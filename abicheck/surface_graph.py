@@ -541,6 +541,57 @@ def _top_fan_in(
     return [(name, count) for name, count in counts[:top_n] if count > 0]
 
 
+def _undocumented_exports(
+    snap: AbiSnapshot,
+    public_entity_ids: frozenset[EntityId] | None,
+    exported_symbols: int,
+) -> tuple[int, int]:
+    """(undocumented exports, the export count the ratio is taken over).
+
+    An undocumented export is a binary export no public header declares. A
+    header dump makes no declaration for it -- castxml and clang parse only
+    what the headers declare -- so it exists only in the export table, and
+    counting it from the declaration list finds none: the metric was
+    structurally zero on every real header-backed snapshot, and
+    ``undocumented_export_ratio_increased`` could never be reported. When the
+    snapshot has an export table and header provenance, the table is
+    accounted the way ``exported_not_public`` accounts it
+    (``buildsource.export_account_decision``: a public declaration, a C++
+    compiler artifact, an allocator interposer or a public template
+    instantiation is documented), over every export. Otherwise (no table, no
+    header provenance: a hand-built or binary-only snapshot) the legacy
+    declaration count applies -- ``EXPORT_ONLY`` declarations over the
+    exported public ones.
+    """
+    from .buildsource.cross_source_checks_base import (
+        _exported_symbol_names as exported_symbol_names,
+    )
+    from .buildsource.export_account_decision import (
+        account_export,
+        accounting_context,
+    )
+
+    decls: list[Function | Variable] = [
+        *snap.declarations.functions,
+        *snap.declarations.variables,
+    ]
+    exported = exported_symbol_names(snap) if snap.from_headers else None
+    if exported is not None and any(
+        d.origin == ScopeOrigin.PUBLIC_HEADER for d in decls
+    ):
+        ctx = accounting_context(snap, frozenset(exported))
+        undocumented = sum(
+            1 for sym in exported if not account_export(sym, ctx).documented
+        )
+        return undocumented, len(exported)
+    legacy = sum(
+        1
+        for d in decls
+        if _is_exported(d, public_entity_ids) and d.origin == ScopeOrigin.EXPORT_ONLY
+    )
+    return legacy, exported_symbols
+
+
 def compute_surface_metrics(
     snap: AbiSnapshot,
     *,
@@ -583,17 +634,10 @@ def compute_surface_metrics(
         1 for v in snap.declarations.variables if _is_exported(v, public_entity_ids)
     )
 
-    undocumented = sum(
-        1
-        for f in snap.declarations.functions
-        if _is_exported(f, public_entity_ids) and f.origin == ScopeOrigin.EXPORT_ONLY
+    undocumented, export_total = _undocumented_exports(
+        snap, public_entity_ids, exported_symbols
     )
-    undocumented += sum(
-        1
-        for v in snap.declarations.variables
-        if _is_exported(v, public_entity_ids) and v.origin == ScopeOrigin.EXPORT_ONLY
-    )
-    ratio = (undocumented / exported_symbols) if exported_symbols else 0.0
+    ratio = (undocumented / export_total) if export_total else 0.0
 
     # Iterate canonical record names (each real record once, by full name) so a
     # namespaced record is not listed twice under both ``ns::A`` and ``A``.

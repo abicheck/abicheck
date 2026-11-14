@@ -137,6 +137,8 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
     if tag in ("Struct", "Class", "Union"):
         if el.get("name") == FLOAT128_STANDIN:
             return FLOAT128_SPELLING  # extract/castxml_header_compat.py
+        if el.get("name") is None:
+            return _nameless_record_spelling(ctx, el, tag)
         # See strip_anonymous_type_location's docstring.
         return _strip_anonymous_type_location(el.get("name", "?"))
     if tag == "Typedef":
@@ -173,6 +175,24 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
         # name, and the tag fallback below would spell it "AutoType".
         return "auto"
     return el.get("name", tag)
+
+
+def _nameless_record_spelling(ctx: CastxmlParserContext, el: Any, tag: str) -> str:
+    """Spell a record castxml emits with no ``name`` attribute at all.
+
+    That is a closure type (a lambda) or another unnamed class local to its
+    context; an anonymous ``struct { ... }`` member carries ``name=""``
+    instead and is not spelled here. ``"?"`` -- the repository's "no
+    evidence" sentinel -- would hide a type castxml did see: a function
+    returning a lambda would read as an unresolved return, so neither a
+    return-type change nor the unnamed-to-named transition could be
+    reported. The spelling names the enclosing declaration, not a source
+    line, so an unrelated edit that moves the lambda does not change it.
+    """
+    owner = ctx.resolve(el.get("context", ""))
+    owner_name = owner.get("name", "") if owner is not None else ""
+    spelled = f"(unnamed {tag.lower()})"
+    return f"{owner_name}::{spelled}" if owner_name and owner_name != "::" else spelled
 
 
 #: Declarator wrappers that, around a ``FunctionType``, nest *inside* the

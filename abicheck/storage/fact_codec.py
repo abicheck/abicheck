@@ -247,6 +247,8 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     for func_dict in d.get("functions", []):
         # Side-table fact (extension_facts.encode_noexcept_unobserved).
         func_dict.pop("is_noexcept_fact", None)
+        # Side-table fact (extension_facts._sync_final_member_functions).
+        func_dict.pop("is_final", None)
         for fact_key in _FUNCTION_FACT_KEYS:
             _encode_one(func_dict.get(fact_key))
         for param_dict in func_dict.get("params", []):

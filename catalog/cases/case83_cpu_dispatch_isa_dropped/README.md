@@ -17,9 +17,10 @@ Because those `*_avx512` specializations are **declared in the public
 header**, they are promised entry points: a binary compiled against v1.h that
 calls one fails to load against v2. That is a binary (and source) break, so
 the verdict is `BREAKING`, even though dispatcher-only callers are unaffected.
-If the dropped specializations were export-only (declared in no public
-header — internal dispatch targets), the same roll-up is graded
-`COMPATIBLE_WITH_RISK`.
+If headers were given and they prove the dropped specializations export-only
+(declared in no public header — internal dispatch targets), the same roll-up
+is graded `COMPATIBLE_WITH_RISK`. Without header evidence (a binary or
+DWARF-only comparison) nothing proves export-only, so it stays `BREAKING`.
 
 ## Old/new diff
 
@@ -74,9 +75,10 @@ under a sibling ISA in the new snapshot, it emits one grouped
 `CPU_DISPATCH_ISA_DROPPED` finding instead of N independent `func_removed`
 findings — the per-symbol removals are suppressed as children so the report
 names the deployment-level event once. The kind's default grade is
-`COMPATIBLE_WITH_RISK` (`RISK_KINDS`), which applies only when every removed
-member is export-only. When any removed member is declared in the old public
-headers, the finding carries `effective_verdict: BREAKING`
+`COMPATIBLE_WITH_RISK` (`RISK_KINDS`), which applies only when headers were
+given and every removed member is proven export-only. When any removed member
+is declared in the old public headers, or no header evidence was given, the
+finding carries `effective_verdict: BREAKING`
 (`modulation_rule: cpu_dispatch_isa.public_member`): the ISA token is a naming
 heuristic and may not lower the removal of a promised entry point.
 
@@ -104,8 +106,8 @@ g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo.so
 no change, but the header promised `kmeans_compute_avx512` as a callable
 entry point, and the old `app` above — built only against v1.h — no longer
 loads. A compatibility verdict is about every consumer the public contract
-admits, not the common one. Only export-only specializations (no header
-declaration) keep the `COMPATIBLE_WITH_RISK` grade.
+admits, not the common one. Only specializations the headers prove
+export-only (no header declaration) keep the `COMPATIBLE_WITH_RISK` grade.
 
 ## Safe redesign
 

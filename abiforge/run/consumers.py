@@ -276,6 +276,32 @@ int main() {
 }
 """
 
+_SRC_CALL = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  SrcLeft l;
+  std::printf("take=%d twice=%d scale=%d limit=%d\n", src_take(1), src_twice(3),
+              src_scale(5), SRC_LIMIT);
+  std::printf("entry=%d dispatch=%d count=%d more=%d\n", src_entry(2), src_dispatch(&l),
+              src_count("edit"), src_more(1));
+  return 0;
+}
+"""
+
+_TREE_CALL = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  TreeHolder h;
+  h.in.a = 1;
+  h.n = 2;
+  TreePair p;
+  p.a = 3;
+  std::printf("holder=%d pair=%d,%d count=%d\n", tree_holder_n(&h), tree_pair_a(&p),
+              tree_pair_b(&p), tree_count(4));
+  return 0;
+}
+"""
+
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
@@ -288,4 +314,6 @@ CONSUMERS: dict[str, dict[str, str]] = {
         "symbols": _MORE_SYMBOLS,
     },
     "cxx_alt": {"call": _XA_CALL},
+    "cxx_src": {"call": _SRC_CALL},
+    "cxx_tree": {"call": _TREE_CALL},
 }

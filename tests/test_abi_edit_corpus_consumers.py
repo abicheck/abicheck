@@ -200,7 +200,9 @@ def test_a_library_pair_is_built_once_for_every_consumer_set(
 ) -> None:
     builds: list[tuple[str, str]] = []
 
-    def fake_build(seed, config, out_dir, overrides=None, flags=None, link=None):  # noqa: ANN001
+    def fake_build(
+        seed, config, out_dir, overrides=None, flags=None, link=None, evidence=None
+    ):  # noqa: ANN001
         builds.append(("new" if overrides is not None else "old", config.build_id))
         return _built(out_dir)
 
@@ -226,7 +228,7 @@ def test_the_verdict_is_computed_from_the_build_alone(
     monkeypatch.setattr(
         harness,
         "build",
-        lambda s, c, d, overrides=None, flags=None, link=None: _built(d),
+        lambda s, c, d, overrides=None, flags=None, link=None, evidence=None: _built(d),
     )
     monkeypatch.setattr(cells, "unavailable", lambda c: None)
     monkeypatch.setattr(cells, "capability_gap", lambda op, c: None)

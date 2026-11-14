@@ -74,6 +74,7 @@ _NEVER_IN_A_DOCUMENT = (
     "binary_sha256",
     # Stored as the declarations section's extension fact (ADR-015 origin).
     "typedef_origins",
+    "std_reexports",
     "wire_extensions",
     "spellings_generation",
     "_func_by_mangled",

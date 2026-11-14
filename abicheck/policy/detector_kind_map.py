@@ -33,7 +33,6 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "struct_packing_changed",
                 "struct_return_convention_changed",
                 "toolchain_flag_drift",
-                "type_visibility_changed",
                 "value_abi_trait_changed",
                 "vector_abi_changed",
                 "wchar_model_changed",
@@ -161,6 +160,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "enum_member_removed",
                 "enum_member_value_changed",
                 "enum_underlying_size_changed",
+                "type_added",
                 "type_removed",
             }
         ),
@@ -185,6 +185,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "func_deprecated": frozenset(
             {"func_deprecated_added", "func_deprecated_removed"}
         ),
+        "func_final_specifier": frozenset({"func_became_final", "func_lost_final"}),
         "func_override_specifier": frozenset(
             {"func_override_specifier_added", "func_override_specifier_removed"}
         ),
@@ -244,6 +245,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "glibcxx_dual_abi_selection": frozenset(
             {"glibcxx_dual_abi_changed", "toolchain_flag_drift"}
         ),
+        "imported_symbols_unprovided": frozenset({"imported_symbol_unprovided"}),
         "inline_namespace": frozenset({"inline_namespace_moved"}),
         "integer_model": frozenset({"integer_model_changed"}),
         "kabi": frozenset(
@@ -357,6 +359,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
             }
         ),
         "reserved_fields": frozenset({"used_reserved_field"}),
+        "runtime_requirements": frozenset({"sanitizer_runtime_required"}),
         "stdlib_impl": frozenset(
             {"libcpp_abi_version_changed", "stdlib_implementation_changed"}
         ),
@@ -387,6 +390,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "type_kind_changes": frozenset(
             {"source_level_kind_changed", "type_kind_changed"}
         ),
+        "type_visibility": frozenset({"type_visibility_changed"}),
         "typedefs": frozenset(
             {"typedef_base_changed", "typedef_removed", "typedef_version_sentinel"}
         ),
@@ -503,6 +507,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "exported_not_public",
         "exported_symbol_source_owner_changed",
         "float_abi_changed",
+        "func_return_covariant_narrowed",
         "generated_file_dependency_unstable",
         "generated_header_changed",
         "generated_header_reaches_public_api",

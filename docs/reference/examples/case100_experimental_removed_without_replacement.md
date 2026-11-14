@@ -62,7 +62,8 @@ Verdict: BREAKING (exit 4)
 
 ## Minimum evidence
 
-`min_evidence: L0` — the mangled symbol `_ZN3lib12experimental3barEv`
+`ground_truth.json` lists `min_evidence: L1` — the evidence the named
+diagnosis below needs. At L0 the mangled symbol `_ZN3lib12experimental3barEv`
 disappearing from v2's `.dynsym` is enough on its own to reach the BREAKING
 verdict, even on a fully stripped binary with no debug info at all (as
 `func_removed_elf_only`). Classifying it specifically as "no replacement

@@ -522,7 +522,13 @@ def public_header_contract_fact(
     """
     if origin is not ScopeOrigin.PUBLIC_HEADER:
         return None
-    if is_confirmed_true(in_public_contract(decl)):
+    # Only a real producer's positive makes this redundant. A legacy-bridged
+    # "true" (no stored fact, ``Visibility.PUBLIC``) is exactly what export
+    # narrowing ignores (``has_observed_contract_evidence``), so skipping on it
+    # left an unexported header function out of the surface -- whichever
+    # backend happened to record it PUBLIC (the native gcc one does).
+    current = in_public_contract(decl)
+    if is_confirmed_true(current) and not is_legacy_derived(current):
         return None
     return Fact.present(True, "declared in a supplied public header")
 

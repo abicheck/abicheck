@@ -22,7 +22,6 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_namespaces import (
     DEFAULT_EXPERIMENTAL_NAMESPACES,
     _IndexItem,
-    _looks_like_std_reexport,
     _origin_by_name,
     _paired_stable_indices,
     _segments,
@@ -319,8 +318,7 @@ class TestExperimentalRemovedWithoutReplacement:
         # declaration/re-export can legitimately declare a name in
         # `experimental::` whose *mangled symbol* demangles to the
         # underlying stable declaration it aliases (no "experimental"
-        # segment at all) -- the same declared-vs-underlying divergence
-        # `detect_std_reexport_removed` is built on. Namespace
+        # segment at all). Namespace
         # classification must come from the *declared* name only, or this
         # would silently defeat EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         # for every alias-shaped experimental declaration.
@@ -1006,132 +1004,7 @@ class TestExperimentalRemovedWithoutReplacement:
         assert "f(int)" in removed[0].symbol
 
 
-# ---------------------------------------------------------------------------
-# _looks_like_std_reexport
-# ---------------------------------------------------------------------------
-
-
-class TestLooksLikeStdReexport:
-    def test_classic_reexport(self) -> None:
-        assert _looks_like_std_reexport(
-            "lib::execution::par",
-            "std::execution::par",
-        )
-
-    def test_same_name_in_std_is_not_reexport(self) -> None:
-        # If both sides are in std::, this is the genuine declaration,
-        # not a re-export. We only report when a library namespace
-        # aliases a std:: entity.
-        assert not _looks_like_std_reexport(
-            "std::execution::par",
-            "std::execution::par",
-        )
-
-    def test_underlying_not_in_std_is_rejected(self) -> None:
-        assert not _looks_like_std_reexport("lib::par", "other::par")
-
-    def test_different_leaf_is_rejected(self) -> None:
-        assert not _looks_like_std_reexport("lib::par", "std::seq")
-
-    def test_empty_inputs(self) -> None:
-        assert not _looks_like_std_reexport("", "std::par")
-        assert not _looks_like_std_reexport("lib::par", "")
-
-
-# ---------------------------------------------------------------------------
-# detect_std_reexport_removed
-# ---------------------------------------------------------------------------
-
-
-class TestStdReexportRemoved:
-    def test_reexport_removed_fires(self) -> None:
-        # OLD: lib::par is a using-declaration aliasing std::par.
-        # Because we cannot run a demangler here without external help,
-        # we inject the mangled name as the demangled form by way of
-        # the std-prefixed mangled string. The detector queries
-        # ``demangle_batch`` which will return "" for synthetic mangled
-        # names that don't start with ``_Z``, so we need an alternative
-        # path: monkey-patch the demangler.
-        import abicheck.diff_namespaces as mod
-
-        captured: list[list[str]] = []
-
-        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
-            captured.append(list(mangled_list))
-            return {"_ZN3lib3parE": "std::execution::par"}
-
-        # The detector imports demangle_batch lazily from .demangle
-        # inside the function; we patch the source module so the lazy
-        # import resolves to our fake.
-        import abicheck.demangle as dm
-
-        orig = dm.demangle_batch
-        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
-        try:
-            old = _snap(funcs=[_fn("lib::execution::par", mangled="_ZN3lib3parE")])
-            new = _snap(funcs=[])
-            changes = mod.detect_std_reexport_removed(old, new)
-        finally:
-            dm.demangle_batch = orig  # type: ignore[assignment]
-
-        assert len(changes) == 1
-        c = changes[0]
-        assert c.kind == ChangeKind.STD_REEXPORT_REMOVED
-        assert c.symbol == "lib::execution::par"
-        assert "std::execution::par" in c.description
-        # ADR-084: the re-export is not observed in a header, so reachability is
-        # recorded as unknown rather than asserted from the export population.
-        assert c.public_reachable is False
-        assert c.reachability_kind is None
-
-    def test_reexport_kept_does_not_fire(self) -> None:
-        import abicheck.demangle as dm
-
-        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
-            return {m: "std::execution::par" for m in mangled_list}
-
-        orig = dm.demangle_batch
-        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
-        try:
-            old = _snap(
-                funcs=[
-                    _fn("lib::execution::par", mangled="_ZN3lib3parE"),
-                ]
-            )
-            new = _snap(
-                funcs=[
-                    _fn("lib::execution::par", mangled="_ZN3lib3parE"),
-                ]
-            )
-            from abicheck.diff_namespaces import detect_std_reexport_removed
-
-            changes = detect_std_reexport_removed(old, new)
-        finally:
-            dm.demangle_batch = orig  # type: ignore[assignment]
-
-        assert changes == []
-
-    def test_genuine_function_removal_does_not_fire(self) -> None:
-        # The OLD function lives in lib::, demangles to lib:: (NOT std::),
-        # so it's not a re-export; removal should NOT produce
-        # STD_REEXPORT_REMOVED. (A separate detector reports func_removed.)
-        import abicheck.demangle as dm
-
-        def fake_demangle(mangled_list: list[str]) -> dict[str, str]:
-            return {m: "lib::par" for m in mangled_list}
-
-        orig = dm.demangle_batch
-        dm.demangle_batch = fake_demangle  # type: ignore[assignment]
-        try:
-            old = _snap(funcs=[_fn("lib::par", mangled="_ZN3lib3parE")])
-            new = _snap(funcs=[])
-            from abicheck.diff_namespaces import detect_std_reexport_removed
-
-            changes = detect_std_reexport_removed(old, new)
-        finally:
-            dm.demangle_batch = orig  # type: ignore[assignment]
-
-        assert changes == []
+# detect_std_reexport_removed: tests/test_std_reexports.py
 
 
 # ---------------------------------------------------------------------------

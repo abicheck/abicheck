@@ -36,7 +36,7 @@ from collections.abc import Callable
 from enum import StrEnum
 from xml.etree.ElementTree import Element
 
-from .context import CastxmlParserContext, member_elements as _members
+from .context import CastxmlParserContext, member_elements
 
 _MAX_DEPTH = 32
 
@@ -87,16 +87,25 @@ def tail_padding_rule(triple: str | None) -> TailPaddingRule | None:
     return None
 
 
+#: Triple components of a Windows GNU target: GCC (``-mms-bitfields``, on by
+#: default for Windows targets) and Clang both lay bit-fields out by
+#: Microsoft's rules there, though the rest of the record is Itanium.
+_MS_BITFIELD_SYSTEMS = ("mingw32", "windows-gnu", "cygwin")
+
+
+def ms_bitfield_layout(triple: str | None) -> bool:
+    """Whether target *triple* allocates bit-fields Microsoft's way: each
+    run of bit-fields of one declared type occupies a whole storage unit of
+    that type, so a bit-field's width does not bound where the record's data
+    ends (``struct { int a : 3; }`` holds four bytes of data, not one)."""
+    if not triple:
+        return False
+    rest = "-".join(triple.lower().split("-")[1:])
+    return any(sys_ in rest for sys_ in _MS_BITFIELD_SYSTEMS)
+
+
 def rule_of(ctx: CastxmlParserContext) -> TailPaddingRule | None:
     return tail_padding_rule(ctx.target_triple)
-
-
-def ms_bitfields(ctx: CastxmlParserContext) -> bool:
-    """Whether the target lays bit-fields out by Microsoft's rules (MinGW's
-    default ``-mms-bitfields``): a bit-field then fills a whole unit of its
-    declared type, which the generic Itanium bit arithmetic does not model."""
-    t = (ctx.target_triple or "").lower()
-    return "mingw" in t or "windows-gnu" in t
 
 
 # --- C++11 POD: trivial and standard-layout ------------------------------------
@@ -110,8 +119,8 @@ UserProvided = Callable[[CastxmlParserContext, Element], "bool | None"]
 def pod11(
     ctx: CastxmlParserContext, el: Element, user_provided: UserProvided
 ) -> bool | None:
-    """C++11 POD for record *el*: trivially copyable, standard-layout, and a
-    trivial default constructor (tri-state; ``None`` when undecidable)."""
+    """C++11 POD for record *el*: trivially copyable, standard-layout as C++11
+    defined it (before CWG 1813), and a trivial default constructor (tri-state; ``None`` when undecidable)."""
     from .record_traits import standard_layout, trivially_copyable
 
     if el.get("incomplete") == "1":
@@ -119,7 +128,7 @@ def pod11(
     return _all(
         [
             trivially_copyable(ctx, el),
-            standard_layout(ctx, el),
+            standard_layout(ctx, el, cxx11=True),
             _trivial_default_ctor(ctx, el, 0, user_provided),
         ]
     )
@@ -163,7 +172,7 @@ def _trivial_default_ctor(
         return None
     if el.tag not in ("Struct", "Class", "Union"):
         return True
-    members = _members(ctx, el)
+    members = member_elements(ctx, el)
     ctors = [m for m in members if m.tag == "Constructor"]
     if not ctors:
         return None  # CastXML omits a deleted one: it may exist

@@ -125,6 +125,11 @@ def _side_binary_sha256(
     return getattr(snapshot, "binary_sha256", None) or None
 
 
+def _projection_gaps(snapshot: AbiSnapshot) -> frozenset[str]:
+    """The evidence the comparison's projection set aside on one side."""
+    return frozenset(getattr(snapshot, "projection_evidence_gaps", ()) or ())
+
+
 def attach_type_evidence(
     result: DiffResult, old: AbiSnapshot | None, new: AbiSnapshot
 ) -> None:
@@ -170,5 +175,12 @@ def attach_type_evidence(
             # input -- the identity `note_if_same_binary_compared` uses too.
             old_digest, new_digest = evidence_identity_digests(old, new)
             identical = old_digest is not None and old_digest == new_digest
+        # Equal bytes are one input only when the comparison set the same
+        # evidence aside on both sides: a pair projected to a common rung
+        # because headers came for one side only (ADR-063's 2026-11-14
+        # amendment) records that set-aside on the header side alone, so its
+        # effective inputs differ and D1(c) does not exempt it (matrix row 17).
+        if identical and _projection_gaps(old) != _projection_gaps(new):
+            identical = False
         facts = dataclasses.replace(facts, identical_inputs=identical)
     result.type_evidence = facts

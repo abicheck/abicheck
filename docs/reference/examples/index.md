@@ -92,8 +92,8 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 
 | Evidence | Cases | What it needs |
 |----------|-------|---------------|
-| [L0 — binary only](by-evidence/l0.md) | 68 | Detectable from the shipped binary's symbol table alone. |
-| [L1 — + debug info](by-evidence/l1.md) | 77 | Needs debug information on top of the binary. |
+| [L0 — binary only](by-evidence/l0.md) | 65 | Detectable from the shipped binary's symbol table alone. |
+| [L1 — + debug info](by-evidence/l1.md) | 80 | Needs debug information on top of the binary. |
 | [L2 — + headers](by-evidence/l2.md) | 54 | Needs the public headers parsed alongside the binary. |
 | [L3 — + build evidence](by-evidence/l3.md) | 11 | Needs the build's own configuration and flags. |
 | [L4 — + source replay](by-evidence/l4.md) | 5 | Needs the sources replayed through a source-level ABI extraction. |

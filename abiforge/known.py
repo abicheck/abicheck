@@ -20,7 +20,6 @@ from abiforge.run.toolchains import uses_libstdcxx
 
 _CLASSES = frozenset({"cxx_classes"})
 
-GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
 GAP_CLANG_CHAR = (
     "A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth"
 )
@@ -32,37 +31,17 @@ GAP_VA_LIST = "Only the clang header backend marks a `va_list` parameter"
 GAP_GCC_THROW = (
     "The native gcc header backend records no dynamic exception specification"
 )
-GAP_GCC_UNEXPORTED = (
-    "The native gcc header backend keeps an unexported declaration PUBLIC"
-)
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
 )
-GAP_EMPTY_NODE = "Dropping a version node that binds no symbol reads as a binary break"
-GAP_HEADER_DROPPED_EXPORT = "A function that leaves the public header but stays exported reads as a binary break"
 GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
-GAP_HEADER_ONLY_POINTER = (
-    "A pointer-level change of a never-exported header function reads as a binary break"
-)
 GAP_CASTXML_ALIGN = (
     "castxml headers read a variable's alignment specifier only as a lower bound"
-)
-GAP_BASE_UNVERSIONED = (
-    "An export GNU ld binds to the base version is never reported as unversioned"
-)
-GAP_VECTOR_ABI = (
-    "A `-mveclibabi` switch reads as a binary break when no call is vectorized"
 )
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
-GAP_GCC_HEADER_ONLY = (
-    "The native gcc header backend records no function the library never emits"
-)
-GAP_DEFINE_PROFILE = (
-    "A macro that changes the build's ABI makes the two header dumps incomparable"
-)
 
 
 def _always(_: Config) -> bool:
@@ -182,20 +161,6 @@ def _va_list_gap(op: str, kind: str, backend: str) -> Known:
     )
 
 
-def _unexported_gap(op: str, seeds: frozenset[str], kind: str) -> Known:
-    return _backend_gap(
-        op,
-        seeds,
-        "gcc",
-        "wrong-kind",
-        "the gcc backend records the unexported declaration PUBLIC, so the "
-        "pair does not match and the change reads func_added",
-        GAP_GCC_UNEXPORTED,
-        frozenset({f"missing:{kind}"}),
-        "COMPATIBLE",
-    )
-
-
 # Header-backend parity gaps the corpus found (tests/
 # test_header_backend_fact_gaps_integration.py holds their canaries).
 _BACKEND_GAPS: tuple[Known, ...] = (
@@ -221,8 +186,6 @@ _BACKEND_GAPS: tuple[Known, ...] = (
         ),
         "COMPATIBLE",
     ),
-    _unexported_gap("declared_exports_defined", _ELF, "FUNC_EXPORT_ADDED"),
-    _unexported_gap("inline_function_outlined", _MORE, "FUNC_LOST_INLINE"),
 )
 
 
@@ -238,29 +201,6 @@ _BREAKING = frozenset({"BREAKING"})
 # Platform-level operators (``abiforge.operators.platform``).
 _PLATFORM: tuple[Known, ...] = (
     Known(
-        "empty_version_node_dropped",
-        _ALT,
-        "false-positive",
-        _always,
-        "a version node no symbol was bound to is dropped: no consumer can "
-        "require it, yet symbol_version_defined_removed keeps its BREAKING default",
-        GAP_EMPTY_NODE,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=_BREAKING,
-    ),
-    Known(
-        "exported_but_undeclared",
-        _ELF,
-        "false-positive",
-        _headers_vis_default,
-        "wget leaves the header but stays exported; built consumers still run, "
-        "yet the contract removal reads func_removed (BREAKING)",
-        GAP_HEADER_DROPPED_EXPORT,
-        issues=frozenset({"stronger-than:API_BREAK"}),
-        verdicts=_BREAKING,
-        also_cls=frozenset({"wrong-verdict"}),
-    ),
-    Known(
         "glibc_version_required_added",
         _ELF,
         "wrong-kind",
@@ -272,34 +212,6 @@ _PLATFORM: tuple[Known, ...] = (
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
     Known(
-        "header_only_function_params_changed",
-        _ALT,
-        "false-clean",
-        _hb("gcc"),
-        "the native gcc backend records no hscale (static inline, never "
-        "emitted), so the signature change reads as nothing",
-        GAP_GCC_HEADER_ONLY,
-        issues=frozenset(
-            {"missing:HEADER_ONLY_FUNCTION_PARAMS_CHANGED", "weaker-than:API_BREAK"}
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-        # A gcc consumer only warns on the int -> int * conversion: no
-        # source break, so the same finding reads wrong-verdict.
-        also_cls=frozenset({"wrong-verdict"}),
-    ),
-    Known(
-        "header_only_function_params_changed",
-        _ALT,
-        "false-positive",
-        lambda c: c.evidence == "headers" and c.header_backend != "gcc",
-        "hscale is static inline and never exported, yet its int -> int * "
-        "parameter reads param_pointer_level_changed (BREAKING)",
-        GAP_HEADER_ONLY_POINTER,
-        issues=frozenset({"stronger-than:API_BREAK"}),
-        verdicts=_BREAKING,
-        also_cls=frozenset({"wrong-verdict"}),
-    ),
-    Known(
         "object_alignment_reduced",
         _ELF,
         "wrong-verdict",
@@ -307,30 +219,11 @@ _PLATFORM: tuple[Known, ...] = (
         "castxml cannot read g_al's old aligned(16), so the address-derived "
         "reduction is demoted to COMPATIBLE",
         GAP_CASTXML_ALIGN,
-        issues=frozenset({"weaker-than:COMPATIBLE_WITH_RISK"}),
+        # The same unread aligned(16): VAR_ALIGNMENT_CHANGED is missing too.
+        issues=frozenset(
+            {"weaker-than:COMPATIBLE_WITH_RISK", "none-of:VAR_ALIGNMENT_CHANGED"}
+        ),
         verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "unversioned_export_added",
-        _ELF,
-        "wrong-kind",
-        _always,
-        "GNU ld binds the unmatched edit_unv to the base version (index 1), "
-        "which unversioned_exported_symbol deliberately never flags",
-        GAP_BASE_UNVERSIONED,
-        issues=frozenset({"missing:UNVERSIONED_EXPORTED_SYMBOL"}),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "vector_math_abi_changed",
-        _ELF,
-        "false-positive",
-        lambda c: c.producer.family == "gcc" and c.evidence in ("dwarf", "headers"),
-        "the seed makes no math call, so -mveclibabi=svml changes no code; "
-        "vector_abi_changed keeps its BREAKING default",
-        GAP_VECTOR_ABI,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=_BREAKING,
     ),
     Known(
         "std_string_abi_flipped",
@@ -343,28 +236,6 @@ _PLATFORM: tuple[Known, ...] = (
         GAP_DUAL_ABI_COW_CHURN,
         issues=frozenset({"missing:GLIBCXX_DUAL_ABI_FLIP_DETECTED"}),
         verdicts=_BREAKING,
-    ),
-    Known(
-        "header_inline_removed",
-        _XA,
-        "false-clean",
-        _hb("gcc"),
-        "the native gcc backend records no demo::clampi (header-only, never "
-        "emitted), so its removal reads NO_CHANGE",
-        GAP_GCC_HEADER_ONLY,
-        issues=frozenset({"missing:INLINE_FUNCTION_REMOVED", "weaker-than:API_BREAK"}),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "time_bits_64",
-        _ALT,
-        "refused",
-        _ev("headers"),
-        "-D_TIME_BITS=64 reaches the new side's header dump only, so the two "
-        "dumps' parse profiles differ and the compare refuses",
-        GAP_DEFINE_PROFILE,
-        issues=frozenset({"refused:ProfileMismatchError"}),
-        verdicts=frozenset({"REFUSED"}),
     ),
     Known(
         "gnu_unique_static_added",
@@ -407,6 +278,7 @@ _PLATFORM: tuple[Known, ...] = (
     ),
 )
 
+
 KNOWN: tuple[Known, ...] = (
     Known(
         "char_made_unsigned",
@@ -427,34 +299,6 @@ KNOWN: tuple[Known, ...] = (
             {"missing:CHAR_SIGNEDNESS_CHANGED", "weaker-than:COMPATIBLE_WITH_RISK"}
         ),
         verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "virtual_become_pure",
-        _CLASSES,
-        "wrong-kind",
-        # clang marks the in-class declaration DW_VIRTUALITY_pure_virtual; GCC
-        # writes DW_VIRTUALITY_virtual, so only a GCC build misses the kind.
-        lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
-        "from a GCC-built DWARF snapshot the now-pure virtual reads func_removed; "
-        "neither func_virtual_became_pure nor type_became_abstract",
-        GAP_DWARF_PURE,
-        issues=frozenset({"none-of:FUNC_VIRTUAL_BECAME_PURE|TYPE_BECAME_ABSTRACT"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "type_lost_abstract",
-        frozenset({"cxx_more"}),
-        "false-positive",
-        # The reverse of virtual_become_pure: GCC's DWARF marks Shape::area
-        # DW_VIRTUALITY_virtual while it is still pure, so the old snapshot
-        # has no exported area and defining it reads as a new virtual; clang
-        # marks it pure and reads FUNC_ADDED (COMPATIBLE). Consumers still run.
-        lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
-        "from a GCC-built DWARF snapshot defining a pure virtual reads "
-        "virtual_method_added (BREAKING); the vtable keeps its slot count",
-        GAP_DWARF_PURE,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "rebuild_optimized",

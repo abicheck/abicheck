@@ -44,7 +44,6 @@ from .diff_platform_elf_symbols import (
     _ELF_VIS_PROTECTED_PAIR,
     _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
     _check_binding_change as _check_binding_change,
-    _check_elf_visibility_change as _check_elf_visibility_change,
     _check_func_visibility_protected as _check_func_visibility_protected,
     _check_ifunc_type_change as _check_ifunc_type_change,
     _check_symbol_size_change as _check_symbol_size_change,

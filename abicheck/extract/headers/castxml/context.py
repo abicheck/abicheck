@@ -130,6 +130,8 @@ class CastxmlParserContext:
         self.layout_flag_cache: dict[tuple[str, str, int], bool | None] = {}
         self.nua_spellings: frozenset[str] | None = None
         self.is_cxx_document: bool | None = None
+        #: File ids that are provably C++ headers (``cxx_header_evidence``).
+        self.cxx_only_files: frozenset[str] | None = None
         #: Whether the parse targeted the Itanium C++ ABI (from its manglings).
         self.itanium_abi_target: bool | None = None
         #: The ``-dumpmachine`` triple of the compiler castxml parsed as

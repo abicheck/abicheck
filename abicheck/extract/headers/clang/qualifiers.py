@@ -477,6 +477,15 @@ def clang_method_is_override(node: dict[str, Any]) -> bool:
     )
 
 
+def clang_method_is_final(node: dict[str, Any]) -> bool:
+    """The ``final`` virt-specifier on a member function *node*: a child
+    ``FinalAttr`` under ``"inner"``, the convention ``override`` uses."""
+    return any(
+        isinstance(child, dict) and child.get("kind") == "FinalAttr"
+        for child in ast_inner(node)
+    )
+
+
 #: Back-compat alias -- see :func:`clang_method_is_override`'s own docstring.
 _clang_method_is_override = clang_method_is_override
 

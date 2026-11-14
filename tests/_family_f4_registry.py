@@ -169,6 +169,15 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
+    # A member function's Itanium scope, naming the record whose members
+    # still exist (compare/live_member_scopes): mangling grammar.
+    "abicheck.compare.live_member_scopes::live_member_scopes::affix.startswith:'_Z'": "grammar",
+    # An array bound's spacing ("char [8]" vs "char[8]"): C++ type spelling.
+    "abicheck.diff_helpers::_normalize_type_spelling::re:'\\\\s*\\\\[\\\\s*'": "spelling",
+    "abicheck.diff_helpers::_normalize_type_spelling::re:'\\\\s*\\\\]'": "spelling",
+    # The vector-math library selection flags (-mveclibabi=, -fveclib=) in a
+    # DW_AT_producer flag set: the compiler's own flag spelling.
+    "abicheck.compare.toolchain_flags::advanced_change_grade::affix.startswith:_CALLEE_LIBRARY_VECTOR_FLAGS": "platform",
     # A SPELLING_MIGRATIONS row's retired function-name prefixes (castxml's
     # compiler-declared __builtin_*, reserved to the implementation) between
     # operands that straddle the retiring generation (policy/retired_function_drift).
@@ -291,7 +300,20 @@ HEURISTICS: dict[str, str] = {
     "abicheck.diff_templates::<module>::re:'(?<![A-Za-z0-9_])decltype$'": "spelling",
     "abicheck.diff_templates::<module>::re:'(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])'": "spelling",
     "abicheck.diff_templates::<module>::re:'<[^<>]'": "spelling",
-    "abicheck.diff_templates::<module>::vocab:_UNSPECIFIED_RETURN_MARKERS": "spelling",
+    "abicheck.compare.cpu_dispatch_public_members::_declared_qualified::affix.startswith:'?'": "grammar",
+    "abicheck.compare.runtime_requirements::<module>::re:'^(?:lib(?:asan|tsan|hwasan)|libclang_rt\\\\.(?:asan|tsan|hwasan)[-_.][...": "platform",
+    "abicheck.compare.runtime_requirements::<module>::re:'^(?:lib(?P<gnu>asan|tsan|hwasan|ubsan|msan|lsan)|libclang_rt\\\\.(?P<c...": "platform",
+    "abicheck.compare.runtime_requirements::<module>::vocab:_FAMILY_PREFIXES": "platform",
+    "abicheck.compare.runtime_requirements::_reserved_family::affix.startswith:_USER_SUPPLIED_PREFIX": "platform",
+    "abicheck.compare.runtime_requirements::_reserved_family::affix.startswith:prefix": "platform",
+    "abicheck.compare.abi_equivalent_retype::<module>::re:'[A-Za-z_][\\\\w:]*|&&|&|\\\\*|\\\\S'": "spelling",
+    "abicheck.compare.abi_equivalent_retype::_split_indirect::re:'[A-Za-z_][\\\\w:]*'": "spelling",
+    "abicheck.compare.type_visibility::<module>::vocab:_CLASS_SYMBOL_PREFIXES": "grammar",
+    "abicheck.compare.type_visibility::_exports_member::affix.startswith:prefixes": "grammar",
+    "abicheck.compare.type_visibility::_member_prefixes::affix.endswith:'E'": "grammar",
+    "abicheck.compare.type_visibility::_member_prefixes::affix.startswith:'N'": "grammar",
+    "abicheck.compare.type_visibility::type_visibility_changes::affix.removeprefix:'typeinfo for '": "grammar",
+    "abicheck.diff_templates::<module>::re:'\\\\bauto\\\\b|\\\\bdecltype\\\\s*\\\\(|__lambda|[({<]lambda\\\\b|\\\\((?:unnamed|...": "spelling",
     "abicheck.diff_templates::_batch_demangle_for_identity::affix.startswith:'_Z'": "grammar",
     "abicheck.diff_templates::_canonical_identity_name::affix.startswith:'_Z'": "grammar",
     "abicheck.diff_templates::_normalize_mach_o_mangled::affix.startswith:'__Z'": "grammar",

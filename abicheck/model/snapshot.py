@@ -180,11 +180,9 @@ class AbiSnapshot:
     # as the ``abicheck.cxx_concept_header_scan`` extension fact of the debug
     # section (storage/extension_fact_catalog.py), not as a section key.
     cxx_concept_header_scan: bool | None = field(default=None, kw_only=True)
-    # The public headers' C++20 concepts and template constraints, modelled by
-    # the clang header backend (extract/headers/clang/concept_constraints.py,
-    # encoding in model/concept_constraint.py). None: not modelled (castxml,
-    # a C parse, no declared public set, an older dump). Persisted as the
-    # ``abicheck.cxx_concept_constraints`` extension fact of the debug section.
+    # Public headers' C++20 concepts/constraints (clang backend, encoding in
+    # model/concept_constraint.py); None: not modelled (castxml, C, no public
+    # set, older dump). Extension fact ``abicheck.cxx_concept_constraints``.
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
     # Public headers' template-parameter defaults (model/template_default_table.py);
     # None: not modelled. Extension fact ``abicheck.cxx_template_defaults``.
@@ -192,11 +190,12 @@ class AbiSnapshot:
         default=None, kw_only=True
     )
     cu_stack_protector: dict[str, int] | None = field(default=None, kw_only=True)
-    # ADR-015 origin of each typedef key (bare and qualified), classified by
-    # apply_provenance from the producer's declaring header; a key absent (or
-    # None: never classified, DWARF, an older dump) is UNKNOWN, never private.
+    # ADR-015 origin per typedef key; absent (or None) is UNKNOWN, never private.
     # Extension fact ``abicheck.typedef_origins`` of the declarations section.
     typedef_origins: dict[str, ScopeOrigin] | None = field(default=None, kw_only=True)
+    # Public headers' ``using std::X;`` re-exports, declared name -> std:: target
+    # ({}: none; None: not modelled). Extension fact ``abicheck.std_reexports``.
+    std_reexports: dict[str, str] | None = field(default=None, kw_only=True)
     # SHA-256 of the binary's bytes this snapshot was dumped from (ADR-090 D1(c)
     # identity; extension fact ``abicheck.binary_sha256``). None: not recorded.
     binary_sha256: str | None = field(default=None, kw_only=True)

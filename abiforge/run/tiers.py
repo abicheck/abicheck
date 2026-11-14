@@ -57,6 +57,9 @@ from abiforge.model.config import (
 )
 from abiforge.model.seeds import SEED_BY_NAME, Seed
 from abiforge.operators import OP_BY_NAME, EditOp, matrix
+from abiforge.operators.build_data import BUILD_DATA_OPERATORS
+from abiforge.operators.source_evidence import SOURCE_EVIDENCE_OPERATORS
+from abiforge.operators.source_tree import SOURCE_TREE_OPERATORS
 from abiforge.run.toolchains import (
     CONSUMER_TOOLCHAIN_ENV,
     TOOLCHAIN_ENV,
@@ -83,6 +86,93 @@ def stds(lang: str) -> tuple[Standard, ...]:
 
 
 # --- PR tier ----------------------------------------------------------------
+
+# A config-only placeholder per producer family (``requires`` reads no host).
+_FAMILY_PROBE: dict[str, Toolchain] = {
+    "gcc": Toolchain("gcc", 0, "gcc", "g++"),
+    "clang": Toolchain("clang", 0, "clang", "clang++"),
+}
+
+
+def _build_data_rows() -> tuple[tuple[str, str, str, dict[str, object]], ...]:
+    """One PR row per build-data operator, alternating the producer family.
+
+    An operator only one family can build takes that family.
+    """
+    rows: list[tuple[str, str, str, dict[str, object]]] = []
+    for i, op in enumerate(BUILD_DATA_OPERATORS):
+        order = ("gcc", "clang") if i % 2 == 0 else ("clang", "gcc")
+        for seed in ("c_elf", "cxx_alt"):
+            if not op.applies_to(SEED_BY_NAME[seed]):
+                continue
+            lang = SEED_BY_NAME[seed].lang
+            fam = next(
+                (
+                    f
+                    for f in order
+                    if op.requires(
+                        default_config(lang, _FAMILY_PROBE[f]).with_(build_data=True)
+                    )
+                    is None
+                ),
+                None,
+            )
+            if fam is not None:
+                rows.append((op.name, seed, fam, {"build_data": True}))
+    return tuple(rows)
+
+
+#: The PR tier's L3 build-data guards (``abiforge.operators.build_data``).
+BUILD_DATA_PR = _build_data_rows()
+
+#: The sources evidence variant's config (``Config.sources``): clang header
+#: backend, whose source replay records macros, bodies and call edges.
+SOURCES_CONFIG: dict[str, object] = {"sources": True, "header_backend": "clang"}
+
+
+def _source_evidence_rows() -> tuple[tuple[str, str, str, dict[str, object]], ...]:
+    """One PR row per source-evidence operator (``cxx_src``) and per
+    source-tree operator (``cxx_tree``), alternating the producer family."""
+    ops = [(op, "cxx_src") for op in SOURCE_EVIDENCE_OPERATORS]
+    ops += [(op, "cxx_tree") for op in SOURCE_TREE_OPERATORS]
+    return tuple(
+        (op.name, seed, ("gcc", "clang")[i % 2], dict(SOURCES_CONFIG))
+        for i, (op, seed) in enumerate(ops)
+    )
+
+
+#: The PR tier's L4/L5 source-evidence guards
+#: (``abiforge.operators.source_evidence``).
+SOURCE_EVIDENCE_PR = _source_evidence_rows()
+
+#: The PR tier's dependency-resolution guards (``Config.follow_deps``,
+#: ``abiforge.operators.dependencies``): an import no library in the DT_NEEDED
+#: closure provides, from symbols alone and with headers, one family each.
+DEPENDENCY_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
+    (
+        "import_left_unprovided",
+        "c_elf",
+        "gcc",
+        {"follow_deps": True, "evidence": "binary"},
+    ),
+    ("import_left_unprovided", "c_elf", "clang", {"follow_deps": True}),
+)
+
+#: Rows that exist because a ChangeKind is reachable only in one corner of
+#: the config space the axis guards never build, so the PR floor verifies it.
+KIND_REACH_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
+    # A relaxed requires-clause (CONCEPT_CONSTRAINT_CHANGED), C++20.
+    ("concept_constraint_relaxed", "cxx_classes", "gcc", {"std": "c++20"}),
+    # -fshort-enums as the build records it (L3, ENUM_SIZE_FLAG_CHANGED).
+    ("rebuild_short_enums", "c_core", "gcc", {"build_data": True}),
+    # char8_t (C++20), a dynamic exception specification (pre-C++17), libc++.
+    ("char_param_became_char8", "cxx_alt", "gcc", {"std": "c++20"}),
+    ("func_exception_spec_widened", "cxx_more", "clang", {"std": "c++14"}),
+    ("rebuild_against_libcxx", "cxx_stdlib", "clang", {}),
+    # time_t widening needs an i386 build (gcc-multilib); header evidence,
+    # whose parse differs only in the glibc ABI-selecting macros.
+    ("time_bits_64", "c_elf_alt", "gcc", {"flags": Flags(bits=32)}),
+)
 
 # (op, seed, producer family, config changes). One guard per axis.
 _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
@@ -115,6 +205,14 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     # internal type reached through a public one under headers.
     ("executable_stack_removed", "c_elf_alt", "gcc", {"evidence": "binary"}),
     ("internal_type_grew", "cxx_alt", "clang", {}),
+    # L3 build data: a compile mode only the build's compile commands record
+    # (abiforge.operators.build_data), one row per operator.
+    *BUILD_DATA_PR,
+    # L4/L5 source evidence: what only source replay or the source graph
+    # sees (abiforge.operators.source_evidence), one row per operator.
+    *SOURCE_EVIDENCE_PR,
+    *DEPENDENCY_PR,
+    *KIND_REACH_PR,
 )
 
 

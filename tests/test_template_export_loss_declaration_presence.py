@@ -344,7 +344,11 @@ def test_template_removed_from_header_is_still_a_removal(tmp_path: Path) -> None
 
 def test_plain_function_dropped_from_header_stays_a_removal(tmp_path: Path) -> None:
     """Control: a plain function the new header drops is a removal even though
-    the new binary still exports the symbol. The declaration is the evidence."""
+    the new binary still exports the symbol. The declaration is the evidence.
+
+    The export survives, so already-built consumers still bind to it: the
+    removal is an API break, not a binary break (a header removal that keeps
+    its export)."""
     symbol = "_ZN2ns3barEi"
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -368,7 +372,7 @@ def test_plain_function_dropped_from_header_stays_a_removal(tmp_path: Path) -> N
     report = _compare(tmp_path, old_so, new_so, old_dir / "m.h", new_dir / "m.h")
     kinds = {c["kind"] for c in report["changes"] if c.get("symbol") == symbol}
     assert "func_removed" in kinds, sorted(kinds)
-    assert report["verdict"] == "BREAKING"
+    assert report["verdict"] == "API_BREAK"
 
 
 # ── Class-template specializations ─────────────────────────────────────────

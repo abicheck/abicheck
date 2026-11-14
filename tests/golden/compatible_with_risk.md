@@ -29,6 +29,7 @@
 | Coverage gap | Detector 'unnamed_types' disabled: baseline binary export table not completely read |
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
+| Coverage gap | Detector 'imported_symbols_unprovided' disabled: no --follow-deps dependency evidence on the old side |
 | Coverage gap | No header/AST data; type-level changes may be missed |
 
 ## Relationship Coverage
@@ -90,7 +91,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `python_ext`, `python_api`, … and 4 more
+**Not evaluated:** 11 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `python_ext`, `python_api`, … and 5 more
 
 
 ## Related review groups

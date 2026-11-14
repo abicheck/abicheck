@@ -38,6 +38,7 @@
 | Coverage gap | Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector |
 | Coverage gap | Detector 'unnamed_types' disabled: missing binary export table on one side |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
+| Coverage gap | Detector 'imported_symbols_unprovided' disabled: missing ELF metadata |
 | Coverage gap | No binary metadata available; verdict is based on header analysis only |
 
 ## Relationship Coverage
@@ -88,7 +89,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 19 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 13 more
+**Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
 
 ## Related review groups

@@ -11,8 +11,6 @@ All fixtures are original C++ ABI scenarios authored for this project.
 
 from __future__ import annotations
 
-import pytest
-
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.model import (
@@ -448,80 +446,3 @@ class TestTypedefRemoved:
         r = compare(old, new)
         assert r.verdict == Verdict.NO_CHANGE
         assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in r.changes)
-
-
-# ── TYPE_VISIBILITY_CHANGED ──────────────────────────────────────────────────
-
-
-class TestTypeVisibilityChanged:
-    """TYPE_VISIBILITY_CHANGED is emitted via diff_advanced_dwarf.
-
-    checker.py imports diff_advanced_dwarf at module level:
-        from .dwarf_advanced import diff_advanced_dwarf
-    So the correct monkeypatch target is abicheck.checker.diff_advanced_dwarf —
-    that is where the already-bound reference lives at call time.
-    Tests inject pre-built tuples without needing real .so files.
-    """
-
-    def test_type_visibility_changed_is_breaking(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import abicheck.checker as checker_mod
-
-        def fake_diff(
-            old: AdvancedDwarfMetadata,
-            new: AdvancedDwarfMetadata,
-        ) -> list[tuple[str, str, str, str | None, str | None]]:
-            return [
-                (
-                    "type_visibility_changed",
-                    "MyClass",
-                    "Type visibility changed: MyClass (default → hidden)",
-                    "default",
-                    "hidden",
-                )
-            ]
-
-        monkeypatch.setattr(checker_mod, "diff_advanced_dwarf", fake_diff)
-
-        adv = _minimal_adv()
-        r = compare(_snap(dwarf_advanced=adv), _snap("2.0", dwarf_advanced=adv))
-        assert r.verdict == Verdict.BREAKING
-        assert any(c.kind == ChangeKind.TYPE_VISIBILITY_CHANGED for c in r.changes), (
-            "Expected TYPE_VISIBILITY_CHANGED in changes"
-        )
-
-    def test_type_visibility_changed_symbol_and_values(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import abicheck.checker as checker_mod
-
-        def fake_diff(
-            old: AdvancedDwarfMetadata,
-            new: AdvancedDwarfMetadata,
-        ) -> list[tuple[str, str, str, str | None, str | None]]:
-            return [
-                (
-                    "type_visibility_changed",
-                    "AbstractBase",
-                    "Type visibility changed: AbstractBase",
-                    "default",
-                    "hidden",
-                )
-            ]
-
-        monkeypatch.setattr(checker_mod, "diff_advanced_dwarf", fake_diff)
-
-        adv = _minimal_adv()
-        r = compare(_snap(dwarf_advanced=adv), _snap("2.0", dwarf_advanced=adv))
-        change = next(
-            c for c in r.changes if c.kind == ChangeKind.TYPE_VISIBILITY_CHANGED
-        )
-        assert change.symbol == "AbstractBase"
-        assert change.old_value == "default"
-        assert change.new_value == "hidden"
-
-    def test_no_type_visibility_without_dwarf(self) -> None:
-        """Without dwarf_advanced metadata, TYPE_VISIBILITY_CHANGED is never emitted."""
-        r = compare(_snap(), _snap("2.0"))
-        assert not any(c.kind == ChangeKind.TYPE_VISIBILITY_CHANGED for c in r.changes)

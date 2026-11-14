@@ -443,15 +443,15 @@ def _strip_header_and_above_evidence(
     snap.from_headers = False
     snap.python_api = None
     snap.semantic_ir = None
-    # `_attach_header_graph`'s own docstring: "the header-only (L2) semantic
-    # graph" -- an L2 fact like the others above, not the L4/L5
-    # `build_source.source_graph` this function leaves untouched.
+    # The header-only (L2) graph; the L4/L5 `build_source.source_graph` stays.
     snap.surface_graph = None
     # Header-scan facts (concept scan, export-table fallback) describe the
     # headers this projection excludes, so no gap they name applies below it.
     snap.cxx_concept_header_scan = None
     snap.scope_fallback = None
-    snap.cxx_concept_constraints = snap.cxx_template_defaults = None
+    snap.cxx_concept_constraints = snap.cxx_template_defaults = snap.std_reexports = (
+        None
+    )
     # ADR-050 `ExtractionContract`: both fingerprints are computed from
     # header-scope/compile-context inputs this function just discarded.
     # Left alone, `checker.compare()`'s `check_contracts_comparable()` can
@@ -639,11 +639,9 @@ def project_snapshot_to_depth(
     build_rank = DEPTH_RANK["build"]
     source_rank = DEPTH_RANK["source"]
 
-    # Copy exactly what this rung actually writes to, not the whole object
-    # graph unconditionally -- see :func:`_projected_copy`'s own docstring
-    # for the per-rung ownership argument and the measurement that motivated
-    # it (a `--depth headers` projection of a real L2 snapshot deep-copied
-    # ~100 MB of surface in order to rebind two fields).
+    # Copy exactly what this rung writes to, not the whole object graph (the
+    # docstring's "How much of *snap* the returned copy owns": a full copy of
+    # a real L2 snapshot at `--depth headers` was ~100 MB to rebind two fields).
     deep = rank < headers_rank
     out = copy.deepcopy(snap) if deep else copy.copy(snap)
     if deep:
@@ -661,6 +659,8 @@ def project_snapshot_to_depth(
             dwarf_struct_scope=dwarf_struct_scope,
             dwarf_enum_scope=dwarf_enum_scope,
         )
+        # Indexes a prior compare built on *snap* still list stripped entries.
+        out._func_by_mangled = out._var_by_mangled = out._type_by_name = None
     if rank < build_rank:
         out.build_mode = None
     pack = out.build_source
@@ -786,15 +786,15 @@ def header_scope_excluded_by_depth(
     """Whether the explicitly requested *depth* is what made public-header
     scoping impossible for this pair.
 
-    True only when *depth* ranks below ``headers`` and the projection itself
-    switched every present side into ``elf_only_mode`` (which no public
-    surface resolves from). Header scoping is then outside the requested
+    True only when *depth* ranks below ``headers``, every present side ends in
+    ``elf_only_mode`` (which no public surface resolves from) and the
+    projection put at least one there (the other may never have had headers). Header scoping is then outside the requested
     scope rather than a scope that failed to resolve, so a caller should not
     request it -- the same treatment a pure binary-only comparison gets.
     """
     if depth is None or DEPTH_RANK.get(depth.lower(), 99) >= DEPTH_RANK["headers"]:
         return False
     pairs = [(b, a) for b, a in zip(before, after, strict=True) if b is not None]
-    return bool(pairs) and all(
-        a is not None and a.elf_only_mode and not b.elf_only_mode for b, a in pairs
+    return all(a is not None and a.elf_only_mode for _, a in pairs) and any(
+        not b.elf_only_mode for b, _ in pairs
     )

@@ -10,9 +10,8 @@ A *point* in the space is one combination of six axes::
   a language feature, off that feature (``FEATURE_CONSTRUCT``);
 - **edit** (``edit_values``): the class of the edit within its construct, as
   ``abiforge.model.edit_model`` defines it from C/C++ layout rules, not from the
-  operators. Record layout (``struct``) and base-class layout
-  (``inheritance``) are split; every other construct has the single value
-  ``any``. A model class no operator generates stays in the denominator and
+  operators. The constructs ``edit_model.EDIT_MODEL`` names are split; every
+  other construct has the single value ``any``. A model class no operator generates stays in the denominator and
   is listed by ``edit_classes_without_operator``;
 - **language** / **standard**: ``abiforge.model.config.STANDARDS``;
 - **config feature** (``CONFIG_FEATURES``): one ABI-relevant setting the cell
@@ -116,6 +115,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("template", _CXX),
     Construct("concept", _CXX, "concepts"),
     Construct("no_unique_address", _CXX, "no_unique_address"),
+    Construct("deduced_return", _CXX, "deduced_return"),
     Construct("noexcept_type", _CXX, "noexcept_in_type"),
     Construct("std_string", _CXX, "std_string"),
     Construct("restrict_pointer", _C, "restrict"),
@@ -136,6 +136,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("inline_namespace", _CXX),
     Construct("abi_tag", _CXX),
     Construct("hidden_friend", _CXX),
+    Construct("using_declaration", _CXX),
 )
 CONSTRUCT_BY_NAME: dict[str, Construct] = {c.name: c for c in CONSTRUCTS}
 
@@ -230,6 +231,7 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.opq": "struct",
     "k.isa": "function",
     "k.inst": "template",
+    "k.dta": "template",
     "k.ovl": "function",
     "k.inv": "inline_namespace",
     "k.exp": "function",
@@ -242,13 +244,39 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.aeq": "struct",
     "k.del": "function",
     "k.ibr": "inline_function",
+    "k.tvz": "class_virtual",
+    "k.evd": "struct",
+    "k.urt": "deduced_return",
+    "k.rex": "using_declaration",
     "k.pnv": "class_virtual",
     "k.stl": "std_string",
     "k.anon": "function",
+    # cxx_more: edit-class probes (abiforge/model/probes.py)
+    "vt": "class_virtual",
+    "en": "enum",
+    "ef": "enum_fixed_underlying",
+    "ec": "enum_class",
+    "vr": "variable",
+    "td": "typedef",
+    "tp": "template",
+    # cxx_src (abiforge.operators.source_evidence)
+    "src.macro": "header_constant",
+    "src.inl": "inline_function",
+    "src.tmpl": "template",
+    "src.vd": "class_virtual",
+    "src": "function",
+    # cxx_tree (abiforge.operators.source_tree)
+    "tree.anon": "struct",
+    "tree.pair": "struct",
+    "tree.rtti": "class_virtual",
+    "tree.ren": "struct",
+    "tree.priv": "struct",
+    "tree.privref": "struct",
+    "tree": "function",
 }
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
-GATE_ROLES = frozenset({"alt.gate", "xa.gate"})
+GATE_ROLES = frozenset({"alt.gate", "xa.gate", "src.gate", "tree.gate"})
 
 # Language feature an operator needs -> the construct it exercises.
 FEATURE_CONSTRUCT: dict[str, str] = {
@@ -292,6 +320,12 @@ OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
     "rebuild_hidden_visibility": ("compile_option",),
     "rebuild_optimized": ("compile_option",),
     "rebuild_m32": ("compile_option",),
+    # a class edit that is also the class's first virtual (a vptr appears)
+    "vptr_introduced": ("class", "class_virtual"),
+    # a base added to the polymorphic Shape: a base-subobject edit
+    "base_class_add": ("inheritance",),
+    # the same library dumped with less evidence on its new side
+    "new_side_dumped_without_headers": ("compile_option",),
 }
 
 
@@ -342,6 +376,9 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_became_packed": "packing_change",
         "field_became_bitfield": "field_to_bitfield",
         "field_renamed": "member_rename",
+        "tree_anonymous_type_coordinates_shifted": "declaration_text_only",
+        "tree_pointee_type_renamed": "pointee_rename",
+        "tree_private_pointee_type_renamed": "pointee_rename",
         "field_became_const": "member_cv_change",
         "field_became_volatile": "member_cv_change",
         "record_became_opaque": "record_opaque",
@@ -383,6 +420,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "vtt_grew": "base_add_virtual",
         "base_removed": "base_remove",
         "base_added_nonvirtual": "base_add_nonvirtual",
+        "base_class_add": "base_add_nonvirtual",
         "base_became_nonvirtual": "base_became_nonvirtual",
         "base_access_narrowed": "base_access_changed",
         "virtual_bases_reordered": "base_reorder",
@@ -422,6 +460,8 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "imported_symbol_removed": "body_change",
         "glibc_version_required_added": "body_change",
         "glibc_older_version_required": "body_change",
+        "glibc_floor_raised": "body_change",
+        "import_left_unprovided": "body_change",
         "glibc_version_requirement_dropped": "body_change",
         "fortified_call_dropped": "body_change",
         "text_relocation_introduced": "body_change",
@@ -433,6 +473,13 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "allocator_replacement_added": "function_added",
         "std_template_instance_exported": "function_added",
         "func_remove": "function_removed",
+        "src_default_argument_changed": "default_argument_changed",
+        "src_public_entry_calls_internal": "body_change",
+        "src_public_entry_depends_on_hidden": "body_change",
+        "src_public_function_added": "function_added",
+        "src_public_function_removed": "function_removed",
+        "src_undocumented_export_added": "export_declaration_mismatch",
+        "tree_private_declaration_exported": "export_declaration_mismatch",
         "allocator_replacement_removed": "function_removed",
         "symbols_prefixed_batch": "function_renamed",
         "api_version_suffix_bumped": "function_renamed",
@@ -462,8 +509,139 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "template_return_argument_changed": "return_retyped",
         "template_param_argument_changed": "param_retyped",
         "declared_function_lost_definition": "export_declaration_mismatch",
+        "declared_function_export_became_c_namesake": "export_declaration_mismatch",
         "unnamed_type_api_added": "function_added",
         "reorder_declarations": "declaration_text_only",
+    },
+    "class_virtual": {
+        "virtual_appended_after_last_slot": "vfunc_appended",
+        # Shape::perimeter goes between area and kind: kind's slot moves.
+        "virtual_method_add": "vfunc_inserted",
+        "virtual_remove": "vfunc_removed",
+        "virtual_reorder": "vfunc_reordered",
+        "method_const_drop": "vfunc_signature_changed",
+        "override_return_became_covariant": "vfunc_return_covariant",
+        "method_noexcept_add": "vfunc_exception_spec_change",
+        "virtual_noexcept_added": "vfunc_exception_spec_change",
+        "virtual_become_pure": "vfunc_became_pure",
+        "type_lost_abstract": "vfunc_lost_pure",
+        "pure_virtual_added": "pure_vfunc_added",
+        "method_became_virtual": "method_became_virtual",
+        "method_became_nonvirtual": "method_became_nonvirtual",
+        "override_added": "override_added",
+        "override_removed": "override_removed",
+        "override_specifier_added": "override_specifier_change",
+        "override_specifier_removed": "override_specifier_change",
+        "virtual_became_final": "final_specifier_change",
+        "virtual_lost_final": "final_specifier_change",
+        "destructor_became_virtual": "virtual_dtor_added",
+        "destructor_became_nonvirtual": "virtual_dtor_removed",
+        "key_function_inlined": "key_function_change",
+        "vptr_introduced": "became_polymorphic",
+        "last_virtual_removed": "lost_polymorphism",
+        "polymorphic_type_added_without_virtual_dtor": "polymorphic_class_added",
+        "class_rtti_became_protected": "vtable_symbol_visibility",
+        "class_visibility_hidden": "vtable_symbol_visibility",
+        # a new public subclass overriding SrcBase::f
+        "src_virtual_dispatch_target_added": "polymorphic_class_added",
+        # a private polymorphic class gets an out-of-line key function, so the
+        # library now emits (and exports) its vtable and typeinfo
+        "tree_internal_rtti_exported": "key_function_change",
+    },
+    "enum": {
+        "enum_append_member": "enumerator_appended",
+        "enum_sentinel_moved": "enumerator_inserted",
+        "enum_remove_member": "enumerator_removed",
+        "enum_change_value": "enumerator_value_changed",
+        "serialization_tag_swapped": "enumerator_values_swapped",
+        "enum_member_renamed": "enumerator_renamed",
+        "enum_enumerator_alias_added": "enumerator_alias_added",
+        "enum_append_wide_value": "range_exceeds_underlying",
+        "rebuild_short_enums": "underlying_type_change",
+        "enum_became_scoped": "scoped_change",
+        "enum_added": "enum_added",
+        "enum_removed": "enum_removed",
+    },
+    "enum_fixed_underlying": {
+        "fixed_enum_enumerator_appended": "enumerator_appended",
+        "fixed_enum_enumerator_inserted": "enumerator_inserted",
+        "fixed_enum_enumerator_removed": "enumerator_removed",
+        "fixed_enum_enumerator_value_changed": "enumerator_value_changed",
+        "fixed_enum_enumerator_values_swapped": "enumerator_values_swapped",
+        "fixed_enum_enumerator_renamed": "enumerator_renamed",
+        "fixed_enum_enumerator_alias_added": "enumerator_alias_added",
+        # An unscoped enum's underlying type becomes fixed (unsigned char).
+        "enum_underlying_narrow": "underlying_type_change",
+        "fixed_enum_became_scoped": "scoped_change",
+        "fixed_enum_added": "enum_added",
+        "fixed_enum_removed": "enum_removed",
+        "fixed_enum_became_opaque": "became_opaque",
+    },
+    "enum_class": {
+        "enum_class_append": "enumerator_appended",
+        "enum_class_enumerator_inserted": "enumerator_inserted",
+        "enum_class_remove": "enumerator_removed",
+        "enum_class_change_value": "enumerator_value_changed",
+        "enum_class_enumerator_values_swapped": "enumerator_values_swapped",
+        "enum_class_enumerator_renamed": "enumerator_renamed",
+        "enum_class_enumerator_alias_added": "enumerator_alias_added",
+        "enum_class_underlying_narrow": "underlying_type_change",
+        "enum_lost_scoped": "scoped_change",
+        "enum_class_added": "enum_added",
+        "enum_class_removed": "enum_removed",
+        "enum_class_became_opaque": "became_opaque",
+    },
+    "variable": {
+        "object_retyped_same_size": "retyped_same_size",
+        # int -> long long
+        "var_type_change": "size_grows",
+        "object_array_grew": "size_grows",
+        "const_string_object_grew": "size_grows",
+        "internal_table_grown": "size_grows",
+        "object_shrank": "size_shrinks",
+        "object_became_const": "cv_change",
+        "object_lost_const": "cv_change",
+        "const_object_value_changed": "initial_value_change",
+        "object_became_tls": "tls_change",
+        "object_became_protected": "visibility_change",
+        "object_hidden": "visibility_change",
+        "object_became_weak": "binding_change",
+        "object_alignment_reduced": "alignment_change",
+        "var_alignment_raised": "alignment_change",
+        "object_moved_version_node": "version_change",
+        "object_added": "variable_added",
+        "object_removed": "variable_removed",
+        "object_renamed": "variable_renamed",
+        "source_only_var_export_added": "export_declaration_mismatch",
+        "object_became_inline_variable": "became_inline",
+    },
+    "typedef": {
+        # int -> long long
+        "typedef_retarget": "retarget_size_change",
+        "integer_typedef_widened": "retarget_size_change",
+        "typedef_retargeted_same_size": "retarget_same_size",
+        "handle_typedef_retargeted": "retarget_pointee",
+        "typedef_removed": "typedef_removed",
+        "version_sentinel_typedef_bumped": "typedef_renamed",
+        "typedef_added": "typedef_added",
+        "typedef_respelled_as_alias": "respelled",
+    },
+    "template": {
+        "template_default_arg_change": "default_argument_change",
+        "exported_instantiation_default_changed": "default_argument_change",
+        "template_param_added_defaulted": "param_added_defaulted",
+        "mandatory_template_param_added": "param_added_mandatory",
+        "template_param_removed": "param_removed",
+        "template_nontype_param_retyped": "param_retyped",
+        "template_instantiation_added": "instantiation_added",
+        "explicit_instantiation_dropped": "instantiation_dropped",
+        "internal_template_instance_dropped": "instantiation_dropped",
+        "template_specialization_added": "specialization_added",
+        "template_specialization_removed": "specialization_removed",
+        "tag_type_renamed": "argument_renamed",
+        "src_template_body_changed": "definition_changed",
+        "template_added": "template_added",
+        "src_uninstantiated_template_removed": "template_removed",
     },
 }
 

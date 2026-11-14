@@ -54,7 +54,11 @@ _DWARF_TO_AST_EQUIV: dict[ChangeKind, set[ChangeKind]] = {
     ChangeKind.STRUCT_ALIGNMENT_CHANGED: {ChangeKind.TYPE_ALIGNMENT_CHANGED},
     ChangeKind.STRUCT_FIELD_OFFSET_CHANGED: {ChangeKind.TYPE_FIELD_OFFSET_CHANGED},
     ChangeKind.STRUCT_FIELD_REMOVED: {ChangeKind.TYPE_FIELD_REMOVED},
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED: {ChangeKind.TYPE_FIELD_TYPE_CHANGED},
+    # A union member's retype is reported by the AST lane as its own kind.
+    ChangeKind.STRUCT_FIELD_TYPE_CHANGED: {
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.UNION_FIELD_TYPE_CHANGED,
+    },
 }
 
 # Enum change kinds eligible for same-kind symbol-based dedup (FIX-C).

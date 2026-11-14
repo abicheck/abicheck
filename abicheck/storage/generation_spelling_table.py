@@ -612,12 +612,90 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "and a castxml record's data size as not collected"
     ),
     63: GenerationSpellingChange(
-        "no type or name spelling changes. A castxml record's data size is "
-        "0 for an empty record under either POD rule (an empty C++11 POD on "
-        "Apple arm64 read as its sizeof), and unknown for a record with a "
-        "bit-field on a MinGW target, whose Microsoft bit-field layout the "
-        "Itanium arithmetic does not model. Nothing rewritten: a generation-62 "
-        "value loads unchanged with the usual drift notice"
+        "castxml spells a record it emits with no name attribute (a lambda "
+        "closure, an unnamed local class) as '<owner>::(unnamed class)' "
+        "where older dumps wrote '?'. No rewrite is sound -- a stored '?' "
+        "does not say which owner or record it was, and '?' is the "
+        "no-evidence sentinel every comparison already reads as unknown, so "
+        "an old '?' against the new spelling produces no finding. The native "
+        "gcc backend records the export fact through the shared tiered "
+        "lookup (a .symtab-only or extern-C namesake hit is partial); no "
+        "stored spelling changes. (A short-lived main-branch build also "
+        "stamped 63 for the castxml data-size target rules recorded here at "
+        "66; a package from it reads as 63 and reports drift up to the "
+        "current generation like any other.)"
+    ),
+    64: GenerationSpellingChange(
+        "no type or name spelling changes. Header dumps with a public-header "
+        "set record the public headers' namespace-scope using std::X "
+        "re-exports (castxml namespace members bound from std, clang "
+        "UsingDecl, the native gcc plugin's new using rows) as the "
+        "abicheck.std_reexports extension fact of the declarations section. "
+        "No rewrite is needed -- an older snapshot reads the table as not "
+        "modelled, which reports no re-export removed"
+    ),
+    65: GenerationSpellingChange(
+        "no type or name spelling changes. The captured build mode's C++ "
+        "standard-library family (and libc++ ABI version) is read from the "
+        "binary's exported symbols instead of the declarations' manglings, "
+        "which with headers came from the header parser's own library; only "
+        "build_mode.stdlib/libcpp_abi_version can change, and only for a "
+        "header dump of a library built against another standard library "
+        "than the parser read. No rewrite is needed -- compare re-derives "
+        "the family from a stored snapshot's exports the same way"
+    ),
+    66: GenerationSpellingChange(
+        "no type or name spelling changes. castxml records an empty class's "
+        "data size as 0 (it is always laid out as an empty base) and leaves "
+        "a bit-field record's data size not collected on Microsoft bit-field "
+        "targets (MinGW, Cygwin); the std::X re-export table is not modelled "
+        "when the declaring namespace has no own declaration to place it, and "
+        "castxml's extern-C recovery no longer applies to provably C++ "
+        "headers. No rewrite is sound for the old data sizes, which read as "
+        "a differing fact only when both sides were recorded at 66"
+    ),
+    67: GenerationSpellingChange(
+        "no type or name spelling changes. On Apple arm64 a record's C++11 POD "
+        "test for tail-padding reuse uses the C++11 standard-layout rule "
+        "(before CWG 1813), so such a record's castxml data size is its "
+        "sizeof; castxml's clang side passes parse with the binary-ABI target, "
+        "so a Windows-default clang no longer reads MinGW headers as MSVC and "
+        "loses their noexcept and semantic facts. No rewrite is sound for the "
+        "old values, which differ only on those targets"
+    ),
+    68: GenerationSpellingChange(
+        "no type or name spelling changes. Only the DWARF-derived "
+        "triviality-for-calls token of a by-value aggregate can differ: a gcc "
+        "user copy/move constructor (declared under the unified C4 name) now "
+        "reads as nontrivial, and a converting or default constructor no "
+        "longer does. That is a value_abi_trait fact, not a spelling, so no "
+        "rewrite applies; a stored pair from both sides of the bump can show "
+        "VALUE_ABI_TRAIT_CHANGED for such a type"
+    ),
+    69: GenerationSpellingChange(
+        "no type or name spelling changes. The header backends record the "
+        "final virt-specifier of a member function (Function.is_final, the "
+        "abicheck.final_member_functions extension fact), and the native gcc "
+        "plugin also declares explicit function template specializations. An "
+        "older snapshot carries no final specifier (read as not known) and its "
+        "gcc-backend surface lacks those specializations; no rewrite applies"
+    ),
+    70: GenerationSpellingChange(
+        "no type or name spelling changes. castxml's guessed Itanium mangling "
+        "of a global-namespace variable (_Z<len><name>) is never kept as its "
+        "symbol: the Itanium ABI does not mangle global variables, so an "
+        'explicit extern "C" variable in a C++ header records its plain name '
+        "again, as generations before 66 did; no rewrite applies"
+    ),
+    71: GenerationSpellingChange(
+        "no type or name spelling changes. The DWARF lane now records a "
+        "record's is_abstract (from pure members, or an emitted vtable) and "
+        "reads a GCC member's pure virtual from its __cxa_pure_virtual vtable "
+        "slot, so a GCC pure virtual member is kept as one; the native gcc "
+        "header backend records static inline C function definitions. These "
+        "are new facts on existing records, not respellings: no rewrite "
+        "applies, and a pre-71 side's is_abstract is unknown (None), which "
+        "the abstract detector skips"
     ),
 }
 

@@ -59,6 +59,7 @@ from .extract import dwarf_subtree_index as _dsi
 from .extract.dwarf_value_abi_trait import (
     comparable_traits,
     declared_triviality,
+    is_copy_or_move_ctor,
     ret_component as _ret_component,
     returns_in_registers as _returns_in_registers,
 )
@@ -356,11 +357,7 @@ def _check_children_nontrivial(
             return False
         if name.startswith("~") or any(p in linkage for p in ("D0Ev", "D1Ev", "D2Ev")):
             return True
-        return bool(
-            class_name
-            and linkage
-            and any(p in linkage for p in (f"{class_name}C1E", f"{class_name}C2E"))
-        )
+        return bool(class_name) and is_copy_or_move_ctor(ch, type_die, class_name, CU)
 
     for ch in type_die.iter_children():
         if ch.tag == "DW_TAG_inheritance":

@@ -276,3 +276,49 @@ def test_header_scope_fallback_names_the_cause_instead_of_asking_for_headers(
     assert "supply public headers" not in block["remedy"] + summary
     assert "headers were supplied, but header scoping fell back" in summary
     assert effect == UNCONFIRMED_FALLBACK_MERGE_EFFECT
+
+
+_GAP_A = "header declarations set aside"
+_GAP_B = "another rung's evidence set aside"
+
+
+@pytest.mark.parametrize(
+    ("old_gaps", "new_gaps", "same_bytes", "exempt"),
+    [
+        ((), (), True, True),
+        ((_GAP_A,), (), True, False),
+        ((), (_GAP_A,), True, False),
+        ((_GAP_A,), (_GAP_A,), True, True),
+        ((_GAP_A,), (_GAP_B,), True, False),
+        ((_GAP_A,), (), False, False),
+    ],
+)
+def test_identical_bytes_exempt_only_when_projection_set_aside_the_same(
+    old_gaps: tuple[str, ...],
+    new_gaps: tuple[str, ...],
+    same_bytes: bool,
+    exempt: bool,
+) -> None:
+    """ADR-090 D1(c) / matrix row 17 under ADR-063's 2026-11-14 amendment:
+    two stripped dumps of one binary, projected to binary depth because
+    headers came for one side only, carry a set-aside gap on that side alone;
+    their effective inputs differ, so equal hashes do not exempt the pair."""
+    from abicheck.policy.unconfirmed_compatibility import is_unconfirmed
+    from abicheck.workflows.analysis_assurance_attach import attach_type_evidence
+
+    old = _snapshot("symbols_only")
+    new = _snapshot("symbols_only")
+    old.binary_sha256 = "a" * 64
+    new.binary_sha256 = ("a" if same_bytes else "b") * 64
+    old.projection_evidence_gaps = old_gaps
+    new.projection_evidence_gaps = new_gaps
+    result = DiffResult(
+        library="libx.so.1",
+        old_version="1",
+        new_version="2",
+        changes=[],
+        verdict=Verdict.NO_CHANGE,
+    )
+    attach_type_evidence(result, old, new)
+    assert result.type_evidence.identical_inputs is exempt
+    assert is_unconfirmed(result) is (not exempt)

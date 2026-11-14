@@ -134,28 +134,11 @@ dependency walk and debug roots to every member. No open gap remains.
 `false-clean` — a GNU-unique binding change is missed when the static's owner left the binary.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_disabled` entry in abiforge/known.py, which fails once the answer changes -->
 
-#### A macro that changes the build's ABI makes the two header dumps incomparable (2026-11-12)
-
-**Status (2026-11-12): OPEN.** Rebuilding an i386 library with `-D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64` widens `time_t`; given the same defines, the new side's header dump records a different parse profile, and the compare raises `ProfileMismatchError` instead of reporting `time64_abi_changed` (the DWARF-depth compare reports it). The refusal is the right answer for an accidental option drift and the wrong one for a deliberate ABI-level macro. Found by the edit corpus (`time_bits_64` on `c_elf_alt`, `-m32`). Owner: `comparability.py`.
-`refused` — a deliberate ABI macro switch cannot be compared at header depth.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `time_bits_64` entry in abiforge/known.py, which fails once the answer changes -->
-
 #### A version requirement on a newly needed library reads as compatible, whatever its version (2026-11-12)
 
 **Status (2026-11-12): OPEN.** `diff_platform_elf_symbols` reports a new `.gnu.version_r` tag as `symbol_version_required_added_compat` whenever its library was neither required nor `DT_NEEDED` before. A library whose old build imported nothing from libc (an `-O2` build linked `--as-needed`) and now calls `getrandom` gains `libc.so.6` with `GLIBC_2.25`: a runtime floor that did not exist before reads as compatible, and no `runtime_floor_raised` is reported. `needed_added` keeps the verdict at `COMPATIBLE_WITH_RISK`, so no verdict reads cleaner. Found by the edit corpus (`glibc_version_required_added` on `c_elf`, gcc `-O2`). Owner: `diff_platform_elf_symbols.py`.
 `wrong-kind` — the new glibc floor is named as a compatible requirement.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `glibc_version_required_added` entry in abiforge/known.py, which fails once the answer changes -->
-
-#### An export GNU ld binds to the base version is never reported as unversioned (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `unversioned_exported_symbol` flags only `ElfVersionBinding.UNVERSIONED` and deliberately skips `BASE` (index 1 in a library with a `VER_FLG_BASE` definition), reasoning that a base-bound export predates the version script. GNU ld binds every export a version script does not match to the base version, so a symbol newly added outside every node (`LIBEDIT_1.0 { global: [!e]*; };` plus a new `edit_unv`) is exactly the hygiene problem the check describes, yet it never reads unversioned; a real `UNVERSIONED` binding in a versioned library is not something GNU ld produces. Telling a new base-bound export from one that predates versioning needs the comparison's history, not one side. Found by the edit corpus (`unversioned_export_added` on `c_elf`). Owner: `buildsource/cross_source_checks.py`.
-`wrong-kind` — a new unversioned export in a versioned library reads only as `func_added`.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `unversioned_export_added` entry in abiforge/known.py, which fails once the answer changes -->
-
-#### A GCC-built DWARF snapshot cannot tell that a virtual became pure (2026-11-08)
-
-**Status (2026-11-08): OPEN.** Since extractor generation 45 a DWARF-only snapshot records C++ member functions, and a clang-built virtual that becomes `= 0` reads `func_virtual_became_pure` (clang marks the in-class declaration `DW_VIRTUALITY_pure_virtual`). GCC 13 writes `DW_VIRTUALITY_virtual` for a pure virtual, so the declaration looks like any other unexported virtual and the pair reads `func_removed` (BREAKING, so the verdict is right; the kind is not). The binary does carry the fact: the class's `_ZTV` object has an `R_X86_64_64` relocation against `__cxa_pure_virtual` in that slot. Closing it needs the ELF reader to map vtable relocations to slots; the DWARF walker already reads each virtual's slot from `DW_AT_vtable_elem_location` (`extract/dwarf_member_functions.vtable_slot`). Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`, gcc). `wrong-kind`. The reverse edit misreads too (2026-11-11): defining a pure virtual (`type_lost_abstract`, `cxx_more`, evidence `dwarf`, gcc) reads `virtual_method_added`, so a COMPATIBLE edit reads BREAKING (`false-positive`); clang reads `func_added`. Owner: `extract/` (ELF vtable relocations, `extract/dwarf_member_functions.py`).
-<!-- canary: tests/test_dwarf_member_functions.py::test_a_virtual_that_became_pure_is_reported_from_gcc_dwarf -->
 
 #### castxml spells a multi-dimensional array with its bounds reversed (2026-11-08)
 
@@ -334,15 +317,9 @@ current emitter, which is unchanged.
 
 #### The native gcc header backend keeps an unexported declaration PUBLIC (2026-11-12)
 
-**Status (2026-11-12): OPEN.** A function a public header declares but the library does not export is recorded `Visibility.HIDDEN` (with `binary_exported` false) by castxml and clang, but `Visibility.PUBLIC` (with `binary_exported` false) by the gcc plugin backend (`extract/headers/gcc/backend.py` sets only the surface facts). The old and new sides of a declaration that gains an export, or of an inline function moved out of line, then fail to pair, and the change reads `func_added` instead of `func_export_added`/`func_lost_inline` (both COMPATIBLE, so the verdict holds). Found by the edit corpus (`declared_exports_defined` on `c_elf`, `inline_function_outlined` on `cxx_more`). Owner: `extract/headers/gcc/`.
+**Status (2026-11-14): NARROWED.** The consequences below are fixed: `surface_facts.public_header_contract_fact` now writes the scope-aware contract fact even when the record's visibility already bridges to public, so export narrowing keeps the declaration and the old and new sides pair (`declared_exports_defined` and `inline_function_outlined` now agree under `headers.gcc`). What remains is the record itself: the gcc backend still writes `Visibility.PUBLIC` where castxml and clang write `HIDDEN`; every surface fact is right. Original report: a function a public header declares but the library does not export is recorded `Visibility.HIDDEN` (with `binary_exported` false) by castxml and clang, but `Visibility.PUBLIC` (with `binary_exported` false) by the gcc plugin backend (`extract/headers/gcc/backend.py` sets only the surface facts). The old and new sides of a declaration that gains an export, or of an inline function moved out of line, then fail to pair, and the change reads `func_added` instead of `func_export_added`/`func_lost_inline` (both COMPATIBLE, so the verdict holds). Found by the edit corpus (`declared_exports_defined` on `c_elf`, `inline_function_outlined` on `cxx_more`). Owner: `extract/headers/gcc/`.
 `false-clean` — a gcc-backend dump reports a gained export or a lost `inline` as a plain addition.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_keeps_an_unexported_declaration_public -->
-
-#### The native gcc header backend records no function the library never emits (2026-11-12)
-
-**Status (2026-11-12): OPEN.** castxml and the clang backend record a header-only function: a `static inline` C function, or a C++ `inline` function no unit of the library calls. The native gcc plugin backend (ADR-092) does not, because gcc never emits it. So removing such a function reads `NO_CHANGE` instead of `inline_function_removed`, and an incompatible parameter change reads nothing instead of `header_only_function_params_changed`, although consumers that call it stop compiling. Found by the edit corpus (`header_inline_removed` on `cxx_alt`, `header_only_function_params_changed` on `c_elf_alt`, `headers.gcc`). Owner: `extract/headers/gcc/`.
-`false-clean` — a source break in a header-only function is invisible under the gcc header backend.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `header_inline_removed` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
@@ -639,30 +616,6 @@ per-item status in the
 
 **Status (2026-11-12): OPEN.** `affected_symbols` on a type finding is built by `diff_filtering._build_type_to_funcs` (and `_build_type_embed_index` for embedding), which relates a changed type to every public function whose signature type string *contains* the type's name (`_SubstringMatcher`, documented as "identical substring semantics" to the `tname in ft` loop it replaced). With no identifier boundary, a change to `struct s1` is attributed to functions taking `struct s10 *`, `struct s100 *`, …: the closed layout fragment (`formal/FRAGMENT.md`) observed `use_s10 … use_s199` on `s1`'s findings. Findings, kinds and verdicts are unaffected (attribution only); consumer-impact views, appcompat matching on mangled names and report "affected functions" lists over-report. Fix: match on identifier boundaries in the matcher's output (a needle hit counts only when the characters before and after it are not `[A-Za-z0-9_]`, and `::` scoping is respected), keeping the single Aho-Corasick pass; check `compare/type_symbol_disambiguation.attribute_scoped_types` still sees the same candidates. Do not switch to exact-token equality on the whole ref: `const Widget &` and `Widget *` must still match `Widget`. Owner: `abicheck/diff_filtering.py`.
 <!-- canary: tests/test_affected_symbols_identifier_boundary_gap.py::test_type_name_prefix_of_another_type_is_attributed_to_its_functions -->
-
-#### Dropping a version node that binds no symbol reads as a binary break (2026-11-12)
-
-**Status (2026-11-12): OPEN.** A version script that drops a node no exported symbol was bound to (`LIBEDIT_1.1 { local: ...; } LIBEDIT_1.0;`) removes a `.gnu.version_d` entry no consumer can have recorded in its `.gnu.version_r`, since a consumer records only the versions of symbols it binds. `symbol_version_defined_removed` fires on its own exactly in this case (with a bound symbol, `symbol_version_node_removed` wins the dedup) and keeps its `BREAKING` default. Found by the edit corpus (`empty_version_node_dropped` on `c_elf_alt`; every consumer still loads). Owner: `diff_platform_elf_symbols.py` / the `symbol_version_defined_removed` taxonomy entry.
-`false-positive` — a version-script cleanup that breaks nobody gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `empty_version_node_dropped` entry in abiforge/known.py, which fails once the answer changes -->
-
-#### A function that leaves the public header but stays exported reads as a binary break (2026-11-12)
-
-**Status (2026-11-12): OPEN.** Removing a declaration from the public header while the library keeps exporting the symbol reports `exported_not_public` and `func_removed` (`BREAKING`). Built consumers still bind the export and run; only consumers that name the function stop compiling, which is a source break. Treating a still-exported symbol as not removed is listed under "Do not re-attempt" because it would silence a real contract removal; the open question is the verdict, not the finding. Found by the edit corpus (`exported_but_undeclared` on `c_elf`, default visibility). Owner: `policy/` (contract-removal classification).
-`false-positive` — a contract removal with the binary intact gates as an ABI break, not an API break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `exported_but_undeclared` entry in abiforge/known.py, which fails once the answer changes -->
-
-#### A pointer-level change of a never-exported header function reads as a binary break (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `compare/export_transition.regrade_unexported_params` relabels `func_params_changed` on a function whose export is confirmed absent on both sides as `header_only_function_params_changed` (`API_BREAK`), but a sibling parameter kind on the same function is not regraded: a `static inline` header function whose `int` parameter becomes `int *` reports `header_only_function_params_changed` plus `param_pointer_level_changed` (`BREAKING`), though no binary carries the function. Found by the edit corpus (`header_only_function_params_changed` on `c_elf_alt`). Owner: `compare/export_transition.py`.
-`false-positive` — a source-only signature change of a header-only function gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `header_only_function_params_changed` entry in abiforge/known.py, which fails once the answer changes -->
-
-#### A `-mveclibabi` switch reads as a binary break when no call is vectorized (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `vector_abi_changed` compares the `-mveclibabi=`/`-fveclib=` switches each unit's `DW_AT_producer` records and keeps its `BREAKING` default whatever the code does. A library that makes no vectorizable math call is byte-identical apart from the producer string, yet the rebuild gates as a break. Closing it needs evidence that a vectorized math entry point (an SVML or libmvec import) actually changed. Found by the edit corpus (`vector_math_abi_changed` on `c_elf`, gcc). Owner: `compare/toolchain_flags.py`.
-`false-positive` — a switch that changed no code gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `vector_math_abi_changed` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### An inline function's static local, exported by clang, reads as an undeclared export (2026-11-12)
 

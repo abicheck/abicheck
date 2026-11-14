@@ -26,7 +26,6 @@ from abicheck.diff_templates import (
     detect_mandatory_template_param_added,
     detect_overload_set_rerouted,
     detect_template_patterns,
-    detect_unspecified_return_now_named,
 )
 from abicheck.model import (
     AbiSnapshot,
@@ -1050,28 +1049,7 @@ class TestMandatoryTemplateParamAdded:
 # ---------------------------------------------------------------------------
 
 
-class TestUnspecifiedReturnNowNamed:
-    def test_auto_to_named(self) -> None:
-        old = _snap(funcs=[_fn("lib::make", return_type="auto")])
-        new = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
-        changes = detect_unspecified_return_now_named(old, new)
-        assert len(changes) == 1
-        c = changes[0]
-        assert c.kind == ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED
-        assert c.old_value == "auto"
-        assert c.new_value == "lib::Foo"
-
-    def test_named_to_lambda(self) -> None:
-        old = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
-        new = _snap(funcs=[_fn("lib::make", return_type="<lambda(int)>")])
-        changes = detect_unspecified_return_now_named(old, new)
-        assert len(changes) == 1
-        assert "unspecified" in changes[0].description
-
-    def test_stable_no_finding(self) -> None:
-        old = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
-        new = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
-        assert detect_unspecified_return_now_named(old, new) == []
+# UNSPECIFIED_RETURN_NOW_NAMED: tests/test_unspecified_return_now_named.py
 
 
 # ---------------------------------------------------------------------------

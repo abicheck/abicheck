@@ -160,7 +160,7 @@ class TestFuncDeletedElfFallbackDetection:
     def test_became_inline_symbol_vanished_is_breaking(self) -> None:
         """is_inline transition where symbol vanishes from .dynsym is a binary break.
 
-        FUNC_BECAME_INLINE (API_BREAK) fires for the inline transition, AND
+        FUNC_BECAME_INLINE (a risk) fires for the inline transition, AND
         FUNC_DELETED_ELF_FALLBACK (BREAKING) fires because the symbol actually
         disappeared from .dynsym — old binaries linked against it will fail.
         """

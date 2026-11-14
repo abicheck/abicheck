@@ -209,3 +209,74 @@ def test_unrelated_changes_pass_through_unchanged_and_in_order() -> None:
     retype = _change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "(long)", "(long long)")
     out = refine_abi_equivalent_retypes([removed, retype], old, new)
     assert _kinds(out) == [ChangeKind.FUNC_REMOVED, _RETYPED]
+
+
+# A field pointing at a renamed record. The oracle is the table itself: a
+# rename keeps the slot an address only for an indirect shape spelled the same
+# on both sides, at the same offset, over two records of equal layout.
+def _pointee(name: str, *, size: int = 32, offsets=(0,)) -> RecordType:
+    return RecordType(
+        name=name,
+        kind="struct",
+        size_bits=size,
+        alignment_bits=32,
+        fields=[
+            TypeField(name=f"f{i}", type="int", offset_bits=o)
+            for i, o in enumerate(offsets)
+        ],
+    )
+
+
+def _holder(spelling: str, offset: int = 0) -> RecordType:
+    return RecordType(
+        name="Outer",
+        kind="struct",
+        size_bits=64,
+        fields=[TypeField(name="p", type=spelling, offset_bits=offset)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("old_t", "new_t", "new_pointee", "keep_old_name", "new_offset", "refined"),
+    [
+        ("Inner *", "Inner2 *", _pointee("Inner2"), False, 0, True),
+        ("struct Inner **", "struct Inner2 **", _pointee("Inner2"), False, 0, True),
+        ("const Inner &", "const Inner2 &", _pointee("Inner2"), False, 0, True),
+        ("Inner * const", "Inner2 * const", _pointee("Inner2"), False, 0, True),
+        # the shape changes: a different slot
+        ("Inner *", "Inner2 **", _pointee("Inner2"), False, 0, False),
+        ("Inner *", "const Inner2 *", _pointee("Inner2"), False, 0, False),
+        # by value: the record itself is stored, not an address
+        ("Inner", "Inner2", _pointee("Inner2"), False, 0, False),
+        # repointed at a type that still coexists with the old one: not a rename
+        ("Inner *", "Inner2 *", _pointee("Inner2"), True, 0, False),
+        # the renamed record's layout differs
+        (
+            "Inner *",
+            "Inner2 *",
+            _pointee("Inner2", size=64, offsets=(0, 32)),
+            False,
+            0,
+            False,
+        ),
+        # the field itself moved
+        ("Inner *", "Inner2 *", _pointee("Inner2"), False, 32, False),
+    ],
+)
+def test_pointer_to_renamed_record_is_refined_only_for_a_pure_rename(
+    old_t, new_t, new_pointee, keep_old_name, new_offset, refined
+) -> None:
+    old_types = [_holder(old_t), _pointee("Inner")]
+    new_types = [_holder(new_t, new_offset), new_pointee]
+    if keep_old_name:
+        new_types.append(_pointee("Inner"))
+    for kind in (
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+    ):
+        symbol = "Outer::p" if kind is ChangeKind.STRUCT_FIELD_TYPE_CHANGED else "Outer"
+        change = _change(kind, symbol, old_t, new_t, field_name="p")
+        (out,) = refine_abi_equivalent_retypes(
+            [change], _snap(types=old_types), _snap(types=new_types)
+        )
+        assert (out.kind is _RETYPED) is refined, (kind, old_t, new_t)

@@ -556,13 +556,19 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     ),
     _E(
         "unspecified_return_now_named",
-        _A,
-        impact="A factory function's return type changed between an "
-        "unspecified placeholder (`auto`, lambda type, anonymous "
-        "class) and a named type — or vice versa. Source that "
-        "stored the result with the deduced spelling (`auto x = "
-        "make_X();`) keeps compiling; source that wrote out the "
-        "type fails to compile.",
+        _C,
+        impact="A function's return type changed from an unspecified "
+        "placeholder (a deduced `auto`, a lambda closure, an unnamed "
+        "class) to a named type. Every caller could only hold the old "
+        "result through `auto` (an unnamed type cannot be spelled), and "
+        "`auto` still deduces the new one, so existing source keeps "
+        "compiling; the return type becomes a nameable part of the "
+        "interface. The mangled name of a non-template function does not "
+        "encode its return type, so its symbol is unchanged. What the "
+        "change does to the returned object (its type, its layout) is "
+        "reported by the return-type and template findings, not here; the "
+        "reverse direction, a named return becoming unnameable, is a "
+        "return-type change reported by `func_return_changed`.",
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
