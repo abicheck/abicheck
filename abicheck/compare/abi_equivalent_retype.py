@@ -159,23 +159,38 @@ def _field_retype(
     )
 
 
-_INDIRECT = re.compile(
-    r"^(?P<lead>(?:(?:const|volatile)\s+)*)(?:(?:struct|class|union)\s+)?"
-    r"(?P<name>[A-Za-z_][\w:]*)(?P<shape>(?:\s*(?:\*|&&|&|\bconst\b|\bvolatile\b))*)\s*$"
-)
+_TOKEN = re.compile(r"[A-Za-z_][\w:]*|&&|&|\*|\S")
+_QUALIFIERS = frozenset({"const", "volatile"})
+_TAGS = frozenset({"struct", "class", "union"})
+_INDIRECTIONS = frozenset({"*", "&", "&&"})
 
 
 def _split_indirect(spelling: str) -> tuple[str, str] | None:
-    """(pointee name, normalized shape) of a pointer/reference spelling."""
-    m = _INDIRECT.match(spelling.strip())
-    if m is None:
+    """(pointee name, normalized shape) of a pointer/reference spelling.
+
+    Tokenized rather than matched by one regex: a repeated alternation of
+    ``&&`` and ``&`` backtracks exponentially on a long ``&&`` run.
+    """
+    tokens = _TOKEN.findall(spelling)
+    lead: list[str] = []
+    i = 0
+    while i < len(tokens) and tokens[i] in _QUALIFIERS:
+        lead.append(tokens[i])
+        i += 1
+    if i < len(tokens) and tokens[i] in _TAGS:
+        i += 1
+    if i >= len(tokens) or not re.fullmatch(r"[A-Za-z_][\w:]*", tokens[i]):
         return None
-    shape = m.group("lead").split() + re.findall(
-        r"\*|&&|&|const|volatile", m.group("shape")
-    )
-    if not any(tok in ("*", "&", "&&") for tok in shape):
+    name = tokens[i]
+    if name in _QUALIFIERS or name in _TAGS:
         return None
-    return m.group("name"), " ".join(shape)
+    tail = tokens[i + 1 :]
+    if any(tok not in _INDIRECTIONS and tok not in _QUALIFIERS for tok in tail):
+        return None
+    shape = lead + tail
+    if not any(tok in _INDIRECTIONS for tok in shape):
+        return None
+    return name, " ".join(shape)
 
 
 def _same_layout(a: RecordType, b: RecordType) -> bool:
