@@ -58,6 +58,7 @@ from abiforge.model.config import (
 from abiforge.model.seeds import SEED_BY_NAME, Seed
 from abiforge.operators import OP_BY_NAME, EditOp, matrix
 from abiforge.operators.build_data import BUILD_DATA_OPERATORS
+from abiforge.operators.source_evidence import SOURCE_EVIDENCE_OPERATORS
 from abiforge.run.toolchains import (
     CONSUMER_TOOLCHAIN_ENV,
     TOOLCHAIN_ENV,
@@ -123,6 +124,23 @@ def _build_data_rows() -> tuple[tuple[str, str, str, dict[str, object]], ...]:
 #: The PR tier's L3 build-data guards (``abiforge.operators.build_data``).
 BUILD_DATA_PR = _build_data_rows()
 
+#: The sources evidence variant's config (``Config.sources``): clang header
+#: backend, whose source replay records macros, bodies and call edges.
+SOURCES_CONFIG: dict[str, object] = {"sources": True, "header_backend": "clang"}
+
+
+def _source_evidence_rows() -> tuple[tuple[str, str, str, dict[str, object]], ...]:
+    """One PR row per source-evidence operator, alternating the producer family."""
+    return tuple(
+        (op.name, "cxx_src", ("gcc", "clang")[i % 2], dict(SOURCES_CONFIG))
+        for i, op in enumerate(SOURCE_EVIDENCE_OPERATORS)
+    )
+
+
+#: The PR tier's L4/L5 source-evidence guards
+#: (``abiforge.operators.source_evidence``).
+SOURCE_EVIDENCE_PR = _source_evidence_rows()
+
 # (op, seed, producer family, config changes). One guard per axis.
 _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("struct_append_field", "c_core", "gcc", {}),
@@ -157,6 +175,9 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     # L3 build data: a compile mode only the build's compile commands record
     # (abiforge.operators.build_data), one row per operator.
     *BUILD_DATA_PR,
+    # L4/L5 source evidence: what only source replay or the source graph
+    # sees (abiforge.operators.source_evidence), one row per operator.
+    *SOURCE_EVIDENCE_PR,
 )
 
 

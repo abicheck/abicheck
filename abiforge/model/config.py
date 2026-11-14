@@ -259,6 +259,10 @@ class Config:
     # ``compile_commands.json`` (``abicheck dump --build-info``), the record of
     # the exact compile command the harness ran.
     build_data: bool = False
+    # L4/L5 source evidence on top of ``headers``: abicheck is also given each
+    # side's source tree (``abicheck dump --sources``), the tree the harness
+    # wrote and compiled.
+    sources: bool = False
 
     def __post_init__(self) -> None:
         if self.header_backend not in HEADER_BACKENDS:
@@ -271,6 +275,8 @@ class Config:
             object.__setattr__(self, "header_backend", "castxml")
         if self.build_data and self.evidence != "headers":
             raise ValueError("build_data is L3 evidence on top of headers")
+        if self.sources and self.evidence != "headers":
+            raise ValueError("sources is L4/L5 evidence on top of headers")
 
     @property
     def lang(self) -> str:
@@ -320,7 +326,9 @@ class Config:
         label = self.evidence
         if self.evidence == "headers" and self.header_backend != "castxml":
             label = f"headers.{self.header_backend}"
-        return f"{label}+build" if self.build_data else label
+        if self.build_data:
+            label += "+build"
+        return f"{label}+src" if self.sources else label
 
     @property
     def space_evidence(self) -> str:

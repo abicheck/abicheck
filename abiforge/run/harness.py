@@ -172,8 +172,10 @@ def _compile_library(
             cmd.append(f"-Wl,-soname,{soname}")
     cmd += _seed_link(extra).render(out_dir)
     cmd += link.render(out_dir)
-    if config.build_data:
-        # The L3 record of this build: the one command that compiled it.
+    if config.build_data or config.sources:
+        # The L3 record of this build: the one command that compiled it. A
+        # ``sources`` tree carries it the way a real checkout's build dir
+        # does (``dump --sources`` auto-discovers it for L4 replay).
         entry = {"directory": str(out_dir), "file": str(src), "arguments": cmd}
         (out_dir / COMPILE_DB).write_text(json.dumps([entry]), encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -232,6 +234,7 @@ def build(
         backend=config.header_backend,
         gcc_options=gcc_options,
         build_info=out_dir / COMPILE_DB if config.build_data else None,
+        sources=out_dir if config.sources else None,
     )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 

@@ -1221,6 +1221,69 @@ XA_SEED = Seed(
     gate_role="xa.gate",
 )
 
+# A C++ library for the L4/L5 source evidence variant (``Config.sources``):
+# its baseline carries what only source replay and the source graph see -- a
+# public macro, a default argument, a header-only inline and template, a
+# public entry with an unused internal helper, a virtual hierarchy dispatched
+# through a public function. C++98-clean, so every standard builds it. Gated
+# (``src.gate``): only ``abiforge.operators.source_evidence`` edits it.
+_SRC_ROLES: dict[str, RoleText] = {
+    "src.gate": ("", ""),
+    "src.macro": ("#define SRC_LIMIT 4", ""),
+    "src.dflt": (
+        "int src_take(int a, int b = 4);",
+        "int src_take(int a, int b) { return a + b; }",
+    ),
+    "src.inl": ("inline int src_twice(int v) { return v * 2; }", ""),
+    "src.tmpl": ("template <class T> T src_scale(T v) { return v * 2; }", ""),
+    "src.call": (
+        "int src_entry(int v);",
+        "static int src_helper(int v) { return v; }\n"
+        "int src_entry(int v) { return v; }",
+    ),
+    "src.vd": (
+        "struct SrcBase { virtual ~SrcBase(); virtual int f(); };\n"
+        "struct SrcLeft : SrcBase { int f(); };\nint src_dispatch(SrcBase *b);",
+        "SrcBase::~SrcBase() {}\nint SrcBase::f() { return 0; }\n"
+        "int SrcLeft::f() { return 1; }\nint src_dispatch(SrcBase *b) { return b->f(); }",
+    ),
+    "src.fn": (
+        "int src_count(const char *s);",
+        "int src_count(const char *s) { int n = 0; while (s[n]) ++n; return n; }",
+    ),
+    "src.extra": ("int src_more(int v);", "int src_more(int v) { return v + 2; }"),
+}
+
+SRC_SEED = Seed(
+    name="cxx_src",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_SRC_HPP",
+        "#define EDIT_SEED_SRC_HPP",
+        _VIS_OPEN,
+        "@@src.macro@@",
+        "@@src.dflt@@",
+        "@@src.inl@@",
+        "@@src.tmpl@@",
+        "@@src.call@@",
+        "@@src.vd@@",
+        "@@src.fn@@",
+        "@@src.extra@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@src.dflt@@",
+        "@@src.call@@",
+        "@@src.vd@@",
+        "@@src.fn@@",
+        "@@src.extra@@",
+    ),
+    roles=_SRC_ROLES,
+    gate_role="src.gate",
+)
+
 SEEDS: tuple[Seed, ...] = (
     C_SEED,
     CXX_SEED,
@@ -1229,5 +1292,6 @@ SEEDS: tuple[Seed, ...] = (
     ALT_SEED,
     XCXX_SEED,
     XA_SEED,
+    SRC_SEED,
 )
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}
