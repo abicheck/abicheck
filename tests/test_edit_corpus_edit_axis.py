@@ -67,6 +67,7 @@ EXPECTED_STRUCT = _MEMBER | {
     "record_align_change",
     "record_kind_change",
     "record_opaque",
+    "record_defined",
     "record_removed",
     "record_added",
     "record_triviality_change",

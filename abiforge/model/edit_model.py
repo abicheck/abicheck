@@ -129,6 +129,7 @@ _STRUCT_OTHER: tuple[tuple[str, str], ...] = (
     ("record_align_change", "the record's own alignment changes (alignas/aligned)"),
     ("record_kind_change", "struct becomes union or the reverse"),
     ("record_opaque", "the record's definition is withdrawn (made opaque)"),
+    ("record_defined", "an opaque record's definition becomes visible"),
     ("record_removed", "the record is removed from the interface"),
     ("record_added", "a new record is added to the interface"),
     (

@@ -220,6 +220,27 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "lay": "struct",
     "layb": "inheritance",
     "x": "function",
+    # cxx_more: one baseline per ChangeKind operator (operators/kinds.py)
+    "k.vbo": "inheritance",
+    "k.svg": "inheritance",
+    "k.tpr": "struct",
+    "k.rsv": "struct",
+    "k.tvs": "typedef",
+    "k.hnd": "typedef",
+    "k.opq": "struct",
+    "k.isa": "function",
+    "k.inst": "template",
+    "k.ovl": "function",
+    "k.inv": "inline_namespace",
+    "k.exp": "function",
+    "k.tag": "template",
+    "k.cpo": "function",
+    "k.ret": "function",
+    "k.tpp": "function",
+    "k.slk": "struct",
+    "k.mtp": "template",
+    "k.aeq": "struct",
+    "k.del": "function",
 }
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
@@ -345,6 +366,8 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "cxx_record_added": "record_added",
         "record_lost_trivially_copyable": "record_triviality_change",
         "record_lost_standard_layout": "member_access_change",
+        "reserved_field_used": "member_rename",
+        "field_retyped_abi_equivalent": "retype_same_layout",
     },
     "inheritance": {
         "base_became_virtual": "base_became_virtual",
@@ -355,6 +378,8 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "base_added_nonvirtual": "base_add_nonvirtual",
         "base_became_nonvirtual": "base_became_nonvirtual",
         "base_access_narrowed": "base_access_changed",
+        "virtual_bases_reordered": "base_reorder",
+        "secondary_base_became_polymorphic": "base_layout_changed",
     },
     "function": {
         "func_param_append": "param_added",
@@ -422,6 +447,12 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         # symbol changes type
         "gnu_unique_static_added": "function_added",
         "comment_only": "declaration_text_only",
+        "experimental_api_graduated": "function_added",
+        "experimental_api_removed": "function_removed",
+        "function_became_customization_object": "function_removed",
+        "template_return_argument_changed": "return_retyped",
+        "template_param_argument_changed": "param_retyped",
+        "declared_function_lost_definition": "export_declaration_mismatch",
         "reorder_declarations": "declaration_text_only",
     },
 }
