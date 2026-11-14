@@ -552,12 +552,14 @@ ELF_SEED = Seed(
 # A second C library seen as an ELF object, whose *baseline* already carries
 # what a c_elf edit adds: an executable stack, packed relative relocations,
 # DT_RPATH, a text relocation, initial-exec TLS, an IFUNC, a symbol-less
-# version node, fortified and newer-glibc imports, no SONAME. An edit removes
+# version node, fortified and newer-glibc imports, no SONAME, and eager
+# binding without RELRO (so bind-now can go while RELRO stays). An edit removes
 # one. Only operators that name ``alt.gate`` apply (``Seed.gate_role``), so
 # c_elf's link edits, which rewrite the flags from c_elf's own baseline, do
 # not land here. Role names start with ``alt.``.
 _ALT_LDFLAGS = (
-    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,execstack "
+    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,norelro "
+    "-Wl,-z,execstack "
     "-Wl,-z,pack-relative-relocs -Wl,-z,notext -Wl,-rpath,/opt/edit/lib "
     "-Wl,--disable-new-dtags"
 )

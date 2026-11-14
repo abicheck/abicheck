@@ -519,6 +519,17 @@ _ALT = (
         **_BINARY,
     ),
     _alt(
+        "bind_now_dropped_without_relro",
+        ("build.ldflags",),
+        _drop_ld("-Wl,-z,now"),
+        "eager binding becomes lazy while RELRO stays off on both sides: "
+        "DF_BIND_NOW is the only thing that changes (c_elf's bind_now_dropped "
+        "also lowers full RELRO to partial, which abicheck reports instead)",
+        expected=frozenset({"BIND_NOW_DISABLED"}),
+        **_AT_MOST_RISK,
+        **_BINARY,
+    ),
+    _alt(
         "relr_relocs_unpacked",
         ("build.ldflags",),
         _drop_ld("-Wl,-z,pack-relative-relocs"),
