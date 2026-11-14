@@ -9,19 +9,19 @@ A *point* in the space is one combination of six axes::
   changes, read off the operator's roles (``ROLE_CONSTRUCT``) or, when it needs
   a language feature, off that feature (``FEATURE_CONSTRUCT``);
 - **edit** (``edit_values``): the class of the edit within its construct, as
-  ``_edit_corpus_edit_model`` defines it from C/C++ layout rules, not from the
+  ``abiforge.model.edit_model`` defines it from C/C++ layout rules, not from the
   operators. Record layout (``struct``) and base-class layout
   (``inheritance``) are split; every other construct has the single value
   ``any``. A model class no operator generates stays in the denominator and
   is listed by ``edit_classes_without_operator``;
-- **language** / **standard**: ``_edit_corpus_config.STANDARDS``;
+- **language** / **standard**: ``abiforge.model.config.STANDARDS``;
 - **config feature** (``CONFIG_FEATURES``): one ABI-relevant setting the cell
   turns on (``baseline`` = none of them), on either side of a rebuild;
 - **build** / **consumer** toolchain: the family that builds the library and
-  the one that builds its consumers (``_edit_corpus_config.FAMILIES``); a
+  the one that builds its consumers (``abiforge.model.config.FAMILIES``); a
   (build, consumer) pair that cannot work is infeasible through
   ``PAIR_RULES``;
-- **evidence**: ``_edit_corpus_config.EVIDENCE``, with ``headers`` split by
+- **evidence**: ``abiforge.model.config.EVIDENCE``, with ``headers`` split by
   the backend that dumps them (``SPACE_EVIDENCE``: ``headers.castxml``,
   ``headers.clang``, ``headers.gcc``), so a header backend no cell ran shows
   as an uncovered axis value rather than vanishing from the denominator.
@@ -30,8 +30,8 @@ A *point* in the space is one combination of six axes::
 before C++20, a C++-only construct in C, ``-fabi-version`` on clang, a family
 that does not target Linux ELF), or ``None``. ``cell_points`` maps one corpus
 cell (operator, seed, config) onto the points it exercises. The generator
-(``_edit_corpus_cells.seed_conflict``) and the coverage report
-(``_edit_corpus_coverage``) both read this module, so a rule changes in one
+(``abiforge.run.cells.seed_conflict``) and the coverage report
+(``abiforge.coverage``) both read this module, so a rule changes in one
 place.
 
 What a covered fraction of this space does NOT mean: a covered point is one
@@ -49,8 +49,8 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from tests import _edit_corpus_edit_model as _model
-from tests._edit_corpus_config import (
+from abiforge.model import edit_model as _model
+from abiforge.model.config import (
     EVIDENCE,
     FAMILIES,
     FEATURES,
@@ -64,8 +64,8 @@ from tests._edit_corpus_config import (
 )
 
 if TYPE_CHECKING:
-    from tests._edit_corpus_operators import EditOp
-    from tests._edit_corpus_seeds import Seed
+    from abiforge.model.seeds import Seed
+    from abiforge.operators import EditOp
 
 AXES: tuple[str, ...] = (
     "construct",
@@ -94,7 +94,7 @@ LANGS: tuple[str, ...] = ("c", "c++")
 class Construct:
     name: str
     langs: frozenset[str]
-    # The ``_edit_corpus_config.FEATURES`` entry the construct needs, if any.
+    # The ``abiforge.model.config.FEATURES`` entry the construct needs, if any.
     feature: str | None = None
 
 
@@ -254,7 +254,7 @@ def op_constructs(op: EditOp) -> tuple[str, ...]:
 # --- edit sub-classes -------------------------------------------------------
 #
 # A construct says what an edit touches, not how. The classes an edit can
-# fall into are defined by ``_edit_corpus_edit_model`` from C/C++ layout rules,
+# fall into are defined by ``abiforge.model.edit_model`` from C/C++ layout rules,
 # independently of the operators: every class there is a value of the edit
 # axis, and so enters the denominator, whether or not an operator generates
 # it. ``formal/EXPERIMENTS.md`` (E4) shows why a single representative per
@@ -409,7 +409,7 @@ CONFIG_AXIS: tuple[str, ...] = (
 _FEATURE_BY_NAME = {f.name: f for f in CONFIG_FEATURES}
 
 # Constructs a config feature cannot be combined with, and why. The generator
-# refuses these cells (``_edit_corpus_cells.seed_conflict`` and ``pair_blocked``
+# refuses these cells (``abiforge.run.cells.seed_conflict`` and ``pair_blocked``
 # call ``seed_flags_conflict``).
 CONSTRUCT_CONFIG_CONFLICTS: dict[tuple[str, str], str] = {
     ("std_string", "packed"): (

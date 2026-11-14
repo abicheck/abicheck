@@ -17,13 +17,12 @@ from pathlib import Path
 import pytest
 from _workflow_exec import find_run_step, load_workflow, require_bash, run_step
 
-import tests._edit_corpus_cells as cells
-import tests._edit_corpus_exec as ex
-import tests._edit_corpus_harness as harness
-import tests._edit_corpus_tiers as tiers
-import tests._edit_corpus_toolchains as tcs
-from tests._edit_corpus_cells import CellContext, CellResult, pair_blocked, run_cell
-from tests._edit_corpus_config import (
+import abiforge.run.cells as cells
+import abiforge.run.exec as ex
+import abiforge.run.harness as harness
+import abiforge.run.tiers as tiers
+import abiforge.run.toolchains as tcs
+from abiforge.model.config import (
     STANDARD_BY_NAME,
     Config,
     Consumer,
@@ -32,13 +31,14 @@ from tests._edit_corpus_config import (
     Toolchain,
     default_config,
 )
-from tests._edit_corpus_exec import ConsumerSet, ExecutionOracle, RunResult
-from tests._edit_corpus_expect import ExecTruth, PairTruth
-from tests._edit_corpus_harness import Built
-from tests._edit_corpus_operators import OP_BY_NAME
-from tests._edit_corpus_report import load, summarize, write_cell
-from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME
-from tests._edit_corpus_toolchains import ToolchainSelectionError, parse_selection
+from abiforge.model.expect import ExecTruth, PairTruth
+from abiforge.model.seeds import C_SEED, SEED_BY_NAME
+from abiforge.operators import OP_BY_NAME
+from abiforge.run.cells import CellContext, CellResult, pair_blocked, run_cell
+from abiforge.run.exec import ConsumerSet, ExecutionOracle, RunResult
+from abiforge.run.harness import Built
+from abiforge.run.report import load, summarize, write_cell
+from abiforge.run.toolchains import ToolchainSelectionError, parse_selection
 
 GCC13 = Toolchain("gcc", 13, "/x/gcc-13", "/x/g++-13")
 GCC14 = Toolchain("gcc", 14, "/x/gcc-14", "/x/g++-14")

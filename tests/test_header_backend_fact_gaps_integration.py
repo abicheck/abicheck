@@ -4,7 +4,7 @@ Each test dumps a tiny real library with one header backend and asserts the
 fact that backend currently fails to record (castxml and the native gcc plugin
 against the clang backend, which records all of them). Every test is a
 ``known_gap_canary`` for a ``docs/contribute/known-gaps.md`` entry and for the
-strict-xfail ``tests/_edit_corpus_known.py`` entries that name the same gap:
+strict-xfail ``abiforge/known.py`` entries that name the same gap:
 when one fails, the backend learned the fact -- archive the entry, drop the
 corpus ``Known`` rows, and turn the canary into a regression test.
 """

@@ -4,11 +4,11 @@ Each cell ``(operator, seed, Config)`` is built with a real toolchain, compared
 by abicheck through its public API, *and executed*: consumers compiled against
 the old header run against the old and the new library, layout probes measure
 ``sizeof``/``offsetof``, and consumers recompiled against the new header give
-source-break truth (``_edit_corpus_exec``). ``reconcile`` classifies the cell
+source-break truth (``abiforge.run.exec``). ``reconcile`` classifies the cell
 from the execution result, the operator's ``expect(config)`` and abicheck's
-answer; false-clean ranks first (``_edit_corpus_expect``).
+answer; false-clean ranks first (``abiforge.model.expect``).
 
-Tiers (``_edit_corpus_tiers``), selected by marker, never by a new CI job:
+Tiers (``abiforge.run.tiers``), selected by marker, never by a new CI job:
 
 - PR: ``integration`` only, a fixed handful of cells (seconds);
 - nightly: ``-m edit_corpus_nightly``, a seeded pairwise covering array
@@ -20,7 +20,7 @@ The nightly/weekly cell lists are generated only when their marker is
 selected (``pytest_generate_tests``), so collecting this module never probes
 a compiler. A cell whose toolchain is missing is skipped with the reason,
 never passed. A mismatch is a strict xfail only while it reproduces exactly as
-recorded in ``_edit_corpus_known``; any other failure prints the cell
+recorded in ``abiforge.known``; any other failure prints the cell
 minimized to (seed, edit, config) as a ready-to-paste regression test.
 """
 
@@ -34,15 +34,9 @@ from pathlib import Path
 import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
-from tests._edit_corpus_cells import (
-    CellContext,
-    CellResult,
-    _shrink_steps,
-    minimize,
-    regression_test,
-    run_cell,
-)
-from tests._edit_corpus_config import (
+from abiforge.coverage import make_record, ran_consumers, write_record
+from abiforge.known import KNOWN, known_mismatch
+from abiforge.model.config import (
     EVIDENCE,
     STANDARD_BY_NAME,
     STANDARDS,
@@ -53,9 +47,7 @@ from tests._edit_corpus_config import (
     default_config,
     has_feature,
 )
-from tests._edit_corpus_coverage import make_record, ran_consumers, write_record
-from tests._edit_corpus_exec import probe_expressions
-from tests._edit_corpus_expect import (
+from abiforge.model.expect import (
     MISMATCH_CLASSES,
     PASSING_CLASSES,
     ExecTruth,
@@ -63,10 +55,18 @@ from tests._edit_corpus_expect import (
     issue_keys,
     reconcile,
 )
-from tests._edit_corpus_known import KNOWN, known_mismatch
-from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, matrix
-from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME, SEEDS
-from tests._edit_corpus_tiers import (
+from abiforge.model.seeds import C_SEED, SEED_BY_NAME, SEEDS
+from abiforge.operators import OP_BY_NAME, OPERATORS, matrix
+from abiforge.run.cells import (
+    CellContext,
+    CellResult,
+    _shrink_steps,
+    minimize,
+    regression_test,
+    run_cell,
+)
+from abiforge.run.exec import probe_expressions
+from abiforge.run.tiers import (
     _PR,
     Cell,
     pairwise,
@@ -326,7 +326,7 @@ def test_elf_symbol_table_kinds_are_owed_only_on_elf(
 def test_a_rebuild_row_with_its_target_flag_already_set_is_repaired_not_dropped() -> (
     None
 ):
-    from tests._edit_corpus_tiers import _repair_rebuild
+    from abiforge.run.tiers import _repair_rebuild
 
     op = OP_BY_NAME["rebuild_short_enums"]
     drawn = Flags(opt="O2", short_enums=True, pack=1)
@@ -400,7 +400,7 @@ def test_every_rule_fires_for_some_config() -> None:
 
 
 def test_every_expectation_band_is_ordered_for_every_probe_config() -> None:
-    from tests._edit_corpus_expect import VERDICT_RANK
+    from abiforge.model.expect import VERDICT_RANK
 
     for op in OPERATORS:
         for e in EVIDENCE:
@@ -531,11 +531,11 @@ def test_shrink_steps_move_one_axis_towards_the_default() -> None:
 def test_minimize_keeps_only_the_axis_that_reproduces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import tests._edit_corpus_cells as cells
+    import abiforge.run.cells as cells
 
     def fake_run(op, seed, config, ctx):  # reproduces iff -fshort-enums is on
         cls = "false-clean" if config.flags.short_enums else "agree"
-        from tests._edit_corpus_expect import Reconciled
+        from abiforge.model.expect import Reconciled
 
         return CellResult(
             op.name, seed.name, config, "ran", reconciled=Reconciled(cls, ())
@@ -550,7 +550,7 @@ def test_minimize_keeps_only_the_axis_that_reproduces(
 
 
 def test_regression_printer_emits_valid_python_naming_the_cell() -> None:
-    from tests._edit_corpus_expect import Reconciled
+    from abiforge.model.expect import Reconciled
 
     cell = CellResult(
         "enum_append_wide_value",
@@ -664,7 +664,7 @@ def test_known_mismatches_point_at_a_known_gaps_heading() -> None:
 
 
 def test_every_standard_of_both_languages_is_a_nightly_axis_value() -> None:
-    from tests._edit_corpus_tiers import _STD_SLOTS, std_for_slot
+    from abiforge.run.tiers import _STD_SLOTS, std_for_slot
 
     for lang in ("c", "c++"):
         drawn = {std_for_slot(lang, slot) for slot in range(_STD_SLOTS)}
@@ -673,7 +673,7 @@ def test_every_standard_of_both_languages_is_a_nightly_axis_value() -> None:
 
 @pytest.mark.parametrize("n", [1, 2, 3, 4, 7])
 def test_shards_partition_the_cells(n: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests._edit_corpus_tiers import shard
+    from abiforge.run.tiers import shard
 
     cells = list(range(23))
     got = []
@@ -685,7 +685,7 @@ def test_shards_partition_the_cells(n: int, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_a_malformed_shard_spec_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests._edit_corpus_tiers import shard_spec
+    from abiforge.run.tiers import shard_spec
 
     monkeypatch.setenv("ABICHECK_EDIT_CORPUS_SHARD", "5/4")
     with pytest.raises(ValueError, match="1 <= K <= N"):
@@ -703,7 +703,7 @@ def test_a_malformed_shard_spec_is_an_error(monkeypatch: pytest.MonkeyPatch) -> 
 def test_enabled_tiers_reads_the_env_var(
     raw: str, want: set[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tests._edit_corpus_tiers import enabled_tiers
+    from abiforge.run.tiers import enabled_tiers
 
     monkeypatch.setenv("ABICHECK_EDIT_CORPUS_TIER", raw)
     assert enabled_tiers() == want
@@ -768,7 +768,7 @@ def test_a_false_clean_degrades_to_its_verdict_class_without_execution() -> None
 def test_discovery_rejects_a_c_and_cxx_driver_pair_of_different_versions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import tests._edit_corpus_toolchains as tcs
+    import abiforge.run.toolchains as tcs
 
     paths = {
         "gcc": "/x/gcc",
@@ -845,7 +845,7 @@ def _check_cell(cell: Cell, ctx: CellContext, tier: str) -> None:
             f"recorded {known.cls} {sorted(known.issues)} (verdict in {sorted(known.verdicts)}) "
             f"no longer reproduces as recorded: got {result.cls} {sorted(issues)} "
             f"verdict={result.verdict}. If the detector was fixed, remove the "
-            f"_edit_corpus_known entry and its known-gaps row.\n{result.describe()}"
+            f"abiforge.known entry and its known-gaps row.\n{result.describe()}"
         )
         pytest.xfail(f"{known.cls}: {known.reason}")
     if result.cls in PASSING_CLASSES:
@@ -867,7 +867,7 @@ def _check_cell(cell: Cell, ctx: CellContext, tier: str) -> None:
 
 def _write_pairs(cell: Cell, result: CellResult) -> None:
     """Keep every cell's per-(build, consumer) rows for the workflow's summary."""
-    from tests._edit_corpus_report import write_cell
+    from abiforge.run.report import write_cell
 
     out = os.environ.get("ABICHECK_EDIT_CORPUS_REPORT_DIR")
     if out:
@@ -916,7 +916,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     collecting this module never probes a compiler and a forgotten env var is
     visible as a skip, not as an empty parameter set.
     """
-    from tests import _edit_corpus_tiers as tiers
+    from abiforge.run import tiers as tiers
 
     for name, tier, gen in (
         ("nightly_cell", "nightly", tiers.nightly_cells),

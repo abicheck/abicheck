@@ -20,8 +20,8 @@ generated: false
   (`field_added_in_tail_padding`, `field_inserted_in_padding`,
   `field_removed_without_shrink`), checked against the Lean layout table (E2
   gap closed); since 2026-11-13 every record- and base-layout class of
-  `tests/_edit_corpus_edit_model.py` has an operator
-  (`tests/_edit_corpus_operators_layout.py`), so `edit_classes_without_operator`
+  `abiforge/model/edit_model.py` has an operator
+  (`abiforge/operators/layout.py`), so `edit_classes_without_operator`
   is empty;
 - the disposition count trigger has a sufficient precondition, and no step
   breaks it on the corpus (E7);
@@ -34,7 +34,7 @@ generated: false
 We want two claims, and today we can state neither precisely:
 
 1. **The generator is complete.** The generated ABI edit corpus
-   (`tests/_edit_corpus_*`, space model in `tests/_edit_corpus_space.py`)
+   (`abiforge/`, formerly `tests/_edit_corpus_*`; space model in `abiforge/model/space.py`)
    covers its space without gaps, and every generated case has a correct
    expected outcome.
 2. **abicheck detects that space.** Every case in it gets the expected
@@ -123,7 +123,7 @@ vptr, templates). Each fragment is one Lean module on a shared core
    fields, and remove without shrinking sizeof. Append-into-padding already
    exists (`field_added_in_tail_padding`, #1999). Take their expectations from
    `formal/lean/layout_table.json`, not from the class.
-2. ✅ **Generator space:** add an *edit* axis to `tests/_edit_corpus_space.py`,
+2. ✅ **Generator space:** add an *edit* axis to `abiforge/model/space.py`,
    so coverage can say which edit sub-classes ran, not only which constructs.
 3. **Disposition:** decide on E7's proposal (a structural precondition for the
    count trigger), and widen

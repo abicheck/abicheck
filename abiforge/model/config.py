@@ -17,10 +17,10 @@ parameter that can decide an edit's ABI outcome, as explicit axes:
 - platform / object format (``host_platform``);
 - the evidence abicheck is given (``EVIDENCE``: binary only, +DWARF, +headers).
 
-Nothing here probes the host: ``_edit_corpus_toolchains`` decides which
+Nothing here probes the host: ``abiforge.run.toolchains`` decides which
 configs can be built, and an unbuildable config is *unavailable*, never
 passed. Nothing here is ground truth either: operators map a config to their
-expectation in ``_edit_corpus_operators``.
+expectation in ``abiforge.operators``.
 """
 
 from __future__ import annotations

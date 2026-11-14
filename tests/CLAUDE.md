@@ -217,47 +217,14 @@ CI's `pr` profile.
   fixtures that still build satisfy the floor. Bug class
   `guard.absent_capability_vs_real_failure`; contract in
   `test_compile_failure_contract.py`.
-- `_edit_corpus_*.py` — the generated ABI edit corpus: seeds and operators
-  (`requires(config)`/`expect(config)`; tables in `_edit_corpus_operators.py`
-  for the core seeds, `_operators_elf.py` for `c_elf`, `_operators_cxx.py`
-  for `cxx_more`, `_operators_platform.py` for ELF/loader/toolchain-level
-  edits, the `EditOp` type in `_edit_corpus_opkit.py`; a seed's
-  `build.*` roles carry compile/link inputs — version script, SONAME, flags —
-  that an operator edits like a declaration; a seed with a `gate_role`
-  (`c_elf_alt`, `cxx_alt`: baselines that already carry a feature an edit
-  removes) takes only operators naming that role), the `Config` axes and toolchain
-  registry, the execution oracle (consumers run against old and new library,
-  layout probes, new-header compiles) and `reconcile` (false-clean first).
-  `requires` must not read the host: a host capability (CPU, libstdc++, a
-  flag the toolchain may refuse) is an `EditOp` field (`host_arch`,
-  `needs_libstdcxx`, `probe_flags`) that `capability_gap` turns into an
-  *unavailable* cell at run time.
-  Record a mismatch in `_edit_corpus_known.py` with a `known-gaps.md` row;
-  change an expectation only from the edit's ABI meaning (an `oracle-conflict`
-  means it is wrong), never to match abicheck's answer. Nightly: `ABICHECK_EDIT_CORPUS_TIER=nightly pytest
-  tests/test_abi_edit_corpus_matrix.py -m edit_corpus_nightly`
-  (`ABICHECK_EDIT_CORPUS_SEED`, `ABICHECK_EDIT_CORPUS_SHARD=K/N`); a failing
-  cell prints a minimized, ready-to-paste regression test.
-  A `Config` is one library *build* (`build_id`: standard, producer, flags,
-  evidence and, for `headers`, the header backend — castxml, clang or the
-  native gcc plugin, which needs `python -m abicheck.extract.headers.gcc.build
-  --compiler g++` once or reads unavailable — built and compared once) plus `consumers` (toolchain, standard,
-  flags each); the oracle reports every (build, consumer) pair, and a mix
-  that cannot work (libstdc++ vs libc++, the dual ABI, a standard the edited
-  header needs) is an explicit `infeasible` pair, never a pass. Restrict
-  either role with `ABICHECK_EDIT_CORPUS_TOOLCHAIN` /
-  `ABICHECK_EDIT_CORPUS_CONSUMER_TOOLCHAIN` (or `--edit-corpus-toolchain` /
-  `--edit-corpus-consumer-toolchain`; e.g. `gcc-13` and
-  `gcc-14,clang-18,clang-19`); an uninstalled name fails the run.
-  `python -m tests._edit_corpus_report RESULTS_DIR` summarizes the pairs.
-  Coverage (`_edit_corpus_coverage.py`, `_edit_corpus_space.py`): read
-  `docs/contribute/testing.md` "Generated ABI edit corpus coverage" before
-  adding an operator, seed role or config axis — a new declared kind needs
-  `python -m tests._edit_corpus_coverage ledger --write`, a new role or axis
-  value needs its construct / config-feature entry in the space model, and a
-  new `struct`/`inheritance` operator needs its `OP_EDIT_CLASS` entry. Edit
-  classes come from `_edit_corpus_edit_model.py`, never from the operators: a
-  class with no operator stays in the model as a reported gap.
+- `_abiforge_pytest.py` — pytest glue for **abiforge** (the generator of the
+  ABI edit corpus, a standalone package at the repository root): registers
+  `--edit-corpus-toolchain` / `--edit-corpus-consumer-toolchain`. The corpus
+  tests here (`test_abi_edit_corpus*.py`, `test_edit_corpus_*.py`) consume
+  abiforge; read `abiforge/CLAUDE.md` before adding an operator, seed role,
+  config axis or known mismatch. `test_abiforge_boundaries.py` keeps abiforge
+  free of `tests`/`pytest` imports and confines `abicheck` imports to its
+  checker adapters.
 
 ## Field-shapes corpus (`field_shapes/`)
 

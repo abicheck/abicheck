@@ -2,7 +2,7 @@
 
 Ground truth is declared from the edit's meaning (C/C++ conversion and
 overload rules, the ELF loader, the platform calling convention), never from
-abicheck's answer; see ``_edit_corpus_operators`` for the ``EditOp`` fields.
+abicheck's answer; see ``abiforge.operators`` for the ``EditOp`` fields.
 The operators edit roles of the ``c_elf`` (``elf.*``) and ``cxx_more``
 (``x.*``) seeds.
 """
@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests._edit_corpus_config import Config
-from tests._edit_corpus_expect import Rule
-from tests._edit_corpus_opkit import _REMOVED, Edit, EditOp, _set
+from abiforge.model.config import Config
+from abiforge.model.expect import Rule
+from abiforge.model.opkit import _REMOVED, Edit, EditOp, _set
 
 __all__ = ["SYMBOL_OPERATORS"]
 

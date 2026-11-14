@@ -1,7 +1,7 @@
-"""Build old/new libraries from a seed, an operator and a ``Config``; run abicheck.
+"""Build old/new libraries from a seed, an operator and a ``Config``; ask the checker.
 
-Only the public entry points are used: ``abicheck.dumper.dump`` for the
-snapshots and ``abicheck.checker.compare`` for the verdict. The evidence axis
+The checker under test is reached only through its adapter
+(``abiforge.checkers.abicheck``: ``snapshot`` and ``answer``). The evidence axis
 decides what the dump is given: ``binary`` builds without ``-g`` and passes no
 header, ``dwarf`` builds with ``-g`` and passes no header, ``headers`` adds the
 public header (dumped by ``config.header_backend``: castxml, clang or the
@@ -13,25 +13,23 @@ nothing.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from abicheck.checker import compare
-from abicheck.dumper import dump
-from tests._edit_corpus_config import (
+from abiforge.checkers import abicheck as checker
+from abiforge.model.config import (
     Config,
     Flags,
     Standard,
     Toolchain,
     default_config,
 )
-from tests._edit_corpus_operators import EditOp
-from tests._edit_corpus_seeds import BuildArgs, RoleText, Seed
-from tests._edit_corpus_toolchains import std_flag
+from abiforge.model.seeds import BuildArgs, RoleText, Seed
+from abiforge.operators import EditOp
+from abiforge.run.toolchains import std_flag
 
 # compiler label -> (C driver, C++ driver): the base PR's two fixed lanes.
 COMPILERS: dict[str, tuple[str, str]] = {
@@ -92,7 +90,7 @@ class Outcome:
 
 def label_toolchain(label: str) -> Toolchain:
     """The plain-``PATH`` driver pair of a base-PR compiler label as a Toolchain."""
-    from tests._edit_corpus_toolchains import _identify
+    from abiforge.run.toolchains import _identify
 
     cc, cxx = COMPILERS[label]
     ident = _identify(cc) if shutil.which(cc) else None
@@ -117,7 +115,7 @@ def dump_std_spelling(config: Config) -> str:
     castxml emulates the system ``cc``/``c++`` (gcc on Linux), not the
     producer, so ``c23`` from clang must be spelled ``c2x`` for gcc 13.
     """
-    from tests._edit_corpus_toolchains import std_flag_for_driver
+    from abiforge.run.toolchains import std_flag_for_driver
 
     driver = "c++" if config.lang == "c++" else "cc"
     return (
@@ -219,67 +217,14 @@ def build(
     gcc_options = " ".join(
         [f"-std={std}", *fl.layout_flags(config.producer, seed.lang), *defines]
     )
-    backend = config.header_backend
-    if os.environ.get("ABICHECK_EDIT_CORPUS_PUBLIC_DUMP"):
-        # The public dump workflow end to end (``run_dump``), record-layout
-        # enrichment included.
-        from abicheck.compile_context import CompileContext
-        from abicheck.service import run_dump
-
-        snap = run_dump(
-            so,
-            "elf",
-            headers,
-            version=out_dir.name,
-            lang="c++" if is_cxx else "c",
-            lang_explicit=True,
-            frontend=backend,
-            compile=CompileContext(
-                gcc_options=gcc_options if headers else None, frontend=backend
-            ),
-        )
-    else:
-        snap = dump(
-            so,
-            headers,
-            version=out_dir.name,
-            compiler="c++" if is_cxx else "cc",
-            lang="c++" if is_cxx else "c",
-            header_backend=backend,
-            gcc_options=gcc_options if headers else None,
-            # ``abicheck dump -H`` tags each header it is given public
-            # (ADR-015 provenance); the bare ``dump()`` only does when told,
-            # and without it the cross-source checks (public-not-exported,
-            # exported-not-public) never run.
-            public_headers=headers or None,
-        )
-        if headers and backend == "clang":
-            # The public dump workflow (``abicheck dump``/``compare``) enriches
-            # a clang-backend snapshot with record layout after ``dump()``; the
-            # bare ``dumper.dump()`` does not (known-gaps "`dumper.dump()` never
-            # runs the clang record-layout pass"). Mirror the workflow, so the
-            # corpus judges what users get.
-            from abicheck.compile_context import CompileContext
-            from abicheck.extract.headers.clang.layout_tool import (
-                attach_clang_layout,
-            )
-
-            snap = attach_clang_layout(
-                snap,
-                headers,
-                [],
-                lang="c++" if is_cxx else "c",
-                compile=CompileContext(gcc_options=gcc_options),
-            )
-    if headers:
-        # ``abicheck dump -H`` takes the headers it parses as the library's
-        # public-header set and classifies every declaration's origin against
-        # it (``finish_provenance``); the bare ``dumper.dump()`` leaves origin
-        # unknown, so a declared-but-unexported entry has no public-contract
-        # fact and its gained export reads as a plain addition. Mirror it.
-        from abicheck.workflows.snapshot_factory import finish_provenance
-
-        snap = finish_provenance(snap, headers, None)
+    snap = checker.snapshot(
+        so,
+        headers,
+        version=out_dir.name,
+        is_cxx=is_cxx,
+        backend=config.header_backend,
+        gcc_options=gcc_options,
+    )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
 
@@ -343,18 +288,9 @@ REFUSED = "REFUSED"
 
 
 def abicheck_answer(old: Built, new: Built) -> tuple[str, frozenset[str]]:
-    """(verdict name, ChangeKind names); ``REFUSED`` plus the error type on refusal.
-
-    A refusal (``abicheck.errors.AbicheckError``, e.g. a profile mismatch) is
-    abicheck's answer, not a harness failure: it is neither clean nor a break.
-    """
-    from abicheck.errors import AbicheckError
-
-    try:
-        result = compare(old.snapshot, new.snapshot)
-    except AbicheckError as exc:
-        return REFUSED, frozenset({type(exc).__name__})
-    return result.verdict.name, frozenset(c.kind.name for c in result.changes)
+    """(verdict name, ChangeKind names) from the checker adapter; ``REFUSED``
+    plus the error type when the checker refuses to compare."""
+    return checker.answer(old.snapshot, new.snapshot)
 
 
 def run_operator(

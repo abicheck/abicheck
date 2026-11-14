@@ -3,7 +3,7 @@
 Each corpus cell writes its pairs as one JSON file (``write_cell``), so xdist
 workers never share a file; ``summarize`` folds a run's files into a Markdown
 table for the workflow summary and its tracking issue. Run as
-``python -m tests._edit_corpus_report RESULTS_DIR`` to print that table
+``python -m abiforge.run.report RESULTS_DIR`` to print that table
 (stdlib only: the workflow's report job runs it without installing abicheck).
 
 The summary counts what each pair *did*: ``binary-break``, ``source-break``,
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # stdlib-only at runtime: the report job installs nothing
-    from tests._edit_corpus_cells import CellResult
+    from abiforge.run.cells import CellResult
 
 
 def write_cell(out_dir: Path, cell_id: str, result: CellResult) -> Path:
@@ -118,7 +118,7 @@ def summarize(rows: list[dict[str, str]], limit: int = 40) -> str:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 1:
-        print("usage: python -m tests._edit_corpus_report RESULTS_DIR", file=sys.stderr)
+        print("usage: python -m abiforge.run.report RESULTS_DIR", file=sys.stderr)
         return 64
     sys.stdout.write(summarize(load(Path(argv[0]) / "pairs")))
     return 0

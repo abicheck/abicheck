@@ -1,4 +1,4 @@
-"""Edit operators for the record- and base-layout classes of ``_edit_corpus_edit_model``.
+"""Edit operators for the record- and base-layout classes of ``abiforge.model.edit_model``.
 
 One operator per model class that had none. Each edits one probe role of the
 ``cxx_more`` seed (``lay.*`` for record layout, ``layb.*`` for base
@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests._edit_corpus_expect import Rule
-from tests._edit_corpus_operators_platform import _X86_HOSTS, _x86_64
-from tests._edit_corpus_opkit import (
+from abiforge.model.expect import Rule
+from abiforge.model.opkit import (
     _ALIGN,
     _FIELD_TYPE,
     _OFFSET,
@@ -27,7 +26,8 @@ from tests._edit_corpus_opkit import (
     Roles,
     _set,
 )
-from tests._edit_corpus_seeds import XCXX_SEED
+from abiforge.model.seeds import XCXX_SEED
+from abiforge.operators.platform import _X86_HOSTS, _x86_64
 
 __all__ = ["LAYOUT_OPERATORS"]
 

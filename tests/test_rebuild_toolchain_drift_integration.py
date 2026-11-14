@@ -288,16 +288,16 @@ def test_i386_c_rebuild_reads_compatible_once_debug_info_is_read(tmp_path, evide
     canary loss is demoted; the address-derived alignment is demoted at every
     evidence level, since nothing declares an alignment the new placement
     fails. Binary only, the canary loss keeps its RISK (no unit records its
-    flags) -- the strict ``tests/_edit_corpus_known.py`` entry.
+    flags) -- the strict ``abiforge/known.py`` entry.
     """
     _driver("gcc")
     _require_m32()
-    from tests._edit_corpus_cells import CellContext, run_cell
-    from tests._edit_corpus_config import STANDARD_BY_NAME, Config, Flags
-    from tests._edit_corpus_known import known_mismatch
-    from tests._edit_corpus_operators import OP_BY_NAME
-    from tests._edit_corpus_seeds import SEED_BY_NAME
-    from tests._edit_corpus_toolchains import toolchain
+    from abiforge.known import known_mismatch
+    from abiforge.model.config import STANDARD_BY_NAME, Config, Flags
+    from abiforge.model.seeds import SEED_BY_NAME
+    from abiforge.operators import OP_BY_NAME
+    from abiforge.run.cells import CellContext, run_cell
+    from abiforge.run.toolchains import toolchain
 
     config = Config(
         std=STANDARD_BY_NAME["c17"],

@@ -1,9 +1,9 @@
 """The edit-operator type and the role-editing helpers every operator module shares.
 
-``EditOp`` is documented in ``_edit_corpus_operators``; the operator tables
-live there (core seeds), in ``_edit_corpus_operators_elf`` (``c_elf``), in
-``_edit_corpus_operators_cxx`` (``cxx_more``) and in
-``_edit_corpus_operators_platform`` (ELF, loader and toolchain facts on
+``EditOp`` is documented in ``abiforge.operators``; the operator tables
+live there (core seeds), in ``abiforge.operators.elf`` (``c_elf``), in
+``abiforge.operators.cxx`` (``cxx_more``) and in
+``abiforge.operators.platform`` (ELF, loader and toolchain facts on
 ``c_elf``, ``cxx_more`` and the gated ``c_elf_alt``/``cxx_alt``).
 """
 
@@ -12,9 +12,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
-from tests._edit_corpus_config import Config, Flags, has_feature
-from tests._edit_corpus_expect import Expectation, Rule, evidence_floor
-from tests._edit_corpus_seeds import RoleText, Seed
+from abiforge.model.config import Config, Flags, has_feature
+from abiforge.model.expect import Expectation, Rule, evidence_floor
+from abiforge.model.seeds import RoleText, Seed
 
 Roles = Mapping[str, RoleText]
 Edit = Callable[[Roles], dict[str, RoleText]]
@@ -39,7 +39,7 @@ class EditOp:
     # Weakest evidence that can show the edit: "binary" (exported symbols),
     # "dwarf" (types of exported entities), "headers" (declarations only).
     min_evidence: str | Callable[[Config], str] = "dwarf"
-    # Language features (``_edit_corpus_config.FEATURES``) the edit needs.
+    # Language features (``abiforge.model.config.FEATURES``) the edit needs.
     features: tuple[str, ...] = ()
     # Config-dependent ground truth, first match wins.
     rules: tuple[Rule, ...] = ()
@@ -48,7 +48,7 @@ class EditOp:
     # A rebuild edit: the new side is built with ``rebuild(flags)``.
     rebuild: Callable[[Flags], Flags] | None = None
     # Needs the producer's C++ library to be libstdc++; probed at run time by
-    # ``_edit_corpus_toolchains.capability_gap``, never at collection.
+    # ``abiforge.run.toolchains.capability_gap``, never at collection.
     needs_libstdcxx: bool = False
     # Compile/link flags the edit adds that a toolchain or linker may refuse
     # (a non-x86 target, an older binutils); probed at run time the same way,
@@ -65,7 +65,7 @@ class EditOp:
     # so the cell list (and the PR floor check built from it) is host-free.
     host_arch: frozenset[str] = frozenset()
     # The language-space constructs the edit exercises, when its roles do not
-    # say it (``_edit_corpus_space.op_constructs``); empty = read the roles.
+    # say it (``abiforge.model.space.op_constructs``); empty = read the roles.
     constructs: tuple[str, ...] = ()
 
     def applies_to(self, seed: Seed) -> bool:

@@ -9,7 +9,7 @@ is empty is simply absent from the rendered file.
 Both seeds use the same ``core`` roles so that an operator written against them
 applies to C and C++ alike; the C++ seed adds class, template and enum-class
 roles that only C++ operators require. Nothing here is a ground truth: the
-expected ChangeKinds live with the operators in ``_edit_corpus_operators.py``.
+expected ChangeKinds live with the operators in ``abiforge.operators``.
 """
 
 from __future__ import annotations
@@ -826,8 +826,8 @@ _XCXX_ROLES: dict[str, RoleText] = {
     "x.extra": ("", ""),
 }
 
-# Record- and base-layout probes, one per ``_edit_corpus_edit_model`` class the
-# layout operators (``_edit_corpus_operators_layout``) generate. Members are
+# Record- and base-layout probes, one per ``abiforge.model.edit_model`` class the
+# layout operators (``abiforge.operators.layout``) generate. Members are
 # char/short/int/unsigned only, so the layout is the same at -m32 and LP64.
 _LAYOUT_ROLES: dict[str, RoleText] = {
     "lay.ihead": (
