@@ -25,6 +25,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -36,28 +37,37 @@ _HEADER = "#pragma once\nlong next_tick(long t);\n"
 _SOURCE = '#include "tick.h"\nlong next_tick(long t) { return t + 1; }\n'
 
 
-def _clang_m32_available() -> bool:
+def _i386_shared_link_available() -> bool:
+    """The named optional capability: can clang++ link an i386 shared library here?
+
+    Syntax acceptance (``-fsyntax-only``) is not enough: Linux clang accepts
+    ``-m32`` without the i386 runtime, and only the link fails. This check is the
+    one skip condition; once it passes, the test's own compile and link must succeed.
+    """
     clang = shutil.which("clang++")
     if clang is None:
         return False
-    probe = subprocess.run(
-        [clang, "-m32", "-x", "c++", "-", "-fsyntax-only"],
-        input="int main() { return 0; }\n",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return probe.returncode == 0
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "probe.cpp"
+        src.write_text('extern "C" int probe(void) { return 0; }\n')
+        out = Path(tmp) / "libprobe.so"
+        built = subprocess.run(
+            [clang, "-m32", "-shared", "-fPIC", str(src), "-o", str(out)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return built.returncode == 0
 
 
-# ELF/Linux only: an i386 *shared library* needs the ELF i386 link. On macOS
-# ``-m32`` selects an armv4t Mach-O target that cannot link (as CI showed), so
-# this is the same platform scope as ``test_clang_header_backend_integration``.
 @pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="ELF i386 link is Linux-scoped"
 )
-@pytest.mark.skipif(not _clang_m32_available(), reason="clang++ with -m32 libc")
+@pytest.mark.skipif(
+    not _i386_shared_link_available(),
+    reason="optional capability: clang++ cannot link an i386 shared library here",
+)
 def test_the_clang_parse_probes_the_i386_long_it_parses_with(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

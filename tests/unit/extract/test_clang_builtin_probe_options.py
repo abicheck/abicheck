@@ -112,3 +112,28 @@ def test_no_language_standard_reaches_the_probe_for_any_standard(standard: str) 
     options = probe_option_tokens(f"-m32 {standard}", ())
     assert standard not in options
     assert "-m32" in options
+
+
+@pytest.mark.parametrize(
+    ("gcc_options", "expected"),
+    [
+        # Separate-argument forced include: both the flag and its file are dropped.
+        ("-include /tmp/prelude.hpp -m32", ("-m32",)),
+        ("-imacros /tmp/macros.h -m32", ("-m32",)),
+        # Joined forms.
+        ("-include/tmp/prelude.hpp -m32", ("-m32",)),
+        ("--include=/tmp/prelude.hpp -m32", ("-m32",)),
+        ("--imacros=/tmp/macros.h -m32", ("-m32",)),
+        # Target and ABI flags beside a forced include survive, in order.
+        (
+            "-include /tmp/p.hpp -m32 -D_TIME_BITS=64 -std=c++17",
+            ("-m32", "-D_TIME_BITS=64"),
+        ),
+    ],
+)
+def test_forced_includes_never_reach_the_c_probe(
+    gcc_options: str, expected: tuple[str, ...]
+) -> None:
+    # A C++-only prelude makes the C probe fail to compile, discarding every
+    # builtin fact; the probe needs the target and ABI flags, never the header.
+    assert probe_option_tokens(gcc_options, ()) == expected

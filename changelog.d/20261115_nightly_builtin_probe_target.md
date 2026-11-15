@@ -10,3 +10,6 @@
   `__SIZEOF_INT128__`.
   The probe also drops `-std=` / `--std=` from its options, since it compiles C
   and a C++ standard would discard every builtin fact of a C++ parse.
+  Forced includes (`-include`, `-imacros`, and their joined and `--include=` forms)
+  are dropped from the probe's options as well: a C++-only forced header would
+  otherwise fail the C probe and discard every builtin fact.

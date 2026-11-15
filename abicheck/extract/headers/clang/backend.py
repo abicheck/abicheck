@@ -129,6 +129,13 @@ def parse_option_tokens(
 #: a C++ ``-std=`` in C mode, which would discard every builtin fact.
 _LANGUAGE_STANDARD_PREFIXES = ("-std=", "--std=")
 
+#: Forced-include options. A header forced into the parse (``-include x.hpp``,
+#: ``-include x``, ``--include=x``) can be C++-only, and the C probe would fail to
+#: compile it, discarding every builtin fact. The probe needs target and ABI flags
+#: only, so these are dropped in their separate-argument and joined forms.
+_FORCED_INCLUDE_SEPARATE = ("-include", "-imacros")
+_FORCED_INCLUDE_JOINED = ("-include", "-imacros", "--include=", "--imacros=")
+
 
 def probe_option_tokens(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
@@ -139,11 +146,21 @@ def probe_option_tokens(
     a language, not an ABI, and the probe is C, so a ``-std=c++17`` the parse
     was given must not reach it. ``-m32`` and the other target options stay.
     """
-    return tuple(
-        token
-        for token in parse_option_tokens(gcc_options, gcc_option_tokens)
-        if not token.startswith(_LANGUAGE_STANDARD_PREFIXES)
-    )
+    kept: list[str] = []
+    drop_next = False
+    for token in parse_option_tokens(gcc_options, gcc_option_tokens):
+        if drop_next:
+            drop_next = False
+            continue
+        if token in _FORCED_INCLUDE_SEPARATE:
+            drop_next = True
+            continue
+        if token.startswith(_FORCED_INCLUDE_JOINED):
+            continue
+        if token.startswith(_LANGUAGE_STANDARD_PREFIXES):
+            continue
+        kept.append(token)
+    return tuple(kept)
 
 
 def resolve_clang_langmode(
