@@ -3736,25 +3736,45 @@ def check_known_baseline_vs_base(
 def known_when_widening(
     current: Mapping[str, Mapping[str, str]], recorded: Mapping[str, Mapping[str, str]]
 ) -> list[str]:
-    """Entries whose ``when`` now covers a probe configuration its record does not.
+    """Every difference between a ``when`` record and the one ``known.py`` computes.
 
     *current* and *recorded* map ``"<key>#<n>"`` to ``{standard|toolchain: hex
-    mask}`` (``abiforge.known_coverage.known_record``). An entry missing from
-    *recorded* has an empty record, so any covered configuration is widening.
-    A narrowed or unchanged entry passes.
+    mask}`` (``abiforge.known_coverage.known_record``). The record is exact: an
+    entry whose covered set grew needs review (widening); one whose set shrank
+    needs its record shrunk in the same change (narrowing); an entry the record
+    lacks, or the record keeps after its entry is gone, is stale. An entry with
+    no difference passes.
+
+    A universe change (a new standard or toolchain the ``when`` matches, or a
+    removed one) shows up here as widening or narrowing, and is regenerated the
+    same way, after review.
     """
-    from abiforge.known_coverage import widened_pairs
+    from abiforge.known_coverage import narrowed_pairs, widened_pairs
 
     problems: list[str] = []
-    for ident in sorted(current):
-        extra = widened_pairs(current[ident], recorded.get(ident, {}))
-        if extra:
-            detail = ", ".join(f"{pair} +{n}" for pair, n in sorted(extra.items()))
+    for ident in sorted(set(current) | set(recorded)):
+        if ident not in current:
             problems.append(
-                f"abiforge/known.py entry {ident} now covers configurations its "
-                f"recorded `when` does not ({detail}); a widened `when` needs its "
-                "scope reviewed, then `scripts/check_ai_readiness.py "
-                "--write-known-when` to record it"
+                f"abiforge/known_when_baseline.json records {ident}, which abiforge/known.py "
+                "no longer has: regenerate the record with --write-known-when in this PR"
+            )
+            continue
+        now, then = current[ident], recorded.get(ident, {})
+        grown = widened_pairs(now, then)
+        if grown:
+            detail = ", ".join(f"{pair} +{n}" for pair, n in sorted(grown.items()))
+            problems.append(
+                f"widening, needs review: abiforge/known.py entry {ident} now covers "
+                f"configurations its recorded `when` does not ({detail}). If the probe grid "
+                "or STANDARDS changed instead, review that, then regenerate with "
+                "--write-known-when"
+            )
+        shrunk = narrowed_pairs(now, then)
+        if shrunk:
+            detail = ", ".join(f"{pair} -{n}" for pair, n in sorted(shrunk.items()))
+            problems.append(
+                f"narrowed entry {ident} ({detail}): regenerate the record with "
+                "--write-known-when in this PR, so the ceiling shrinks in the same diff"
             )
     return problems
 

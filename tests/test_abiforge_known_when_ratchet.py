@@ -92,15 +92,31 @@ def test_widened_when_fails(gate):
     current = _record(ALL_C20)
     problems = gate.known_when_widening(current, recorded)
     assert len(problems) == 1
+    assert problems[0].startswith("widening, needs review")
     assert "e#0" in problems[0]
     # The clang pairs are new: four configurations each (2 flags x 2 evidence).
     assert "c++20|clang19 +4" in problems[0]
 
 
-def test_narrowed_when_passes(gate):
+def test_narrowed_entry_with_stale_record_fails_with_regenerate_message(gate):
     recorded = _record(GCC_ONLY_C20)
     current = _record(GCC_C20_O2)
-    assert gate.known_when_widening(current, recorded) == []
+    (problem,) = gate.known_when_widening(current, recorded)
+    assert problem.startswith("narrowed entry e#0")
+    assert "c++20|gcc14 -2" in problem
+    assert "regenerate the record with --write-known-when in this PR" in problem
+
+
+def test_narrowed_entry_with_regenerated_record_passes(gate):
+    current = _record(GCC_C20_O2)
+    assert gate.known_when_widening(current, current) == []
+
+
+def test_record_entry_removed_from_known_fails(gate):
+    recorded = _record(GCC_ONLY_C20)
+    (problem,) = gate.known_when_widening({}, recorded)
+    assert "e#0" in problem
+    assert "regenerate the record with --write-known-when" in problem
 
 
 def test_widening_is_counted_per_configuration_not_per_pair(gate):
@@ -110,6 +126,7 @@ def test_widening_is_counted_per_configuration_not_per_pair(gate):
     current = _record(GCC_ONLY_C20)["e#0"]
     assert widened_pairs(current, recorded) == {"c++20|gcc14": 2}
     (problem,) = gate.known_when_widening(_record(GCC_ONLY_C20), _record(GCC_C20_O2))
+    assert problem.startswith("widening, needs review")
     assert "c++20|gcc14 +2" in problem
 
 
@@ -153,5 +170,6 @@ def test_widening_the_real_std_string_entry_is_caught(gate):
     )
     problems = gate.known_when_widening(current, load_baseline(BASELINE_PATH))
     assert len(problems) == 1
+    assert problems[0].startswith("widening, needs review")
     assert "std_string_abi_flipped" in problems[0]
     assert "clang" in problems[0]
