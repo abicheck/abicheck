@@ -108,3 +108,33 @@ def _use_time_t_in_signature(snap: AbiSnapshot) -> None:
             visibility=Visibility.PUBLIC,
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("old_map", "new_map"),
+    [
+        # Same width, different spelling on each side: no width flip.
+        (
+            {"time_t": "__time64_t", "__time64_t": "__int64_t"},
+            {"time_t": "long long"},
+        ),
+        # The new side's underlying type is not a fundamental this detector knows.
+        (
+            {"time_t": "__time_t", "__time_t": "long"},
+            {"time_t": "struct opaque_time"},
+        ),
+        # A typedef present on only one side is not a flip of that family member.
+        ({"time_t": "__time_t", "__time_t": "long"}, {}),
+    ],
+    ids=["same-width-respelled", "unresolvable-new-underlying", "absent-on-new-side"],
+)
+def test_no_width_change_or_unknown_width_is_no_time64_finding(
+    old_map: dict[str, str], new_map: dict[str, str]
+) -> None:
+    # The candidate is skipped when either side has no width or the widths
+    # agree; a respelling alone must not raise TIME64_ABI_CHANGED.
+    old = _snap(old_map)
+    new = _snap(new_map)
+    _use_time_t_in_signature(old)
+    _use_time_t_in_signature(new)
+    assert _diff_time64_abi(old, new) == []
