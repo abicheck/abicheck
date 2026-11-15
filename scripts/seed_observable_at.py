@@ -538,6 +538,7 @@ def _spell(alts: tuple[tuple[str, ...], ...]) -> str:
 def markdown_table() -> str:
     """Kind | taxonomy | verdict | decision | rationale | evidence."""
     from abicheck.model.change_catalog.assembled import REGISTRY
+    from abicheck.model.change_catalog.observability import UNCLASSIFIED
 
     owner = taxonomy_owner()
     ops = operator_evidence()
@@ -552,6 +553,10 @@ def markdown_table() -> str:
         dec = DECISIONS.get(kind)
         if dec is None:
             decision, rationale = "UNCLASSIFIED", ""
+        elif entry.observable_at is UNCLASSIFIED:
+            # Decided, but the module would pass the line cap: not applied.
+            alts, rationale, _platforms, _const = FORMS[dec.code]
+            decision, rationale = f"held (cap): {_spell(alts)}", dec.note or rationale
         else:
             alts, rationale, _platforms, _const = FORMS[dec.code]
             decision = _spell(alts)
