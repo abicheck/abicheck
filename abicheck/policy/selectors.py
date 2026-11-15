@@ -84,10 +84,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
-from ..model.change_catalog.kind_variants import kind_match_set
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.elf_facts import SymbolBinding
 from ..model.execution_cache import memoized
+from .kind_relations import kind_match_set
 from .selectors_namespace_glob import (
     _compile_glob,
     _compile_namespace_glob,

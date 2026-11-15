@@ -52,7 +52,6 @@ from abiforge.model import edit_model as _model
 from abiforge.model.config import (
     EVIDENCE,
     FAMILIES,
-    FEATURES,
     HEADER_BACKENDS,
     STANDARDS,
     Config,
@@ -60,6 +59,8 @@ from abiforge.model.config import (
     Flags,
     ResolvedConsumer,
     Standard,
+    StdRange,
+    in_standards,
 )
 
 if TYPE_CHECKING:
@@ -100,6 +101,71 @@ class Construct:
 _BOTH = frozenset(LANGS)
 _CXX = frozenset({"c++"})
 _C = frozenset({"c"})
+
+# Where each language feature (``config.FEATURES``) is defined, with the source
+# of each end: the first standard that has it and, when a standard removed it,
+# the last one that still does. The ``first`` years must equal ``FEATURES``
+# (``tests/test_abiforge_standards.py`` checks that), which the feature check
+# in ``EditOp.requires`` and ``has_feature`` read.
+FEATURE_STANDARDS: dict[str, tuple[StdRange, ...]] = {
+    "inline": (
+        StdRange("c", "c99", "ISO/IEC 9899:1999 6.7.4 (function specifiers)"),
+        StdRange(
+            "c++",
+            "c++11",
+            "ISO/IEC 14882:1998 [dcl.fct.spec] (inline functions, C++98)",
+        ),
+    ),
+    "enum_class": (
+        StdRange("c++", "c++11", "ISO/IEC 14882:2011 [dcl.enum] (scoped enumerations)"),
+    ),
+    "enum_underlying": (
+        StdRange(
+            "c",
+            "c23",
+            "ISO/IEC 9899:2024 6.7.2.2 (fixed underlying type of an enumeration)",
+        ),
+        StdRange("c++", "c++11", "ISO/IEC 14882:2011 [dcl.enum] (underlying type)"),
+    ),
+    "deduced_return": (
+        StdRange("c++", "c++14", "N3638 (return type deduction), [dcl.spec.auto]"),
+    ),
+    "noexcept_in_type": (
+        StdRange(
+            "c++", "c++17", "P0012R1 (noexcept in the type system), [except.spec]"
+        ),
+    ),
+    "concepts": (StdRange("c++", "c++20", "P0734R0 (concepts), [temp.concept]"),),
+    "no_unique_address": (
+        StdRange(
+            "c++", "c++20", "P0840R2 ([[no_unique_address]]), [dcl.attr.nouniqueaddr]"
+        ),
+    ),
+    "std_string": (
+        StdRange(
+            "c++",
+            "c++11",
+            "N2668 (copy-on-write made non-conforming, C++11 string layout), N3337 [string.require]",
+        ),
+    ),
+    "restrict": (StdRange("c", "c99", "ISO/IEC 9899:1999 6.7.3.1 (restrict)"),),
+    "flexible_array": (
+        StdRange("c", "c99", "ISO/IEC 9899:1999 6.7.2.1 (flexible array member)"),
+    ),
+    "atomic": (
+        StdRange("c", "c11", "ISO/IEC 9899:2011 6.7.2.4 (atomic type specifiers)"),
+    ),
+    "char8_t": (StdRange("c++", "c++20", "P0482R6 (char8_t), [lex.ccon]"),),
+    "bit_int": (
+        StdRange("c", "c23", "ISO/IEC 9899:2024 6.2.5 (bit-precise integer types)"),
+    ),
+}
+
+
+def feature_standards(feature: str) -> tuple[StdRange, ...]:
+    """The standard ranges a language feature is defined in (see ``FEATURE_STANDARDS``)."""
+    return FEATURE_STANDARDS[feature]
+
 
 CONSTRUCTS: tuple[Construct, ...] = (
     Construct("struct", _BOTH),
@@ -810,10 +876,10 @@ def infeasible(p: Point) -> str | None:
     con = CONSTRUCT_BY_NAME[p.construct]
     if p.lang not in con.langs:
         return f"{p.construct} is not a {p.lang} construct"
-    if con.feature is not None:
-        first = FEATURES[con.feature].get(p.lang)
-        if first is None or std.year < first:
-            return f"{p.construct} needs {con.feature}, which {p.std} lacks"
+    if con.feature is not None and not in_standards(
+        feature_standards(con.feature), std
+    ):
+        return f"{p.construct} needs {con.feature}, which {p.std} lacks"
     feat = _FEATURE_BY_NAME.get(p.config)
     if feat is not None and (why := feat.gate(p.lang, p.build)):
         return why

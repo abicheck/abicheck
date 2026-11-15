@@ -23,7 +23,7 @@ report a removal the user already disposed of (exit 0, but a non-empty
 report and a verdict that reads as "something changed").
 
 The membership relation is owned by
-:data:`~abicheck.model.change_catalog.kind_variants.ROLLUP_MEMBER_KINDS`. This
+:data:`~abicheck.policy.kind_relations.ROLLUP_MEMBER_KINDS`. This
 module applies it, per symbol:
 
 * the roll-up is **hidden** only when it covers at least one removal, every
@@ -43,8 +43,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ...model.change_catalog.kind_variants import rollup_member_kinds
 from ..disposition_ledger import Disposition
+from ..kind_relations import rollup_member_kinds
 from .suppression import dispose_by_suppression
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

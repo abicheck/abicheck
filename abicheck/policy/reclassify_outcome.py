@@ -29,9 +29,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import cast
 
-from ..model.change_catalog.kind_variants import expand_variant_overrides
 from ..model.change_catalog.kinds import HasKind
 from .classification import Verdict, effective_category
+from .kind_relations import expand_variant_overrides
 from .reclassify import (
     _frozen_floor,
     _matched_kind,

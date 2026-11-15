@@ -33,16 +33,16 @@ from typing import TYPE_CHECKING
 
 from ..compare.finding_dedup import dedup_identity_key
 from ..model.change import Change
-from ..model.change_catalog.kind_variants import (
-    ROLLUP_MEMBER_KINDS,
-    rollup_member_kinds,
-)
 from .acknowledgment_breaks import (
     ACCEPTABLE_BREAK_VERDICTS,
     ACCEPTED_BREAK_APPLICATION_POINT,
 )
 from .dedup_survivors import dedup_survivor
 from .disposition_ledger import Disposition, DispositionLedger
+from .kind_relations import (
+    ROLLUP_MEMBER_KINDS,
+    rollup_member_kinds,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date

@@ -181,7 +181,7 @@ rule names it. Instead it follows the removals it summarises:
   or `ignore` still leaves a COMPATIBLE roll-up next to it.
 
 The members are the removal kinds in `ROLLUP_MEMBER_KINDS`
-(`abicheck/model/change_catalog/kind_variants.py`): `func_removed`,
+(`abicheck/policy/kind_relations.py`): `func_removed`,
 `var_removed` and `type_removed`, with their `*_elf_only` variants where one
 exists.
 
