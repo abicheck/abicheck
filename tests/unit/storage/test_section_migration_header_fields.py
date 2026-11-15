@@ -15,22 +15,26 @@ from __future__ import annotations
 from abicheck.storage.dto import (
     BINARY_SECTION_KIND,
     SECTION_SCHEMA_VERSIONS,
+    SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
     migrate_section_dto,
 )
 
 
-def test_a_v1_binary_migration_keeps_must_understand_and_extensions() -> None:
+def test_a_v1_migration_keeps_must_understand_and_extensions() -> None:
+    # semantic_ir has a real v1 -> v2 migration; binary is still at version 1,
+    # so it has none to exercise. The header-carrier property is the same.
     stored = SectionDTO(
-        section_kind=BINARY_SECTION_KIND,
+        section_kind=SEMANTIC_IR_SECTION_KIND,
         section_schema_version=1,
-        payload={"exports": []},
+        payload={"semantic_ir": {}},
         must_understand=("vendor.required",),
         extensions={"vendor.fact": 7},
     )
     migrated = migrate_section_dto(stored)
     assert (
-        migrated.section_schema_version == SECTION_SCHEMA_VERSIONS[BINARY_SECTION_KIND]
+        migrated.section_schema_version
+        == SECTION_SCHEMA_VERSIONS[SEMANTIC_IR_SECTION_KIND]
     )
     assert migrated.must_understand == ("vendor.required",)
     assert dict(migrated.extensions) == {"vendor.fact": 7}

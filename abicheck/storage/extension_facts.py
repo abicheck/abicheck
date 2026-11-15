@@ -49,6 +49,7 @@ from .extension_fact_catalog import (
     EXPORT_READ,
     EXTENSION_FACTS,
     FINAL_MEMBER_FUNCTIONS,
+    MACHO_OBJECT_SIZES,
     NOEXCEPT_UNOBSERVED,
     STD_REEXPORTS,
     TYPEDEF_ORIGINS,
@@ -191,6 +192,58 @@ def sync_export_read_fact(snap: Any) -> None:
     write_extension_fact(snap, EXPORT_READ, value)
 
 
+def sync_macho_sizes_fact(snap: Any) -> None:
+    """Record the Mach-O object-size derivation as MACHO_OBJECT_SIZES.
+
+    Written when the Mach-O block recorded its derivation flag or any size, so
+    each survives the round trip on its own. Each row names an
+    export by its position in the block's export list.
+    """
+    macho = _platform_blocks(snap).get("macho")
+    if macho is None:
+        return
+    derived = getattr(macho, "sizes_derived", None)
+    rows = [
+        [index, exp.size, exp.size_bound_by]
+        for index, exp in enumerate(macho.exports)
+        if exp.size is not None or exp.size_bound_by is not None
+    ]
+    if derived is None and not rows:
+        return
+    if _blocked_reason(snap, MACHO_OBJECT_SIZES.section) is not None:
+        return
+    write_extension_fact(snap, MACHO_OBJECT_SIZES, {"derived": derived, "sizes": rows})
+
+
+def apply_macho_sizes_fact(snap: Any) -> None:
+    """The inverse on load: a present fact sets each listed export's size and
+    closer and marks the derivation as run. Absent (an older writer, or the
+    derivation never ran) the sizes stay None and ``sizes_derived`` stays
+    unset, so the layout gate declines the Mach-O side. A present value that
+    does not decode is refused rather than read as "not derived"."""
+    macho = _platform_blocks(snap).get("macho")
+    if macho is None:
+        return
+    fact = read_extension_fact(snap, MACHO_OBJECT_SIZES)
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if fact.status is not FactStatus.PRESENT or fact.value is None:
+        if _blocked_reason(snap, MACHO_OBJECT_SIZES.section) is not None:
+            return
+        raise SnapshotError(
+            "snapshot's macho_object_sizes extension fact is unreadable: "
+            + "; ".join(str(d) for d in fact.diagnostics)
+        )
+    for index, size, closer in fact.value["sizes"]:
+        if index >= len(macho.exports):
+            raise SnapshotError(
+                f"macho_object_sizes names export {index} of {len(macho.exports)}"
+            )
+        macho.exports[index].size = size
+        macho.exports[index].size_bound_by = closer
+    macho.sizes_derived = fact.value["derived"]
+
+
 def apply_export_read_fact(snap: Any) -> None:
     """Set each loaded platform block's ``export_read`` from the stored fact:
     a listed platform reads its state, an unlisted one ``complete``. With no
@@ -216,6 +269,7 @@ def sync_model_extension_facts(snap: Any) -> None:
     ADR-079's ``export_read`` and ``cxx_concept_header_scan``. Each write
     path and the evidence digest call this first; it is idempotent."""
     sync_export_read_fact(snap)
+    sync_macho_sizes_fact(snap)
     _sync_binary_sha256(snap)
     # Before the early return below: its section is not this fact's, and a
     # blocked one must not leave a stale or missing typedef_origins fact.
@@ -460,6 +514,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     no gap -- what every older snapshot reads as. A stored value that does
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
+    apply_macho_sizes_fact(snap)
     _apply_binary_sha256(snap)
     _apply_concept_constraints(snap)
     _apply_stack_protector_census(snap)

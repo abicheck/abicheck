@@ -16,8 +16,8 @@
         "source_path",
         "source_size"
       ],
-      "section_schema_version": 2,
-      "sha256": "4bdf9b31c90225a332f92a9fa8acb1e609aed2d1c30d2800fee315bc5ea62a9f"
+      "section_schema_version": 1,
+      "sha256": "42f6702a1baea99ac08218e51e59815fc352928df80ff6dc80fc26201d6129eb"
     },
     "build": {
       "fields": [

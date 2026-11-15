@@ -476,3 +476,39 @@ def test_removed_local_boundary_with_unchanged_contents_is_no_slot_change(
     new = _local_boundary_snapshot(tmp_path / "new.dylib", False, encoding)
     kinds = [c.kind.name for c in _diff_elf_layout(old, new)]
     assert "VTABLE_SLOT_COUNT_CHANGED" not in kinds
+
+
+def test_a_reader_without_the_size_fact_declines_the_layout_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-062 D19: this build writes the sizes as an optional extension fact.
+
+    A reader that does not know the fact finds no sizes in the document. The
+    layout gate must decline the Mach-O side as not derived, never report a
+    clean layout check. The positive control is the same document read by a
+    reader that does know the fact.
+    """
+    import dataclasses
+
+    from abicheck.storage import extension_facts as ef
+    from abicheck.storage.extension_fact_catalog import MACHO_OBJECT_SIZES
+
+    out = tmp_path / "d19.json"
+    save_snapshot(_macho_snap(_vtable_macho(tmp_path, "d19.dylib", 0x30)), out)
+
+    known = load_snapshot(out)
+    assert known.macho is not None and known.macho.sizes_derived is True
+
+    unknown = dataclasses.replace(
+        MACHO_OBJECT_SIZES, name="abicheck.macho_object_sizes.unknown_here"
+    )
+    monkeypatch.setattr(ef, "MACHO_OBJECT_SIZES", unknown)
+    blind = load_snapshot(out)
+    assert blind.macho is not None
+    assert blind.macho.sizes_derived is None
+    assert all(e.size is None for e in blind.macho.exports)
+
+    new = _macho_snap(_vtable_macho(tmp_path, "d19-new.dylib", 0x40))
+    ok, reason = _layout_support(blind, new)
+    assert not ok
+    assert "not derived" in reason
