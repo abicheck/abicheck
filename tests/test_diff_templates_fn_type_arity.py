@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.diff_templates import _count_top_level_template_args
+from abicheck.compare.template_pattern_arity import (
+    count_top_level_template_args as _count_top_level_template_args,
+)
 
 
 @pytest.mark.parametrize(

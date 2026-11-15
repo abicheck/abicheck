@@ -123,8 +123,12 @@ at most headers. Every kind is in exactly one bucket
 (`test_every_kind_is_in_exactly_one_scope_bucket`), and every report lists the
 buckets with their counts and reasons.
 
-- *Declared*: an operator names the kind in an expectation, under some rule.
-  Computed from the operators alone.
+- *Declared*: an operator *requires* the kind (`expected`, or an `any_of`
+  group of one) under some rule. A member of a larger `any_of` group accepts
+  a cell but is not declared on its own: one alternative may be a kind no
+  cell can produce (abicheck always reports its sibling, as with the DWARF
+  layout diff's `STRUCT_*` twins of the `TYPE_*` kinds). Computed from the
+  operators alone.
 - *Verified* (per tier): a cell expected the kind, abicheck produced it, and
   the cell reconciled to a passing class. A strict-xfail (known) cell, a
   skipped cell and an unobservable cell verify nothing. A kind abicheck
@@ -181,8 +185,41 @@ model also has classes for reorder, retype (same layout, grows, shrinks,
 alignment only), array bound changes, bit-fields, record-level edits
 (including a change of triviality for calls) and rename/cv. Base-class layout (`inheritance`) is split by base added
 (non-virtual or virtual), removed, reordered, made virtual or non-virtual,
-resized, or given a new access. Every other construct has the single class
-`any`. `OP_EDIT_CLASS` in `abiforge.model.space` maps each operator of a
+resized, or given a new access. A function (`function`) is split by the part
+of its declaration, definition or exporting symbol that changes: each
+parameter (added, removed, retyped, indirection, pointee cv, renamed,
+reordered, default argument), the return type, variadic-ness, calling
+convention, exception specification, attributes, language linkage, inline or
+out of line, body imports, overloads, the function set (added, removed,
+renamed, declared versus exported), and the symbol's binding, visibility,
+version and type. Virtual functions (`class_virtual`) are split by what the
+edit does to the Itanium vtable: a slot appended, inserted, removed or
+reordered; a virtual's signature, covariant return, `noexcept`, purity,
+`override` and `final`; a method made virtual or non-virtual; an override
+added or removed in a derived class; a destructor made virtual or not; the
+key function; the vptr appearing or going; a new polymorphic class; and the
+vtable/type_info symbol. The three enum constructs (`enum`,
+`enum_fixed_underlying`, `enum_class`) share one list (an enumerator
+appended, inserted, removed, revalued, swapped, renamed or aliased; the
+underlying type and its range; scoping; the enum added, removed or made
+opaque), minus what a rule excludes and `IMPOSSIBLE_ENUM_EDITS` states (no
+opaque declaration without a fixed underlying type; a fixed one cannot be
+outgrown). A variable is split by its type's size effect, cv, initializer,
+TLS, visibility, binding, alignment and version node, and by the object
+added, removed, renamed, declared versus exported, or made a C++17 inline
+variable; a typedef by retarget (size change, same size, pointee), removal,
+rename, addition or a respelling to the same type; a template by a
+parameter's default, a parameter added (defaulted or not), removed or
+retyped, an instantiation added or dropped, an explicit specialization added
+or removed, and a template argument type renamed. A class with no C
+spelling (an overload, a scoped enum, an inline variable, an
+alias-declaration) has no C points. Each class an older operator did not
+generate has a probe in `abiforge/model/probes.py` and an operator in
+`abiforge/operators/` (`vtable`, `enums`, `variables`, `aliases`). An
+operator whose role is a carrier for another construct
+(a variable or record added beside the seed's functions, a rebuild with
+other flags) is placed by `OP_CONSTRUCT` instead of by its role. Every other
+construct has the single class `any`. `OP_EDIT_CLASS` in `abiforge.model.space` maps each operator of a
 split construct to its class. It may only name model classes, and an
 operator it does not place fails `tests/test_edit_corpus_edit_axis.py`.
 Every model class is in the denominator, whether or not an operator generates
@@ -198,8 +235,9 @@ What these numbers do **not** mean:
   edit that should produce it; one cell under one configuration verified it.
 - A covered space point means a cell *ran* there, not that abicheck was right
   there (mismatches are the corpus test's own result) and not that every edit
-  of that construct ran. Record-layout and base-class edits are split by the
-  edit model's classes, but other constructs are not split, so their
+  of that construct ran. Ten constructs are split by the edit model's
+  classes, but the others (unions, header constants, TLS objects, link and
+  compile options, and the rest) are not split, so their
   individual edits are still not counted, and a class's points are covered by
   one operator, not by every layout that class can land in.
 - The space holds only the corpus's own axes. Architectures beyond `-m32`,

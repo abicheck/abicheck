@@ -535,11 +535,11 @@ def test_flag_and_macro_probes_read_the_driver(
         # i386 SysV aligns a member double to 4: struct rec {int; double;
         # char[8]} is 20 bytes with offsets 0/4/12 whether packed or not, and
         # only alignof drops (4 -> 1).
-        (32, {"STRUCT_ALIGNMENT_CHANGED"}, True),
+        (32, {"TYPE_ALIGNMENT_CHANGED"}, True),
         (32, {"TYPE_SIZE_CHANGED"}, True),
         # x86-64 aligns it to 8: packing moves `weight` from 8 to 4, and the
         # header layout records alignof(rec) 8 -> 1 as well; both are owed.
-        (64, {"STRUCT_ALIGNMENT_CHANGED"}, False),
+        (64, {"TYPE_ALIGNMENT_CHANGED"}, False),
         (64, {"TYPE_FIELD_OFFSET_CHANGED"}, False),
         (64, {"TYPE_FIELD_OFFSET_CHANGED", "TYPE_ALIGNMENT_CHANGED"}, True),
     ],
@@ -594,7 +594,7 @@ def test_pack_rebuild_from_a_packed_old_side_matches_the_layout_oracle(
     unchanged = _rec_layout(old_pack) == _rec_layout(1)
     exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(flags=Flags(pack=old_pack)))
     accepts_alignment_only = (
-        exp.problems("BREAKING", _answer({"STRUCT_ALIGNMENT_CHANGED"})) == []
+        exp.problems("BREAKING", _answer({"TYPE_ALIGNMENT_CHANGED"})) == []
     )
     assert accepts_alignment_only is unchanged
 
@@ -622,9 +622,8 @@ def test_pack_rebuild_alignment_only_needs_the_header_dump(
         assert clean == [
             # with_derived: an ELF break under an unchanged SONAME owes the advisory.
             "missing expected kinds ['SONAME_BUMP_RECOMMENDED']",
-            "none of ['STRUCT_ALIGNMENT_CHANGED', 'STRUCT_FIELD_OFFSET_CHANGED', "
-            "'STRUCT_SIZE_CHANGED', 'TYPE_ALIGNMENT_CHANGED', "
-            "'TYPE_FIELD_OFFSET_CHANGED', 'TYPE_SIZE_CHANGED'] reported",
+            "none of ['TYPE_ALIGNMENT_CHANGED', 'TYPE_FIELD_OFFSET_CHANGED', "
+            "'TYPE_SIZE_CHANGED'] reported",
             "verdict NO_CHANGE weaker than required BREAKING",
         ]
     else:
@@ -935,6 +934,9 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("[[deprecated]] int legacy", ["legacy"]),
         ("public:\n  volatile int reg", ["reg"]),
         ("private:\n  int hidden;\npublic:\n  int shown", ["shown"]),
+        # A label carries across declarations: only public members are named.
+        ("int a; protected: int b; int c; public: int d", ["a", "d"]),
+        ("private: int a; public: int b; private: int c", ["b"]),
         ("int depth = 4", ["depth"]),
         ("int mode{1}", ["mode"]),
         ("char tag[8] = {0}", ["tag"]),
@@ -949,6 +951,8 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("private:\n  int hidden", []),
         ("protected: mutable int hits", []),
         ("static const int k", []),
+        ("private:\n  int hidden", []),
+        ("protected: mutable int hits", []),
     ],
     ids=str,
 )
@@ -1048,3 +1052,31 @@ def test_the_layout_probe_skips_only_records_it_cannot_qualify() -> None:
     }
     assert exprs["lib::E::e1"] == "(long long)(lib::e1)"
     assert exprs["lib::F::f0"] == "(long long)(lib::F::f0)"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (b"x=\xc9\n", b"x=\x94\n"),  # two invalid UTF-8 lead bytes
+        (b"\xff\xfe", b"\xff\xfd"),
+        (b"ok\n", b"ok\xc3\n"),  # valid vs. a truncated sequence
+    ],
+)
+def test_a_consumer_printing_any_bytes_is_compared_not_a_crash(
+    tmp_path: Path, first: bytes, second: bytes
+) -> None:
+    """A consumer mis-called by an ABI break (e.g. a SysV -> ms_abi switch)
+    prints whatever its garbage registers hold. The oracle must compare that
+    output, so non-UTF-8 bytes neither raise nor collapse two different
+    outputs into one."""
+    from abiforge.run.exec import _run
+
+    results = []
+    for i, payload in enumerate((first, second)):
+        exe = tmp_path / f"c{i}"
+        octal = "".join(f"\\{b:03o}" for b in payload)
+        exe.write_text(f"#!/bin/sh\nprintf '{octal}'\n", encoding="ascii")
+        exe.chmod(0o755)
+        results.append(_run(exe, tmp_path))
+    assert results[0].rc == results[1].rc == 0
+    assert results[0].key() != results[1].key()

@@ -24,7 +24,7 @@ surface actually describes the analyzed binary (``source_surface_dso_mismatch``)
 These are ordinary ``run_crosschecks`` runners; ``cross_source_checks.py``
 imports them inside ``run_crosschecks`` when assembling the runner table. The
 shared finding/coverage plumbing (``_change``, ``_CheckOutput``,
-``_exported_symbol_names``, the provider constants) comes from the leaf
+``compare.export_names.default_export_names``, the provider constants) comes from the leaf
 ``cross_source_checks_base`` — **not** from ``cross_source_checks`` — so this
 module never depends on the engine and the ``cross_source_checks`` →
 check-module dependency stays one-directional (no import cycle; CLAUDE.md
@@ -258,7 +258,7 @@ def _check_source_surface_dso_mismatch(snapshot: AbiSnapshot, cfg: Any) -> _Chec
             [], "present", "L4 surface carries no reachable declarations", providers
         )
     # Use the L4 source-linker's export keyspace (not the double-stripped
-    # `_exported_symbol_names`), so `mapped & exported` compares like-for-like on
+    # `compare.export_names.default_export_names`), so `mapped & exported` compares like-for-like on
     # Mach-O C++ dylibs where the surface mappings keep the `_Z…` spelling (Codex
     # review).
     exported = _linked_export_symbols(snapshot)

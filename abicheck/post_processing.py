@@ -901,11 +901,11 @@ class DetectCppPatterns:
         Matching uses BOTH exact equality and a guarded substring containment
         (see ``_matches_suppression_key`` for the unambiguity rules).
         """
-        from .model.change_catalog.kinds import ChangeKind
+        from .compare.cpu_dispatch_public_members import GROUPABLE_REMOVALS
 
         to_keep: list[Change] = []
         for ch in changes:
-            if ch.kind == ChangeKind.FUNC_REMOVED and any(
+            if ch.kind in GROUPABLE_REMOVALS and any(
                 _matches_suppression_key(ch.symbol, key) for key in suppressed_keys
             ):
                 record_collapsed_findings(

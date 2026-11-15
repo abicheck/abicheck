@@ -174,7 +174,7 @@ static void decl(void *data,void *) {
 #ifdef GCC_CPP
   if(code==FUNCTION_DECL && DECL_LANG_SPECIFIC(d)) {
     int quals=TREE_CODE(TREE_TYPE(d))==METHOD_TYPE?type_memfn_quals(TREE_TYPE(d)):0;
-    fprintf(out,",\"override\":%s",DECL_OVERRIDE_P(d)?"true":"false");
+    fprintf(out,",\"override\":%s,\"final\":%s",DECL_OVERRIDE_P(d)?"true":"false",!DECL_VIRTUAL_P(d)?"null":DECL_FINAL_P(d)?"true":"false");
     fprintf(out,",\"const\":%s,\"volatile\":%s,\"static_member\":%s",(quals&TYPE_QUAL_CONST)?"true":"false",(quals&TYPE_QUAL_VOLATILE)?"true":"false",DECL_STATIC_FUNCTION_P(d)?"true":"false");
     fprintf(out,",\"pure_virtual\":%s,\"constructor\":%s,\"destructor\":%s,\"clone\":%s,\"explicit\":%s,\"ref_qualifier\":%s",DECL_PURE_VIRTUAL_P(d)?"true":"false",DECL_CONSTRUCTOR_P(d)?"true":"false",DECL_DESTRUCTOR_P(d)?"true":"false",DECL_CLONED_FUNCTION_P(d)?"true":"false",DECL_NONCONVERTING_P(d)?"true":"false",q(FUNCTION_REF_QUALIFIED(TREE_TYPE(d))?(FUNCTION_RVALUE_QUALIFIED(TREE_TYPE(d))?"&&":"&"):"").c_str());
     fprintf(out,",\"deleted\":%s,\"defaulted\":%s,\"constexpr\":%s,\"virtual\":%s,\"vindex\":%s,\"noexcept\":%s,\"extern_c\":%s",
@@ -296,12 +296,44 @@ static void type(void *data,void *) {
   }fprintf(out,"}\n");
 }
 #ifdef GCC_CPP
+// A namespace-scope using-declaration leaves no declaration of its own: it
+// binds the named entity, declared elsewhere, in this namespace's binding
+// table. Each such binding is one "using" row (the declaring namespace in
+// "scope", the bound entity's namespace path in "target_scope"); std and the
+// reserved _-prefixed implementation namespaces are not library namespaces.
+static std::string namespace_path(tree ctx) {
+  std::vector<std::string> parts;
+  for(;ctx && TREE_CODE(ctx)==NAMESPACE_DECL && ctx!=global_namespace;ctx=CP_DECL_CONTEXT(ctx))parts.push_back(name(ctx));
+  std::string s;for(auto it=parts.rbegin();it!=parts.rend();++it){if(!s.empty())s+="::";s+=*it;}
+  return s;
+}
+static void using_row(tree ns,tree d) {
+  if(!d || !DECL_P(d) || !DECL_NAME(d))return;
+  tree ctx=CP_DECL_CONTEXT(d);
+  if(ctx==ns || !ctx || TREE_CODE(ctx)!=NAMESPACE_DECL)return;
+  fprintf(out,"{\"kind\":\"using\",\"name\":%s,\"target_scope\":%s",q(name(d)).c_str(),q(namespace_path(ctx).c_str()).c_str());
+  scope(ns);fprintf(out,"}\n");
+}
+static void usings(tree ns) {
+  tree top=ns;
+  while(CP_DECL_CONTEXT(top)!=global_namespace)top=CP_DECL_CONTEXT(top);
+  if(ns==global_namespace || DECL_NAMESPACE_STD_P(top) || name(top)[0]=='_' || !DECL_NAME(top))return;
+  hash_table<named_decl_hash> *table=DECL_NAMESPACE_BINDINGS(ns);
+  if(!table)return;
+  for(auto it=table->begin();it!=table->end();++it) {
+    tree b=*it;
+    if(!b || TREE_CODE(b)==BINDING_VECTOR)continue;
+    if(TREE_CODE(b)==OVERLOAD && OVL_LOOKUP_P(b)){using_row(ns,TREE_TYPE(b));b=OVL_FUNCTION(b);}  // name-lookup.cc STAT_HACK_P/STAT_TYPE/STAT_DECL
+    for(ovl_iterator iter(b);iter;++iter)using_row(ns,*iter);
+  }
+}
 static void visit_type(tree);
 static void visit_decl(tree d) {
   if(!d || !DECL_P(d))return;
   if(TREE_CODE(d)==NAMESPACE_DECL) {
     if(DECL_NAMESPACE_ALIAS(d))return;
     for(tree x=cp_namespace_decls(d);x;x=DECL_CHAIN(x))visit_decl(x);
+    usings(d);
   } else if(TREE_CODE(d)==CONCEPT_DECL) {
     fprintf(out,"{\"kind\":\"concept\",\"name\":%s,\"expression\":%s",q(name(d)).c_str(),q(expr_as_string(DECL_INITIAL(d),TFF_SCOPE)).c_str());source(d);scope(DECL_CONTEXT(d));fprintf(out,"}\n");
   } else if(TREE_CODE(d)==TEMPLATE_DECL) {
@@ -347,10 +379,18 @@ static void visit_type(tree t) {
     if(TREE_CODE(d)==FIELD_DECL)visit_type(TREE_TYPE(d));else visit_decl(d);
   }
 }
+// An explicit specialization of a function template (template <> int f<int>(int))
+// is held in gcc's specialization table, not on the template's
+// DECL_TEMPLATE_INSTANTIATIONS list (which carries class template instances),
+// so the namespace walk never reaches it: visit each one there.
+static void explicit_function_specialization(bool,spec_entry *e,void *) {
+  tree s=e?e->spec:NULL_TREE;
+  if(s && TREE_CODE(s)==FUNCTION_DECL && DECL_LANG_SPECIFIC(s) && DECL_TEMPLATE_SPECIALIZATION(s) && !uses_template_parms(s))visit_decl(s);
+}
 #endif
 static void finish(void *,void *) {
 #ifdef GCC_CPP
-  if(!errorcount)visit_decl(global_namespace);
+  if(!errorcount){visit_decl(global_namespace);walk_specializations(true,explicit_function_specialization,nullptr);}
 #endif
 fprintf(out,"{\"kind\":\"end\",\"errors\":%d}\n",errorcount);fclose(out);}
 int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
@@ -361,6 +401,9 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);
+  // A function *definition* (a static inline header function) never reaches
+  // PLUGIN_FINISH_DECL; its FUNCTION_DECL arrives here once the body is parsed.
+  register_callback(args->base_name,PLUGIN_FINISH_PARSE_FUNCTION,decl,nullptr);
 #endif
   register_callback(args->base_name,PLUGIN_FINISH,finish,nullptr);return 0;
 }

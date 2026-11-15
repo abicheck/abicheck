@@ -22,7 +22,7 @@ branch-specific reference behind a trigger-worded pointer).
 abicheck helps library and package maintainers understand and validate
 API/ABI evolution: it compares two versions of a native library (ELF, PE/COFF,
 Mach-O, plus optional debug info, headers, build data and sources — evidence
-levels L0–L5), classifies every change into one of 429 `ChangeKind`s
+levels L0–L5), classifies every change into one of 434 `ChangeKind`s
 (`BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`), and
 gates CI on the result while reporting what the evidence could not establish.
 Pure Python, 3.11+. Product direction: [`vision.md`](vision.md); this file owns
@@ -229,7 +229,7 @@ Follow the pointer whose trigger matches your task:
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — comparison result: changes, verdict, context
-- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 429 change types
+- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 434 change types
 - `Verdict` (`checker.py`) — overall result (compatible/source_break/breaking)
 
 ## Adding a new ChangeKind
@@ -256,6 +256,11 @@ Follow the pointer whose trigger matches your task:
    `compare/finding_identity/change_kinds._TYPE_BEARING_DISCRIMINATOR_KINDS`), `VALUE_INSENSITIVE`,
    or `UNVERIFIED`. `tests/test_canonical_finding_id_completeness.py` fails
    until you do.
+6. Declare `observable_at=` (ADR-093): the minimal evidence configurations
+   that observe the fact, built with `observability.observable(...)`, plus a
+   `rationale` when `{B}` alone is not enough; declare `relations=` if the
+   kind is a variant, twin, subsumed or implied finding. A new kind may not
+   be `UNCLASSIFIED` (`tests/test_change_kind_observability_complete.py`).
 
 ## Conventions
 
@@ -291,6 +296,12 @@ Follow the pointer whose trigger matches your task:
 
 - **Correctness decides, not effort.** Judge an approach on correctness,
   generality and fit with the architecture; there is no deadline criterion.
+- **Long-term right over current behavior.** Judge a finding by what is
+  technically right, not by how abicheck answers today or what compatibility
+  its current outputs promise. When a default, a catalog ground truth or an
+  ADR is wrong, change it in the same change (amendment, ground truth and
+  migration together) and fix the cause, rather than recording the answer
+  as a known gap or patching around it.
 - **Fix the cause, not the instance.** Trace a bug to its root cause and close
   the whole class. If a general fix is not feasible in one pass, say so and
   record the gap in `docs/contribute/known-gaps.md`.

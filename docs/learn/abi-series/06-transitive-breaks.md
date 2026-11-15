@@ -129,9 +129,11 @@ int` for plain `int` in a C++ API is breaking for a different reason — `E` and
     `DW_TAG_class_type` and splits the verdict by storage model:
 
     - **union involved** → `type_kind_changed` → 🔴 **BREAKING** (layout changes).
-    - **`struct`↔`class`, no union** → `source_level_kind_changed` → 🟠
-      **API_BREAK** — binary-identical, source-level only. Don't bump the SONAME
-      for this one; it needs at most a recompile.
+    - **`struct`↔`class`, no union** → `source_level_kind_changed` → 🟢
+      **COMPATIBLE** — same layout and Itanium mangling, and source still
+      compiles. What the keyword change *implies* is reported on its own:
+      changed default access as an access-change finding, and on MSVC (which
+      mangles the class-key) the affected exports as removed and added.
 
 ---
 

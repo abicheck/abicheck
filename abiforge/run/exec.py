@@ -54,7 +54,12 @@ def _compile(cmd: list[str], what: str) -> subprocess.CompletedProcess[str]:
     """Run a compiler command; a hang is a failure naming the command, never a skip."""
     try:
         return subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=_COMPILE_TIMEOUT
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="backslashreplace",
+            check=False,
+            timeout=_COMPILE_TIMEOUT,
         )
     except subprocess.TimeoutExpired as exc:
         raise CompileError(
@@ -89,6 +94,9 @@ def _run(exe: Path, lib_dir: Path) -> RunResult:
             [str(exe)],
             capture_output=True,
             text=True,
+            # A consumer mis-called by an ABI break can print any bytes; that
+            # output is break evidence to compare, never a decode failure.
+            errors="backslashreplace",
             env=env,
             timeout=_RUN_TIMEOUT,
             check=False,
@@ -173,22 +181,22 @@ def _field_names(body: str) -> list[str]:
     field named by its declarator; any other ``(`` left is a member function.
     A bit-field and a static data member are skipped (``offsetof`` is
     ill-formed on both); an access label (``private:``) is not a declaration,
-    but a member it makes private or protected is skipped (``offsetof`` from
-    outside the class cannot name it), and a default member initializer
-    (``= 4``, ``{4}``) is not the name.
+    and a default member initializer (``= 4``, ``{4}``) is not the name. A
+    field under a ``protected:``/``private:`` label is skipped too: outside
+    the class ``offsetof`` cannot name it (a ``struct`` body starts public).
     """
     names = []
-    accessible = True  # a ``struct`` body starts public
+    public = True
     for decl in body.split(";"):
         decl = _ATTRIBUTE.sub("", decl)
         decl = re.sub(r"\[\[.*?\]\]", "", decl)
         decl = re.sub(r"\b(?:alignas|_Alignas)\s*\([^()]*\)", "", decl)
         labels = re.findall(r"\b(public|protected|private)\s*:(?!:)", decl)
         if labels:
-            accessible = labels[-1] == "public"
+            public = labels[-1] == "public"
         decl = re.sub(r"\b(?:public|protected|private)\s*:(?!:)", "", decl)
-        if not accessible:
-            continue  # offsetof cannot name a private or protected member
+        if not public:
+            continue
         if re.search(r"\bstatic\b", decl):
             continue  # a static data member: not part of the layout
         pointer = _FUNC_POINTER.search(decl)
@@ -299,7 +307,12 @@ def run_probe(
             f"layout probe does not build: {' '.join(cmd)}\n{proc.stderr}"
         )
     res = subprocess.run(
-        [str(out)], capture_output=True, text=True, check=False, timeout=_RUN_TIMEOUT
+        [str(out)],
+        capture_output=True,
+        text=True,
+        errors="backslashreplace",
+        check=False,
+        timeout=_RUN_TIMEOUT,
     )
     if res.returncode != 0:
         raise AssertionError(f"layout probe failed: {res}")

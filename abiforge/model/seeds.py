@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from abiforge.model.probes import PROBE_ROLES
+
 # (header_text, source_text). "" means "no such line in this file".
 RoleText = tuple[str, str]
 
@@ -52,6 +54,17 @@ class Seed:
     # feature an edit then removes) takes only the operators written for it:
     # an operator applies only when its roles include ``gate_role``.
     gate_role: str | None = None
+    # Further files of the library's source tree, as (path relative to the
+    # tree, template): a header the public header includes but the dump is
+    # not given (a private header), or another translation unit (``.c`` /
+    # ``.cpp``) compiled into the same library. A header takes each role's
+    # header text, a translation unit its source text.
+    extra_files: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    @property
+    def extra_sources(self) -> tuple[str, ...]:
+        """The extra files that are translation units, in order."""
+        return tuple(p for p, _ in self.extra_files if p.endswith((".c", ".cpp")))
 
     @property
     def header_name(self) -> str:
@@ -92,6 +105,24 @@ class Seed:
                 self.source_template, current, side=1, guard=self.name, kind="source"
             ),
         )
+
+    def render_extra(
+        self, overrides: Mapping[str, RoleText] | None = None
+    ) -> dict[str, str]:
+        """Each extra file's text (path -> text) with *overrides* applied."""
+        current: dict[str, RoleText] = dict(self.roles)
+        if overrides:
+            current.update(overrides)
+        return {
+            path: _render(
+                template,
+                current,
+                side=1 if path in self.extra_sources else 0,
+                guard=self.name,
+                kind=path,
+            )
+            for path, template in self.extra_files
+        }
 
 
 def _render(
@@ -243,6 +274,15 @@ _CXX_ROLES: dict[str, RoleText] = {
         "template <typename T> T clampv(T v) { return v < 0 ? T(0) : v; }",
         "",
     ),
+    # A constrained template, so an edit can relax or rewrite a constraint
+    # (tmpl.clamp starts unconstrained: an edit there can only tighten).
+    # Guarded, so a pre-C++20 build of the seed still compiles.
+    "tmpl.req": (
+        "#ifdef __cpp_concepts\n"
+        "template <typename T> requires (sizeof(T) >= 4) T reqv(T v) { return v; }\n"
+        "#endif",
+        "",
+    ),
     "func.mode": (
         "int mode_code(mode m);",
         "int mode_code(mode m) { return m == mode::fast ? 7 : 9; }",
@@ -268,6 +308,7 @@ _CXX_HEADER: tuple[str, ...] = (
     "@@enum.mode@@",
     "@@struct.tagged@@",
     "@@tmpl.clamp@@",
+    "@@tmpl.req@@",
     "@@func.add@@",
     "@@func.scale@@",
     "@@func.count@@",
@@ -454,38 +495,6 @@ _ELF_ROLES: dict[str, RoleText] = {
     ),
     # A reserved-name exported table (glibc's `_IO_2_1_stdin_` shape).
     "elf.itab": ("extern int _lib_table[4];", "int _lib_table[4] = {1, 2, 3, 4};"),
-    "elf.lng": ("long lng_f(long a);", "long lng_f(long a) { return a * 2; }"),
-    "elf.isa": (
-        # Dispatchers, plus per-ISA kernels exported so callers can pin one
-        # (the catalog's case83 / oneDAL shape).
-        "int k1(int a);\nint k2(int a);\nint k3(int a);\n"
-        "int k1_avx2(int a);\nint k2_avx2(int a);\nint k3_avx2(int a);\n"
-        "int k1_sse42(int a);\nint k2_sse42(int a);\nint k3_sse42(int a);",
-        "int k1_avx2(int a) { return a + 1; }\nint k2_avx2(int a) { return a + 2; }\n"
-        "int k3_avx2(int a) { return a + 3; }\nint k1_sse42(int a) { return a + 1; }\n"
-        "int k2_sse42(int a) { return a + 2; }\nint k3_sse42(int a) { return a + 3; }\n"
-        "int k1(int a) { return k1_sse42(a); }\nint k2(int a) { return k2_sse42(a); }\n"
-        "int k3(int a) { return k3_sse42(a); }",
-    ),
-    "elf.vstamp": (
-        "typedef const char *mylib_version_1_2_3;\nmylib_version_1_2_3 mylib_vstamp(void);",
-        'mylib_version_1_2_3 mylib_vstamp(void) { return "1.2.3"; }',
-    ),
-    "elf.res": (
-        "struct res { int a; int reserved1; };\nint res_a(struct res *r);",
-        "int res_a(struct res *r) { return r->a; }",
-    ),
-    "elf.hdl": (
-        "struct ctx_s;\ntypedef struct ctx_s *ctx_t;\nctx_t ctx_open(void);\n"
-        "int ctx_close(ctx_t c);",
-        "struct ctx_s { int n; };\nstatic struct ctx_s s_ctx;\n"
-        "ctx_t ctx_open(void) { return &s_ctx; }\nint ctx_close(ctx_t c) { return c->n; }",
-    ),
-    "elf.opq": (
-        "struct opq;\nstruct opq *opq_new(void);\nint opq_val(struct opq *o);",
-        "struct opq { int a; };\nstatic struct opq s_opq;\n"
-        "struct opq *opq_new(void) { return &s_opq; }\nint opq_val(struct opq *o) { return o->a; }",
-    ),
     "elf.cread": (
         "int cread(const int *p);",
         "int cread(const int *p) { return *p + 2; }",
@@ -532,12 +541,6 @@ ELF_SEED = Seed(
         "@@elf.cref@@",
         "@@elf.cpp@@",
         "@@elf.cread@@",
-        "@@elf.lng@@",
-        "@@elf.isa@@",
-        "@@elf.vstamp@@",
-        "@@elf.res@@",
-        "@@elf.hdl@@",
-        "@@elf.opq@@",
         "@@elf.ms@@",
         "@@elf.attr@@",
         "@@elf.late@@",
@@ -575,12 +578,6 @@ ELF_SEED = Seed(
         "@@elf.cref@@",
         "@@elf.cpp@@",
         "@@elf.cread@@",
-        "@@elf.lng@@",
-        "@@elf.isa@@",
-        "@@elf.vstamp@@",
-        "@@elf.res@@",
-        "@@elf.hdl@@",
-        "@@elf.opq@@",
         "@@elf.ms@@",
         "@@elf.attr@@",
         "@@elf.late@@",
@@ -596,12 +593,14 @@ ELF_SEED = Seed(
 # A second C library seen as an ELF object, whose *baseline* already carries
 # what a c_elf edit adds: an executable stack, packed relative relocations,
 # DT_RPATH, a text relocation, initial-exec TLS, an IFUNC, a symbol-less
-# version node, fortified and newer-glibc imports, no SONAME. An edit removes
+# version node, fortified and newer-glibc imports, no SONAME, and eager
+# binding without RELRO (so bind-now can go while RELRO stays). An edit removes
 # one. Only operators that name ``alt.gate`` apply (``Seed.gate_role``), so
 # c_elf's link edits, which rewrite the flags from c_elf's own baseline, do
 # not land here. Role names start with ``alt.``.
 _ALT_LDFLAGS = (
-    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,execstack "
+    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,norelro "
+    "-Wl,-z,execstack "
     "-Wl,-z,pack-relative-relocs -Wl,-z,notext -Wl,-rpath,/opt/edit/lib "
     "-Wl,--disable-new-dtags"
 )
@@ -867,83 +866,6 @@ _XCXX_ROLES: dict[str, RoleText] = {
         "int thrower(int a) EDIT_THROWS(int) { if (a < 0) throw 1; return a; }",
     ),
     "x.inl": ("inline int inl_add(int a, int b) { return a + b; }", ""),
-    # Types-taxonomy shapes: a CPO candidate, experimental and versioned
-    # namespaces, a pimpl with an inline accessor, explicit template
-    # instantiations, an overload pair, secondary and virtual bases, layout
-    # traits, a tag-dispatched template, a template-typed C entry point.
-    "x.cpo": (
-        "namespace lib { int sort(int a); }",
-        "int lib::sort(int a) { return a + 1; }",
-    ),
-    "x.exp": (
-        "namespace lib { namespace experimental { "
-        "inline int frob(int a) { return a + 1; } } }",
-        "",
-    ),
-    "x.pimpl": (
-        "namespace lib {\nnamespace detail { struct impl { int count_; int cap_; }; }\n"
-        "class Desc {\n  detail::impl* p_;\npublic:\n  Desc();\n"
-        "  int count() const { return p_->count_; }\n};\n}",
-        "lib::Desc::Desc() : p_(new detail::impl{3, 8}) {}",
-    ),
-    "x.inst": (
-        "template <class T> T getv(T a);\nextern template int getv<int>(int);\n"
-        "extern template long getv<long>(long);\ntemplate <class T> T conv(int a);\n"
-        "extern template int conv<int>(int);",
-        # GCC gives an explicit instantiation the visibility of the template
-        # definition, not of the header's declaration: keep it default.
-        "#pragma GCC visibility push(default)\n"
-        "template <class T> T getv(T a) { return a; }\n"
-        "template int getv<int>(int);\ntemplate long getv<long>(long);\n"
-        "template <class T> T conv(int a) { return (T)a; }\n"
-        "template int conv<int>(int);\n#pragma GCC visibility pop",
-    ),
-    "x.route": (
-        "int route(int a);\nint route(double a);",
-        "int route(int a) { return a; }\nint route(double a) { return (int)a + 1; }",
-    ),
-    "x.sec": (
-        "struct SA { virtual int f(); virtual ~SA(); };\nstruct SB { int b; };\n"
-        "struct SD : SA, SB { int f(); };",
-        "int SA::f() { return 1; }\nSA::~SA() {}\nint SD::f() { return 2; }",
-    ),
-    "x.vb2": (
-        "struct VA1 { int a; virtual ~VA1(); };\nstruct VA2 { int b; virtual ~VA2(); };\n"
-        "struct VD2 : virtual VA1, virtual VA2 { virtual ~VD2(); };",
-        "VA1::~VA1() {}\nVA2::~VA2() {}\nVD2::~VD2() {}",
-    ),
-    "x.slay": (
-        "struct SL {\n  int get() const;\nprivate:\n  int a;\n  int b;\n};",
-        "int SL::get() const { return a + b; }",
-    ),
-    "x.tp": (
-        "struct TP {\n  int get() const;\nprivate:\n  int a;\n  char b;\n};\nint tp_use(TP* p);",
-        "int TP::get() const { return a + b; }\nint tp_use(TP* p) { return p->get(); }",
-    ),
-    "x.tc": (
-        "struct TC { int a; };\nint tc_get(TC t);",
-        "int tc_get(TC t) { return t.a; }",
-    ),
-    "x.tag": (
-        "namespace lib { struct fast_tag {}; template <class T> int run();\n"
-        "extern template int run<fast_tag>(); }",
-        "#pragma GCC visibility push(default)\n"
-        "template <class T> int lib::run() { return 1; }\n"
-        "template int lib::run<lib::fast_tag>();\n#pragma GCC visibility pop",
-    ),
-    "x.box": (
-        "template <class T> struct Box { T v; };\n"
-        'extern "C" int consume(Box<int>* b);\nBox<int> make_box(int a);',
-        'extern "C" int consume(Box<int>* b) { return b->v; }\n'
-        "Box<int> make_box(int a) { Box<int> b; b.v = a; return b; }",
-    ),
-    # A deduced (closure) return type needs C++14; older standards see nothing.
-    "x.autoret": (
-        "#if __cplusplus >= 201402L\n"
-        "inline auto make_cb() { return [](int a) { return a + 1; }; }\n#endif",
-        "",
-    ),
-    "x.kind": ("struct Kd { int a; int get(); };", "int Kd::get() { return a + 2; }"),
     "x.extra": ("", ""),
 }
 
@@ -1039,6 +961,170 @@ _LAYOUT_ROLES: dict[str, RoleText] = {
 _XCXX_ROLES.update(_LAYOUT_ROLES)
 _LAYOUT_SLOTS: tuple[str, ...] = tuple(f"@@{r}@@" for r in _LAYOUT_ROLES)
 
+# Baselines for operators that each target one ChangeKind no other operator
+# reaches (``abiforge.operators.kinds``): one self-contained declaration group
+# per role, named ``K*``/``k*`` so they collide with nothing else here.
+_KIND_ROLES: dict[str, RoleText] = {
+    "k.vbo": (
+        "struct KVA { int a; };\nstruct KVB { int b; };\n"
+        "struct KVD : virtual KVA, virtual KVB { int d; };\nint kvd_use(KVD* p);\n"
+        "int kvd_make();",
+        "int kvd_use(KVD* p) { return p->a + p->b + p->d; }\n"
+        "int kvd_make() { KVD v; v.a = 1; v.b = 2; v.d = 3; return kvd_use(&v); }",
+    ),
+    "k.svg": (
+        "struct KSA { virtual int f(); };\nstruct KSB { int x; };\n"
+        "struct KSD : KSA, KSB { int d; };\nKSD* ksd_make();",
+        "int KSA::f() { return 1; }\nKSD* ksd_make() { return new KSD(); }",
+    ),
+    # Not POD for layout (a user-provided constructor): a derived class may
+    # reuse KTP's tail padding, so its data size (dsize) is ABI.
+    "k.tpr": (
+        "struct KTP { KTP(); int i; char c; };\nint ktp_get(KTP* p);",
+        "KTP::KTP() : i(1), c(2) {}\nint ktp_get(KTP* p) { return p->i + p->c; }",
+    ),
+    "k.rsv": (
+        "struct KRS { int a; int reserved1; };\nint krs_get(KRS* p);",
+        "int krs_get(KRS* p) { return p->a; }",
+    ),
+    "k.tvs": (
+        "typedef char* kfoo_version_1_2_3;\nint kfoo_len(const char* s);",
+        "int kfoo_len(const char* s) { return s[0]; }",
+    ),
+    "k.hnd": (
+        "struct KHC;\ntypedef KHC* khandle;\nkhandle kh_new();",
+        "struct KHC { int v; };\nkhandle kh_new() { return new KHC(); }",
+    ),
+    "k.opq": (
+        "struct KOC;\nKOC* koc_new();\nint koc_get(KOC* p);",
+        "struct KOC { int v; };\nKOC* koc_new() { return new KOC(); }\n"
+        "int koc_get(KOC* p) { return p->v; }",
+    ),
+    # C names, so the ISA suffix ends the symbol (no mangled parameter list).
+    "k.isa": (
+        'extern "C" {\nint ksum_avx2(int a);\nint kdot_avx2(int a);\n'
+        "int kscl_avx2(int a);\nint ksum_sse2(int a);\nint kdot_sse2(int a);\n"
+        "int kscl_sse2(int a);\n}",
+        'extern "C" {\nint ksum_avx2(int a) { return a + 1; }\n'
+        "int kdot_avx2(int a) { return a + 2; }\nint kscl_avx2(int a) { return a + 3; }\n"
+        "int ksum_sse2(int a) { return a + 4; }\nint kdot_sse2(int a) { return a + 5; }\n"
+        "int kscl_sse2(int a) { return a + 6; }\n}",
+    ),
+    "k.inst": (
+        # The header promises both instantiations (explicit instantiation
+        # declarations), so each is part of the public contract. A template's
+        # visibility pragma does not reach an instantiation gcc emits where
+        # the template is defined, so -fvisibility=hidden would hide it
+        # (clang keeps it); the attribute is the export macro (as xa.tmpl).
+        'template <class T> __attribute__((visibility("default"))) T ktwice(T v);\n'
+        "extern template int ktwice<int>(int);\n"
+        "extern template double ktwice<double>(double);",
+        "template <class T> T ktwice(T v) { return v + v; }\n"
+        "template int ktwice<int>(int);\ntemplate double ktwice<double>(double);",
+    ),
+    "k.ovl": (
+        "int kput(int a);\nint kput(double a);",
+        "int kput(int a) { return a; }\nint kput(double a) { return (int)a + 1; }",
+    ),
+    "k.inv": (
+        "namespace kv { inline namespace v1 { int kv_f(int a); } }",
+        "namespace kv { inline namespace v1 { int kv_f(int a) { return a; } } }",
+    ),
+    "k.exp": (
+        "namespace kx { namespace experimental { int kx_f(int a); int kx_g(int a); } }",
+        "namespace kx { namespace experimental {\n"
+        "int kx_f(int a) { return a; }\nint kx_g(int a) { return a + 1; }\n} }",
+    ),
+    "k.tag": (
+        'struct ktag_a {};\ntemplate <class T> __attribute__((visibility("default"))) int kfam();',
+        "template <class T> int kfam() { return (int)sizeof(T); }\n"
+        "template int kfam<ktag_a>();",
+    ),
+    "k.cpo": (
+        "namespace kc { int kc_swap(int a); }",
+        "namespace kc { int kc_swap(int a) { return -a; } }",
+    ),
+    "k.ret": (
+        "template <class T> struct KBx { T v; };\nKBx<int> kbx_get();",
+        "KBx<int> kbx_get() { return KBx<int>{1}; }",
+    ),
+    "k.tpp": (
+        'template <class T> struct KPb { T v; };\nextern "C" int kpb_take(KPb<int> b);',
+        'extern "C" int kpb_take(KPb<int> b) { return (int)b.v; }',
+    ),
+    "k.slk": (
+        "struct KSK { int a; };\nint ksk_get(KSK* p);",
+        "int ksk_get(KSK* p) { return p->a; }",
+    ),
+    "k.mtp": (
+        "template <class T> struct KMb { T v; };\nint kmb_use(KMb<int>* p);",
+        "int kmb_use(KMb<int>* p) { return p->v; }",
+    ),
+    "k.aeq": (
+        "struct KAE { long a; };\nint kae_get(KAE* p);",
+        "int kae_get(KAE* p) { return (int)p->a; }",
+    ),
+    "k.del": (
+        "int kdl_keep(int a);\nint kdl_gone(int a);",
+        "int kdl_keep(int a) { return a; }\nint kdl_gone(int a) { return a + 1; }",
+    ),
+    # A public class reaching a detail:: type through a pimpl pointer from an
+    # inline member function.
+    "k.ibr": (
+        "namespace kib { namespace detail { struct Impl { int count; }; }\n"
+        "class KW { detail::Impl* p; public: KW(); int n() const { return p->count; } }; }",
+        "kib::KW::KW() : p(new detail::Impl{3}) {}",
+    ),
+    # A polymorphic class whose own symbols (typeinfo, vtable) are exported
+    # with it; no free function names it, so narrowing the class's visibility
+    # cannot hide a function through GCC's type-visibility constraint.
+    "k.tvz": (
+        "struct KTV { virtual ~KTV(); virtual int kget(); int v; };",
+        "KTV::~KTV() {}\nint KTV::kget() { return v; }",
+    ),
+    # An unchanged record API whose new side is dumped with less evidence.
+    "k.evd": (
+        "struct KEV { int a; char c; };\nint kev_get(KEV* p);",
+        "int kev_get(KEV* p) { return p->a + p->c; }",
+    ),
+    # An inline function returning a lambda: callers can hold the result
+    # only in ``auto``. kurt_use calls it, so the library emits (weak)
+    # symbols for kmake and the closure's call operator. A deduced return
+    # type is C++14: under C++11 the group is empty (the operator needs the
+    # ``deduced_return`` feature, so no C++11 cell runs it).
+    "k.urt": (
+        "#if __cplusplus >= 201402L\n"
+        "inline auto kmake() { return [](int x) { return x + 7; }; }\n"
+        "int kurt_use(int a);\n#endif",
+        "#if __cplusplus >= 201402L\nint kurt_use(int a) { return kmake()(a); }\n#endif",
+    ),
+    # A namespace-scope using-declaration re-exporting a std function: consumer
+    # source may spell krx::abs.
+    "k.rex": (
+        "#include <cstdlib>\nnamespace krx { using std::abs; int krx_f(int a); }",
+        "namespace krx { int krx_f(int a) { return std::abs(a); } }",
+    ),
+    # An exported instantiation that relies on a defaulted trailing template
+    # parameter: kdta<int> names kdta<int, int> (U = int by default). The
+    # attribute is the export macro, as for k.inst.
+    "k.dta": (
+        "template <class T, class U = int> "
+        '__attribute__((visibility("default"))) U kdta(T v);\n'
+        "extern template int kdta<int>(int);",
+        "template <class T, class U> U kdta(T v) { return (U)v; }\n"
+        "template int kdta<int>(int);",
+    ),
+    # Empty baselines: the operator adds the declaration.
+    "k.pnv": ("", ""),
+    "k.stl": ("", ""),
+    "k.anon": ("", ""),
+}
+_XCXX_ROLES.update(_KIND_ROLES)
+_LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in _KIND_ROLES)
+# Edit-class probes (``abiforge.model.probes``).
+_XCXX_ROLES.update(PROBE_ROLES)
+_LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in PROBE_ROLES)
+
 XCXX_SEED = Seed(
     name="cxx_more",
     lang="c++",
@@ -1073,20 +1159,6 @@ XCXX_SEED = Seed(
         "@@x.helper@@",
         "@@x.throws@@",
         "@@x.inl@@",
-        "@@x.cpo@@",
-        "@@x.exp@@",
-        "@@x.pimpl@@",
-        "@@x.inst@@",
-        "@@x.route@@",
-        "@@x.sec@@",
-        "@@x.vb2@@",
-        "@@x.slay@@",
-        "@@x.tp@@",
-        "@@x.tc@@",
-        "@@x.tag@@",
-        "@@x.box@@",
-        "@@x.autoret@@",
-        "@@x.kind@@",
         "@@x.extra@@",
         *_LAYOUT_SLOTS,
         _VIS_CLOSE,
@@ -1120,20 +1192,6 @@ XCXX_SEED = Seed(
         "@@x.helper@@",
         "@@x.throws@@",
         "@@x.inl@@",
-        "@@x.cpo@@",
-        "@@x.exp@@",
-        "@@x.pimpl@@",
-        "@@x.inst@@",
-        "@@x.route@@",
-        "@@x.sec@@",
-        "@@x.vb2@@",
-        "@@x.slay@@",
-        "@@x.tp@@",
-        "@@x.tc@@",
-        "@@x.tag@@",
-        "@@x.box@@",
-        "@@x.autoret@@",
-        "@@x.kind@@",
         "@@x.extra@@",
         *_LAYOUT_SLOTS,
     ),
@@ -1241,6 +1299,163 @@ XA_SEED = Seed(
     gate_role="xa.gate",
 )
 
+# A C++ library for the L4/L5 source evidence variant (``Config.sources``):
+# its baseline carries what only source replay and the source graph see -- a
+# public macro, a default argument, a header-only inline and template, a
+# public entry with an unused internal helper, a virtual hierarchy dispatched
+# through a public function. C++98-clean, so every standard builds it. Gated
+# (``src.gate``): only ``abiforge.operators.source_evidence`` edits it.
+_SRC_ROLES: dict[str, RoleText] = {
+    "src.gate": ("", ""),
+    "src.macro": ("#define SRC_LIMIT 4", ""),
+    "src.dflt": (
+        "int src_take(int a, int b = 4);",
+        "int src_take(int a, int b) { return a + b; }",
+    ),
+    "src.inl": ("inline int src_twice(int v) { return v * 2; }", ""),
+    "src.tmpl": ("template <class T> T src_scale(T v) { return v * 2; }", ""),
+    "src.call": (
+        "int src_entry(int v);",
+        "static int src_helper(int v) { return v; }\n"
+        "int src_entry(int v) { return v; }",
+    ),
+    "src.vd": (
+        "struct SrcBase { virtual ~SrcBase(); virtual int f(); };\n"
+        "struct SrcLeft : SrcBase { int f(); };\nint src_dispatch(SrcBase *b);",
+        "SrcBase::~SrcBase() {}\nint SrcBase::f() { return 0; }\n"
+        "int SrcLeft::f() { return 1; }\nint src_dispatch(SrcBase *b) { return b->f(); }",
+    ),
+    "src.fn": (
+        "int src_count(const char *s);",
+        "int src_count(const char *s) { int n = 0; while (s[n]) ++n; return n; }",
+    ),
+    "src.extra": ("int src_more(int v);", "int src_more(int v) { return v + 2; }"),
+}
+
+SRC_SEED = Seed(
+    name="cxx_src",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_SRC_HPP",
+        "#define EDIT_SEED_SRC_HPP",
+        _VIS_OPEN,
+        "@@src.macro@@",
+        "@@src.dflt@@",
+        "@@src.inl@@",
+        "@@src.tmpl@@",
+        "@@src.call@@",
+        "@@src.vd@@",
+        "@@src.fn@@",
+        "@@src.extra@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@src.dflt@@",
+        "@@src.call@@",
+        "@@src.vd@@",
+        "@@src.fn@@",
+        "@@src.extra@@",
+    ),
+    roles=_SRC_ROLES,
+    gate_role="src.gate",
+)
+
+
+# A C++ library laid out as a small project tree for the ``sources`` evidence
+# variant: a public header, a private header it includes (``detail/``, never
+# given to the dump, so its declarations carry private-header provenance) and
+# a second translation unit (``tree_unit2.cpp``, which defines EDIT_UNIT2
+# before including the public header). It carries what only a multi-file,
+# multi-TU tree shows: private-header provenance, per-TU type definitions,
+# anonymous-type coordinates. Gated (``tree.gate``): only
+# ``abiforge.operators.source_tree`` edits it.
+_TREE_ROLES: dict[str, RoleText] = {
+    "tree.gate": ("", ""),
+    "tree.anon": (
+        "struct TreeHolder { struct { int a; } in; int n; };\n"
+        "int tree_holder_n(const TreeHolder *h);",
+        "int tree_holder_n(const TreeHolder *h) { return h->n; }",
+    ),
+    "tree.pair": (
+        "#define TREE_TAIL_T int\n"
+        "struct TreePair { int a; TREE_TAIL_T tail; };\n"
+        "int tree_pair_a(const TreePair *p);\n"
+        "int tree_pair_b(const TreePair *p);",
+        "int tree_pair_a(const TreePair *p) { return p->a; }",
+    ),
+    "tree.unit2": ("", "int tree_pair_b(const TreePair *p) { return p->a + 1; }"),
+    "tree.fn": ("int tree_count(int v);", "int tree_count(int v) { return v; }"),
+    # A public record pointing at a public type, and one pointing at a type
+    # the private header defines (the targets of the rename operators).
+    "tree.ren": (
+        "struct TreeTarget { int v; };\n"
+        "struct TreeRef { TreeTarget *t; int n; };\n"
+        "int tree_ref_n(const TreeRef *r);",
+        "int tree_ref_n(const TreeRef *r) { return r->n; }",
+    ),
+    "tree.priv": ("struct TreeImpl { int v; };", ""),
+    "tree.privref": (
+        "struct TreeHandle { TreeImpl *impl; int n; };\n"
+        "int tree_handle_n(const TreeHandle *h);",
+        "int tree_handle_n(const TreeHandle *h) { return h->n; }",
+    ),
+    # Private-header declarations an edit adds (empty in the baseline).
+    "tree.leak": ("", ""),
+    "tree.rtti": ("", ""),
+}
+
+TREE_PRIVATE_HEADER = "detail/tree_priv.h"
+TREE_SECOND_UNIT = "tree_unit2.cpp"
+
+TREE_SEED = Seed(
+    name="cxx_tree",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_TREE_HPP",
+        "#define EDIT_SEED_TREE_HPP",
+        _VIS_OPEN,
+        f'#include "{TREE_PRIVATE_HEADER}"',
+        "@@tree.anon@@",
+        "@@tree.pair@@",
+        "@@tree.fn@@",
+        "@@tree.ren@@",
+        "@@tree.privref@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@tree.anon@@",
+        "@@tree.pair@@",
+        "@@tree.fn@@",
+        "@@tree.ren@@",
+        "@@tree.privref@@",
+        "@@tree.leak@@",
+        "@@tree.rtti@@",
+    ),
+    roles=_TREE_ROLES,
+    gate_role="tree.gate",
+    extra_files=(
+        (
+            TREE_PRIVATE_HEADER,
+            (
+                "#ifndef EDIT_SEED_TREE_PRIV_HPP",
+                "#define EDIT_SEED_TREE_PRIV_HPP",
+                "@@tree.priv@@",
+                "@@tree.leak@@",
+                "@@tree.rtti@@",
+                "#endif",
+            ),
+        ),
+        (
+            TREE_SECOND_UNIT,
+            ("#define EDIT_UNIT2 1", '#include "edit_seed.h"', "@@tree.unit2@@"),
+        ),
+    ),
+)
+
 SEEDS: tuple[Seed, ...] = (
     C_SEED,
     CXX_SEED,
@@ -1249,5 +1464,7 @@ SEEDS: tuple[Seed, ...] = (
     ALT_SEED,
     XCXX_SEED,
     XA_SEED,
+    SRC_SEED,
+    TREE_SEED,
 )
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}

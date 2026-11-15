@@ -588,4 +588,19 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "glibcxx_dual_abi_changed",
         "ADR-050 amendment 2026-11-09: the two builds select different libstdc++ dual ABIs (_GLIBCXX_USE_CXX11_ABI) and the public surface uses std::string/std::list -- re-mangled exports, or a variable/record of a changed type → BREAKING",
     ),
+    (
+        "FUNC_RETURN_COVARIANT_NARROWED",
+        "func_return_covariant_narrowed",
+        "a pointer/reference return narrowed to a class whose path to the old class is non-virtual bases at offset 0: the same address comes back and the mangled name is unchanged → COMPATIBLE_WITH_RISK",
+    ),
+    (
+        "SANITIZER_RUNTIME_REQUIRED",
+        "sanitizer_runtime_required",
+        "the library now needs a sanitizer runtime an uninstrumented process does not have: a DT_NEEDED ASan/TSan/HWASan runtime that must load first, or sanitizer-runtime imports (__asan_*, __ubsan_*, ...) no DT_NEEDED library provides -- existing consumers fail to load it → BREAKING",
+    ),
+    (
+        "IMPORTED_SYMBOL_UNPROVIDED",
+        "imported_symbol_unprovided",
+        "with resolved-dependency evidence (--follow-deps) on both sides: a self-contained library (every strong import provided by its DT_NEEDED closure) gained a strong import nothing in that closure provides -- the dynamic linker fails to load it → BREAKING",
+    ),
 )

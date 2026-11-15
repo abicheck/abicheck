@@ -272,6 +272,18 @@ _MEMBERS = (
         # castxml 0.7 drops a = delete'd member (known-gaps "frontend kind
         # parity", case38), so the header lane names the deletion a removal.
         any_of=(frozenset({"FUNC_DELETED", "FUNC_DELETED_DWARF"}) | _REMOVED,),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "headers" and c.header_backend != "castxml",
+                {"expected": frozenset({"FUNC_DELETED"}), "any_of": ()},
+                "the clang and gcc header backends record = delete",
+            ),
+            Rule(
+                lambda c: c.evidence == "dwarf",
+                {"expected": frozenset({"FUNC_DELETED_DWARF"}), "any_of": ()},
+                "DWARF records the deleted member (DW_AT_deleted)",
+            ),
+        ),
         **_BINARY,
     ),
     _op(
@@ -311,13 +323,25 @@ _MEMBERS = (
             "struct Base { virtual int m(); virtual int z() = 0; virtual ~Base(); };",
         ),
         "Base becomes abstract (new Base no longer compiles) and its vtable grows",
-        any_of=(
-            frozenset(
+        # A *new* pure virtual: FUNC_PURE_VIRTUAL_ADDED names an existing
+        # method becoming pure (method_became_pure_virtual).
+        expected=frozenset({"TYPE_BECAME_ABSTRACT", "VTABLE_SLOT_COUNT_CHANGED"}),
+        rules=(
+            Rule(
+                lambda c: c.objfmt != "elf" and c.evidence != "binary",
                 {
-                    "FUNC_PURE_VIRTUAL_ADDED",
-                    "TYPE_BECAME_ABSTRACT",
-                    "VTABLE_SLOT_COUNT_CHANGED",
-                }
+                    "expected": frozenset(
+                        {"TYPE_BECAME_ABSTRACT", "TYPE_VTABLE_CHANGED"}
+                    )
+                },
+                "VTABLE_SLOT_COUNT_CHANGED reads the _ZTV symbol size from the "
+                "ELF symbol table (diff_elf_layout requires an ELF snapshot); "
+                "off ELF the debug/header vtable comparison names the growth",
+            ),
+            Rule(
+                lambda c: c.evidence == "binary",
+                {"expected": frozenset({"VTABLE_SLOT_COUNT_CHANGED"})},
+                "symbols alone show the longer vtable, not that Base is abstract",
             ),
         ),
         **_BINARY,
@@ -339,11 +363,18 @@ _LINKAGE = (
             ),
         ),
         "lib::v1::f1 becomes lib::v2::f1: every mangled name changes, the spelling does not",
-        # v1 -> v2 is also a version bump of the inline namespace.
-        expected=frozenset(
-            {"INLINE_NAMESPACE_MOVED", "INLINE_NAMESPACE_VERSION_BUMPED"}
+        expected=frozenset({"INLINE_NAMESPACE_MOVED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "binary",
+                {
+                    "expected": frozenset(
+                        {"INLINE_NAMESPACE_MOVED", "FUNC_LIKELY_RENAMED"}
+                    )
+                },
+                "from symbols alone the renamed exports are paired as a likely rename",
+            ),
         ),
-        rules=(_binary_mangled("INLINE_NAMESPACE_MOVED", "FUNC_LIKELY_RENAMED"),),
         **_BINARY,
     ),
     _op(
@@ -365,7 +396,10 @@ _LINKAGE = (
         _replace("x.vbase", "struct VD : VB {", "struct VD : virtual VB {"),
         "a virtual base moves the VB subobject behind a vbase offset and adds a VTT",
         expected=frozenset({"BASE_CLASS_VIRTUAL_CHANGED"}),
-        any_of=(frozenset({"RTTI_INHERITANCE_CHANGED", "VTABLE_THUNK_SET_CHANGED"}),),
+        any_of=(
+            frozenset({"RTTI_INHERITANCE_CHANGED"}),
+            frozenset({"VTABLE_THUNK_SET_CHANGED"}),
+        ),
         rules=(
             Rule(
                 lambda c: c.objfmt != "elf",
@@ -381,7 +415,7 @@ _LINKAGE = (
         _replace("x.multi", "struct MI : B1, B2 {", "struct MI : B2, B1 {"),
         "swapping bases swaps their subobject offsets and the primary vtable",
         expected=frozenset({"BASE_CLASS_POSITION_CHANGED"}),
-        any_of=(frozenset({"BASE_CLASS_OFFSET_CHANGED", "TYPE_BASE_CHANGED"}),),
+        any_of=(frozenset({"BASE_CLASS_OFFSET_CHANGED"}),),
     ),
     _op(
         "primary_base_grew",
@@ -393,9 +427,22 @@ _LINKAGE = (
         ),
         "B2 moves inside MI: the this-adjusting thunk for MI::f2 gets a new offset",
         any_of=(
-            frozenset({"VTABLE_THUNK_OFFSET_CHANGED", "BASE_CLASS_OFFSET_CHANGED"}),
+            frozenset({"VTABLE_THUNK_OFFSET_CHANGED"}),
+            frozenset({"BASE_CLASS_OFFSET_CHANGED"}),
         ),
         rules=(
+            Rule(
+                lambda c: c.objfmt == "macho" and c.evidence != "binary",
+                {"any_of": (frozenset({"BASE_CLASS_OFFSET_CHANGED"}),)},
+                "Mach-O: VTABLE_THUNK_OFFSET_CHANGED reads thunk names from the "
+                "ELF symbol table (diff_elf_layout requires an ELF snapshot); "
+                "the debug/header lane still records B2's new offset",
+            ),
+            Rule(
+                lambda c: c.evidence == "binary",
+                {"any_of": (frozenset({"VTABLE_THUNK_OFFSET_CHANGED"}),)},
+                "symbols alone carry the thunk names, not the base offsets",
+            ),
             Rule(
                 lambda c: c.objfmt == "pe",
                 {"any_of": ()},
@@ -414,8 +461,33 @@ _LINKAGE = (
             "struct Plain { int a; int get(); };",
             "struct Plain { int a; virtual int get(); };",
         ),
-        "a first virtual adds a vptr at offset 0: a moves and the size grows",
-        expected=frozenset({"VPTR_INTRODUCED"}),
+        "a first virtual adds a vptr at offset 0: a moves and the size grows; "
+        "the existing get() itself became virtual",
+        expected=frozenset({"VPTR_INTRODUCED", "FUNC_VIRTUAL_ADDED"}),
+    ),
+    _op(
+        "method_became_pure_virtual",
+        ("x.plain",),
+        _replace(
+            "x.plain",
+            "struct Plain { int a; int get(); };",
+            "struct Plain { int a; virtual int get() = 0; };",
+        ),
+        "an existing method becomes pure virtual (its out-of-line definition "
+        "stays): Plain is abstract, so consumers can no longer construct it, "
+        "and the new vptr moves a and grows the size",
+        expected=frozenset({"FUNC_PURE_VIRTUAL_ADDED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
+                {"expected": frozenset({"FUNC_VIRTUAL_ADDED"})},
+                "no evidence of the pure specifier exists here: GCC writes "
+                "DW_VIRTUALITY_virtual for a pure virtual, and Plain has no key "
+                "function, so its vtable (whose __cxa_pure_virtual slot would "
+                "show it) is emitted nowhere -- only get() becoming virtual is "
+                "observable",
+            ),
+        ),
     ),
 )
 
@@ -682,8 +754,8 @@ _SHAPES = (
                 {
                     "expected": frozenset(),
                     "any_of": (
-                        frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),
-                        frozenset({"TYPE_FIELD_ADDED", "TYPE_FIELD_ADDED_COMPATIBLE"}),
+                        frozenset({"TYPE_SIZE_CHANGED"}),
+                        frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}),
                     ),
                     "verdict_min": "BREAKING",
                     "verdict_max": None,
@@ -714,7 +786,7 @@ _SHAPES = (
                     "any_of": (
                         _OFFSET,
                         _SIZE,
-                        frozenset({"TYPE_FIELD_ADDED", "TYPE_FIELD_ADDED_COMPATIBLE"}),
+                        frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}),
                     ),
                     "verdict_min": "BREAKING",
                     "verdict_max": None,
@@ -735,13 +807,13 @@ _SHAPES = (
         ),
         "x sat in RP's hole: removing it leaves b at offset 4 and sizeof at 8, so "
         "no offset or size changes, but the removed member is gone for every reader",
-        any_of=(frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),),
+        any_of=(frozenset({"TYPE_FIELD_REMOVED"}),),
         rules=(
             Rule(
                 lambda c: c.flags.pack == 1,  # wider packing keeps the hole
                 {
                     "any_of": (
-                        frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),
+                        frozenset({"TYPE_FIELD_REMOVED"}),
                         _OFFSET,
                         _SIZE,
                     ),
@@ -751,6 +823,33 @@ _SHAPES = (
             ),
         ),
         touches=("x.rmpad",),
+    ),
+    _op(
+        "default_argument_added",
+        ("x.over",),
+        _replace("x.over", "int pick(int a);", "int pick(int a = 3);"),
+        "a parameter gains a default argument: the symbol, the signature and "
+        "every existing call are unchanged (the default is substituted at the "
+        "call site), so nothing breaks; a changed default would only reach "
+        "recompiled callers, which source (L4) evidence reports, not headers",
+        expected=frozenset(),
+        verdict_min="NO_CHANGE",
+        verdict_max="COMPATIBLE",
+    ),
+    _op(
+        "func_became_extern_c",
+        ("x.helper",),
+        _replace(
+            "x.helper",
+            "int enp_a(int a);",
+            'extern "C" int enp_a(int a);',
+        ),
+        'the declaration gains extern "C": the function is now exported as '
+        "enp_a instead of its mangled name, so every existing binary's import "
+        "of the mangled name is unresolved",
+        expected=frozenset({"FUNC_LANGUAGE_LINKAGE_CHANGED"}),
+        rules=(_binary_mangled("FUNC_LANGUAGE_LINKAGE_CHANGED"),),
+        **_BINARY,
     ),
     _op(
         "source_only_export_added",

@@ -637,7 +637,7 @@ class TestExportTableGatesVisibilityPromotion:
     def test_no_platform_table_falls_back_to_looser_behavior(self) -> None:
         # A synthetic/incomplete snapshot with no elf/pe/macho block at all
         # keeps the pre-existing (looser) behavior rather than being
-        # stripped to nothing -- `_exported_symbol_names` returns `None`,
+        # stripped to nothing -- `compare.export_names.default_export_names` returns `None`,
         # not an empty set, precisely to make this distinction.
         snap = AbiSnapshot(
             library="lib",

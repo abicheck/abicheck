@@ -8,7 +8,7 @@
 | **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | `func_visibility_protected_changed`, `symbol_elf_visibility_changed` |
+| **Detected `ChangeKind`s** | `func_visibility_protected_changed` |
 | **Source files** | `catalog/cases/case51_protected_visibility/` |
 | **Rule family** | [`protected-visibility`](by-rule/protected-visibility.md) |
 | **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
@@ -52,7 +52,6 @@ abicheck compare libfoo_v1.so libfoo_v2.so
 Verdict: COMPATIBLE_WITH_RISK (exit 0)
 
 - func_visibility_protected_changed: ELF symbol visibility changed: hook_point (default → protected)
-- symbol_elf_visibility_changed: ELF visibility changed: hook_point (default -> protected)
 ```
 
 ## Minimum evidence

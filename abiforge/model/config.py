@@ -15,7 +15,10 @@ parameter that can decide an edit's ABI outcome, as explicit axes:
   pair, so a build is compiled once whatever the number of consumers.
   Default: one consumer built like the library;
 - platform / object format (``host_platform``);
-- the evidence abicheck is given (``EVIDENCE``: binary only, +DWARF, +headers).
+- the evidence abicheck is given: a level (``EVIDENCE``: binary only, +DWARF,
+  +headers) and, at ``headers``, whether the build is ``stripped`` (``{B,H}``,
+  the primary configuration) or carries DWARF (``{B,D,H}``). ``evidence_set``
+  is the same fact as :class:`EvidenceSet` atoms, the vocabulary of plan §2.
 
 Nothing here probes the host: ``abiforge.run.toolchains`` decides which
 configs can be built, and an unbuildable config is *unavailable*, never
@@ -69,6 +72,7 @@ FEATURES: dict[str, dict[str, int]] = {
     "inline": {"c": 1999, "c++": 2011},
     "enum_class": {"c++": 2011},
     "enum_underlying": {"c": 2023, "c++": 2011},
+    "deduced_return": {"c++": 2014},
     "noexcept_in_type": {"c++": 2017},
     "concepts": {"c++": 2020},
     "no_unique_address": {"c++": 2020},
@@ -125,6 +129,7 @@ class Flags:
     cxx11_abi: int | None = None  # _GLIBCXX_USE_CXX11_ABI; None = toolchain default
     abi_version: int | None = None  # gcc -fabi-version=N
     vtordisp: int | None = None  # MSVC /vdN
+    stdlib: str | None = None  # "libc++" (clang -stdlib=); None = toolchain default
 
     @property
     def id(self) -> str:
@@ -143,6 +148,8 @@ class Flags:
             parts.append(f"fabi{self.abi_version}")
         if self.vtordisp is not None:
             parts.append(f"vd{self.vtordisp}")
+        if self.stdlib is not None:
+            parts.append(self.stdlib.replace("+", "x"))
         return "+".join(parts)
 
     def unsupported_reason(self, tc: Toolchain, lang: str) -> str | None:
@@ -157,6 +164,10 @@ class Flags:
             return "/vd is an MSVC flag"
         if self.vtordisp is not None and lang != "c++":
             return "/vd affects C++ classes only"
+        if self.stdlib is not None and lang != "c++":
+            return "-stdlib selects a C++ standard library"
+        if self.stdlib is not None and tc.family != "clang":
+            return "-stdlib is a clang switch"
         if tc.family == "msvc" and (self.short_enums or self.visibility != "default"):
             return "MSVC has no -fshort-enums / -fvisibility analogue"
         return None
@@ -182,6 +193,8 @@ class Flags:
             out.append(f"-D_GLIBCXX_USE_CXX11_ABI={self.cxx11_abi}")
         if self.abi_version is not None:
             out.append(f"-fabi-version={self.abi_version}")
+        if self.stdlib is not None and lang == "c++":
+            out.append(f"-stdlib={self.stdlib}")
         return out
 
     def layout_flags(self, tc: Toolchain, lang: str) -> list[str]:
@@ -195,9 +208,56 @@ class Flags:
 
 # --- evidence and platform -------------------------------------------------
 
-# What abicheck is given, weakest first.
-EVIDENCE: tuple[str, ...] = ("binary", "dwarf", "headers")
-EVIDENCE_RANK: dict[str, int] = {e: i for i, e in enumerate(EVIDENCE)}
+#: The evidence sources, with the atom spellings of the completeness plan §2
+#: (and of abicheck's ``EvidenceSource``, which abiforge must not import):
+#: ``B`` stripped binary, ``D`` DWARF (PDB on Windows), ``H`` public headers
+#: without build flags, ``BD`` build data, ``S`` sources, ``G`` the multi-TU graph.
+ATOMS: tuple[str, ...] = ("B", "D", "H", "BD", "S", "G")
+
+
+@dataclass(frozen=True)
+class EvidenceSet:
+    """A set of evidence sources. Always contains ``B`` (no header-only targets).
+
+    Sets are compared by inclusion (``<=``), not by a rank: ``{B,D}`` and
+    ``{B,H}`` are incomparable, which a ranked string axis cannot express.
+    """
+
+    atoms: frozenset[str]
+
+    def __post_init__(self) -> None:
+        unknown = self.atoms - set(ATOMS)
+        if unknown:
+            raise ValueError(f"unknown evidence atoms {sorted(unknown)}")
+        if "B" not in self.atoms:
+            raise ValueError("an evidence set always contains B")
+
+    @classmethod
+    def of(cls, *atoms: str) -> EvidenceSet:
+        return cls(frozenset(atoms))
+
+    def __contains__(self, atom: object) -> bool:
+        return atom in self.atoms
+
+    def __le__(self, other: EvidenceSet) -> bool:
+        return self.atoms <= other.atoms
+
+
+BINARY = EvidenceSet.of("B")  # L0
+DWARF = EvidenceSet.of("B", "D")  # L1
+HEADERS = EvidenceSet.of("B", "D", "H")  # what the headers cell builds today
+#: The primary configuration (plan §2, L2s): stripped, headers only.
+HEADERS_STRIPPED = EvidenceSet.of("B", "H")
+
+#: The level names a :class:`Config` takes, weakest first. A name keeps its
+#: meaning in every cell id and predicate; the atoms behind it are
+#: :attr:`Config.evidence_set`, and ``stripped`` picks the headers variant.
+LEVEL_SET: dict[str, EvidenceSet] = {
+    "binary": BINARY,
+    "dwarf": DWARF,
+    "headers": HEADERS,
+}
+EVIDENCE: tuple[str, ...] = tuple(LEVEL_SET)
 #: The header AST backends the ``headers`` lane can dump with (castxml is the
 #: reference; clang and the native gcc plugin, ADR-092, are checked against
 #: the same ground truth). Meaningless below ``headers`` evidence.
@@ -251,19 +311,43 @@ class Config:
     # Consumers checked against the one library pair; () = one built like it.
     consumers: tuple[Consumer, ...] = ()
     evidence: str = "headers"
+    # The primary configuration (plan §2, L2s): headers built without DWARF, so
+    # the library is stripped. Meaningful only at ``headers``; elsewhere it is
+    # normalized off (two spellings of one build never become two cells).
+    stripped: bool = False
     platform: tuple[str, str] = field(default_factory=host_platform)
     # Which backend dumps the headers; ignored below ``headers`` evidence.
     header_backend: str = "castxml"
+    # L3 build data on top of ``headers``: abicheck is also given each side's
+    # ``compile_commands.json`` (``abicheck dump --build-info``), the record of
+    # the exact compile command the harness ran.
+    build_data: bool = False
+    # L4/L5 source evidence on top of ``headers``: abicheck is also given each
+    # side's source tree (``abicheck dump --sources``), the tree the harness
+    # wrote and compiled.
+    sources: bool = False
+    # Dependency resolution on top of any evidence level: abicheck also
+    # resolves each side's DT_NEEDED closure (``abicheck dump --follow-deps``)
+    # and records which imports a provider in it defines.
+    follow_deps: bool = False
 
     def __post_init__(self) -> None:
+        if self.evidence not in LEVEL_SET:
+            raise ValueError(f"evidence {self.evidence!r} not in {EVIDENCE}")
         if self.header_backend not in HEADER_BACKENDS:
             raise ValueError(
                 f"header_backend {self.header_backend!r} not in {HEADER_BACKENDS}"
             )
+        if self.stripped and self.evidence != "headers":
+            object.__setattr__(self, "stripped", False)
         if self.evidence != "headers" and self.header_backend != "castxml":
             # No headers are dumped: normalize, so two spellings of one build
             # never become two cells.
             object.__setattr__(self, "header_backend", "castxml")
+        if self.build_data and self.evidence != "headers":
+            raise ValueError("build_data is L3 evidence on top of headers")
+        if self.sources and self.evidence != "headers":
+            raise ValueError("sources is L4/L5 evidence on top of headers")
 
     @property
     def lang(self) -> str:
@@ -285,6 +369,21 @@ class Config:
         """Every consumer, resolved, in order, without duplicates."""
         specs = self.consumers or (Consumer(),)
         return tuple(dict.fromkeys(self.resolve(c) for c in specs))
+
+    @property
+    def evidence_set(self) -> EvidenceSet:
+        """The evidence sources this build is given, as atoms.
+
+        ``build_data`` adds ``BD`` and ``sources`` adds ``S``. ``G`` (the
+        multi-TU graph) is not a Config axis yet.
+        """
+        base = HEADERS_STRIPPED if self.stripped else LEVEL_SET[self.evidence]
+        atoms = set(base.atoms)
+        if self.build_data:
+            atoms.add("BD")
+        if self.sources:
+            atoms.add("S")
+        return EvidenceSet(frozenset(atoms))
 
     @property
     def objfmt(self) -> str:
@@ -310,15 +409,24 @@ class Config:
 
         castxml stays implicit so every pre-existing cell id is unchanged.
         """
-        if self.evidence == "headers" and self.header_backend != "castxml":
-            return f"headers.{self.header_backend}"
-        return self.evidence
+        label = self.evidence
+        if self.evidence == "headers":
+            if self.stripped:
+                label = "headers.stripped"
+            if self.header_backend != "castxml":
+                label = f"{label}.{self.header_backend}"
+        if self.build_data:
+            label += "+build"
+        if self.sources:
+            label += "+src"
+        return f"{label}+deps" if self.follow_deps else label
 
     @property
     def space_evidence(self) -> str:
         """The evidence axis value in the language-space model (always explicit)."""
         if self.evidence == "headers":
-            return f"headers.{self.header_backend}"
+            base = "headers.stripped" if self.stripped else "headers"
+            return f"{base}.{self.header_backend}"
         return self.evidence
 
     def consumer_label(self, c: ResolvedConsumer) -> str:

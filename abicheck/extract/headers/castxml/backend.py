@@ -71,7 +71,7 @@ from ..toolchain import (
     _tool_identity,
     _tool_identity_metadata,
 )
-from .abi_fundamental import probe_plain_char_unsigned
+from .abi_fundamental import probe_plain_char_unsigned, probe_target_triple
 from .calling_convention import calling_conventions_in
 from .clang_semantics_join import join_clang_semantics
 from .dumper import _CastxmlParser
@@ -649,6 +649,9 @@ class CastxmlBackend:
         plain_char = probe_plain_char_unsigned(
             r.compiler, r.gcc_path, r.gcc_prefix, tuple(r.gcc_option_tokens)
         )
+        triple = probe_target_triple(
+            r.compiler, r.gcc_path, r.gcc_prefix, tuple(r.gcc_option_tokens)
+        )
         parser = _CastxmlParser(
             xml_root,
             r.exported_dynamic,
@@ -657,6 +660,7 @@ class CastxmlBackend:
             public_dir_paths=r.public_dir_paths,
             no_binary_evidence=r.no_binary_evidence,
             plain_char_unsigned=plain_char,
+            target_triple=triple,
         )
         for gap in join_gaps(xml_root):
             note_parser_limitation(parser, gap)
@@ -671,6 +675,7 @@ class CastxmlBackend:
                 public_dir_paths=r.public_dir_paths,
                 no_binary_evidence=False,
                 plain_char_unsigned=plain_char,
+                target_triple=triple,
             ),
         )
         meta = selected_meta[0] if selected_meta else (None, None)

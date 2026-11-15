@@ -30,17 +30,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..compare.edge_query import export_table_covered
-from ..elf_symbol_filter import is_linker_reserved_symbol
+from ..compare.export_names import without_linker_reserved
 from ..model import AbiSnapshot
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import Confidence
-from ..model.export_index import (
-    build_raw_export_index,
-    default_versioned_names,
-    linked_export_names,
-)
+from ..model.export_index import build_raw_export_index, linked_export_names
 
 # The §6.8 provider-agreement vocabulary (ADR-035 D4) — which evidence source
 # corroborates a finding, driving its confidence tag.
@@ -116,42 +111,6 @@ def _change(
     )
 
 
-def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
-    """The binary's exported symbol names, or ``None`` if no export table exists.
-
-    ADR-063 T7: thin wrapper over the canonical
-    ``model.export_index.default_versioned_names`` projection (over
-    ``model.export_index.build_raw_export_index``'s raw read) — only
-    **default/unversioned** ELF exports count toward the obligation set, and
-    Mach-O names are normalized the same way the dumper normalizes
-    ``Function.mangled`` (its single leading underscore stripped), preserving
-    this module's own ``set[str] | None`` signature and ``None``-for-no-table
-    contract. A table that was never read (a default or parse-failed
-    platform block) is ``None`` too, not an empty set: I4 (``compare.
-    edge_query.export_table_covered``) -- read as empty, it flagged every
-    declaration ``PUBLIC_NOT_EXPORTED`` at HIGH confidence.
-    """
-    index = build_raw_export_index(snapshot)
-    if index is None or not export_table_covered(snapshot, index.platform):
-        return None
-    return _without_linker_reserved(set(default_versioned_names(index)), index.platform)
-
-
-def _without_linker_reserved(names: set[str], platform: str) -> set[str]:
-    """Drop ELF linker-reserved symbols (``__bss_start``/``_edata``/``_end``/...).
-
-    Every export-table-walking cross-source check reads the table through
-    :func:`_exported_symbol_names` or :func:`_linked_export_symbols`, so this is
-    the one place the class is excluded: a gold- or Bazel-linked library
-    exports these whatever its headers say, and ``exported_not_public`` used
-    to report each one as an undocumented export (a RISK on every such build).
-    The predicate is the shared ``elf_symbol_filter`` one, not a local list.
-    """
-    if platform != "elf":
-        return names
-    return {n for n in names if not is_linker_reserved_symbol(n)}
-
-
 def _linked_export_symbols(snapshot: AbiSnapshot) -> set[str] | None:
     """Exported symbol names in the **L4 source-linker's** keyspace.
 
@@ -159,11 +118,11 @@ def _linked_export_symbols(snapshot: AbiSnapshot) -> set[str] | None:
     — matches ``cli_buildsource_merge._exported_symbols_from_snapshot`` (the
     set that seeds ``source_link``), so a comparison against the surface's
     ``source_decl_to_binary_symbol`` mappings uses the *same spelling*. Unlike
-    :func:`_exported_symbol_names`, Mach-O names are **not** re-normalized —
+    :func:`~abicheck.compare.export_names.default_export_names`, Mach-O names are **not** re-normalized —
     ``macho_metadata`` already strips the platform's one leading underscore,
     and the L4 linker keeps that once-stripped form.
     """
     index = build_raw_export_index(snapshot)
     if index is None:
         return None
-    return _without_linker_reserved(set(linked_export_names(index)), index.platform)
+    return without_linker_reserved(set(linked_export_names(index)), index.platform)

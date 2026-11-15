@@ -472,6 +472,10 @@ def _normalize_type_spelling(name: str, *, strip_indirection: bool) -> str:
     s = name.strip()
     # Collapse whitespace directly touching a pointer/reference sigil ("Foo *" / "Foo* " / "Foo * *") to a single canonical spelling *before* any other step, regardless of strip_indirection -- when indirection is kept (cross-tier comparison), this is the difference between correctly matching "Foo*" (header) against "Foo *" (DWARF) and wrongly treating a pure spacing difference as a real indirection-level disagreement (Codex review, fresh evidence: preserving "*"/"&" for the indirection fix above still needs their surrounding whitespace normalized).
     s = re.sub(r"\s*([*&])\s*", r"\1", s).strip()
+    # Likewise an array bound: the native gcc header backend writes
+    # "char [8]" where DWARF writes "char[8]", the same type.
+    s = re.sub(r"\s*\[\s*", "[", s)
+    s = re.sub(r"\s*\]", "]", s)
     if strip_indirection:
         # Remove trailing pointer/reference decorators and CV-qualifiers
         s = re.sub(r"[\s*&]+$", "", s).strip()
@@ -517,6 +521,7 @@ _TYPE_SPELLING_VALUE_KINDS = frozenset(
     {
         ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
         ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.UNION_FIELD_TYPE_CHANGED,
     }
 )
 

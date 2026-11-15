@@ -12,6 +12,8 @@ partition, without needing a compiler.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker import ChangeKind, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.dwarf_advanced import (
@@ -120,10 +122,31 @@ class TestVectorAbiChanged:
         assert change.old_value == "-vecabi=legacy"
         assert change.new_value == "-vecabi=cmdtarget"
 
-    def test_verdict_is_breaking(self) -> None:
-        old = _snap(set())
-        new = _snap({"-mveclibabi=svml"})
-        assert compare(old, new).verdict.value == "BREAKING"
+    @pytest.mark.parametrize(
+        ("old_flags", "new_flags", "expected"),
+        [
+            # Callee-library selection only: the binary's own exports are
+            # unchanged, so the flag is a risk (new imports report the rest).
+            (set(), {"-mveclibabi=svml"}, "COMPATIBLE_WITH_RISK"),
+            ({"-mveclibabi=svml"}, set(), "COMPATIBLE_WITH_RISK"),
+            ({"-fveclib=libmvec"}, {"-fveclib=SVML"}, "COMPATIBLE_WITH_RISK"),
+            ({"-mveclibabi=acml"}, {"-fveclib=libmvec"}, "COMPATIBLE_WITH_RISK"),
+            # Intel -vecabi changes the ABI of the binary's own SIMD clones.
+            ({"-vecabi=legacy"}, {"-vecabi=cmdtarget"}, "BREAKING"),
+            (set(), {"-vecabi=cmdtarget"}, "BREAKING"),
+            # Any -vecabi change in the mix keeps the break.
+            (
+                {"-mveclibabi=svml", "-vecabi=legacy"},
+                {"-mveclibabi=svml", "-vecabi=cmdtarget"},
+                "BREAKING",
+            ),
+            ({"-mveclibabi=svml"}, {"-vecabi=cmdtarget"}, "BREAKING"),
+        ],
+    )
+    def test_verdict_follows_which_flag_family_changed(
+        self, old_flags: set[str], new_flags: set[str], expected: str
+    ) -> None:
+        assert compare(_snap(old_flags), _snap(new_flags)).verdict.value == expected
 
 
 class TestVectorAbiPartition:

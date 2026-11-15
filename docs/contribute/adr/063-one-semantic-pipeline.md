@@ -1479,3 +1479,59 @@ Sequencing: Phase 3 lands first. This amendment's own PR is documentation only.
 - Loosening C.8's existing suppressions or the rules in
   `check_fact_set_compatibility`. This amendment adds a layer above them.
 - A new `ChangeKind`, CLI flag, or schema field.
+
+## Amendment (2026-11-14, accepted): a pair is judged at the evidence rung both operands reach
+
+**Amendment status:** Accepted. It changes a default exit code. The change
+ships with `policy/common_evidence_depth.py` and the changelog fragment
+`changelog.d/20261114_asymmetric_header_evidence.md`.
+
+### Context
+
+When header evidence was given for one operand only (`--header old=…` with
+no `new=` headers, or a stored header-less baseline compared with a fresh
+`-H` dump), the pipeline compared header-parsed declarations on one side
+with a header-less dump of the other. Comparing an identical `.so` against
+itself this way reported `type_removed`, `func_removed` and
+`type_vtable_changed`, and exited 4 (BREAKING). Each of those findings came
+from the evidence mismatch, not from the library. That breaks the
+"weaker evidence narrows conclusions" rule (ADR-028/049/063/064): missing
+evidence must never fabricate a break.
+
+### Decision
+
+- When exactly one operand is header-derived, the pair is compared at the
+  rung both operands reach, which is binary depth. This uses the existing
+  joint `project_pair_to_depth` projection, the same one an explicit
+  `--depth binary` uses.
+- A coverage warning names the side that had headers, so the reduced
+  assurance stays visible.
+- An explicit `--depth` still wins.
+- When either side's `debug` section is unreadable, its `from_headers` is a
+  default, not evidence. That pair is not treated as asymmetric.
+
+### Consequences
+
+- **Exit-code change:** the outcome of such a pair moves from BREAKING
+  (exit 4) to NO_CHANGE (exit 0). When no DWARF lets binary depth confirm
+  layouts, it moves to UNCONFIRMED (exit 1). Real binary-level changes
+  (removed exports, layout changes visible in DWARF) are still reported at
+  binary depth.
+- CI pipelines that relied on the old failure lose only false positives.
+  Pipelines that want header-depth checks must give headers to both sides.
+- abiforge's `new_side_dumped_without_headers` operator pins the
+  NO_CHANGE outcome on every PR cell.
+- No new `ChangeKind`, CLI flag or schema field.
+
+## Amendment (2026-11-14, decision): evidence levels are sets of sources
+
+[ADR-093](093-declared-change-kind-relations-and-observability.md) replaces
+the chain reading of the evidence levels. DWARF (`D`) and public headers
+(`H`) are sibling sources above the binary (`B`), not successive ranks; a
+level is a *set* of sources (L0 `{B}`, L1 `{B,D}`, L2s `{B,H}`, L3
+`{B,H,BD}`, L4 `{B,H,BD,S}`, L5 adds `G`). Where this ADR's plan, `--depth`
+or capability text orders levels as a chain, it orders *configurations a run
+can request*, not what each configuration can observe. Per-kind
+observability is declared as `ChangeKindMeta.observable_at`. Stripped binary
+plus public headers, `{B,H}`, is the primary configuration: every fact
+physically present in a public header must be caught there without DWARF.

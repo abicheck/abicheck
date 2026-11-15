@@ -63,7 +63,7 @@ Phase 5 section for the design this page's data comes from.
 | `PeMetadata.delay_imports` | `dict[str, list[str]] \| None` | pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.base_access` | `dict[str, str]` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
-| `RecordType.data_size_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.data_size_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.deprecated` | `str \| None` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_abstract` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_final` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |

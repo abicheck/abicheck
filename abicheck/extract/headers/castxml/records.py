@@ -58,6 +58,7 @@ from ....model.identity import entity_id_for_type
 from ....name_classification import strip_anonymous_type_location
 from .abi_fundamental import castxml_type_abi_fact
 from .context import CastxmlParserContext
+from .data_size import data_size_bits
 from .location import (
     access_level,
     deprecation_marker as _deprecation_marker,
@@ -187,8 +188,9 @@ def build_record_type(
                 off = optional_int_attr(b, "offset")
                 if off is not None:
                     base_offsets[type_name(ctx, b.get("type", ""))] = off * 8
-    # data_size_bits is left None. is_standard_layout is derived from the C++ rules over the fields, access specifiers, bases and virtual members CastXML emits, tri-state (record_traits.py); "not polymorphic and no virtual bases" alone is still not used as a standard-layout signal (a mixed-access class is non-standard-layout whatever its vtable). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
+    # data_size_bits is the Itanium dsize derived from POD-for-layout and the member/base offsets (data_size.py), None where a fact it needs is unknown. is_standard_layout is derived from the C++ rules over the fields, access specifiers, bases and virtual members CastXML emits, tri-state (record_traits.py); "not polymorphic and no virtual bases" alone is still not used as a standard-layout signal (a mixed-access class is non-standard-layout whatever its vtable). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
     standard = standard_layout(ctx, el)  # None for an incomplete record
+    dsize = None if is_opaque else data_size_bits(ctx, el)
     trivially = trivially_copyable(ctx, el)  # None for an incomplete record
     # castxml records the `final` class-key specifier as a `final` token
     # inside the compound ``attributes`` string (e.g. ``attributes="final"``),
@@ -220,6 +222,7 @@ def build_record_type(
         is_opaque=is_opaque,
         vptr_offset_bits=vptr_offset_bits,
         base_offsets=base_offsets,
+        data_size_bits=dsize,
         # castxml genuinely resolves these itself (real semantic analysis, not a heuristic reconstruction), opaque or not -- stated explicitly (kept as individual kwargs, not a **record_layout_facts() spread, so scripts/backend_capabilities.py's AST scanner can still see each field named).
         bases_fact=Fact.present(bases),
         virtual_bases_fact=Fact.present(virtual_bases),

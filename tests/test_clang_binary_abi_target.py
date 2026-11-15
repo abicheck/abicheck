@@ -406,3 +406,63 @@ def test_a_prefetch_in_the_wrong_language_mode_is_reacquired(
         acquired, lang, primary_mode, CompileContext(), frozenset()
     )
     assert got is expected
+
+
+def test_castxml_clang_side_pass_parses_for_the_binarys_abi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """castxml's clang side pass (``noexcept``, constraints, template
+    defaults) must parse for the binary's ABI like the primary clang parse:
+    on a Windows clang, the MSVC default could not parse a MinGW library's
+    headers once they included libstdc++, so every ``noexcept`` edit on the
+    windows-latest MinGW lane read NO_CHANGE. Without a Windows default the
+    tokens stay as given."""
+    from xml.etree.ElementTree import fromstring
+
+    from abicheck.errors import SnapshotError
+    from abicheck.extract import compiler_driver
+    from abicheck.extract.headers.castxml import clang_semantics_join as join
+
+    header = tmp_path / "api.h"
+    header.write_text("struct C { int safe() noexcept; };\n")
+    root = fromstring(
+        f'<CastXML><File id="f1" name="{header}"/>'
+        '<Method id="_1" name="safe" mangled="_ZN1C4safeEv" file="f1"/></CastXML>'
+    )
+    seen: list[tuple[str, ...]] = []
+
+    def capture(*_a: object, gcc_option_tokens: tuple[str, ...], **_k: object):
+        seen.append(gcc_option_tokens)
+        raise SnapshotError("stop after the command is built")
+
+    monkeypatch.setattr(join, "clang_header_dump", capture)
+    monkeypatch.setattr(compiler_driver, "resolve_clang_bin", lambda *a: "clang++")
+    monkeypatch.setattr(sysinc, "_resolve_probe_compiler", lambda *a: None)
+    monkeypatch.setattr(
+        abi_target, "_resolved_tool", lambda exe: (exe, Path(exe), None, "d")
+    )
+    cases = [
+        ("x86_64-pc-windows-msvc", ("-DX", "--target=x86_64-w64-windows-gnu")),
+        ("x86_64-w64-windows-gnu", ("-DX",)),
+        ("x86_64-pc-linux-gnu", ("-DX",)),
+    ]
+    for n, (default, expected) in enumerate(cases):
+        monkeypatch.setattr(abi_target, "_default_triple", lambda s, d, t=default: t)
+        join.join_clang_semantics(
+            root,
+            f"abi-target-join-{n}-{tmp_path.name}",
+            headers=[header],
+            extra_includes=[],
+            compiler="c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            gcc_option_tokens=("-DX",),
+            sysroot=None,
+            nostdinc=False,
+            lang=None,
+            extra_hash_dirs=(),
+            exported_symbols=frozenset({"_ZN1C4safeEv"}),
+        )
+        assert seen[-1] == expected, default
+    assert len(seen) == len(cases)

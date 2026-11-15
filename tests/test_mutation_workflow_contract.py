@@ -966,3 +966,36 @@ def test_a_formatting_exclusion_is_honoured_inside_the_copied_tree() -> None:
         "mutmut would abort at stats collection. ruff said:\n"
         f"{proc.stdout}{proc.stderr}"
     )
+
+
+def test_every_repository_package_the_tests_import_is_copied_into_mutants() -> None:
+    """Every top-level package of this repository that a test module imports
+    must exist inside `mutants/` (as `source_paths` or `also_copy`), or the
+    lane aborts at stats collection with `ModuleNotFoundError` the first time
+    its selection reaches that module (`abiforge`, run 43581073135).
+
+    Oracle: the repository's own top-level packages (directories with an
+    `__init__.py`), intersected with the names test modules import -- read
+    from the test sources, not from the mutmut configuration."""
+    import ast
+
+    packages = {
+        p.name
+        for p in REPO_ROOT.iterdir()
+        if p.is_dir() and (p / "__init__.py").is_file() and p.name != "tests"
+    }
+    imported: set[str] = set()
+    for path in (REPO_ROOT / "tests").rglob("test_*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                imported.add(node.module.split(".")[0])
+            elif isinstance(node, ast.Import):
+                imported |= {a.name.split(".")[0] for a in node.names}
+    config = _mutmut_config()
+    copied = set(config.get("source_paths", [])) | set(config.get("also_copy", []))
+    missing = sorted((packages & imported) - copied)
+    assert "abiforge" in packages & imported
+    assert not missing, (
+        f"tests import these packages but mutants/ lacks them: {missing}"
+    )

@@ -23,6 +23,7 @@ from ....model import (
     Variable,
 )
 from ....model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from ....model.declaration_headers import HeaderAttributedMap
 from ....model.identity import (
     entity_id_for_constant,
     entity_id_for_enum,
@@ -121,6 +122,7 @@ def project(
     functions = {}
     variables = {}
     aliases = {}
+    alias_headers: dict[str, str] = {}
     alias_ids = {}
     alias_abis = {}
     constants = {}
@@ -362,6 +364,7 @@ def project(
                 contract_attributes=attributes(r),
                 deprecated_fact=Fact.present(r.get("deprecated")),
                 is_override=r.get("override"),
+                is_final=r.get("final"),
                 ref_qualifier=r.get("ref_qualifier", ""),
                 is_virtual=protocol_flag(r, "virtual", language),
                 is_pure_virtual=protocol_flag(r, "pure_virtual", language),
@@ -428,9 +431,11 @@ def project(
             if name == target:
                 continue
             aliases[name] = target
+            alias_headers[name] = r.get("source") or ""
             alias_ids[name] = entity_id_for_typedef(scope(r), r["name"])
             if r.get("abi"):
                 alias_abis[name] = abi(r["abi"])
+    aliases = HeaderAttributedMap(aliases, alias_headers)
     ir = normalize_header_ast(
         types=types.values(),
         enums=enums.values(),
@@ -485,5 +490,49 @@ def project(
         semantic_ir=ir,
         cxx_template_defaults=defaults if language == "c++" else None,
         cxx_concept_constraints=constraints if language == "c++" else None,
+        std_reexports=std_reexports(rows, policy) if language == "c++" else None,
         extraction_provenance=provenance,
     )
+
+
+def _namespace_path(row: dict[str, Any]) -> tuple[str, ...] | None:
+    """A row's enclosing namespace path; ``None`` below a record or an
+    anonymous namespace (no re-export can be declared there)."""
+    out: list[str] = []
+    for part in row.get("scope") or ():
+        if part.get("kind") not in ("namespace", "inline_namespace"):
+            return None
+        out.append(str(part.get("name") or ""))
+    return tuple(out)
+
+
+def std_reexports(rows: list[dict[str, Any]], policy: Any) -> dict[str, str] | None:
+    """The public headers' ``using std::X;`` re-exports from the plugin's
+    ``using`` rows. GCC records no position for a using-declaration, so the
+    declaring namespace's own declarations stand in for its provenance, and
+    a re-export in a namespace with none leaves the table ``None``
+    (``extract/headers/std_reexports.py``, ``namespace_origin``)."""
+    from ..std_reexports import namespace_origin, reexport_entry
+
+    own_files: dict[tuple[str, ...], list[str | None]] = {}
+    entries: dict[tuple[str, ...], list[tuple[str, str]]] = {}
+    for r in rows:
+        path = _namespace_path(r)
+        if not path:
+            continue
+        if r["kind"] != "using":
+            own_files.setdefault(path, []).append(r.get("source"))
+            continue
+        target = "::".join(p for p in (r.get("target_scope"), r.get("name")) if p)
+        entry = reexport_entry(path, target)
+        if entry is not None:
+            entries.setdefault(path, []).append(entry)
+    out: dict[str, str] = {}
+    for path, found in entries.items():
+        origin = namespace_origin(own_files.get(path, ()), policy.public)
+        if origin is None:
+            return None  # the re-exports' provenance cannot be established
+        if origin:
+            for entry in found:
+                out.setdefault(*entry)
+    return dict(sorted(out.items()))

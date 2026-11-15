@@ -245,7 +245,9 @@ class TestElfVisibilityChanged:
         )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         kind_set = _kinds(r)
-        assert ChangeKind.SYMBOL_ELF_VISIBILITY_CHANGED in kind_set
+        # One event, one finding: the function-specific kind, not the generic.
+        assert ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED in kind_set
+        assert ChangeKind.SYMBOL_ELF_VISIBILITY_CHANGED not in kind_set
 
 
 class TestSonameChanges:

@@ -27,7 +27,8 @@ name: Edit corpus tiers
 # never dropped. Versioned names are apt-installed first.
 #
 # Toolchains: two gcc and two clang majors plus gcc-multilib, so the version,
-# consumer-family and -m32 axes have more than one buildable value. A config
+# consumer-family and -m32 axes have more than one buildable value, and libc++
+# (both clang majors) for the libc++ rebuild. A config
 # the runner cannot build is reported as a skip with its reason, never passed.
 #
 # Scheduled runs are on main only. A failed scheduled run opens ONE tracking
@@ -68,7 +69,7 @@ permissions:
   contents: read
 
 env:
-  BASE_PACKAGES: gcc g++ gcc-14 g++-14 clang clang-19 gcc-multilib g++-multilib binutils
+  BASE_PACKAGES: gcc g++ gcc-14 g++-14 clang clang-19 gcc-multilib g++-multilib binutils libc++-dev libc++abi-dev libc++-19-dev libc++abi-19-dev
 
 jobs:
   plan:

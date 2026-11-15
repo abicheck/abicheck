@@ -80,7 +80,6 @@ since SDK consumers typically use stable binary interfaces, not source-level nam
 | `field_renamed` | Struct/class field name changed |
 | `method_access_changed` | Method access level changed |
 | `field_access_changed` | Field access level changed |
-| `source_level_kind_changed` | `struct` ↔ `class` keyword (binary-identical) |
 | `removed_const_overload` | const overload removed |
 | `param_default_value_removed` | Default argument removed |
 

@@ -37,6 +37,7 @@ from enum import StrEnum
 from .build_mode_facts import GlibcxxDualAbi
 
 __all__ = [
+    "LIBC_ABI_MACROS",
     "RUNTIME_ABI_MACROS",
     "DualAbiSelection",
     "SelectionSource",
@@ -53,6 +54,14 @@ __all__ = [
 #: own declarations. Flipping one is a compatibility finding
 #: (``glibcxx_dual_abi_changed``), not a reason to refuse the comparison.
 RUNTIME_ABI_MACROS: tuple[str, ...] = ("_GLIBCXX_USE_CXX11_ABI",)
+
+#: glibc's ABI-selecting feature macros: they choose which libc ABI the
+#: library is compiled to (64-bit ``time_t``, large-file ``off_t``), not the
+#: library's own declarations. A side that flips one is the ABI transition
+#: ``time64_abi_changed`` reports -- comparable, not a refused profile. Kept
+#: apart from :data:`RUNTIME_ABI_MACROS`, whose operations the libstdc++
+#: dual-ABI detector reads as its own selection.
+LIBC_ABI_MACROS: tuple[str, ...] = ("_TIME_BITS", "_FILE_OFFSET_BITS")
 
 _MACRO = "_GLIBCXX_USE_CXX11_ABI"
 
@@ -121,9 +130,15 @@ def runtime_abi_ops(ops: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return [op for op in ops if _is_runtime_abi_op(op)]
 
 
+def _is_abi_selector_op(op: tuple[str, str]) -> bool:
+    """Whether a macro operation selects a runtime's ABI (libstdc++ or libc)."""
+    return _is_runtime_abi_op(op) or _macro_name(op[1]) in LIBC_ABI_MACROS
+
+
 def macro_ops_differ_only_in_runtime_abi(old_raw: object, new_raw: object) -> bool:
     """True when the two sides' macro operations differ, and every difference
-    is an operation on a runtime-ABI macro (:data:`RUNTIME_ABI_MACROS`).
+    is an operation on a runtime-ABI selector (:data:`RUNTIME_ABI_MACROS` or
+    :data:`LIBC_ABI_MACROS`).
 
     The other operations must match in order: a second, unrelated ``-D``
     difference still changes the declarations the parse saw and keeps
@@ -132,8 +147,8 @@ def macro_ops_differ_only_in_runtime_abi(old_raw: object, new_raw: object) -> bo
     old_ops, new_ops = parse_macro_ops(old_raw), parse_macro_ops(new_raw)
     if old_ops == new_ops:
         return False
-    old_rest = [op for op in old_ops if not _is_runtime_abi_op(op)]
-    new_rest = [op for op in new_ops if not _is_runtime_abi_op(op)]
+    old_rest = [op for op in old_ops if not _is_abi_selector_op(op)]
+    new_rest = [op for op in new_ops if not _is_abi_selector_op(op)]
     return old_rest == new_rest
 
 

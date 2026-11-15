@@ -95,8 +95,11 @@ risk       = RISK_KINDS                                  (unchanged)
 ```
 
 Downgraded kinds: `ENUM_MEMBER_RENAMED`, `FIELD_RENAMED`, `PARAM_RENAMED`,
-`METHOD_ACCESS_CHANGED`, `FIELD_ACCESS_CHANGED`, `SOURCE_LEVEL_KIND_CHANGED`,
+`METHOD_ACCESS_CHANGED`, `FIELD_ACCESS_CHANGED`,
 `REMOVED_CONST_OVERLOAD`, `PARAM_DEFAULT_VALUE_REMOVED`.
+(`SOURCE_LEVEL_KIND_CHANGED` left this list on 2026-11-14: it is COMPATIBLE
+by default since the ADR-011 amendment of that date, so no profile override
+is needed.)
 
 These are all source-level concerns — already-compiled binary consumers are
 unaffected.

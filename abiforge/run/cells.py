@@ -139,27 +139,30 @@ class CellResult:
         )
 
 
-def seed_conflict(seed: Seed, config: Config) -> str | None:
-    """A seed x build pair that is ill-formed on its own, whatever the edit.
+def seed_conflict(seed: Seed, config: Config, op: EditOp | None = None) -> str | None:
+    """A seed x build pair (with *op*'s edit, when given) that is ill-formed.
 
     The rule lives with the language-space model (``abiforge.model.space``), so
     the coverage report counts as infeasible exactly what the generator refuses.
     """
-    return _std_flag_conflict(seed, config.flags)
+    return _std_flag_conflict(seed, config.flags, op)
 
 
-def _std_flag_conflict(seed: Seed, flags: Flags) -> str | None:
-    """A seed built (or consumed) under *flags* that cannot work: the space model's rule."""
-    return seed_flags_conflict(seed, flags)
+def _std_flag_conflict(
+    seed: Seed, flags: Flags, op: EditOp | None = None
+) -> str | None:
+    """A cell built (or consumed) under *flags* that cannot work: the space model's rule."""
+    return seed_flags_conflict(seed, flags, op)
 
 
-def _has_std_string(seed: Seed) -> bool:
-    """The seed passes ``std::string`` across its boundary (cxx_stdlib, cxx_alt)."""
-    return "std_string" in seed_constructs(seed)
+def _has_std_string(seed: Seed, op: EditOp | None = None) -> bool:
+    """The cell passes ``std::string`` across its boundary, in the baseline
+    (cxx_stdlib, cxx_alt) or through *op*'s edit."""
+    return "std_string" in seed_constructs(seed, op)
 
 
 def stdlib_mismatch(
-    seed: Seed, config: Config, consumer: ResolvedConsumer
+    seed: Seed, config: Config, consumer: ResolvedConsumer, op: EditOp | None = None
 ) -> str | None:
     """A ``std::`` seed whose library and consumer use different C++ libraries.
 
@@ -167,7 +170,7 @@ def stdlib_mismatch(
     API (or the reverse), whatever the edit; that pairing is not buildable.
     """
     tc = consumer.toolchain
-    if not _has_std_string(seed) or tc == config.producer:
+    if not _has_std_string(seed, op) or tc == config.producer:
         return None
     if uses_libstdcxx(config.producer) != uses_libstdcxx(tc):
         return (
@@ -182,7 +185,7 @@ def _effective_cxx11_abi(tc: Toolchain, flags: Flags) -> int | None:
 
 
 def dual_abi_mismatch(
-    seed: Seed, config: Config, consumer: ResolvedConsumer
+    seed: Seed, config: Config, consumer: ResolvedConsumer, op: EditOp | None = None
 ) -> str | None:
     """A ``std::string`` consumer on the other side of libstdc++'s dual ABI.
 
@@ -190,7 +193,7 @@ def dual_abi_mismatch(
     types with different mangled names: the consumer cannot link the old
     library at all, so the pair says nothing about the edit.
     """
-    if not _has_std_string(seed):
+    if not _has_std_string(seed, op):
         return None
     if not (uses_libstdcxx(config.producer) and uses_libstdcxx(consumer.toolchain)):
         return None
@@ -231,14 +234,14 @@ def pair_blocked(
             "infeasible",
             "consumer and library word sizes differ; nothing can link",
         )
-    reason = _std_flag_conflict(seed, consumer.flags)
+    reason = _std_flag_conflict(seed, consumer.flags, op)
     if reason:
         return ("infeasible", f"consumer: {reason}")
     reason = consumer_unavailable(config, consumer, op.features)
     if reason:
         return ("unavailable", reason)
-    reason = stdlib_mismatch(seed, config, consumer) or dual_abi_mismatch(
-        seed, config, consumer
+    reason = stdlib_mismatch(seed, config, consumer, op) or dual_abi_mismatch(
+        seed, config, consumer, op
     )
     if reason:
         return ("infeasible", reason)
@@ -246,7 +249,7 @@ def pair_blocked(
 
 
 def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellResult:
-    reason = op.requires(config) or seed_conflict(seed, config)
+    reason = op.requires(config) or seed_conflict(seed, config, op)
     if reason or not op.applies_to(seed) or seed.lang != config.lang:
         return CellResult(
             op.name,

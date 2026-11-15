@@ -590,4 +590,14 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "base_class_access_narrowed",
         "a base-class specifier narrowed (public -> protected/private, or protected -> private): consumers that convert a derived pointer to the base or reach the base's members through the derived type no longer compile. Layout and symbols are unchanged -- header-only (castxml/clang) evidence -- so this is API_BREAK, not BREAKING. Widening is compatible and not reported. -- base access narrowed -> API_BREAK",
     ),
+    (
+        "FUNC_BECAME_FINAL",
+        "func_became_final",
+        "a virtual member function gained the final virt-specifier: its slot and symbol are unchanged, but a consumer class overriding it no longer compiles -> API_BREAK",
+    ),
+    (
+        "FUNC_LOST_FINAL",
+        "func_lost_final",
+        "a virtual member function lost the final virt-specifier: overriding it is allowed again, but calls compiled while it was final may have been devirtualized and never reach a new override -> COMPATIBLE_WITH_RISK",
+    ),
 )

@@ -87,7 +87,7 @@ from .model import (
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.declaration_headers import HeaderAttributedMap, declaring_header_set
 from .model.evidence_merge import merged_capture_fact
-from .tu_fragment import MergedTuFragments, TuFragment, entity_key
+from .tu_fragment import MergedTuFragments, TuFragment, entity_key, merged_std_reexports
 from .tu_merge_provenance import (
     _blank_provenance,
     _more_public_of,
@@ -547,8 +547,7 @@ def merge_fragments(
     # manifest with two TUs, one falling back to clang while the other
     # stays on castxml, would otherwise merge fine and silently stamp the
     # whole snapshot with just one representative fragment's ast_producer
-    # -- which `resolve_header_ast_result`/`dumper.py` then trusts globally
-    # (`is_clang` gates DWARF layout backfill/coherence for every
+    # -- which `resolve_header_ast_result`/`dumper.py` then trusts globally (`is_clang` gates DWARF layout backfill/coherence for every
     # declaration, not just the representative fragment's own). Reject
     # that mix outright rather than let a wrong-producer assumption leak
     # into layout backfill for declarations that didn't actually come from
@@ -788,6 +787,7 @@ def merge_fragments(
         ast_toolchain_supported=representative.ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=representative.ast_toolchain_unsupported_reasons,
         frontend_context_kind=representative.frontend_context_kind,
+        std_reexports=merged_std_reexports(ordered),
     )
 
 

@@ -27,6 +27,7 @@
 | Coverage gap | Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector |
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
+| Coverage gap | Detector 'imported_symbols_unprovided' disabled: no --follow-deps dependency evidence on the old side |
 | Coverage gap | Header analysis without record layout on every compared side: no DWARF layout and no header frontend that computes it (the clang frontend parses declarations but not struct layout, unless the layout companion ran), so struct size, alignment and field offset changes cannot be established; confidence capped at MEDIUM |
 
 ## Relationship Coverage
@@ -69,7 +70,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
+**Not evaluated:** 11 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 5 more
 
 
 ## Related review groups

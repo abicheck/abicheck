@@ -321,7 +321,9 @@ def test_scan_real_guard_after_block_comment_still_recognized() -> None:
 
 
 def test_lines_starting_inside_block_comment_single_line_comment_unaffected() -> None:
-    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+    from abicheck.buildsource.pattern_facts_lexer import (
+        lines_starting_in_block_comment as _lines_starting_inside_block_comment,
+    )
 
     text = "/* one-line comment */\n#ifdef FEATURE_X\nvoid f();\n#endif\n"
     starts = _lines_starting_inside_block_comment(text)
@@ -337,7 +339,9 @@ def test_lines_starting_inside_block_comment_ignores_delimiter_in_string_literal
     # must not open block-comment state -- previously this silently swallowed
     # every following line, including a real #ifdef/#endif pair, with no
     # diagnostic to signal the desync.
-    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+    from abicheck.buildsource.pattern_facts_lexer import (
+        lines_starting_in_block_comment as _lines_starting_inside_block_comment,
+    )
 
     text = 'const char *token = "/*";\n#ifdef FEATURE_X\nvoid f();\n#endif\n'
     starts = _lines_starting_inside_block_comment(text)
@@ -349,7 +353,9 @@ def test_lines_starting_inside_block_comment_ignores_delimiter_in_string_literal
 def test_lines_starting_inside_block_comment_ignores_delimiter_in_char_literal() -> (
     None
 ):
-    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+    from abicheck.buildsource.pattern_facts_lexer import (
+        lines_starting_in_block_comment as _lines_starting_inside_block_comment,
+    )
 
     text = "char c = '/';\n#ifdef FEATURE_X\nvoid f();\n#endif\n"
     starts = _lines_starting_inside_block_comment(text)
@@ -357,7 +363,9 @@ def test_lines_starting_inside_block_comment_ignores_delimiter_in_char_literal()
 
 
 def test_lines_starting_inside_block_comment_handles_escaped_quote_in_string() -> None:
-    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+    from abicheck.buildsource.pattern_facts_lexer import (
+        lines_starting_in_block_comment as _lines_starting_inside_block_comment,
+    )
 
     # An escaped quote inside the string must not close the literal early --
     # if it did, the real "/*" right after would incorrectly open a comment.
@@ -371,7 +379,9 @@ def test_lines_starting_inside_block_comment_still_tracks_a_real_block_comment()
 ):
     # A string-literal-state fix must not regress the original, already-shipped
     # cross-line block-comment tracking this function exists for.
-    from abicheck.buildsource.macro_graph import _lines_starting_inside_block_comment
+    from abicheck.buildsource.pattern_facts_lexer import (
+        lines_starting_in_block_comment as _lines_starting_inside_block_comment,
+    )
 
     text = "/*\n#ifdef FEATURE_X\nvoid a();\n#endif\n*/\nvoid real_decl();\n"
     starts = _lines_starting_inside_block_comment(text)

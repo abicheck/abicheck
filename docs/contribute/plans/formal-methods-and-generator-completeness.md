@@ -134,6 +134,12 @@ vptr, templates). Each fragment is one Lean module on a shared core
 5. ✅ **E8**, then the next fragments in the stated order: function signatures,
    enums, ELF versioning, C++ layout.
 
+6. **Outside the proved fragments:** the evidence-level model (`observable_at`),
+   the stripped binary + headers cell, configuration-space coverage and
+   abiforge self-testing are owned by
+   [abicheck/abiforge completeness](abicheck-abiforge-completeness.md). That plan
+   consumes this plan's fragments; new fragments stay here.
+
 ## Integration rules
 
 - Lean and TLA+ stay **development tools**. They are never an abicheck

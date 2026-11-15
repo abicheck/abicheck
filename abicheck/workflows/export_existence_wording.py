@@ -36,7 +36,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from ..buildsource.cross_source_checks_base import _exported_symbol_names
 from ..buildsource.export_account_decision import (
     ExportAccount,
     account_export,
@@ -52,6 +51,7 @@ from ..buildsource.export_accounting import (
     ACCOUNT_PUBLIC_TEMPLATE,
     ACCOUNT_TEMPLATE_INST,
 )
+from ..compare.export_names import default_export_names
 from ..model import AbiSnapshot
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
@@ -155,7 +155,7 @@ def describe_export_existence(
             continue
         side = old if change.kind in _REMOVED else new
         if id(side) not in exports:
-            names = _exported_symbol_names(side)
+            names = default_export_names(side)
             exports[id(side)] = None if names is None else frozenset(names)
         exported = exports[id(side)]
         if exported is None:

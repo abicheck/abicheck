@@ -10,9 +10,8 @@ A *point* in the space is one combination of six axes::
   a language feature, off that feature (``FEATURE_CONSTRUCT``);
 - **edit** (``edit_values``): the class of the edit within its construct, as
   ``abiforge.model.edit_model`` defines it from C/C++ layout rules, not from the
-  operators. Record layout (``struct``) and base-class layout
-  (``inheritance``) are split; every other construct has the single value
-  ``any``. A model class no operator generates stays in the denominator and
+  operators. The constructs ``edit_model.EDIT_MODEL`` names are split; every
+  other construct has the single value ``any``. A model class no operator generates stays in the denominator and
   is listed by ``edit_classes_without_operator``;
 - **language** / **standard**: ``abiforge.model.config.STANDARDS``;
 - **config feature** (``CONFIG_FEATURES``): one ABI-relevant setting the cell
@@ -116,6 +115,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("template", _CXX),
     Construct("concept", _CXX, "concepts"),
     Construct("no_unique_address", _CXX, "no_unique_address"),
+    Construct("deduced_return", _CXX, "deduced_return"),
     Construct("noexcept_type", _CXX, "noexcept_in_type"),
     Construct("std_string", _CXX, "std_string"),
     Construct("restrict_pointer", _C, "restrict"),
@@ -136,6 +136,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("inline_namespace", _CXX),
     Construct("abi_tag", _CXX),
     Construct("hidden_friend", _CXX),
+    Construct("using_declaration", _CXX),
 )
 CONSTRUCT_BY_NAME: dict[str, Construct] = {c.name: c for c in CONSTRUCTS}
 
@@ -220,10 +221,62 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "lay": "struct",
     "layb": "inheritance",
     "x": "function",
+    # cxx_more: one baseline per ChangeKind operator (operators/kinds.py)
+    "k.vbo": "inheritance",
+    "k.svg": "inheritance",
+    "k.tpr": "struct",
+    "k.rsv": "struct",
+    "k.tvs": "typedef",
+    "k.hnd": "typedef",
+    "k.opq": "struct",
+    "k.isa": "function",
+    "k.inst": "template",
+    "k.dta": "template",
+    "k.ovl": "function",
+    "k.inv": "inline_namespace",
+    "k.exp": "function",
+    "k.tag": "template",
+    "k.cpo": "function",
+    "k.ret": "function",
+    "k.tpp": "function",
+    "k.slk": "struct",
+    "k.mtp": "template",
+    "k.aeq": "struct",
+    "k.del": "function",
+    "k.ibr": "inline_function",
+    "k.tvz": "class_virtual",
+    "k.evd": "struct",
+    "k.urt": "deduced_return",
+    "k.rex": "using_declaration",
+    "k.pnv": "class_virtual",
+    "k.stl": "std_string",
+    "k.anon": "function",
+    # cxx_more: edit-class probes (abiforge/model/probes.py)
+    "vt": "class_virtual",
+    "en": "enum",
+    "ef": "enum_fixed_underlying",
+    "ec": "enum_class",
+    "vr": "variable",
+    "td": "typedef",
+    "tp": "template",
+    # cxx_src (abiforge.operators.source_evidence)
+    "src.macro": "header_constant",
+    "src.inl": "inline_function",
+    "src.tmpl": "template",
+    "src.vd": "class_virtual",
+    "src": "function",
+    # cxx_tree (abiforge.operators.source_tree)
+    "tree.anon": "struct",
+    "tree.pair": "struct",
+    "tree.rtti": "class_virtual",
+    "tree.ren": "struct",
+    "tree.priv": "struct",
+    "tree.privref": "struct",
+    "tree": "function",
 }
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
-GATE_ROLES = frozenset({"alt.gate", "xa.gate"})
+GATE_ROLES = frozenset({"alt.gate", "xa.gate", "src.gate", "tree.gate"})
 
 # Language feature an operator needs -> the construct it exercises.
 FEATURE_CONSTRUCT: dict[str, str] = {
@@ -240,10 +293,49 @@ def role_construct(role: str) -> str:
     raise KeyError(f"seed role {role!r} has no construct in ROLE_CONSTRUCT")
 
 
+# Operators whose roles name a carrier (``elf.extra``, a ``func.*`` or class
+# seed role holding several declarations) rather than what the edit changes:
+# the role-derived construct is not the one the edit touches. A key must be a real operator (``test_edit_corpus_edit_axis``).
+OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
+    # declarations of another construct added next to the seed's functions
+    "object_added": ("variable",),
+    "source_only_var_export_added": ("variable",),
+    "header_constant_added": ("header_constant",),
+    "record_added": ("struct",),
+    # record, typedef and enum edits whose second role is a carrier function
+    "field_renamed": ("struct",),
+    "record_became_opaque": ("struct",),
+    "struct_became_union": ("struct",),
+    "record_removed": ("struct",),
+    "typedef_removed": ("typedef",),
+    "enum_member_renamed": ("enum",),
+    "serialization_tag_swapped": ("enum",),
+    "internal_table_grown": ("variable",),
+    # free functions declared beside the seed's class
+    "extern_c_linkage_removed": ("function",),
+    "param_default_value_changed": ("function",),
+    "param_default_value_removed": ("function",),
+    "param_restrict_removed": ("function",),
+    # the same sources rebuilt with other flags
+    "rebuild_hidden_visibility": ("compile_option",),
+    "rebuild_optimized": ("compile_option",),
+    "rebuild_m32": ("compile_option",),
+    # a class edit that is also the class's first virtual (a vptr appears)
+    "vptr_introduced": ("class", "class_virtual"),
+    # a base added to the polymorphic Shape: a base-subobject edit
+    "base_class_add": ("inheritance",),
+    # the same library dumped with less evidence on its new side
+    "new_side_dumped_without_headers": ("compile_option",),
+}
+
+
 def op_constructs(op: EditOp) -> tuple[str, ...]:
-    """The constructs *op* exercises: as declared, else its features', else its roles'."""
+    """The constructs *op* exercises: as declared, else ``OP_CONSTRUCT``'s,
+    else its features', else its roles'."""
     if op.constructs:
         names = list(op.constructs)
+    elif op.name in OP_CONSTRUCT:
+        names = list(OP_CONSTRUCT[op.name])
     elif op.features:
         names = [FEATURE_CONSTRUCT[f] for f in op.features]
     else:
@@ -284,11 +376,15 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_became_packed": "packing_change",
         "field_became_bitfield": "field_to_bitfield",
         "field_renamed": "member_rename",
+        "tree_anonymous_type_coordinates_shifted": "declaration_text_only",
+        "tree_pointee_type_renamed": "pointee_rename",
+        "tree_private_pointee_type_renamed": "pointee_rename",
         "field_became_const": "member_cv_change",
         "field_became_volatile": "member_cv_change",
         "record_became_opaque": "record_opaque",
         "struct_became_union": "record_kind_change",
         "record_removed": "record_removed",
+        "record_added": "record_added",
         "returned_struct_grew_past_registers": "insert_tail_shifts",
         # Holder embeds detail::Impl by value; Impl grows, moving Holder::x: a
         # member whose type grew, not a member appended at the tail.
@@ -311,6 +407,11 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "cxx_record_added": "record_added",
         "record_lost_trivially_copyable": "record_triviality_change",
         "record_lost_standard_layout": "member_access_change",
+        "reserved_field_used": "member_rename",
+        "nonpod_field_added_in_tail_padding": "insert_tail_absorbed",
+        "opaque_record_defined": "record_defined",
+        "struct_became_class": "record_kind_change",
+        "field_retyped_abi_equivalent": "retype_same_layout",
     },
     "inheritance": {
         "base_became_virtual": "base_became_virtual",
@@ -319,8 +420,228 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "vtt_grew": "base_add_virtual",
         "base_removed": "base_remove",
         "base_added_nonvirtual": "base_add_nonvirtual",
+        "base_class_add": "base_add_nonvirtual",
         "base_became_nonvirtual": "base_became_nonvirtual",
         "base_access_narrowed": "base_access_changed",
+        "virtual_bases_reordered": "base_reorder",
+        "secondary_base_became_polymorphic": "base_layout_changed",
+    },
+    "function": {
+        "func_param_append": "param_added",
+        "func_param_remove": "param_removed",
+        "func_param_type_change": "param_retyped",
+        "param_became_va_list": "param_retyped",
+        "param_lost_va_list": "param_retyped",
+        "param_pointer_level_changed": "param_pointer_level",
+        "param_pointee_const_added": "param_pointee_cv",
+        "param_pointee_const_to_volatile": "param_pointee_cv",
+        "param_rename_header_only": "param_renamed",
+        "params_reordered": "params_reordered",
+        "default_argument_added": "default_argument_changed",
+        "param_default_value_changed": "default_argument_changed",
+        "param_default_value_removed": "default_argument_changed",
+        "param_restrict_removed": "param_qualifier_change",
+        "func_return_type_change": "return_retyped",
+        "return_pointer_level_changed": "return_pointer_level",
+        "return_pointee_const_added": "return_pointee_cv",
+        "return_pointee_const_removed": "return_pointee_cv",
+        "return_deep_pointee_const_removed": "return_pointee_cv",
+        "func_became_variadic": "variadic_change",
+        "func_lost_variadic": "variadic_change",
+        "func_became_ms_abi": "calling_convention_change",
+        "func_exception_spec_widened": "exception_spec_change",
+        "func_contract_attribute_added": "attribute_change",
+        "func_contract_attribute_removed": "attribute_change",
+        "func_became_extern_c": "language_linkage_change",
+        "extern_c_linkage_removed": "language_linkage_change",
+        "func_out_of_line_to_inline": "became_inline",
+        "inline_function_outlined": "became_out_of_line",
+        "imported_symbol_added": "body_change",
+        "imported_symbol_removed": "body_change",
+        "glibc_version_required_added": "body_change",
+        "glibc_older_version_required": "body_change",
+        "glibc_floor_raised": "body_change",
+        "import_left_unprovided": "body_change",
+        "glibc_version_requirement_dropped": "body_change",
+        "fortified_call_dropped": "body_change",
+        "text_relocation_introduced": "body_change",
+        "text_relocation_removed": "body_change",
+        "writable_executable_segment": "body_change",
+        "overload_added": "overload_added",
+        "func_add": "function_added",
+        "export_surface_exploded": "function_added",
+        "allocator_replacement_added": "function_added",
+        "std_template_instance_exported": "function_added",
+        "func_remove": "function_removed",
+        "src_default_argument_changed": "default_argument_changed",
+        "src_public_entry_calls_internal": "body_change",
+        "src_public_entry_depends_on_hidden": "body_change",
+        "src_public_function_added": "function_added",
+        "src_public_function_removed": "function_removed",
+        "src_undocumented_export_added": "export_declaration_mismatch",
+        "tree_private_declaration_exported": "export_declaration_mismatch",
+        "allocator_replacement_removed": "function_removed",
+        "symbols_prefixed_batch": "function_renamed",
+        "api_version_suffix_bumped": "function_renamed",
+        "declared_but_not_exported": "export_declaration_mismatch",
+        "exported_but_undeclared": "export_declaration_mismatch",
+        "source_only_export_added": "export_declaration_mismatch",
+        "declared_exports_defined": "export_declaration_mismatch",
+        "func_became_weak": "binding_change",
+        "weak_became_global": "binding_change",
+        "func_became_protected": "visibility_change",
+        "func_lose_default_visibility": "visibility_change",
+        "internal_helper_hidden": "visibility_change",
+        "version_node_added_for_new_symbol": "version_change",
+        "symbol_moved_version_node_keeping_alias": "version_change",
+        "unversioned_export_added": "version_change",
+        "func_became_ifunc": "symbol_type_change",
+        "ifunc_removed": "symbol_type_change",
+        # adds functions (and a STB_GNU_UNIQUE static inside one): no existing
+        # symbol changes type
+        "gnu_unique_static_added": "function_added",
+        "comment_only": "declaration_text_only",
+        "cpu_dispatch_variants_dropped": "function_removed",
+        "overload_retyped": "param_retyped",
+        "experimental_api_graduated": "function_added",
+        "experimental_api_removed": "function_removed",
+        "function_became_customization_object": "function_removed",
+        "template_return_argument_changed": "return_retyped",
+        "template_param_argument_changed": "param_retyped",
+        "declared_function_lost_definition": "export_declaration_mismatch",
+        "declared_function_export_became_c_namesake": "export_declaration_mismatch",
+        "unnamed_type_api_added": "function_added",
+        "reorder_declarations": "declaration_text_only",
+    },
+    "class_virtual": {
+        "virtual_appended_after_last_slot": "vfunc_appended",
+        # Shape::perimeter goes between area and kind: kind's slot moves.
+        "virtual_method_add": "vfunc_inserted",
+        "virtual_remove": "vfunc_removed",
+        "virtual_reorder": "vfunc_reordered",
+        "method_const_drop": "vfunc_signature_changed",
+        "override_return_became_covariant": "vfunc_return_covariant",
+        "method_noexcept_add": "vfunc_exception_spec_change",
+        "virtual_noexcept_added": "vfunc_exception_spec_change",
+        "virtual_become_pure": "vfunc_became_pure",
+        "type_lost_abstract": "vfunc_lost_pure",
+        "pure_virtual_added": "pure_vfunc_added",
+        "method_became_virtual": "method_became_virtual",
+        "method_became_nonvirtual": "method_became_nonvirtual",
+        "override_added": "override_added",
+        "override_removed": "override_removed",
+        "override_specifier_added": "override_specifier_change",
+        "override_specifier_removed": "override_specifier_change",
+        "virtual_became_final": "final_specifier_change",
+        "virtual_lost_final": "final_specifier_change",
+        "destructor_became_virtual": "virtual_dtor_added",
+        "destructor_became_nonvirtual": "virtual_dtor_removed",
+        "key_function_inlined": "key_function_change",
+        "vptr_introduced": "became_polymorphic",
+        "last_virtual_removed": "lost_polymorphism",
+        "polymorphic_type_added_without_virtual_dtor": "polymorphic_class_added",
+        "class_rtti_became_protected": "vtable_symbol_visibility",
+        "class_visibility_hidden": "vtable_symbol_visibility",
+        # a new public subclass overriding SrcBase::f
+        "src_virtual_dispatch_target_added": "polymorphic_class_added",
+        # a private polymorphic class gets an out-of-line key function, so the
+        # library now emits (and exports) its vtable and typeinfo
+        "tree_internal_rtti_exported": "key_function_change",
+    },
+    "enum": {
+        "enum_append_member": "enumerator_appended",
+        "enum_sentinel_moved": "enumerator_inserted",
+        "enum_remove_member": "enumerator_removed",
+        "enum_change_value": "enumerator_value_changed",
+        "serialization_tag_swapped": "enumerator_values_swapped",
+        "enum_member_renamed": "enumerator_renamed",
+        "enum_enumerator_alias_added": "enumerator_alias_added",
+        "enum_append_wide_value": "range_exceeds_underlying",
+        "rebuild_short_enums": "underlying_type_change",
+        "enum_became_scoped": "scoped_change",
+        "enum_added": "enum_added",
+        "enum_removed": "enum_removed",
+    },
+    "enum_fixed_underlying": {
+        "fixed_enum_enumerator_appended": "enumerator_appended",
+        "fixed_enum_enumerator_inserted": "enumerator_inserted",
+        "fixed_enum_enumerator_removed": "enumerator_removed",
+        "fixed_enum_enumerator_value_changed": "enumerator_value_changed",
+        "fixed_enum_enumerator_values_swapped": "enumerator_values_swapped",
+        "fixed_enum_enumerator_renamed": "enumerator_renamed",
+        "fixed_enum_enumerator_alias_added": "enumerator_alias_added",
+        # An unscoped enum's underlying type becomes fixed (unsigned char).
+        "enum_underlying_narrow": "underlying_type_change",
+        "fixed_enum_became_scoped": "scoped_change",
+        "fixed_enum_added": "enum_added",
+        "fixed_enum_removed": "enum_removed",
+        "fixed_enum_became_opaque": "became_opaque",
+    },
+    "enum_class": {
+        "enum_class_append": "enumerator_appended",
+        "enum_class_enumerator_inserted": "enumerator_inserted",
+        "enum_class_remove": "enumerator_removed",
+        "enum_class_change_value": "enumerator_value_changed",
+        "enum_class_enumerator_values_swapped": "enumerator_values_swapped",
+        "enum_class_enumerator_renamed": "enumerator_renamed",
+        "enum_class_enumerator_alias_added": "enumerator_alias_added",
+        "enum_class_underlying_narrow": "underlying_type_change",
+        "enum_lost_scoped": "scoped_change",
+        "enum_class_added": "enum_added",
+        "enum_class_removed": "enum_removed",
+        "enum_class_became_opaque": "became_opaque",
+    },
+    "variable": {
+        "object_retyped_same_size": "retyped_same_size",
+        # int -> long long
+        "var_type_change": "size_grows",
+        "object_array_grew": "size_grows",
+        "const_string_object_grew": "size_grows",
+        "internal_table_grown": "size_grows",
+        "object_shrank": "size_shrinks",
+        "object_became_const": "cv_change",
+        "object_lost_const": "cv_change",
+        "const_object_value_changed": "initial_value_change",
+        "object_became_tls": "tls_change",
+        "object_became_protected": "visibility_change",
+        "object_hidden": "visibility_change",
+        "object_became_weak": "binding_change",
+        "object_alignment_reduced": "alignment_change",
+        "var_alignment_raised": "alignment_change",
+        "object_moved_version_node": "version_change",
+        "object_added": "variable_added",
+        "object_removed": "variable_removed",
+        "object_renamed": "variable_renamed",
+        "source_only_var_export_added": "export_declaration_mismatch",
+        "object_became_inline_variable": "became_inline",
+    },
+    "typedef": {
+        # int -> long long
+        "typedef_retarget": "retarget_size_change",
+        "integer_typedef_widened": "retarget_size_change",
+        "typedef_retargeted_same_size": "retarget_same_size",
+        "handle_typedef_retargeted": "retarget_pointee",
+        "typedef_removed": "typedef_removed",
+        "version_sentinel_typedef_bumped": "typedef_renamed",
+        "typedef_added": "typedef_added",
+        "typedef_respelled_as_alias": "respelled",
+    },
+    "template": {
+        "template_default_arg_change": "default_argument_change",
+        "exported_instantiation_default_changed": "default_argument_change",
+        "template_param_added_defaulted": "param_added_defaulted",
+        "mandatory_template_param_added": "param_added_mandatory",
+        "template_param_removed": "param_removed",
+        "template_nontype_param_retyped": "param_retyped",
+        "template_instantiation_added": "instantiation_added",
+        "explicit_instantiation_dropped": "instantiation_dropped",
+        "internal_template_instance_dropped": "instantiation_dropped",
+        "template_specialization_added": "specialization_added",
+        "template_specialization_removed": "specialization_removed",
+        "tag_type_renamed": "argument_renamed",
+        "src_template_body_changed": "definition_changed",
+        "template_added": "template_added",
+        "src_uninstantiated_template_removed": "template_removed",
     },
 }
 
@@ -500,6 +821,9 @@ def infeasible(p: Point) -> str | None:
         return why
     if p.edit not in edit_values(p.construct):
         return f"{p.edit} is not an edit sub-class of {p.construct}"
+    langs = _model.edit_langs(p.construct, p.edit)
+    if langs is not None and p.lang not in langs:
+        return f"{p.construct}/{p.edit} has no {p.lang} spelling"
     return None
 
 
@@ -555,21 +879,33 @@ def cell_points(
     return tuple(dict.fromkeys(points))
 
 
-def seed_constructs(seed: Seed) -> tuple[str, ...]:
-    """Every construct a seed's translation unit contains, edited or not."""
-    return tuple(dict.fromkeys(role_construct(r) for r in seed.roles))
+def seed_constructs(seed: Seed, op: EditOp | None = None) -> tuple[str, ...]:
+    """Every construct the translation units of a cell contain.
+
+    The seed's baseline contributes the roles it actually spells (a role
+    whose baseline text is empty, filled only by an operator, contains
+    nothing); *op*, when given, adds what the edit introduces, since the new
+    side is built and consumed too.
+    """
+    names = [role_construct(r) for r, (h, c) in seed.roles.items() if h or c]
+    if op is not None:
+        names.extend(op_constructs(op))
+    return tuple(dict.fromkeys(names))
 
 
-def seed_flags_conflict(seed: Seed, flags: Flags) -> str | None:
-    """Why *seed* cannot be built (or consumed) under *flags*, whatever the edit.
+def seed_flags_conflict(
+    seed: Seed, flags: Flags, op: EditOp | None = None
+) -> str | None:
+    """Why a cell of *seed* (edited by *op*) cannot be built or consumed under *flags*.
 
-    The rule is a property of what the translation unit contains: a seed that
-    uses ``std::string`` anywhere cannot be built with a flag that breaks the
-    installed libstdc++'s layout, even when the edited role is a plain
-    function. The generator applies it to the build and to every consumer.
+    The rule is a property of what the translation units contain: one that
+    uses ``std::string`` anywhere, in the baseline or through the edit,
+    cannot be built with a flag that breaks the installed libstdc++'s layout,
+    even when the edited role is a plain function. The generator applies it
+    to the build and to every consumer.
     """
     feats = [f.name for f in CONFIG_FEATURES if f.on(flags)]
-    for con in seed_constructs(seed):
+    for con in seed_constructs(seed, op):
         for cfg in feats:
             why = CONSTRUCT_CONFIG_CONFLICTS.get((con, cfg))
             if why is not None:
@@ -655,6 +991,7 @@ __all__ = [
     "AXES",
     "CONFIG_AXIS",
     "CONSTRUCTS",
+    "OP_CONSTRUCT",
     "OP_EDIT_CLASS",
     "Point",
     "edit_class",

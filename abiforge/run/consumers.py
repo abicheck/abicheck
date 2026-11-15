@@ -242,59 +242,11 @@ int main() {
 }
 """
 
-# c_elf: the roles the types-taxonomy operators edit.
-_ELF_TYPES = r"""#include <stdio.h>
-#include "edit_seed.h"
-int main(void) {
-  /* Positional: a consumer never names the reserved slot. */
-  struct res r = {3, 0};
-  ctx_t h = ctx_open();
-  struct opq *o = opq_new();
-  printf("lng=%ld disp=%d,%d,%d\n", lng_f(21), k1(1), k2(1), k3(1));
-  printf("avx2=%d,%d,%d sse42=%d,%d,%d\n", k1_avx2(1), k2_avx2(1), k3_avx2(1),
-         k1_sse42(1), k2_sse42(1), k3_sse42(1));
-  /* The stamp's value is the edit's meaning, not a break: only its presence. */
-  printf("vstamp=%d res=%d ctx=%d opq=%d\n", mylib_vstamp() != 0, res_a(&r),
-         ctx_close(h), opq_val(o));
-  return 0;
-}
-"""
-
 _ALT_DATA = r"""#include <stdio.h>
 #include "edit_seed.h"
 int main(void) {
   g_alt += 1;
   printf("alt=%d tie=%d,%d\n", g_alt, t_ie, tie_get());
-  return 0;
-}
-"""
-
-# cxx_more: the roles the types-taxonomy operators edit. Objects with private
-# members are static (zero-initialized), so every run prints the same values.
-_MORE_TYPES = r"""#include <cstdio>
-#include "edit_seed.h"
-static SL sl;
-static TP tp;
-int main() {
-  SD sd; sd.b = 4;
-  SA* pa = &sd;
-  VD2 v2; v2.a = 1; v2.b = 2;
-  VA1* pv = &v2;
-  TC tc{7};
-  Box<int> box; box.v = 5;
-  Kd kd; kd.a = 1;
-  lib::Desc desc;
-  std::printf("sort=%d frob=%d getv=%d,%ld conv=%d\n", lib::sort(2),
-              lib::experimental::frob(3), getv<int>(4), getv<long>(5L), conv<int>(6));
-  std::printf("route=%d,%d sec=%d,%d vb=%d,%d\n", route(1), route(2.5), pa->f(), sd.b,
-              pv->a, v2.b);
-  std::printf("sl=%d tp=%d,%d tc=%d run=%d\n", sl.get(), tp.get(), tp_use(&tp),
-              tc_get(tc), lib::run<lib::fast_tag>());
-  std::printf("consume=%d box=%d kd=%d desc=%d\n", consume(&box), make_box(8).v,
-              kd.get(), desc.count());
-#if __cplusplus >= 201402L
-  std::printf("cb=%d\n", make_cb()(9));
-#endif
   return 0;
 }
 """
@@ -324,22 +276,44 @@ int main() {
 }
 """
 
+_SRC_CALL = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  SrcLeft l;
+  std::printf("take=%d twice=%d scale=%d limit=%d\n", src_take(1), src_twice(3),
+              src_scale(5), SRC_LIMIT);
+  std::printf("entry=%d dispatch=%d count=%d more=%d\n", src_entry(2), src_dispatch(&l),
+              src_count("edit"), src_more(1));
+  return 0;
+}
+"""
+
+_TREE_CALL = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  TreeHolder h;
+  h.in.a = 1;
+  h.n = 2;
+  TreePair p;
+  p.a = 3;
+  std::printf("holder=%d pair=%d,%d count=%d\n", tree_holder_n(&h), tree_pair_a(&p),
+              tree_pair_b(&p), tree_count(4));
+  return 0;
+}
+"""
+
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
     "cxx_stdlib": {"stdlib": _CXX_STDLIB},
-    "c_elf": {
-        "call": _ELF_CALL,
-        "data": _ELF_DATA,
-        "symbols": _ELF_SYMBOLS,
-        "types": _ELF_TYPES,
-    },
+    "c_elf": {"call": _ELF_CALL, "data": _ELF_DATA, "symbols": _ELF_SYMBOLS},
     "c_elf_alt": {"call": _ALT_CALL, "data": _ALT_DATA},
     "cxx_more": {
         "classes": _MORE_CLASSES,
         "hier": _MORE_HIER,
         "symbols": _MORE_SYMBOLS,
-        "types": _MORE_TYPES,
     },
     "cxx_alt": {"call": _XA_CALL},
+    "cxx_src": {"call": _SRC_CALL},
+    "cxx_tree": {"call": _TREE_CALL},
 }

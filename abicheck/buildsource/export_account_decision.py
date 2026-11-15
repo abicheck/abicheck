@@ -73,6 +73,7 @@ __all__ = [
     "account_export",
     "accounting_context",
     "accounting_scope",
+    "undocumented_export_count",
 ]
 
 #: Mangling sigils: Itanium C++ (``_Z…``) and MSVC (``?…``). A non-extern-C
@@ -235,3 +236,11 @@ def account_export(sym: str, ctx: ExportAccountingContext) -> ExportAccount:
     return ExportAccount(
         category, hint=textual_declaration_hint(sym, ctx.evidence), decl=decl
     )
+
+
+def undocumented_export_count(snapshot: AbiSnapshot, exported: frozenset[str]) -> int:
+    """How many of *exported* no public declaration, C++ compiler artifact,
+    allocator interposer or public template instantiation documents -- the
+    same accounting ``exported_not_public`` applies, over every export."""
+    ctx = accounting_context(snapshot, exported)
+    return sum(1 for sym in exported if not account_export(sym, ctx).documented)

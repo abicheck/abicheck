@@ -391,3 +391,22 @@ def test_include_roots_reads_every_include_flag_form(
 )
 def test_itanium_top_namespace(mangled: str, namespace: str | None) -> None:
     assert itanium_top_namespace(mangled) == namespace
+
+
+@pytest.mark.parametrize("helper_binding", ["weak", "global", "absent"])
+def test_overload_stems_use_the_detectors_normalization(helper_binding: str) -> None:
+    """``overload_set_rerouted`` names its finding by the detector's stem
+    (parameter list and leaked return type dropped); the dependency side's
+    stems must be the same strings, or no rerouting finding on a dependency
+    internal can ever be matched."""
+    from abicheck.diff_templates import function_overload_stem
+
+    layout = LAYOUTS[0]
+    snap = _snapshot(
+        layout, vec_named=False, helper_binding=helper_binding, traits_named=False
+    )
+    stems = dependency_internals(snap).overload_stems
+    assert all("(" not in s for s in stems), stems
+    assert stems == {function_overload_stem(s) for s in stems}
+    expected = set() if helper_binding == "global" else {f"{layout.namespace}::helper"}
+    assert stems == expected

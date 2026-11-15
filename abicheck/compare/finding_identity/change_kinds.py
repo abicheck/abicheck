@@ -342,6 +342,8 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     # so its discriminator must not vary with them. Self-mapped, as the enum
     # kinds are.
     "abi_equivalent_type_changed": "abi_equivalent_type_changed",
+    # compare/covariant_return.py: the same slot-identity reasoning.
+    "func_return_covariant_narrowed": "func_return_covariant_narrowed",
     # diff_symbols._detect_newly_deleted_functions emits FUNC_DELETED
     # (castxml is_deleted attribute) or FUNC_DELETED_DWARF (DWARF
     # DW_AT_deleted) for the same symbol/callable->deleted transition --

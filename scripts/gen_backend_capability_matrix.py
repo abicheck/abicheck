@@ -126,9 +126,9 @@ def _render_summary() -> str:
     divergent = [r for r in header_facts if r.castxml is not r.clang]
     # "Only X populates it" means X's OWN PARSE does. A companion-tool row is
     # deliberately excluded from both counts: `RecordType.data_size_bits` is
-    # NONE/COMPANION, and counting it as direct-clang-only would contradict
-    # its own note, which says neither backend's parse computes it
-    # (CodeRabbit review).
+    # PARTIAL/COMPANION, and counting it as castxml-only would hide that
+    # clang also carries it when the companion is configured (CodeRabbit
+    # review).
     own_parse = (Capability.FULL, Capability.PARTIAL)
     castxml_only = [
         r for r in header_facts if r.castxml in own_parse and r.clang not in own_parse

@@ -141,3 +141,35 @@ def test_member_of_class_template_still_missing() -> None:
     new = _snap([_fn("ns::Box<float>::set", "_ZN2ns3BoxIfE3setEf")])
     (finding,) = detect_missing_instantiations(old, new)
     assert finding.kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY
+
+
+# ---------------------------------------------------------------------------
+# A header backend names a function template by its bare identifier
+# (``ktwice``), so the family is read from the demangling, which leads with
+# the *return type* -- and that return type follows the template argument
+# (``int ktwice<int>(int)`` vs ``double ktwice<double>(double)``). The family
+# key must not include it. Each row is a real Itanium symbol pair (kept,
+# dropped) written out from the ABI grammar, with the family stem by hand.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "kept", "dropped", "stem"),
+    [
+        # template<class T> T ktwice(T): int / double
+        ("ktwice", "_Z6ktwiceIiET_S0_", "_Z6ktwiceIdET_S0_", "ktwice"),
+        # template<class T> T* kp(T): int* / char*
+        ("kp", "_Z2kpIiEPT_S0_", "_Z2kpIcEPT_S0_", "kp"),
+        # namespace ns { template<class T> T get(); }: int / long
+        ("get", "_ZN2ns3getIiEET_v", "_ZN2ns3getIlEET_v", "ns::get"),
+    ],
+)
+def test_return_type_varying_instantiation_family_is_one_template(
+    name: str, kept: str, dropped: str, stem: str
+) -> None:
+    old = _snap([_fn(name, kept), _fn(name, dropped)])
+    new = _snap([_fn(name, kept)])
+    (finding,) = detect_missing_instantiations(old, new)
+    assert finding.kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY
+    assert finding.symbol == dropped
+    assert stem in finding.description

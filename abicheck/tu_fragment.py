@@ -30,6 +30,7 @@ TuFragment`` call sites (tests included) keep working unchanged.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -93,6 +94,7 @@ class TuFragment:
     # (extract/headers/clang/concept_constraints.py); None = not modelled.
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+    std_reexports: dict[str, str] | None = None
     extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
 
@@ -139,6 +141,9 @@ class MergedTuFragments:
     #: concept gap stays named) after a multi-TU merge.
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+    #: Union of the TUs' tables (:func:`merged_std_reexports`): None when any TU
+    #: is unmodelled or two TUs bind one name to different targets.
+    std_reexports: dict[str, str] | None = None
     extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
 
@@ -158,3 +163,26 @@ def entity_key(kind: str, name: str) -> tuple[str, str]:
     ``return_type``/``type`` at all.
     """
     return (kind, name)
+
+
+def merged_std_reexports(fragments: Iterable[TuFragment]) -> dict[str, str] | None:
+    """The union of the TUs' ``using std::X;`` re-export tables.
+
+    ``None`` (not established) when there is no TU, when any TU's table is
+    ``None`` -- an unmodelled TU may hold a re-export the others lack, so the
+    union would read that re-export as absent -- or when two TUs bind one
+    declared name to different ``std::`` targets: the headers then disagree
+    with themselves (ODR-violating configuration), and picking either target
+    would assert a fact the input does not establish.
+    """
+    merged: dict[str, str] = {}
+    seen = False
+    for fragment in fragments:
+        table = fragment.std_reexports
+        if table is None:
+            return None
+        seen = True
+        for declared, target in table.items():
+            if merged.setdefault(declared, target) != target:
+                return None
+    return dict(sorted(merged.items())) if seen else None

@@ -259,10 +259,10 @@ class TestCrossKindReconciliationIsOrderIndependent:
         their own namespace's peer or to nothing -- never to whichever came
         first."""
         from abicheck.compare.template_surface import cpo_identity
-        from abicheck.diff_templates import _cpo_function_stem
+        from abicheck.diff_templates import function_overload_stem
 
         def identity(decl: Function | Variable) -> str:
-            return cpo_identity(decl, function_stem=_cpo_function_stem)
+            return cpo_identity(decl, function_stem=function_overload_stem)
 
         first = Function(name="foo", mangled="_ZN3ns13fooEv", return_type="void")
         second = Function(name="foo", mangled="_ZN3ns23fooEv", return_type="void")

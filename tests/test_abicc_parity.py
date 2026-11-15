@@ -315,7 +315,9 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
     # When the header marks a function as inline, callers may stop linking against
     # the DSO symbol (depending on optimizer). If the symbol later disappears from
     # the DSO (e.g., due to -fvisibility=hidden or LTO), existing binaries that
-    # expected to call via PLT break. abicheck detects FUNC_BECAME_INLINE (API_BREAK).
+    # expected to call via PLT break. abicheck detects FUNC_BECAME_INLINE, a
+    # risk while the symbol stays exported (ADR-081 2026-11 amendment): the
+    # break, when it comes, is the export vanishing, reported on its own.
     # ABICC does NOT check inline annotations — it sees both .so files are identical
     # and reports NO_CHANGE. abicheck is more conservative and correct here.
     # See: https://github.com/lvc/abi-compliance-checker/issues/125
@@ -328,7 +330,7 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int compute(int x);",
         "inline int compute(int x) { return x * 2; }",
         "cpp",
-        "API_BREAK",
+        "COMPATIBLE_WITH_RISK",
         "NO_CHANGE",
         "correct",
     ),

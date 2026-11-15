@@ -105,7 +105,8 @@ def test_visibility_change_on_any_alias_is_reported(changed_index: int) -> None:
     old = ElfMetadata(symbols=list(_OLD_ALIASES))
     new = ElfMetadata(symbols=new_aliases)
     kinds = _changed_kinds(compare(_snap(old), _snap(new)), "foo")
-    assert ChangeKind.SYMBOL_ELF_VISIBILITY_CHANGED in kinds
+    # foo is a function: its DEFAULT->PROTECTED change has the specific kind.
+    assert ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED in kinds
 
 
 def test_alias_order_does_not_change_the_verdict() -> None:

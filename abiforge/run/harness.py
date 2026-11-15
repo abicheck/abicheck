@@ -1,18 +1,22 @@
 """Build old/new libraries from a seed, an operator and a ``Config``; ask the checker.
 
 The checker under test is reached only through its adapter
-(``abiforge.checkers.abicheck``: ``snapshot`` and ``answer``). The evidence axis
-decides what the dump is given: ``binary`` builds without ``-g`` and passes no
-header, ``dwarf`` builds with ``-g`` and passes no header, ``headers`` adds the
-public header (dumped by ``config.header_backend``: castxml, clang or the
-native gcc plugin, with the standard and the layout-changing flags the
-library was built with). A compiler failure raises ``CompileError``; it is
-never converted into a skip, because a corpus case that did not build proved
-nothing.
+(``abiforge.checkers.abicheck``: ``snapshot`` and ``answer``). The evidence set
+decides what the dump is given. A build carries DWARF (``-g``) only when ``D``
+is in it, so ``{B}`` and ``{B,H}`` are stripped binaries (checked after the
+link: no ``.debug_*`` section may remain). ``H`` adds the public header, dumped
+by ``config.header_backend`` (castxml, clang or the native gcc plugin) with
+``-std``, ``-I`` and the public ``-D``/``-U``. The layout-changing flags the
+library was built with go to the dumper only in a cell that records the build
+(``D`` or ``BD``): a distributed header records none of them. A compiler failure
+raises ``CompileError``; it is never converted into a skip, because a corpus
+case that did not build proved nothing.
 """
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +42,8 @@ COMPILERS: dict[str, tuple[str, str]] = {
 }
 
 LIB_NAME = "libedit.so"
+#: A ``build_data`` config's L3 record of the library build.
+COMPILE_DB = "compile_commands.json"
 
 
 class CompileError(RuntimeError):
@@ -133,6 +139,75 @@ def _check(cmd: list[str], proc: subprocess.CompletedProcess[str], what: str) ->
         )
 
 
+#: Per object format (ELF, PE): the tool that lists a library's sections, and
+#: the pattern that picks out its DWARF section names from that tool's output.
+_SECTION_LISTING: dict[str, tuple[list[str], str]] = {
+    # ELF: readelf's section table, ``.debug_*`` names.
+    "elf": (["readelf", "-SW"], r"\]\s+(\.debug\S*)"),
+    # PE/COFF (mingw): objdump's section table; DWARF keeps its ``.debug_*`` names.
+    "pe": (["objdump", "-h"], r"^\s+\d+\s+(\.debug_\S+)"),
+}
+
+
+def object_format() -> str:
+    """The object format of this host's libraries (``elf``, ``pe`` or ``macho``)."""
+    if sys.platform == "darwin":
+        return "macho"
+    if sys.platform == "win32":
+        return "pe"
+    return "elf"
+
+
+def _listing(cmd: list[str], what: str) -> str:
+    """The stdout of a listing tool. A tool that fails or prints nothing raises:
+    a failed listing is never read as "no DWARF". A missing tool raises
+    ``FileNotFoundError`` from ``subprocess``, which is never caught here."""
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    _check(cmd, proc, what)
+    if not proc.stdout.strip():
+        raise CompileError(f"{' '.join(cmd)} printed no {what}")
+    return proc.stdout
+
+
+def debug_sections(so: Path) -> list[str]:
+    """The DWARF a built library still carries, named in its own format.
+
+    ELF and PE: the ``.debug_*`` sections. Mach-O: the ``__debug_*`` sections of
+    the ``__DWARF`` segment, and the N_OSO debug-map stabs that a ``-g`` link
+    leaves in the image, each naming the object file that holds the DWARF.
+    """
+    if object_format() == "macho":
+        sections = _listing(["otool", "-l", str(so)], "section table")
+        stabs = _listing(["nm", "-a", "-p", str(so)], "symbol table")
+        names = re.findall(r"sectname\s+(__debug_\S+)", sections)
+        names += [f"OSO {o}" for o in re.findall(r"\bOSO\b\s+(\S.*)$", stabs, re.M)]
+        return names
+    listing, pattern = _SECTION_LISTING[object_format()]
+    return re.findall(pattern, _listing([*listing, str(so)], "section table"), re.M)
+
+
+def strip_debug(so: Path) -> None:
+    """Strip DWARF from a built ELF library, then prove none is left.
+
+    A ``{B}`` or ``{B,H}`` side must be a stripped binary: a leftover
+    ``.debug_*`` section would hand the checker DWARF the cell does not claim.
+    ELF and PE are stripped with binutils ``strip`` (mingw's on PE: a link
+    without ``-g`` still pulls DWARF in from the toolchain's CRT and libgcc
+    objects). Every format is checked afterwards; a section that survives
+    the strip fails the build.
+    """
+    if object_format() in ("elf", "pe"):
+        cmd = ["strip", "--strip-debug", str(so)]
+        _check(
+            cmd,
+            subprocess.run(cmd, capture_output=True, text=True, check=False),
+            "strip",
+        )
+    left = debug_sections(so)
+    if left:
+        raise CompileError(f"{so} still has DWARF after strip --strip-debug: {left}")
+
+
 def _compile_library(
     seed: Seed,
     config: Config,
@@ -142,17 +217,22 @@ def _compile_library(
     source_text: str,
     link: LinkSpec = LinkSpec(),
     extra: BuildArgs | None = None,
+    extra_texts: dict[str, str] | None = None,
 ) -> Path:
     extra = extra or BuildArgs()
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / seed.header_name).write_text(header_text, encoding="utf-8")
     src = out_dir / seed.source_name
     src.write_text(source_text, encoding="utf-8")
+    for rel, text in (extra_texts or {}).items():
+        (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out_dir / rel).write_text(text, encoding="utf-8")
+    units = [src, *(out_dir / rel for rel in seed.extra_sources)]
     so = out_dir / LIB_NAME
-    cmd = compile_cmd(
-        config.producer, config.std, flags, debug=config.evidence != "binary"
-    )
-    cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so), str(src)]
+    debug = "D" in config.evidence_set
+    cmd = compile_cmd(config.producer, config.std, flags, debug=debug)
+    cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so)]
+    cmd += [str(u) for u in units]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
     if sys.platform != "win32":
         cmd.append("-fPIC")
@@ -169,12 +249,27 @@ def _compile_library(
             cmd.append(f"-Wl,-soname,{soname}")
     cmd += _seed_link(extra).render(out_dir)
     cmd += link.render(out_dir)
+    if config.build_data or config.sources:
+        # The L3 record of this build: the one command that compiled it. A
+        # ``sources`` tree carries it the way a real checkout's build dir
+        # does (``dump --sources`` auto-discovers it for L4 replay). The
+        # compiler runs in this process's cwd, so that is the directory the
+        # commands' relative paths resolve against (out_dir may be relative).
+        # One entry per translation unit, each the command compiling only it.
+        lead = [a for a in cmd if a not in {str(u) for u in units}]
+        entries = [
+            {"directory": str(Path.cwd()), "file": str(u), "arguments": [*lead, str(u)]}
+            for u in units
+        ]
+        (out_dir / COMPILE_DB).write_text(json.dumps(entries), encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise CompileError(
             f"{' '.join(cmd)} failed (exit {proc.returncode}):\n"
             f"--- source ---\n{source_text}\n--- stderr ---\n{proc.stderr}"
         )
+    if not debug:
+        strip_debug(so)
     return so
 
 
@@ -190,8 +285,19 @@ def build(
 
     *flags* replaces the config's producer flags (a rebuild edit's new side);
     *link* adds link options (an edit's version script, SONAME, extra libs).
+    The config is this side's: an asymmetric-evidence edit passes its new side's
+    config (``EditOp.new_side_config``).
     """
     fl = flags or config.flags
+    if config.sources:
+        # A source tree is laid out the way a project is: under a project
+        # directory (``src/``), so a path read from either side's tree is
+        # comparable across the two checkouts (abicheck anchors a declaring
+        # path at its last project-layout segment). Flat in ``old/`` and
+        # ``new/``, every header path differed by its checkout root alone, and
+        # L5 identity reconciliation could never pair a declaration across
+        # the two sides.
+        out_dir = out_dir / "src"
     header_text, source_text = seed.render(overrides)
     so = _compile_library(
         seed,
@@ -202,21 +308,27 @@ def build(
         source_text,
         link,
         seed.build_args(overrides),
+        seed.render_extra(overrides),
     )
     header = out_dir / seed.header_name
     is_cxx = seed.lang == "c++"
     headers = [header] if config.evidence == "headers" else []
     std = dump_std_spelling(config)
-    # The header frontend reads the header the way the library was built:
-    # same standard, same layout-changing flags.
-    # A build role's macro definitions (-D/-U) change what the header
-    # declares (``_TIME_BITS=64`` widens time_t), so the dump gets them too.
+    # The header frontend gets what a distributed header carries: the standard,
+    # the include directory, and the public macro definitions. A build role's
+    # -D/-U changes what the header declares (``_TIME_BITS=64`` widens time_t),
+    # so those reach the dump. The layout-changing flags (-m32, -fpack-struct,
+    # the producer's -D) are not in a distributed header. They reach the dump
+    # only in a cell whose evidence records the build: DWARF (``D``) or build
+    # data (``BD``). A stripped ``{B,H}`` side gets none of them, which is the
+    # primary configuration's real view of the header.
     defines = [
         f for f in seed.build_args(overrides).cflags if f.startswith(("-D", "-U"))
     ]
-    gcc_options = " ".join(
-        [f"-std={std}", *fl.layout_flags(config.producer, seed.lang), *defines]
-    )
+    options = [f"-std={std}", f"-I{out_dir}", *defines]
+    if {"D", "BD"} & config.evidence_set.atoms:
+        options += fl.layout_flags(config.producer, seed.lang)
+    gcc_options = " ".join(options)
     snap = checker.snapshot(
         so,
         headers,
@@ -224,6 +336,9 @@ def build(
         is_cxx=is_cxx,
         backend=config.header_backend,
         gcc_options=gcc_options,
+        build_info=out_dir / COMPILE_DB if config.build_data else None,
+        sources=out_dir if config.sources else None,
+        follow_deps=config.follow_deps,
     )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
@@ -275,7 +390,7 @@ def build_new(
     """The edited (new) side; *link* is the edit's own link options, if any."""
     return build(
         seed,
-        config,
+        op.new_side_config(config),
         root / f"{seed.name}-{config.build_id}-{op.name}",
         overrides=op.edit(seed.roles),
         flags=op.new_flags(config.flags),

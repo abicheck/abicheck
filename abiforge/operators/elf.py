@@ -443,9 +443,18 @@ _SYMBOLS = (
         ("elf.obj",),
         _decl("elf.obj", 'extern int g_obj __attribute__((visibility("hidden")));'),
         "a hidden object leaves the dynamic symbol table: consumers fail to load",
-        any_of=(
-            frozenset(
-                {"VAR_REMOVED", "VAR_REMOVED_ELF_ONLY", "VAR_VISIBILITY_CHANGED"}
+        expected=frozenset({"VAR_VISIBILITY_CHANGED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "dwarf",
+                {"expected": frozenset({"VAR_REMOVED"})},
+                "without headers nothing still declares g_obj: its export is "
+                "simply gone",
+            ),
+            Rule(
+                lambda c: c.evidence == "binary",
+                {"expected": frozenset({"VAR_REMOVED_ELF_ONLY"})},
+                "from symbols alone the export is gone",
             ),
         ),
         **_BINARY,
@@ -464,7 +473,14 @@ _SYMBOLS = (
         ("elf.k",),
         _decl("elf.k", "", ""),
         "consumers referencing g_k fail to load",
-        any_of=(frozenset({"VAR_REMOVED", "VAR_REMOVED_ELF_ONLY"}),),
+        expected=frozenset({"VAR_REMOVED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "binary",
+                {"expected": frozenset({"VAR_REMOVED_ELF_ONLY"})},
+                "from symbols alone the removal is an export-table removal",
+            ),
+        ),
         **_BINARY,
     ),
     _op(

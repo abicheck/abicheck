@@ -86,7 +86,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import TypeVar
 
-from ...compare.template_surface import qualified_name_lookup, strip_template_args
+from ...compare.template_surface import qualified_name_lookup
+from ...diff_templates import function_overload_stem
 from ...extract.flat_map_dependency_scope import kept_reference_text
 from ...model import AbiSnapshot, EnumType, Function, RecordType, ScopeOrigin, Variable
 from ...model.declaration_headers import declaring_header_set
@@ -358,11 +359,13 @@ def _overload_stems(
     internal: frozenset[str],
 ) -> frozenset[str]:
     """Stems (``OVERLOAD_SET_REROUTED``'s ``symbol``) under which every
-    function of *snap* is internal."""
+    function of *snap* is internal -- reduced by the detector's own
+    :func:`~abicheck.diff_templates.function_overload_stem`, so the policy
+    join compares one normalization on both sides."""
     internal_stems: set[str] = set()
     other_stems: set[str] = set()
     for fn in snap.declarations.functions:
-        stem = strip_template_args(name_of(fn))
+        stem = function_overload_stem(name_of(fn))
         (internal_stems if _key(fn) in internal else other_stems).add(stem)
     return frozenset(internal_stems - other_stems)
 

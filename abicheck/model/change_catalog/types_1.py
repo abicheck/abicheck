@@ -167,7 +167,9 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "that did not pin a specific ISA, but consumers that linked directly "
         "against a now-removed ISA-specific symbol get unresolved symbols. "
         "Reported as one grouped finding listing the affected algorithm "
-        "stems.",
+        "stems. This risk grade covers export-only members; when any removed "
+        "member was declared in a public header the finding carries an "
+        "effective BREAKING verdict, since a direct caller no longer loads.",
         description_template="CPU dispatch ISA '{name}' tier removed: {detail}. Runtime dispatcher continues to work; consumers that pinned directly to '{name}' symbols get unresolved references at load time.",
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
@@ -760,18 +762,17 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     ),
     _E(
         "source_level_kind_changed",
-        _A,
-        impact="An aggregate's declared struct/class kind changed at the "
-        "source level; `_diff_type_kind_changes()` always routes any "
-        "union-involving transition to the separate "
-        "`type_kind_changed` kind instead, so this one is reported "
-        "only for struct↔class — which differ solely in default "
-        "member access and default inheritance access, never in "
-        "storage layout. The binary layout is unaffected; source "
-        "relying on the old kind's default access may no longer "
-        "compile or may behave differently (e.g. a member that was "
-        "implicitly public becoming implicitly private).",
-        policy_overrides={"sdk_vendor": _C},
+        _C,
+        impact="An aggregate's declared struct/class class-key changed; "
+        "`_diff_type_kind_changes()` routes any union-involving transition "
+        "to `type_kind_changed`, so this kind is only struct↔class. The "
+        "class-key alone changes neither layout nor Itanium mangling, and "
+        "source naming the type with the other key still compiles (a "
+        "mismatched key is at most a warning). Its consequences are "
+        "reported by their own kinds: default member/base access changes "
+        "as `field_access_changed`, `method_access_changed` and "
+        "`base_class_access_narrowed`; MSVC's class-key mangling (U vs V) "
+        "as the PE export removal/addition of every affected function.",
         description_template="Aggregate kind changed: {name} ({old} → {new})",
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,

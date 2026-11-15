@@ -235,6 +235,17 @@ LEADING_ROWS: tuple[FactRow, ...] = (
             "Fact.not_applicable() otherwise (Codex review, PR #982)."
         ),
     ),
+    FactRow(
+        "Function",
+        "is_final",
+        _FULL,
+        _FULL,
+        note=(
+            "The `final` virt-specifier of a virtual member function: castxml's "
+            "`attributes` token, clang's `FinalAttr` child node "
+            "(`clang_method_is_final`); None for a non-virtual declaration."
+        ),
+    ),
     FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
     FactRow(
         "Function",

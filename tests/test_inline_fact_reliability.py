@@ -99,7 +99,9 @@ def test_real_change_with_both_sides_reliable_is_reported(producer: str) -> None
     )
     result = compare(old, new)
     assert ChangeKind.FUNC_BECAME_INLINE in _kinds(result)
-    assert result.verdict == Verdict.API_BREAK
+    # A risk, not a source break: the break, when there is one, is the export
+    # disappearing, reported by its own finding (ADR-081 amendment).
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 def test_declined_pair_is_recorded_in_coverage() -> None:

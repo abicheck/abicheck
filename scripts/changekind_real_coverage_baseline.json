@@ -206,7 +206,6 @@
     "text_relocation_removed",
     "time64_abi_changed",
     "toolchain_version_changed",
-    "type_became_abstract",
     "type_deprecated_added",
     "type_deprecated_removed",
     "type_field_removed",

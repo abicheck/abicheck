@@ -1113,7 +1113,7 @@ def test_reconciliation_underscore_strip_is_macho_only():
     surf2 = SourceAbiSurface(library="l")
     surf2.mappings["source_decl_to_binary_symbol"] = {"__ZN1A3fooEv": "__ZN1A3fooEv"}
     macho_snap.build_source = BuildSourcePack(root="", source_abi=surf2)
-    # _exported_symbol_names strips one underscore → {"_ZN1A3fooEv"}; the mapping
+    # default_export_names strips one underscore → {"_ZN1A3fooEv"}; the mapping
     # value "__ZN1A3fooEv" reconciles via the Mach-O strip.
     assert _l4_reconciled_symbols(macho_snap, {"_ZN1A3fooEv"}) == {"_ZN1A3fooEv"}
 

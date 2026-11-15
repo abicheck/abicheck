@@ -465,6 +465,9 @@ class TestExpectedKindsVerdictAlignment:
         # the BREAKING verdict comes from additional detected kinds.
         KNOWN_EXCEPTIONS = {
             "case35_field_rename",  # field_renamed=API_BREAK; BREAKING from type_field_removed at runtime
+            # cpu_dispatch_isa_dropped defaults to RISK; the roll-up of a
+            # header-declared family carries effective_verdict=BREAKING.
+            "case83_cpu_dispatch_isa_dropped",
         }
         issues = []
         for case_name, meta in verdicts.items():

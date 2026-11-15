@@ -142,6 +142,10 @@ _SURFACE_SCOPE = (
 #: the same symbol, spelled differently from the evidence each side keeps.
 SPELLING_PAIRS: dict[tuple[str, str], str] = {
     ("func_removed", "func_removed_elf_only"): _DEBUG_DECLARATIONS,
+    # A member that became pure loses its export but keeps its debug
+    # declaration, so the binary-only dump spells the loss as a visibility
+    # change of a still-declared function.
+    ("func_visibility_changed", "func_removed_elf_only"): _DEBUG_DECLARATIONS,
     ("var_removed", "var_removed_elf_only"): _DEBUG_DECLARATIONS,
     ("func_added_elf_only", "func_added"): _ELF_ONLY_MODE,
     ("var_removed_elf_only", "var_removed"): _ELF_ONLY_MODE,
@@ -235,6 +239,14 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     "func_static_changed": _DEBUG_DECLARATIONS,
     "func_virtual_added": _DEBUG_DECLARATIONS,
     "func_virtual_removed": _DEBUG_DECLARATIONS,
+    # A binary-only dump reads purity from the member's debug declaration
+    # and, where the producer omits DW_AT_virtuality pure (gcc), from the
+    # class vtable slot bound to __cxa_pure_virtual
+    # (extract/elf_pure_virtual_slots.py); abstractness follows from it. A
+    # header-built snapshot persists neither, so its projection keeps only
+    # the export entry.
+    "func_virtual_became_pure": _DEBUG_DECLARATIONS,
+    "type_became_abstract": _DEBUG_DECLARATIONS,
     "virtual_method_added": _DEBUG_DECLARATIONS,
     "method_access_changed": _DEBUG_DECLARATIONS,
     "experimental_graduated": _DEBUG_DECLARATIONS,

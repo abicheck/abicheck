@@ -36,7 +36,7 @@ from .compare.finding_redundancy import (
     ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
 )
 from .compare.surface_reconcile import releases_reconciliation
-from .compare.toolchain_flags import advanced_dwarf_kind_map, toolchain_flag_changes
+from .compare.toolchain_flags import advanced_dwarf_changes, toolchain_flag_changes
 from .compare.type_layout_diff import (
     diff_struct_layouts,  # noqa: F401 — tests import it from here
 )
@@ -462,21 +462,9 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     o: AdvancedDwarfMetadata = _debug_layout_view(old).advanced
     n: AdvancedDwarfMetadata = _debug_layout_view(new).advanced
 
-    _kind_map = advanced_dwarf_kind_map()
-    return [
-        Change(
-            kind=_kind_map[kind_str],
-            symbol=sym,
-            description=desc,
-            old_value=old_val,
-            new_value=new_val,
-        )
-        for kind_str, sym, desc, old_val, new_val in [
-            *diff_advanced_dwarf(o, n),
-            *toolchain_flag_changes(o, n),
-        ]
-        if kind_str in _kind_map
-    ]
+    return advanced_dwarf_changes(
+        [*diff_advanced_dwarf(o, n), *toolchain_flag_changes(o, n)]
+    )
 
 
 def _apply_soname_policy(

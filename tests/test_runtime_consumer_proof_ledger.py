@@ -24,8 +24,9 @@ _RUNNER = (
 )
 
 #: Measured 2026-11-13 at 509cb0d (Linux, gcc 13.3, Debug): 90 of 118 BREAKING
-#: cases. Raise it when the ledger grows; never lower it to admit a lost proof.
-CONSUMER_ASSERTION_FLOOR = 90
+#: cases; case83 added 2026-11-14 (symbol lookup error on the removed
+#: _avx512 entry point). Raise it when the ledger grows; never lower it to admit a lost proof.
+CONSUMER_ASSERTION_FLOOR = 91
 #: What a BREAKING case without a consumer assertion may record.
 _OTHER_PROOFS = {"none", "output_only", "SKIP", "unmeasured"}
 

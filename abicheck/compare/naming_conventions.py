@@ -383,8 +383,10 @@ def _isa_token_in_symbol(symbol_name: str) -> str | None:
 
 #: Registered name heuristic (design-hardening Phase 5): an ISA token in a
 #: removed symbol's name only *lowers* the removal to
-#: ``cpu_dispatch_isa_dropped`` (a risk), and only when a sibling with the
-#: same algorithm stem survives under another ISA.
+#: ``cpu_dispatch_isa_dropped`` (a risk), only when a sibling with the same
+#: algorithm stem survives under another ISA, and never for a member declared
+#: in a public header (``compare.cpu_dispatch_public_members`` keeps such a
+#: roll-up BREAKING).
 CPU_DISPATCH_ISA = register_name_heuristic(
     "cpu_dispatch_isa",
     owner=__name__,

@@ -144,6 +144,8 @@ SOURCE_TIER_FILES: tuple[str, ...] = (
     "abicheck/buildsource/template_graph_fold.py",
     "abicheck/buildsource/template_graph_value_decls.py",
     "abicheck/buildsource/macro_graph.py",
+    # Decides which lines macro_graph reads as commented out.
+    "abicheck/buildsource/pattern_facts_lexer.py",
     "abicheck/buildsource/override_graph.py",
     "abicheck/buildsource/type_graph.py",
     "abicheck/buildsource/type_graph_index.py",
