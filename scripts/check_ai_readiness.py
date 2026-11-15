@@ -3733,11 +3733,49 @@ def check_known_baseline_vs_base(
     return check_known_baseline_growth(current, base), None
 
 
+def known_when_widening(
+    current: Mapping[str, Mapping[str, str]], recorded: Mapping[str, Mapping[str, str]]
+) -> list[str]:
+    """Entries whose ``when`` now covers a probe configuration its record does not.
+
+    *current* and *recorded* map ``"<key>#<n>"`` to ``{standard|toolchain: hex
+    mask}`` (``abiforge.known_coverage.known_record``). An entry missing from
+    *recorded* has an empty record, so any covered configuration is widening.
+    A narrowed or unchanged entry passes.
+    """
+    from abiforge.known_coverage import widened_pairs
+
+    problems: list[str] = []
+    for ident in sorted(current):
+        extra = widened_pairs(current[ident], recorded.get(ident, {}))
+        if extra:
+            detail = ", ".join(f"{pair} +{n}" for pair, n in sorted(extra.items()))
+            problems.append(
+                f"abiforge/known.py entry {ident} now covers configurations its "
+                f"recorded `when` does not ({detail}); a widened `when` needs its "
+                "scope reviewed, then `scripts/check_ai_readiness.py "
+                "--write-known-when` to record it"
+            )
+    return problems
+
+
+def write_known_when_baseline() -> None:
+    from abiforge.known import KNOWN
+    from abiforge.known_coverage import BASELINE_PATH, known_record, write_baseline
+
+    write_baseline(known_record(KNOWN, known_entry_key), BASELINE_PATH)
+
+
 def check_abiforge_known_no_growth(f: Findings) -> None:
     from abiforge.known import KNOWN
+    from abiforge.known_coverage import known_record, load_baseline
 
     for problem in check_known_no_growth(
         (known_entry_key(entry) for entry in KNOWN), ABIFORGE_KNOWN_BASELINE
+    ):
+        f.err("abiforge-known-no-growth", problem)
+    for problem in known_when_widening(
+        known_record(KNOWN, known_entry_key), load_baseline()
     ):
         f.err("abiforge-known-no-growth", problem)
     problems, note = check_known_baseline_vs_base(
@@ -3873,7 +3911,17 @@ def main(argv: list[str] | None = None) -> int:
         "are independent whole-tree scans, so the wall time drops to roughly "
         "the slowest one; findings are merged in registry order either way.",
     )
+    parser.add_argument(
+        "--write-known-when",
+        action="store_true",
+        help="Regenerate abiforge/known_when_baseline.json from abiforge/known.py "
+        "and exit (review the diff: a raised record is a widened `when`).",
+    )
     args = parser.parse_args(argv)
+    if args.write_known_when:
+        write_known_when_baseline()
+        print("wrote abiforge/known_when_baseline.json")
+        return 0
 
     findings = Findings()
     selected = [n for n in (args.only or list(CHECKS)) if n not in args.skip]

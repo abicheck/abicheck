@@ -780,7 +780,7 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-4 | Platform facts | A7 | in progress (PR 3, PE variables) | #2068 (PR 1, Mach-O); #2073 (PR 2, PE, merged); `fix/ws4-pe-variable-linkage` (PR 3: plain C++ globals bound to MSVC data exports by decoded type, own generation bump) |
 | WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | in review (PR 1: `variant_of` pass) | this PR |
 | WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | B0 merged | #2069 (PR 1, B0) |
-| WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | in review (PR 2 of 3) | this PR (PR 1: #2070, merged) |
+| WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | in review (widening check) | this PR: the `known.py` `when` no-growth check (`abiforge/known_when_baseline.json`); PR 1: #2070, merged |
 | WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | PR 1 (standards axis) in review | this PR |
 
 ### 11.3 File ownership and conflict hotspots
