@@ -25,6 +25,7 @@ kind cannot come back through one configuration.
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -89,3 +90,52 @@ def test_rename_operator_expectation_is_toolchain_independent(op_name: str) -> N
         by_evidence.setdefault(evidence, set()).add(kinds)
     for evidence, kinds in by_evidence.items():
         assert len(kinds) == 1, (op_name, evidence, kinds)
+
+
+#: Compilers for the body-size check. A compiler missing from the host is a
+#: marker-level skip (integration); a compiler that runs and fails is a failure.
+SIZE_COMPILERS = ("gcc-14", "clang-18", "clang-19")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("compiler", SIZE_COMPILERS)
+@pytest.mark.parametrize("opt", OPT_LEVELS)
+def test_prefix_rename_body_is_above_the_fingerprint_floor(
+    tmp_path: Path, compiler: str, opt: str
+) -> None:
+    """The renamed function's body stays above ``_MIN_SYMBOL_SIZE``.
+
+    ``symbols_prefixed_batch`` requires FUNC_LIKELY_RENAMED on binary
+    evidence, which the fingerprint detector can only produce for a function
+    at or above the size floor. The body is measured here, on the real
+    compiler, so the requirement cannot silently drop below the floor.
+    """
+    import shutil
+    import subprocess
+
+    from elftools.elf.elffile import ELFFile
+
+    from abicheck.binary_fingerprint import _MIN_SYMBOL_SIZE
+    from abiforge.operators import OP_BY_NAME
+
+    if shutil.which(compiler) is None:
+        pytest.skip(f"{compiler} is not installed on this host")
+    _, source = OP_BY_NAME["symbols_prefixed_batch"].edit(
+        {"elf.ren": ("int mylib_r_init(void);\nint mylib_r_run(int n);", "")}
+    )["elf.ren"]
+    src = tmp_path / "ren.c"
+    src.write_text(source, encoding="utf-8")
+    lib = tmp_path / f"ren_{compiler}_{opt}.so"
+    subprocess.run(
+        [compiler, "-shared", "-fPIC", f"-{opt}", "-o", str(lib), str(src)],
+        check=True,
+    )
+    with lib.open("rb") as fh:
+        dynsym = ELFFile(fh).get_section_by_name(".dynsym")
+        sizes = {
+            sym.name: sym["st_size"]
+            for sym in dynsym.iter_symbols()
+            if sym.name.startswith("mylib_r_")
+        }
+    assert set(sizes) == {"mylib_r_init", "mylib_r_run"}, sizes
+    assert sizes["mylib_r_run"] > _MIN_SYMBOL_SIZE, (compiler, opt, sizes)
