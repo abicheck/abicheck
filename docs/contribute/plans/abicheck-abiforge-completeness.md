@@ -770,7 +770,7 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS | Scope | Plan items | Status | Current PR |
 |---|---|---|---|---|
 | WS-0 | Review follow-ups; this plan | A10, PR 2 | in review | #2065; this PR |
-| WS-1 | ADR-093, `observable_at` on all kinds | A0, A1 | in review (schema); ADR merged | #2067 merged; #2071 schema; fill of 434 kinds next |
+| WS-1 | ADR-093, `observable_at` on all kinds | A0, A1 | in review (schema, fill); ADR merged | #2067 merged; #2071 schema; fill PR (stacked on #2071): 104 of 434 kinds classified, 330 UNCLASSIFIED (193 of the decided kinds held back by the 800-line cap in 5 taxonomy modules) |
 | WS-2 | `{B,H}` correctness | A2, A3, A4, A5 | not started | — |
 | WS-3 | Pure virtual, key function, vtable home | A6 | not started | — |
 | WS-4 | Platform facts | A7 | not started | — |

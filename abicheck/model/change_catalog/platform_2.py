@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -51,6 +52,29 @@ _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
 
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
+_OBS_B_PE = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.PE}))
+)
+_OBS_B_ELF_MACHO = observable(
+    ("B",),
+    condition=ObservabilityCondition(
+        platform=frozenset({Platform.ELF, Platform.MACHO})
+    ),
+)
+_OBS_DH = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="layout or type fact: DWARF and the public header both carry it",
+)
+_OBS_DBD = observable(
+    ("B", "D"),
+    ("B", "BD"),
+    rationale="compiler-flag fact: the header never carries it; DWARF and build data do",
+)
+
 PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "pe_forwarder_changed",
@@ -62,6 +86,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_PE,),
     ),
     _E(
         "pe_hardening_improved",
@@ -72,6 +97,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_PE,),
     ),
     _E(
         "pe_hardening_weakened",
@@ -86,6 +112,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_PE,),
     ),
     _E(
         "pe_import_load_mode_changed",
@@ -102,6 +129,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_PE,),
     ),
     _E(
         "pe_machine_changed",
@@ -112,6 +140,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_PE,),
     ),
     _E(
         "pe_ordinal_retargeted",
@@ -127,6 +156,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_PE,),
     ),
     _E(
         "pie_disabled",
@@ -136,6 +166,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "platform_baseline_floor_raised",
@@ -165,6 +196,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,  # functions use func_visibility_protected_changed
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "relro_weakened",
@@ -174,6 +206,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "rpath_changed",
@@ -186,6 +219,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "rpath_type_changed",
@@ -202,6 +236,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "rtti_mode_changed",
@@ -228,6 +263,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "sanitizer_mode_changed",
@@ -275,6 +311,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_MACHO,),
     ),
     _E(
         "soname_missing",
@@ -284,6 +321,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "stack_canary_removed",
@@ -293,6 +331,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "static_tls_introduced",
@@ -310,6 +349,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "static_tls_removed",
@@ -320,6 +360,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "struct_packing_mode_changed",
@@ -334,6 +375,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "struct_return_convention_changed",
@@ -351,6 +393,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "sycl_backend_driver_req_changed",
@@ -455,6 +498,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_binding_changed",
@@ -464,6 +508,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_binding_lost_unique",
@@ -477,6 +522,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_binding_strengthened",
@@ -486,6 +532,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_elf_visibility_changed",
@@ -496,6 +543,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_leaked_from_dependency_changed",
@@ -508,6 +556,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_moved_version_node",
@@ -522,6 +571,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_type_changed",
@@ -531,6 +581,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_version_alias_changed",
@@ -541,6 +592,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_version_defined_added",
@@ -550,6 +602,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_version_defined_removed",
@@ -559,6 +612,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_version_node_removed",
@@ -570,6 +624,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_version_required_added",
@@ -579,6 +634,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_version_required_added_compat",
@@ -588,6 +644,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbol_version_required_removed",
@@ -597,6 +654,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "symbolic_binding_mode_changed",
@@ -611,6 +669,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "text_relocation_introduced",
@@ -624,6 +683,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "text_relocation_removed",
@@ -634,6 +694,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "threadsafe_statics_mode_changed",
@@ -648,6 +709,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "time64_abi_changed",
@@ -665,6 +727,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "tls_model_changed",
@@ -678,6 +741,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "tls_var_size_changed",
@@ -688,6 +752,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "toolchain_flag_drift",
@@ -696,6 +761,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "target_isa_changed",
@@ -710,5 +776,6 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
 ]
