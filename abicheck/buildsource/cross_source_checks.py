@@ -90,6 +90,7 @@ from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.evidence_status import Confidence
 from ..model.graph_facts import GraphNode
 from ..model.source_graph import DEPENDENCY_EDGE_KINDS, SourceGraphSummary
+from ..model.surface_facts import decl_export_satisfied
 
 # Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
@@ -428,9 +429,8 @@ def _check_public_not_exported(
             [], "skipped", "no binary export table on the snapshot", providers
         )
 
-    # Two-way reconciliation (ADR-035 D4): exempt decls the L4 linker already tied
-    # to an export under a variant spelling (ctor clone / Mach-O / demangle drift),
-    # so the check does not double-report a symbol that is genuinely exported.
+    # Two-way reconciliation (ADR-035 D4): exempt decls the L4 linker tied to an
+    # export under a variant spelling (ctor clone / Mach-O / demangle drift).
     reconciled = _l4_reconciled_symbols(snapshot, exported)
     satisfied = exported | reconciled | cfg.sibling_exported_symbols
 
@@ -477,12 +477,12 @@ def _check_public_not_exported(
             fn, inline_symbols
         ) or owned.function_owes_no_export(i):
             continue
-        if fn.mangled not in satisfied:
+        if not decl_export_satisfied(fn, satisfied):
             missing(fn, "", _FN_CONSEQUENCE)
     for i, var in enumerate(snapshot.declarations.variables):
         if not _var_has_export_obligation(var) or owned.variable_owes_no_export(i):
             continue
-        if var.mangled not in satisfied:
+        if not decl_export_satisfied(var, satisfied):
             missing(var, "extern variable ", _VAR_CONSEQUENCE)
     findings.sort(key=lambda c: c.symbol)
     detail = (
