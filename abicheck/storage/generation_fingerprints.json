@@ -186,7 +186,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_fixups.py": "6d3c857a849b4c27ad65e8baa59dcdaae51d89029d5a3a8716c6def4e9ad67f0",
+      "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
@@ -233,9 +233,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "5d2ecb1119fdd0b25fbd08133b7cdc2e1b9d5135aad079c6fee23d87b2d5a4b7",
+    "fingerprint": "78067278ca943f367bac23bc973d24919faa68d4c6966535e790cb76af0d25a9",
     "generation": 73,
-    "reason": "WS-4 PR 1 review: classic fixup slots must lie inside their segment, a chained header must be 28 bytes with the starts table after it, and a chained segment count must not exceed the image's segments. Malformed inputs only; valid decodes unchanged."
+    "reason": "Removed an unreachable length guard in _walk_chain (the shared visit budget already bounds the set); decoded output is unchanged"
   },
   "resolver": {
     "files": {
