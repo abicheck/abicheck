@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import KindRelations
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -701,6 +702,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        relations=KindRelations(variant_of="var_removed"),
     ),
     _E(
         "var_removed",
