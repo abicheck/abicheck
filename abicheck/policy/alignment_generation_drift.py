@@ -45,6 +45,7 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
 from ..model.declarations import Variable
 from ..model.snapshot import AbiSnapshot
+from ..model.type_indirection import indirection_shape
 from .generation_drift_demotion import GENERATION_DRIFT_REASON, GENERATION_DRIFT_RULE
 
 __all__ = ["ALIGNMENT_FIX_GENERATION", "demote_pre74_builtin_alignment_drift"]
@@ -76,12 +77,13 @@ def _natural_bits(type_spelling: str) -> tuple[int, int] | None:
     not one of the builtins the pre-74 probe measured."""
     words = [w for w in type_spelling.split() if w not in _QUALIFIERS]
     spelling = " ".join(words)
-    if spelling.endswith("*"):
-        lp64, ilp32 = _POINTER_BYTES
-    elif spelling in _NATURAL_BYTES:
+    if spelling in _NATURAL_BYTES:
         lp64, ilp32 = _NATURAL_BYTES[spelling]
-    else:
+        return lp64 * 8, ilp32 * 8
+    shape = indirection_shape(type_spelling)
+    if shape is None or not shape.closed or shape.levels != ("*",):
         return None
+    lp64, ilp32 = _POINTER_BYTES
     return lp64 * 8, ilp32 * 8
 
 
