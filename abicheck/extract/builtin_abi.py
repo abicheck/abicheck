@@ -142,6 +142,22 @@ return 0;
 """
 
 
+#: Builtins a target may lack. ``__int128`` is absent on 32-bit targets (i386
+#: clang rejects it outright), and one rejected spelling fails the whole probe
+#: compile, so each is guarded by the target's own capability macro: where
+#: absent it is simply not reported, which reads as "no fact" downstream.
+_TARGET_GUARDED = {
+    "__int128": "__SIZEOF_INT128__",
+    "unsigned __int128": "__SIZEOF_INT128__",
+}
+
+
+def _probe_line(name: str) -> str:
+    guard = _TARGET_GUARDED.get(name)
+    line = f"P({name})"
+    return line if guard is None else f"#ifdef {guard}\n{line}\n#endif"
+
+
 @dataclass(frozen=True)
 class BuiltinAbi:
     """What the compiler decided about builtins on one target.
@@ -179,7 +195,7 @@ def probe_builtin_abi(cc_bin: str, option_tokens: tuple[str, ...]) -> BuiltinAbi
     plain_char = plain_char_is_unsigned(cc_bin, option_tokens)
     if plain_char is None:
         return None
-    body = "\n".join(f"P({name})" for name in _PROBED)
+    body = "\n".join(_probe_line(name) for name in _PROBED)
     with tempfile.TemporaryDirectory(prefix="abicheck-builtin-abi-") as tmp:
         src = Path(tmp) / "probe.c"
         exe = Path(tmp) / "probe"

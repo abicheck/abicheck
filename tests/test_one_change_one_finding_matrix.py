@@ -239,8 +239,10 @@ def _k(*kinds: str) -> frozenset[str]:
 #: than passing silently. Companions are the distinct consequences one edit
 #: legitimately implies, each with its reason:
 #:
-#: * ``global_variable_retyped``: ``int`` -> ``long`` changes the symbol's size
-#:   and alignment as well as its type; each is a fact about the same variable.
+#: * ``global_variable_retyped``: ``int`` -> ``long long`` changes the symbol's size
+#:   and alignment (4 -> 8 bytes on every host) as well as its type; each is a fact
+#:   about the same variable. The clang row carried no alignment companion while the
+#:   builtin probe recorded no fact on the parse's own target; now it does, as castxml does.
 #: * ``struct_field_retyped``: the field's offset moves in the record layout,
 #:   which both frontends now record (clang through its own record-layout dump).
 #: * ``class_virtual_method_added``: adding a virtual changes the vtable layout
@@ -262,7 +264,7 @@ EXPECTED: dict[tuple[str, str], tuple[frozenset[str], frozenset[str]]] = {
     ),
     ("global_variable_retyped", "clang"): (
         _k("var_type_changed"),
-        _k("symbol_size_changed"),
+        _k("var_alignment_changed", "symbol_size_changed"),
     ),
     ("enum_member_value_changed", "castxml"): (_k("enum_member_value_changed"), _k()),
     ("enum_member_value_changed", "clang"): (_k("enum_member_value_changed"), _k()),

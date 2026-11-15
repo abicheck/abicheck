@@ -197,6 +197,11 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_tool_probe_hang_guard.py",
                 # castxml's derived data size against each target's compilers.
                 "tests/test_castxml_data_size_integration.py",
+                # The clang builtin-ABI probe measures the parse's own target
+                # (-m32 reaches it) and tolerates an ILP32 builtin set.
+                "tests/unit/extract/test_clang_builtin_probe_options.py",
+                # The same probe through the public dump of a real -m32 parse.
+                "tests/test_clang_builtin_probe_m32.py",
                 # The time64 detector reads a typedef chain in either backend's
                 # spelling (clang chains, gcc flattens), to one finding.
                 "tests/test_time64_typedef_chain.py",
