@@ -1,0 +1,309 @@
+# -- symbols: export-table facts (B) --------------------------------------
+func_added  B  # diff_symbols.py:624: a binary-only NEW reports an undeclared export through the ordinary function diff (FUNC_ADDED), from the export table alone; undeclared_exports.py:141-197 adds FUNC_ADDED_ELF_ONLY only for a header-backed NEW
+func_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (dumper.py:966, 1115)
+func_export_added  U  # export_transition.py:221: emission depends on declaration state (_export_was_gained); not established from B alone
+func_language_linkage_changed  BH  # compare/function_signature.py:487: declaration linkage needs headers; B alone shows only the mangled name
+func_likely_renamed  B  # diff_symbols_renames.py:535-542: name-fingerprint candidates
+func_removed  DH  # diff_symbols.py:249: binary-only snapshots (ELF, PE, Mach-O: dumper.py:966, 1115) emit FUNC_REMOVED_ELF_ONLY for export-table-only records; FUNC_REMOVED needs DWARF or headers
+func_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols.py:249)
+func_visibility_changed  BH  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
+var_added  B  # diff_symbols_variables.py:210: a binary-only NEW reports an added variable export from the export table alone (VAR_ADDED); the ELF-only variant is undeclared_exports.py:141-197
+var_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (undeclared_exports.py:197)
+var_export_added  U  # export_transition.py:250: same path as func_export_added; not established from B alone
+var_removed  DH  # diff_symbols_variables.py:86: binary-only snapshots emit VAR_REMOVED_ELF_ONLY for export-table-only records
+var_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols_variables.py:86)
+var_visibility_changed  U  # emitted only from template_instance_absence.py:516 (typed template evidence)
+symbol_renamed_batch  B  # diff_symbols_renames.py:682-690: rename pairs from symbol names with ELF binding
+symbol_size_changed              B:ELF  # st_size in .dynsym; no PE/Mach-O analogue
+symbol_size_changed_const_object B:ELF
+symbol_size_changed_internal     B:ELF
+# -- symbols: layout / type facts in DWARF and the header (DH) -------------
+anon_field_changed               DH
+calling_convention_changed       DH
+func_params_changed              DH
+func_return_changed              DH
+func_return_covariant_narrowed   DH
+func_variadic_added              DH
+func_variadic_removed            DH
+func_virtual_added               DH
+func_virtual_removed             DH
+param_pointer_level_changed      DH
+return_pointer_level_changed     DH
+var_alignment_changed            DH   # plan A2.1
+var_became_const                 DH
+var_lost_const                   DH
+var_type_changed                 DH
+# -- symbols: declaration-only facts (H) -----------------------------------
+constant_added                   H
+constant_changed                 H
+constant_removed                 H
+ctor_explicit_added              H
+ctor_explicit_removed            H
+ctor_overload_ambiguity_risk     H
+field_access_changed             H
+func_contract_attribute_added    H
+func_contract_attribute_removed  H
+func_deleted                     H
+func_deprecated_added            H
+func_deprecated_removed          H
+func_exception_spec_changed      H
+func_lost_final                  H
+func_lost_inline                 H
+func_became_final                H
+func_noexcept_added              H
+func_noexcept_removed            H
+func_override_specifier_added    H
+func_override_specifier_removed  H
+func_virtual_noexcept_added      H
+hidden_friend_added              H
+hidden_friend_removed            H
+method_access_changed            H
+overload_ambiguity_introduced    H
+param_became_va_list             H
+param_default_value_changed      H   # plan A2.4
+param_default_value_removed      H
+param_lost_va_list               H
+param_pointee_qualifier_added    H
+param_pointee_qualifier_changed  H
+param_renamed                    H
+param_restrict_added             H
+param_restrict_changed           H
+func_return_pointee_qualifier_added    H
+func_return_pointee_qualifier_changed  H
+func_return_pointee_qualifier_removed  H
+public_api_exposes_stl_by_value  H
+var_access_changed               H
+var_access_widened               H
+var_deprecated_added             H
+var_deprecated_removed           H
+# -- symbols: needs the source graph (L5) ---------------------------------
+internal_symbol_required_by_public_api L5
+# -- types: layout / type facts (DH) ---------------------------------------
+atomic_qualifier_changed         DH
+base_class_offset_changed        DH
+base_class_position_changed      DH
+base_class_virtual_changed       DH
+enum_last_member_value_changed   DH
+enum_member_added               DH
+enum_member_removed              DH
+enum_member_value_changed        DH
+field_bitfield_changed           DH
+field_became_const               DH
+field_became_volatile            DH
+field_lost_const                 DH
+field_lost_volatile              DH
+flexible_array_member_changed    DH
+func_cv_changed                  DH
+func_pure_virtual_added          DH
+func_ref_qual_changed            DH
+standard_layout_lost             DH
+struct_alignment_changed         DH
+struct_field_offset_changed      DH
+struct_field_removed             DH
+struct_field_type_changed        DH
+struct_packing_changed           DH   # plan A2.2: {B,D},{B,H}
+struct_size_changed              DH
+trivially_copyable_lost          DH   # plan A2.4: VALUE_ABI_TRAIT duplicate
+type_alignment_changed           DH
+type_base_changed                DH
+type_field_added                 DH
+type_field_added_compatible      DH
+type_field_offset_changed        DH
+type_field_removed               DH
+type_field_type_changed          DH
+type_kind_changed                DH
+type_size_changed                DH
+typedef_base_changed             DH
+union_field_added               DH
+union_field_removed              DH
+union_field_type_changed         DH
+virtual_base_offset_changed      DH
+virtual_method_added             DH
+vptr_introduced                  DH
+# -- types: declaration-only facts (H) -------------------------------------
+base_class_access_narrowed       H
+default_template_arg_changed      H
+enum_became_scoped               H
+enum_deprecated_added            H
+enum_deprecated_removed          H
+enum_lost_scoped                 H
+enum_member_renamed              H
+experimental_graduated           H
+experimental_removed_without_replacement H
+field_became_mutable             H
+field_default_initializer_changed H
+field_default_initializer_removed H
+field_deprecated_added           H
+field_deprecated_removed         H
+field_lost_mutable               H
+field_renamed                    H
+func_static_changed              H
+inline_body_references_renamed_member H
+inline_namespace_version_bumped  H
+mandatory_template_param_added   H
+polymorphic_type_non_virtual_dtor H
+removed_const_overload           H
+source_level_kind_changed        H
+std_reexport_removed             H
+template_param_default_changed   H
+type_became_abstract             H
+type_became_final                H
+type_became_opaque               H
+type_deprecated_added            H
+type_deprecated_removed          H
+type_lost_abstract               H
+type_lost_final                  H
+type_removed                     H
+typedef_removed                  H
+unspecified_return_now_named     H
+# -- types: binary facts (B) ----------------------------------------------
+rtti_inheritance_changed  B:ELF  # diff_elf_layout.py:391-404: shape inferred from _ZTI symbol sizes alone (export-table fact); Mach-O left to #2068
+type_visibility_changed  DH  # compare/type_visibility.py:112-142: class-own-symbol visibility maps through typed class records
+type_vtable_changed  DH  # diff_types_vtable.py:350,579: vtable content from the typed vtable_fact (DWARF/header), not raw symbols
+vtable_slot_count_changed        B:ELF+MACHO
+vtable_thunk_offset_changed      B:ELF+MACHO
+vtable_thunk_set_changed         B:ELF+MACHO
+vtt_slot_count_changed           B:ELF+MACHO
+# -- platform: ELF / Mach-O / PE header and dynamic facts (B) --------------
+abi_tag_changed                  B:ELF
+allocator_replacement_added      B:ELF
+allocator_replacement_removed    B:ELF
+bind_now_disabled                B:ELF
+branch_protection_improved       B:ELF
+branch_protection_weakened       B:ELF
+cet_protection_improved          B:ELF
+cet_protection_weakened          B:ELF
+dt_relr_introduced               B:ELF
+dt_relr_removed                  B:ELF
+dynamic_loading_flags_changed    B:ELF
+elf_abi_flags_changed            B:ELF
+elf_class_changed                B:ELF
+elf_endianness_changed           B:ELF
+elf_init_fini_changed            B:ELF
+elf_machine_changed              B:ELF
+elf_osabi_changed                B:ELF
+executable_stack                 B:ELF
+executable_stack_removed         B:ELF
+fortify_source_weakened          B:ELF
+func_visibility_protected_changed B:ELF
+glibcxx_dual_abi_changed         B
+glibcxx_dual_abi_flip_detected   B
+hash_style_removed               B:ELF
+ifunc_introduced                 B:ELF
+ifunc_removed                    B:ELF
+imported_symbol_added            B
+imported_symbol_removed          B
+imported_symbol_unprovided       B
+interpreter_changed              B:ELF
+macho_cpu_type_changed           B:MACHO
+macho_filetype_changed          B:MACHO
+macho_linkage_flags_changed     B:MACHO
+macho_reexport_changed          B:MACHO
+needed_added                     B
+needed_order_changed             B
+needed_removed                   B
+os_deployment_floor_raised       B:MACHO
+pe_forwarder_changed             B:PE
+pe_hardening_improved            B:PE
+pe_hardening_weakened            B:PE
+pe_import_load_mode_changed      B:PE
+pe_machine_changed               B:PE
+pe_ordinal_retargeted            B:PE
+pie_disabled                     B:ELF
+protected_visibility_changed     B:ELF
+relro_weakened                   B:ELF
+rpath_changed                    B:ELF
+rpath_type_changed               B:ELF
+runpath_changed                  B:ELF
+soname_changed                   B:ELF+MACHO
+soname_missing                   B:ELF
+stack_canary_removed             B:ELF
+static_tls_introduced            B:ELF
+static_tls_removed               B:ELF
+symbol_binding_became_unique     B:ELF
+symbol_binding_changed           B:ELF
+symbol_binding_lost_unique       B:ELF
+symbol_binding_strengthened      B:ELF
+symbol_elf_visibility_changed    B:ELF
+symbol_leaked_from_dependency_changed B:ELF
+symbol_moved_version_node        B:ELF
+symbol_type_changed              B:ELF
+symbol_version_alias_changed     B:ELF
+symbol_version_defined_added     B:ELF
+symbol_version_defined_removed   B:ELF
+symbol_version_node_removed      B:ELF
+symbol_version_required_added    B:ELF
+symbol_version_required_added_compat B:ELF
+symbol_version_required_removed  B:ELF
+symbolic_binding_mode_changed    B:ELF
+text_relocation_introduced       B:ELF
+text_relocation_removed          B:ELF
+tls_var_size_changed             B:ELF
+unversioned_exported_symbol      B:ELF
+runtime_floor_raised             B:ELF
+version_script_missing           B:ELF
+versioned_symbol_scheme_detected B:ELF
+vtable_symbol_identity_changed   B:ELF+MACHO
+writable_executable_segment      B:ELF
+x86_isa_baseline_raised          B:ELF
+# -- platform: compiler-flag facts (DBD) and layout (DH / D1) -------------
+bit_int_width_changed            DH
+char8t_migration                 DH
+char_signedness_changed          DBD  # plan A3
+enum_size_flag_changed           DBD
+enum_underlying_size_changed     D1   # header carries it only when explicit
+exceptions_mode_changed          DBD
+float_abi_changed                DBD
+integer_model_changed            DBD
+long_double_abi_changed          DBD  # plan A3
+lto_mode_changed                 DBD
+struct_packing_mode_changed      DBD
+struct_return_convention_changed DH   # plan: STRUCT_RETURN_CONVENTION
+stdlib_debug_mode_changed        DBD
+target_isa_changed               DBD  # plan A3
+threadsafe_statics_mode_changed  DBD
+time64_abi_changed  D1  # diff_time64.py:26: detector requires typedef evidence (L1 DWARF / L2 headers); DWARF records the size
+tls_model_changed                DBD
+toolchain_flag_drift             DBD  # plan A3
+value_abi_trait_changed          DH   # plan A2.4
+vector_abi_changed               DBD  # plan A3
+whole_program_vtables_mode_changed DBD
+wchar_model_changed              DBD  # plan A3
+abi_relevant_build_flag_changed  DBD
+# -- build / source: declaration-only (H), header and export (BH) ---------
+concept_constraint_changed       H
+concept_tightened               H
+constexpr_value_changed          H
+default_argument_changed         H    # plan A2.4
+exported_not_public              BH
+header_only_function_params_changed H
+inline_body_changed              H    # plan A5
+inline_function_removed          H    # plan A2.4 / A5
+internal_template_leaks_via_public_api H
+internal_type_leaks_via_public_api H
+private_header_leak              H
+public_macro_removed             H    # plan A5
+public_macro_value_changed       H
+public_not_exported              BH
+public_surface_grew              H
+public_surface_shrank            H
+public_typedef_removed           H
+public_typedef_target_changed    H
+rtti_for_internal_type           BH
+source_decl_binary_symbol_mismatch BH
+template_body_changed            H    # plan A5
+uninstantiated_template_removed  H    # plan A2.4
+# -- build / source: binary (B) -------------------------------------------
+consumer_required_symbol_removed  U  # needs a consumer artifact (workflows/consumer_scope.py:261); not a source in the lattice
+runtime_symbol_provider_changed  B
+runtime_weak_resolution_changed  B
+# -- build / source: needs sources or the graph (L4, L5, BHSG) -----------
+call_graph_public_entry_reachability_changed BHSG
+public_api_internal_dependency_added L5
+public_api_internal_type_renamed L5
+public_dependency_role_changed   L5
+public_dependency_role_unknown   L5
+public_to_internal_dependency    L5
+public_virtual_dispatch_set_changed L5
+source_surface_dso_mismatch      L4
+target_dependency_added          L5

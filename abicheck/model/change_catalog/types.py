@@ -39,10 +39,13 @@ from __future__ import annotations
 from .registry import ChangeKindMeta
 from .types_1 import TYPES_ENTRIES_1
 from .types_2 import TYPES_ENTRIES_2
+from .types_3 import TYPES_ENTRIES_3
 
 #: Assembled from the numbered parts above; split purely to keep each
 #: file under ADR-061's 800-line ceiling, exactly as
 #: ``kind_names_{1,2,3}.py`` already is. The public name is unchanged.
-TYPES_ENTRIES: list[ChangeKindMeta] = TYPES_ENTRIES_1 + TYPES_ENTRIES_2
+TYPES_ENTRIES: list[ChangeKindMeta] = (
+    TYPES_ENTRIES_1 + TYPES_ENTRIES_2 + TYPES_ENTRIES_3
+)
 
 __all__ = ["TYPES_ENTRIES"]

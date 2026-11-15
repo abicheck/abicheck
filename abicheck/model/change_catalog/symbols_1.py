@@ -34,7 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .observability import KindRelations
+from .observability import KindRelations, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -51,6 +51,21 @@ _E = ChangeKindMeta
 _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
+
+_OBS_B = observable(("B",))
+_OBS_BH = observable(
+    ("B", "H"),
+    rationale="declared in the public header and present in the export table",
+)
+_OBS_H = observable(
+    ("B", "H"), rationale="declaration-only fact: visible in the public header"
+)
+_OBS_DH = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="layout or type fact: DWARF and the public header both carry it",
+)
+_OBS_L5 = observable(("B", "H", "BD", "S", "G"), rationale="needs the source graph (G)")
 
 SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
@@ -79,6 +94,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "calling_convention_changed",
@@ -88,6 +104,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "constant_added",
@@ -113,6 +130,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "constant_changed",
@@ -138,6 +156,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "constant_removed",
@@ -162,6 +181,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "ctor_explicit_added",
@@ -175,6 +195,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "ctor_explicit_removed",
@@ -187,6 +208,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "ctor_overload_ambiguity_risk",
@@ -204,6 +226,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "field_access_changed",
@@ -214,6 +237,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_added",
@@ -224,6 +248,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "func_became_inline",
@@ -258,6 +283,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_contract_attribute_removed",
@@ -270,6 +296,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_deleted",
@@ -279,6 +306,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_deleted_dwarf",
@@ -308,6 +336,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_deprecated_removed",
@@ -318,6 +347,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_exception_spec_changed",
@@ -331,6 +361,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_language_linkage_changed",
@@ -342,6 +373,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_BH,),
     ),
     _E(
         "func_likely_renamed",
@@ -353,6 +385,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "func_lost_inline",
@@ -411,6 +444,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_noexcept_added",
@@ -419,6 +453,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_noexcept_removed",
@@ -436,6 +471,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_override_specifier_added",
@@ -447,6 +483,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_override_specifier_removed",
@@ -461,6 +498,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "func_params_changed",
@@ -470,6 +508,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "func_removed",
@@ -478,6 +517,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "func_added_elf_only",
@@ -503,6 +543,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B,),
         relations=KindRelations(variant_of="func_added"),
     ),
     _E(
@@ -525,6 +566,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B,),
         relations=KindRelations(variant_of="var_added"),
     ),
     _E(
@@ -534,6 +576,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B,),
         relations=KindRelations(variant_of="func_removed"),
     ),
     _E(
@@ -544,6 +587,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "func_variadic_added",
@@ -557,6 +601,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "func_variadic_removed",
@@ -569,6 +614,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "func_virtual_added",
@@ -577,6 +623,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "func_virtual_removed",
@@ -585,6 +632,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "func_visibility_changed",
@@ -594,6 +642,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_BH,),
     ),
     _E(
         "var_visibility_changed",
@@ -650,6 +699,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "hidden_friend_removed",
@@ -666,6 +716,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "internal_symbol_required_by_public_api",
@@ -686,6 +737,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",  # var_removed -> variable
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_L5,),
     ),
     _E(
         "method_access_changed",
@@ -696,6 +748,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "param_became_va_list",
@@ -715,6 +768,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "param_default_value_changed",
@@ -729,6 +783,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "param_default_value_removed",
@@ -743,5 +798,6 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
 ]
