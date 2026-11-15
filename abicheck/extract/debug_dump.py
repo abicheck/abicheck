@@ -165,6 +165,15 @@ def _resolve_debug_metadata(
     return dwarf_meta, dwarf_adv
 
 
+def _is_macho64(path: Path) -> bool:
+    """True iff *path* is a little-endian 64-bit Mach-O (MH_MAGIC_64)."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"\xcf\xfa\xed\xfe"
+    except OSError:
+        return False
+
+
 def _parse_dwarf_source(
     parse_dwarf: Any,
     dwarf_path: Path,
@@ -181,6 +190,15 @@ def _parse_dwarf_source(
     symbols-only dump of a binary whose debug info was requested and found.
     """
     from ..model.dwarf_facts import AdvancedExtractionStatus
+
+    if dwarf_path != so_path and _is_macho64(dwarf_path) and _is_macho64(so_path):
+        # A Mach-O library's explicit bundle (ADR-021): its UUID must match the
+        # library, and a refused bundle is a reported read failure, not a drop.
+        from ..dwarf_unified import parse_dwarf_from_macho_dsym
+
+        return parse_dwarf_from_macho_dsym(
+            so_path, dwarf_path, _session_out=session_out
+        )
 
     result: tuple[DwarfMetadata, AdvancedDwarfMetadata] = parse_dwarf(
         dwarf_path, _session_out=session_out

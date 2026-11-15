@@ -252,3 +252,77 @@ def test_a_mismatched_bundle_beside_the_library_is_not_used(tmp_path: Path) -> N
     session, status = _open_dwarf_session_with_status(lib)
     assert session is None
     assert status is AdvancedExtractionStatus.NOT_RUN
+
+
+def _explicit_fixture(tmp_path: Path, *, uuid: str) -> tuple[Path, Path]:
+    """A Mach-O library and an explicit bundle file (not beside it) with *uuid*."""
+    lib = _dylib(tmp_path / "libq.dylib", "11111111-2222-3333-4444-555555555555")
+    bundle = _macho(
+        tmp_path / "explicit.dSYM.bin",
+        filetype=_MH_DSYM,
+        uuid=uuid,
+        sections=[("__debug_info", b"\x00" * 16)],
+    )
+    return lib, bundle
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+def test_an_explicit_bundle_for_the_library_is_read(tmp_path: Path) -> None:
+    from abicheck.extract.debug_dump import _resolve_debug_metadata
+
+    src = tmp_path / "lib.c"
+    src.write_text("int triple(int x) { return 3 * x; }\n")
+    elf = tmp_path / "libq.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", "-o", str(elf), str(src)], check=True
+    )
+    uid = "11111111-2222-3333-4444-555555555555"
+    lib = _dylib(tmp_path / "libq.dylib", uid)
+    # The bundle is named explicitly and lives somewhere other than beside the library.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    bundle = _macho(
+        elsewhere / "bundle.bin",
+        filetype=_MH_DSYM,
+        uuid=uid,
+        sections=_sections_from_elf(elf),
+    )
+    meta, adv = _resolve_debug_metadata(lib, None, dwarf_source=bundle)
+    assert meta.has_dwarf is True
+    assert adv.extraction.name == "COMPLETED"
+
+
+def test_an_explicit_bundle_whose_dwarf_is_unreadable_is_reported_not_dropped(
+    tmp_path: Path,
+) -> None:
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.debug_dump import _resolve_debug_metadata
+
+    lib, bundle = _explicit_fixture(
+        tmp_path, uuid="11111111-2222-3333-4444-555555555555"
+    )
+    with pytest.raises(SnapshotError, match="could not be read"):
+        _resolve_debug_metadata(lib, None, dwarf_source=bundle)
+
+
+def test_an_explicit_bundle_with_a_mismatched_uuid_is_a_reported_failure(
+    tmp_path: Path,
+) -> None:
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.debug_dump import _resolve_debug_metadata
+
+    lib, bundle = _explicit_fixture(
+        tmp_path, uuid="99999999-2222-3333-4444-555555555555"
+    )
+    with pytest.raises(SnapshotError, match="does not match"):
+        _resolve_debug_metadata(lib, None, dwarf_source=bundle)
+
+
+def test_a_missing_explicit_bundle_is_a_reported_failure(tmp_path: Path) -> None:
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.debug_dump import _resolve_debug_metadata
+
+    lib = _dylib(tmp_path / "libq.dylib", "11111111-2222-3333-4444-555555555555")
+    with pytest.raises(SnapshotError):
+        _resolve_debug_metadata(lib, None, dwarf_source=tmp_path / "gone.dSYM")

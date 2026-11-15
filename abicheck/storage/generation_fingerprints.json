@@ -10,7 +10,7 @@
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
-      "abicheck/dwarf_unified.py": "890710d8299957ac78a7b823b71c0ebe2771e448a8ee077cc4b4cf3fdf27343f",
+      "abicheck/dwarf_unified.py": "78ef46481983b61342ab044fb6c2b751491f17d0c79b59042a67e630d74272e5",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
       "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
@@ -34,7 +34,7 @@
       "abicheck/extract/cpp20_header_prep.py": "bfc43b5382a9e60e83a022979b25e91dce311813b06b592ede31e099889228fe",
       "abicheck/extract/cxx_digit_separator.py": "04956886d39b50304096a99c11b434fa7f3edd648efb3a3be3cb8b6d12480bfd",
       "abicheck/extract/debug_artifact.py": "e93c500a1bbaf795abc74d91487f038f3ca6337c1243f3a33b4af2850f41e058",
-      "abicheck/extract/debug_dump.py": "97ac8cf0526b877a274c50a413287cf777713fc9452f1ada01da2d8a1e642b56",
+      "abicheck/extract/debug_dump.py": "3c3e2a88ce64d4c7a72994f401c6bcaf8d9ae0ca836f3bd701b3b267a08e7a3b",
       "abicheck/extract/debug_layout_semantic_ir.py": "b4cc00e22312c64e6905ef0aa6a716e3feb258be48f93a20ee1b6472aa69e89a",
       "abicheck/extract/debug_section_presence.py": "7604222ad6db748c6772539dbafd1ac4cedf0f580b9a258d2a4ec2959dd82f57",
       "abicheck/extract/declaration_provenance.py": "4e15f22d3ce0b8580c92194f9b8376363a4f5362bdce5b3cd7a366b16f566e03",
@@ -234,9 +234,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "ef94245fcdb06a5aa205d4ed7196f862b48cf7d5cb875eed73f5e0b9702a6920",
+    "fingerprint": "d32de40d42d88a03036967a4931720ca925c58aa90b34f08a59b1f9940f57d54",
     "generation": 76,
-    "reason": "Mach-O DWARF read from the adjacent dSYM (ADR-021 step 5)"
+    "reason": "Same unpublished generation 76: adds the explicit dwarf_source path for Mach-O dSYM bundles (the reader and discovery already carry the semantic change)"
   },
   "resolver": {
     "files": {

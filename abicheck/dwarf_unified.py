@@ -155,25 +155,20 @@ def _macho_arch(f: BinaryIO) -> str:
     return {_CPU_X86_64: "x64", _CPU_ARM64: "aarch64"}.get(cputype, "unknown")
 
 
-def _macho_dsym_session(
-    so_path: Path, f: BinaryIO
-) -> tuple[DwarfSession | None, AdvancedExtractionStatus]:
-    """DWARF of a Mach-O library, read from its adjacent ``.dSYM`` bundle.
+def _macho_session_from_bundle(
+    so_path: Path, bundle: Path, f: BinaryIO
+) -> tuple[DwarfSession | None, str | None]:
+    """A session over *bundle*'s DWARF for the library *so_path*, or the refusal.
 
-    A library with no bundle, or a bundle that does not belong to it (UUID
-    mismatch, fat, malformed), yields no session with status ``NOT_RUN``:
-    nothing was read, which is absent evidence, never an empty DWARF surface.
+    The bundle must carry the library's UUID; a missing, fat, malformed or
+    mismatched bundle returns ``(None, reason)``. *f* is the library's open
+    handle, owned by the returned session.
     """
     from .extract.macho_dsym import DsymDwarf, macho_uuid, read_dsym_dwarf
 
-    dsym = _adjacent_dsym_binary(so_path)
-    if dsym is None:
-        log.debug("parse_dwarf: no dSYM bundle beside %s", so_path)
-        return None, AdvancedExtractionStatus.NOT_RUN
-    got = read_dsym_dwarf(dsym, dylib_uuid=macho_uuid(so_path))
+    got = read_dsym_dwarf(bundle, dylib_uuid=macho_uuid(so_path))
     if not isinstance(got, DsymDwarf):
-        log.warning("parse_dwarf: dSYM for %s not used: %s", so_path, got.reason)
-        return None, AdvancedExtractionStatus.NOT_RUN
+        return None, got.reason
     session = DwarfSession(
         path=Path(so_path),
         _file=f,
@@ -181,7 +176,73 @@ def _macho_dsym_session(
         dwarf=got.dwarf,
         arch=_macho_arch(f),
     )
+    return session, None
+
+
+def _macho_dsym_session(
+    so_path: Path, f: BinaryIO
+) -> tuple[DwarfSession | None, AdvancedExtractionStatus]:
+    """DWARF of a Mach-O library from the bundle beside it (ADR-021 step 5).
+
+    No bundle, or a bundle that is refused, yields no session with status
+    ``NOT_RUN``: nothing was read, which is absent evidence. A refused bundle
+    is logged with its reason; the explicit path reports it as a failure.
+    """
+    bundle = _adjacent_dsym_binary(so_path)
+    if bundle is None:
+        log.debug("parse_dwarf: no dSYM bundle beside %s", so_path)
+        return None, AdvancedExtractionStatus.NOT_RUN
+    session, reason = _macho_session_from_bundle(so_path, bundle, f)
+    if session is None:
+        log.warning("parse_dwarf: dSYM for %s not used: %s", so_path, reason)
+        return None, AdvancedExtractionStatus.NOT_RUN
     return session, AdvancedExtractionStatus.COMPLETED
+
+
+def parse_dwarf_from_macho_dsym(
+    so_path: Path,
+    dsym: Path,
+    *,
+    _session_out: list[DwarfSession] | None = None,
+) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
+    """DWARF of Mach-O *so_path* from the explicitly named bundle *dsym*.
+
+    The explicit input (``--debug-root`` / ``dwarf_source``) is the user's
+    statement that this bundle holds the library's DWARF, so a bundle that is
+    refused is a recorded read failure, never a silent empty surface. Same
+    contract as :func:`parse_dwarf`: never raises; ``_session_out`` hands the
+    open session to the caller.
+    """
+    try:
+        f = open(so_path, "rb")  # noqa: SIM115 - owned by the session below
+    except OSError as exc:
+        note_debug_info_read_failure(f"library {so_path} unreadable: {exc}")
+        return DwarfMetadata(), AdvancedDwarfMetadata(
+            extraction=AdvancedExtractionStatus.FAILED
+        )
+    session, reason = _macho_session_from_bundle(so_path, dsym, f)
+    if session is None:
+        f.close()
+        note_debug_info_read_failure(
+            f"explicit dSYM {dsym} for {so_path} is not used: {reason}"
+        )
+        return DwarfMetadata(), AdvancedDwarfMetadata(
+            extraction=AdvancedExtractionStatus.FAILED
+        )
+    try:
+        meta, adv = parse_dwarf_from_session(session)
+    except Exception as exc:  # noqa: BLE001 - mirror parse_dwarf's guard
+        log.warning("parse_dwarf: failed to parse CUs in %s: %s", dsym, exc)
+        note_debug_info_read_failure(f"DWARF compilation units unreadable: {exc!r}")
+        session.close()
+        return DwarfMetadata(), AdvancedDwarfMetadata(
+            extraction=AdvancedExtractionStatus.FAILED
+        )
+    if _session_out is not None:
+        _session_out.append(session)
+    else:
+        session.close()
+    return meta, adv
 
 
 def _open_dwarf_session_with_status(
