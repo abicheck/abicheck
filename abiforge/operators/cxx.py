@@ -363,18 +363,12 @@ _LINKAGE = (
             ),
         ),
         "lib::v1::f1 becomes lib::v2::f1: every mangled name changes, the spelling does not",
+        # The required kind is the name-structural fact at every evidence
+        # level and toolchain. FUNC_LIKELY_RENAMED is a size-dependent
+        # fingerprint guess (functions under the 8-byte floor are never
+        # fingerprinted), so it is not required; a run that reports it is
+        # not a failure.
         expected=frozenset({"INLINE_NAMESPACE_MOVED"}),
-        rules=(
-            Rule(
-                lambda c: c.evidence == "binary",
-                {
-                    "expected": frozenset(
-                        {"INLINE_NAMESPACE_MOVED", "FUNC_LIKELY_RENAMED"}
-                    )
-                },
-                "from symbols alone the renamed exports are paired as a likely rename",
-            ),
-        ),
         **_BINARY,
     ),
     _op(
