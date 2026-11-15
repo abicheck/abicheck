@@ -339,12 +339,30 @@ def _claimed_spellings(decls: Iterable[Decl]) -> set[str]:
     return claimed
 
 
+def _singleton_binds(decl: Decl, sym: str) -> bool:
+    """Whether a lone declaration may bind a lone export of the same key.
+
+    An MSVC-decorated function export binds only when both parameter lists
+    decode and agree. Undecodable on either side leaves the parameter identity
+    unestablished: ``int*`` declared against an export that is really
+    ``add(int, int)`` would otherwise hide a real missing export. Variables
+    have no signature, and C-decorated or undecorated exports carry none to
+    compare, so they keep the name-level binding.
+    """
+    agrees = _signature_agrees(decl, sym)
+    if agrees is False:
+        return False
+    if agrees is None and isinstance(decl, Function) and sym.startswith("?"):
+        return False
+    return True
+
+
 def _pair(
     decls: list[Decl], syms: list[str]
 ) -> tuple[list[tuple[Decl, str]], list[str]]:
     """Bind one key's candidates; return the pairs and the refused exports."""
     if len(decls) == 1 and len(syms) == 1:
-        if _signature_agrees(decls[0], syms[0]) is False:
+        if not _singleton_binds(decls[0], syms[0]):
             return [], syms
         return [(decls[0], syms[0])], []
     # Overloads: pair by a fully decoded builtin parameter list, uniquely.

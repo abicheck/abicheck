@@ -86,6 +86,7 @@ from ..policy.no_baseline_findings import (
     check_no_baseline_partition,
     partition_no_baseline_findings,
 )
+from .compare_policy import pe_header_operand_bound
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -488,7 +489,7 @@ def run_no_baseline_compare(
     # carry those findings is an open question, not settled here.
     diff = _diff_pair(
         None,
-        new,
+        pe_header_operand_bound(new),
         suppression=suppression,
         policy=policy,
         policy_file=policy_file,

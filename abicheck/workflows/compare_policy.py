@@ -306,7 +306,7 @@ def _within_comparison_memo_scope(fn: _F) -> _F:
 
 
 @_within_comparison_memo_scope
-def _pe_header_operand_bound(snap: AbiSnapshot) -> AbiSnapshot:
+def pe_header_operand_bound(snap: AbiSnapshot) -> AbiSnapshot:
     """A header-backed PE operand with its declarations joined to its DLL's exports.
 
     A dump binds at extraction (``finish_binary_snapshot``), but a stored
@@ -388,8 +388,8 @@ def compare_snapshots(
             accepting a no-op or failing later inside the core (Codex review).
     """
     _validate_contract_mode(contract_mode, contract_evaluation)
-    old = _pe_header_operand_bound(old)
-    new = _pe_header_operand_bound(new)
+    old = pe_header_operand_bound(old)
+    new = pe_header_operand_bound(new)
     # Centralized POST committed-wrapper recovery: when a committed-surface
     # allowlist is supplied, union the callable `pp_*` wrappers exported by
     # the old snapshot (contract_scope_allowlist's snapshot half) -- keeps
@@ -454,6 +454,7 @@ __all__ = [
     "dedup_policy_override_warnings",
     "load_policy_inputs",
     "load_suppression_and_policy",
+    "pe_header_operand_bound",
 ]
 
 

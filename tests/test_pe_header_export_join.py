@@ -233,3 +233,25 @@ def test_member_really_removed_in_v2_is_still_reported() -> None:
         ("func_removed", "?multiply@Calculator@@QEAAHHH@Z"),
         ("public_surface_shrank", "<surface>"),
     ], kinds
+
+
+@pytest.mark.parametrize(
+    "export",
+    [
+        # Decodable, and a different parameter list (int, int) than int*.
+        "?add@Calculator@@QEAAHHH@Z",
+        # Undecodable on the export side too (a pointer parameter).
+        "?add@Calculator@@QEAAHPEAH@Z",
+    ],
+)
+def test_undecodable_parameter_declaration_does_not_bind_a_lone_export(
+    export: str,
+) -> None:
+    # The header declares add(int*). Its parameter identity cannot be decided
+    # from either spelling, so the lone export of the same name must not claim
+    # it: a real missing export would otherwise be hidden.
+    decl = _decl("add", "_ZN10Calculator3addEPi", ("int*",))
+    snap = _pe_snapshot([export], decl)
+    bind_pe_header_exports(snap)
+    assert decl.mangled == "_ZN10Calculator3addEPi"
+    assert decl.visibility is Visibility.HIDDEN
