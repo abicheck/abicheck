@@ -16,7 +16,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.model.change import Change
-from abicheck.model.change_catalog.kind_variants import expand_variant_overrides
+from abicheck.policy.kind_relations import expand_variant_overrides
 from abicheck.policy.reclassify import effective_verdict_for_change
 from abicheck.policy_file import PolicyFile
 

@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from ..model.change_catalog.kind_variants import matched_via_variant
+from .kind_relations import matched_via_variant
 from .rule_identity import readable_identity_of, rule_id_of
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -126,7 +126,7 @@ def rule_provenance(
     reconstructed from JSON, for instance). Given the disposed *change*, the
     projection also records whether the rule matched only through that
     change's ``*_elf_only`` variant (see
-    :func:`~abicheck.model.change_catalog.kind_variants.matched_via_variant`).
+    :func:`~abicheck.policy.kind_relations.matched_via_variant`).
     """
     if rule is None:
         return None
