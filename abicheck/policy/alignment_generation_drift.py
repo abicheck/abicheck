@@ -29,10 +29,13 @@ Across the generation-74 boundary only, the finding is annotated as
 LP64 (host) natural alignment of the variable's builtin or pointer type, and
 the fresh operand's is the ILP32 (target) natural alignment of that same type.
 The stale value is exactly what the pre-74 probe produced, so the pair is the
-artifact and no other alignment. A real change (an explicit ``alignas`` or
-``aligned`` attribute, a different type, a value that is neither natural
-alignment) keeps its verdict, as does any change between operands of the same
-generation.
+artifact and no other alignment. The matching pair is reported at reduced assurance (``COMPATIBLE_WITH_RISK``,
+the level the other drift demotions use), never as a clean compatible result:
+an explicit ``alignas`` or ``aligned`` change on the stale operand produces the
+same pair, and the stored fact cannot tell the two apart. The reason says so
+and asks for a re-dump of the older operand at generation 74 or later. A
+different type, a value that is neither natural alignment, and any change
+between operands of the same generation keep their verdict.
 
 The finding stays in the report with its rule and reason (ADR-067 record
 before disposing).
@@ -144,8 +147,11 @@ def demote_pre74_builtin_alignment_drift(
         change.modulation_reason = (
             f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
             f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
-            f"the clang builtin probe before generation {ALIGNMENT_FIX_GENERATION} "
-            f"measured the host ABI ({lp64_bits} bits for {stale_var.type!r}) "
-            f"instead of the parse's target ({ilp32_bits} bits))"
+            f"reduced assurance: the values match the pre-generation-"
+            f"{ALIGNMENT_FIX_GENERATION} host-ABI probe ({lp64_bits} bits for "
+            f"{stale_var.type!r}) and the target ({ilp32_bits} bits), but this "
+            "cannot tell generation drift from an explicit alignas/aligned change "
+            "on the older operand; re-dump the older operand with extractor "
+            f"generation >= {ALIGNMENT_FIX_GENERATION} to decide)"
         )
     return changes

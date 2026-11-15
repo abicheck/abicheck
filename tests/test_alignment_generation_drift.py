@@ -116,6 +116,12 @@ def test_host_to_target_alignment_is_demoted_and_recorded(typ: str) -> None:
     assert change.effective_verdict is Verdict.COMPATIBLE_WITH_RISK
     assert change.modulation_rule == "extractor_generation_drift"
     assert str(lp64) in change.modulation_reason
+    # Reduced assurance: the reason says drift and an explicit alignas change
+    # cannot be told apart, and asks for a re-dump of the older operand.
+    assert "cannot tell generation drift from an explicit alignas" in (
+        change.modulation_reason or ""
+    )
+    assert "re-dump the older operand" in (change.modulation_reason or "")
 
 
 @pytest.mark.parametrize("typ", list(_NATURAL))
@@ -231,3 +237,22 @@ def test_a_non_clang_snapshot_keeps_its_verdict(producer: str | None) -> None:
         [change], _snap("long", lp64, producer), _snap("long", ilp32, producer), 73, 74
     )
     assert change.effective_verdict is None
+
+
+def test_an_explicit_alignas_change_in_one_generation_stays_breaking() -> None:
+    # Same generation: no boundary, so no drift. An explicit alignas(16) -> 8
+    # change on a single extractor stays a breaking change.
+    from abicheck.checker_policy import BREAKING_KINDS
+
+    change = Change(
+        ChangeKind.VAR_ALIGNMENT_CHANGED,
+        "value",
+        "alignment changed",
+        old_value="128",
+        new_value="64",
+    )
+    demote_pre74_builtin_alignment_drift(
+        [change], _snap("long", 128), _snap("long", 64), 74, 74
+    )
+    assert change.effective_verdict is None
+    assert ChangeKind.VAR_ALIGNMENT_CHANGED in BREAKING_KINDS
