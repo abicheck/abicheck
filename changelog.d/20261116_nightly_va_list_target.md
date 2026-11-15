@@ -7,4 +7,4 @@
   recognizer now follows that link through the translation unit's typedefs to
   `__builtin_va_list`, so `PARAM_BECAME_VA_LIST` and `PARAM_LOST_VA_LIST` are
   reported on 32-bit targets. A user `typedef char *va_list;` is not recognised.
-  Extractor generation 75.
+  Extractor generation 76.

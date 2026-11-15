@@ -80,6 +80,23 @@ def _debug(snap: AbiSnapshot) -> bool:
 _PRECONDITIONS: tuple[tuple[str, Predicate], ...] = (
     ("missing ELF metadata", lambda o, n: o.elf is None or n.elf is None),
     (
+        # No ELF or Mach-O symbol metadata on a side, or two different formats:
+        # the layout detector cannot read both sides as one format.
+        "missing ELF or Mach-O symbol metadata on one side",
+        lambda o, n: (
+            any(s.elf is None and s.macho is None for s in (o, n))
+            or ((o.elf is None) != (n.elf is None))
+        ),
+    ),
+    (
+        # A Mach-O side whose size derivation never ran: its absent sizes are
+        # unknown, not a clean layout check.
+        "Mach-O layout sizes were not derived",
+        lambda o, n: any(
+            s.macho is not None and s.macho.sizes_derived is not True for s in (o, n)
+        ),
+    ),
+    (
         # No binary format's metadata (ELF, PE, Mach-O) on a side: no export
         # table to read, whichever format the other side has.
         "missing binary export table on one side",

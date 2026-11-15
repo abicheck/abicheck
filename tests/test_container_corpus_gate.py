@@ -68,7 +68,9 @@ def test_a_refreeze_under_the_new_version_satisfies_the_gate(tmp_path: Path) -> 
     new_entry = copy.deepcopy(manifest["entries"][old_key])
     new_entry["path"] = "g40/2/release.zip"
     new_entry["versions"][key] = bumped[key]
-    (corpus / "g40" / "2").mkdir()
+    # The committed corpus already holds g40/2 (the refreeze for this
+    # generation), so the copy in tmp_path may exist; overwrite it.
+    (corpus / "g40" / "2").mkdir(exist_ok=True)
     shutil.copyfile(corpus / "g40/1/release.zip", corpus / "g40/2/release.zip")
     manifest["entries"]["g40_archive/2"] = new_entry
     assert gate.evaluate(manifest, corpus, bumped) == []

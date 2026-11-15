@@ -725,13 +725,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "policy/alignment_generation_drift (the exact LP64/ILP32 natural pair only)"
     ),
     75: GenerationSpellingChange(
-        "fix/nightly-va-list-target: no stored type spelling changes. A clang header "
-        "parse on a pointer-valued va_list target (-m32: __builtin_va_list is char *) "
-        "keeps the typedef link on a decayed parameter and now recognises it as a "
-        "va_list parameter when the link reaches __builtin_va_list "
-        "(extract/headers/clang/qualifiers), so Param.is_va_list is "
-        "set where it was not before. The recorded parameter fact changes; the spelling "
-        "does not"
+        "WS-4 PR 1 (feat/ws4-macho-vtable-facts): Mach-O object sizes (_ZTV/_ZTI/_ZTT "
+        "spans, kept only when pointer fixups corroborate them) are stored as the "
+        "extension fact abicheck.macho_object_sizes. No type or name "
+        "spelling changes and no load-time rewrite; a snapshot without the fact reads "
+        "as not derived, and the layout gate declines the Mach-O side."
+    ),
+    76: GenerationSpellingChange(
+        "fix/nightly-va-list-target (#2088): no stored type spelling changes. A clang "
+        "header parse on a pointer-valued va_list target (-m32: __builtin_va_list is "
+        "char *) keeps the typedef link on a decayed parameter and now recognises it as "
+        "a va_list parameter when the link reaches __builtin_va_list "
+        "(extract/headers/clang/qualifiers), so Param.is_va_list is set where it was not "
+        "before. The recorded parameter fact changes; the spelling does not"
     ),
 }
 
