@@ -715,6 +715,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "time and at dump time, and the identity (mangled) is unchanged"
     ),
     74: GenerationSpellingChange(
+        "fix/nightly-builtin-probe-target (#2084): no stored type spelling changed. "
+        "A clang header parse under -m32 (or another non-host target) now probes the "
+        "builtin layout of the parse's own options, so long/unsigned long/long long "
+        "and the time_t family carry the 32-bit sizes they have on that target; a "
+        "stored snapshot of such a parse recorded the x86-64 sizes. The fact changes, "
+        "the spelling (the name a type is recorded under) does not. The pre-74 host-ABI "
+        "alignment of a builtin variable is demoted across this boundary by "
+        "policy/alignment_generation_drift (the exact LP64/ILP32 natural pair only)"
+    ),
+    75: GenerationSpellingChange(
         "WS-4 PR 1 (feat/ws4-macho-vtable-facts): Mach-O object sizes (_ZTV/_ZTI/_ZTT "
         "spans, kept only when pointer fixups corroborate them) are stored as the "
         "extension fact abicheck.macho_object_sizes. No type or name "
