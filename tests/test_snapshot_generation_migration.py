@@ -31,14 +31,22 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
-from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import snapshot_from_dict
 from abicheck.storage.generation_migrations import FACT_GENERATIONS_KEY
 from abicheck.storage.generation_spelling_table import SPELLING_MIGRATIONS
+from abicheck.storage.snapshot_encode import flat_document_and_carriers
 from abicheck.storage.versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
     RESOLVER_GENERATION,
 )
+
+
+def _flat(snap):
+    """The flat document of *snap*, without its Mach-O size fact: the public
+    flat encoder refuses such a snapshot (ADR-062 D19)."""
+    return flat_document_and_carriers(snap)[0]
+
 
 _SPELLING_INTRODUCED_AT = 6  # castxml AutoType -> auto
 
@@ -115,8 +123,8 @@ def test_old_generation_spelling_compares_clean_with_notice(
     position: str, spelling: str, stamp: dict | None
 ) -> None:
     fresh = _fresh(position, spelling)
-    old = snapshot_from_dict(_as_old_generation(snapshot_to_dict(fresh), stamp))
-    reloaded_fresh = snapshot_from_dict(snapshot_to_dict(fresh))
+    old = snapshot_from_dict(_as_old_generation(_flat(fresh), stamp))
+    reloaded_fresh = snapshot_from_dict(_flat(fresh))
 
     result = compare(old, reloaded_fresh)
 
@@ -136,15 +144,15 @@ def test_current_generation_spelling_is_not_migrated(spelling: str) -> None:
         "resolver": RESOLVER_GENERATION,
         "source": 0,
     }
-    old = snapshot_from_dict(_as_old_generation(snapshot_to_dict(fresh), stamp))
-    result = compare(old, snapshot_from_dict(snapshot_to_dict(fresh)))
+    old = snapshot_from_dict(_as_old_generation(_flat(fresh), stamp))
+    result = compare(old, snapshot_from_dict(_flat(fresh)))
     assert result.changes, "an unmigrated AutoType spelling must still diff"
     assert not old.load_notices
 
 
 def test_same_generation_snapshot_has_no_drift_notice() -> None:
     fresh = _fresh("return", "auto&")
-    doc = snapshot_to_dict(fresh)
+    doc = _flat(fresh)
     assert doc[FACT_GENERATIONS_KEY]["extractor"] == EXTRACTOR_GENERATION
     loaded = snapshot_from_dict(doc)
     assert loaded.load_notices == ()
@@ -156,8 +164,8 @@ def test_same_generation_snapshot_has_no_drift_notice() -> None:
 
 @pytest.mark.parametrize("stamp", _OLD_STAMPS)
 def test_resave_never_redates_the_stamp(stamp: dict | None) -> None:
-    doc = _as_old_generation(snapshot_to_dict(_fresh("return", "auto")), stamp)
-    resaved = snapshot_to_dict(snapshot_from_dict(doc))
+    doc = _as_old_generation(_flat(_fresh("return", "auto")), stamp)
+    resaved = _flat(snapshot_from_dict(doc))
     expected = stamp["extractor"] if stamp else 0
     assert resaved[FACT_GENERATIONS_KEY]["extractor"] == expected
 
@@ -169,7 +177,7 @@ def test_user_type_named_like_old_placeholder_is_not_rewritten() -> None:
         functions=[_func("make", ret="AutoType")],
         types=[RecordType(name="AutoType", kind="struct", size_bits=8)],
     )
-    doc = snapshot_to_dict(snap)
+    doc = _flat(snap)
     doc.pop(FACT_GENERATIONS_KEY)
     loaded = snapshot_from_dict(doc)
     assert any(f.return_type == "AutoType" for f in loaded.declarations.functions)
@@ -212,7 +220,7 @@ def test_real_castxml_dump_old_generation_compares_clean(
         ],
         check=True,
     )
-    fresh_doc = snapshot_to_dict(dump(so, [tmp_path / "api.h"]))
+    fresh_doc = _flat(dump(so, [tmp_path / "api.h"]))
     assert "auto&" in json.dumps(fresh_doc)
     old = snapshot_from_dict(_as_old_generation(fresh_doc, stamp))
     result = compare(old, snapshot_from_dict(fresh_doc))
@@ -227,7 +235,7 @@ def test_real_castxml_dump_old_generation_compares_clean(
 def test_sectioned_on_disk_round_trip_keeps_the_stamp(stamp: dict | None) -> None:
     from abicheck.serialization import snapshot_to_json
 
-    doc = _as_old_generation(snapshot_to_dict(_fresh("return", "auto")), stamp)
+    doc = _as_old_generation(_flat(_fresh("return", "auto")), stamp)
     reloaded = snapshot_from_dict(json.loads(snapshot_to_json(snapshot_from_dict(doc))))
     expected = stamp["extractor"] if stamp else 0
     assert reloaded.fact_generations is not None

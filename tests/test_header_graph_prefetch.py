@@ -20,8 +20,15 @@ import pytest
 
 from abicheck import service_header_graph_attach as attach
 from abicheck.deadline import CancelToken
-from abicheck.serialization import snapshot_to_dict
+from abicheck.storage.snapshot_encode import flat_document_and_carriers
 from abicheck.workflows.dump import header_graph_prefetch as prefetch, native
+
+
+def _flat(snap):
+    """The flat document of *snap*, without its Mach-O size fact: the public
+    flat encoder refuses such a snapshot (ADR-062 D19)."""
+    return flat_document_and_carriers(snap)[0]
+
 
 _HEADER = """\
 #pragma once
@@ -76,7 +83,7 @@ def _dump(lib: Path, header: Path) -> dict:
     snap = native._run_dump_uncached(
         lib, "elf", headers=[header], includes=[header.parent], frontend="castxml"
     )
-    doc = snapshot_to_dict(snap)
+    doc = _flat(snap)
     doc.pop("created_at", None)
     return doc
 
