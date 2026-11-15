@@ -698,13 +698,21 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "the abstract detector skips"
     ),
     72: GenerationSpellingChange(
-        "no type or name spelling changes. A Mach-O export records a derived "
-        "size for its _ZTV/_ZTI/_ZTT object (the distance to the next label of "
-        "its section) and that label as size_bound_by; a Mach-O snapshot records "
-        "sizes_derived; stab-bit entries (N_BNSYM, N_ENSYM) are not boundaries. "
-        "New facts on existing records, not respellings: no rewrite applies. A "
-        "pre-72 side's size is None (not derived), which the layout detectors "
-        "refuse as not evaluated"
+        "WS-4 PR 2 (fix/ws4-pe-msvc-export-match): no stored type spelling "
+        "changes and no load-time rewrite applies. The PE header-to-export "
+        "join (extract/header_export_binding.bind_pe_header_exports) is a "
+        "fact, applied at extraction for a live dump and at compare time by "
+        "the comparison workflows (compare_policy, no_baseline_compare) for "
+        "every header-backed PE operand, so a stored pre-72 baseline and a "
+        "fresh dump meet at the same join; a raw checker.compare call takes "
+        "bound operands (extract.header_export_binding.bind_pe_header_operand)"
+    ),
+    73: GenerationSpellingChange(
+        "WS-4 PR 1 (feat/ws4-macho-vtable-facts): Mach-O object sizes (_ZTV/_ZTI/_ZTT "
+        "spans, kept only when pointer fixups corroborate them) are stored as the "
+        "ADR-062 D19 extension fact abicheck.macho_object_sizes. No type or name "
+        "spelling changes and no load-time rewrite; a snapshot without the fact reads "
+        "as not derived, and the layout gate declines the Mach-O side."
     ),
 }
 

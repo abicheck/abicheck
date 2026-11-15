@@ -37,7 +37,11 @@ from abicheck.extract.header_export_binding import (
 from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
 from abicheck.model.export_index import ExportMatch
-from abicheck.model.surface_facts import binary_export_match, in_public_surface
+from abicheck.model.surface_facts import (
+    binary_export_match,
+    bound_export_spelling,
+    in_public_surface,
+)
 
 _ITANIUM = {"int": "i", "long": "l", "double": "d", "unsigned int": "j", "bool": "b"}
 _MSVC = {"int": "H", "long": "J", "double": "N", "unsigned int": "I", "bool": "_N"}
@@ -105,7 +109,7 @@ def test_every_declaration_binds_to_its_own_export(decl_spelling, export_spellin
         for d, e in zip(decls, combo, strict=True):
             unique = names.count((e[0], e[1])) == 1
             if unique or export_spelling is ms_abi:
-                assert d.mangled == expected[id(d)], combo
+                assert bound_export_spelling(d) == expected[id(d)], combo
                 assert in_public_surface(d), combo
                 assert binary_export_match(d) is ExportMatch.DEMANGLED
             else:
@@ -193,7 +197,8 @@ def test_x86_c_decoration_binds_only_where_the_machine_decorates(export, x86_32,
     )
     bind_header_declarations_to_exports(_snap(d), [export], x86_32=x86_32)
     assert in_public_surface(d) is binds
-    assert d.mangled == (export if binds else "cfun")
+    assert bound_export_spelling(d) == (export if binds else None)
+    assert d.mangled == "cfun"
 
 
 def test_variable_binds_across_schemes():
@@ -205,18 +210,21 @@ def test_variable_binds_across_schemes():
         **header_ast_surface_facts(exported=ExportMatch.ABSENT, producer="castxml"),
     )
     out = bind_header_declarations_to_exports(_snap(v), ["?gv@inner@outer@@3HA"])
-    assert v.mangled == "?gv@inner@outer@@3HA"
+    assert bound_export_spelling(v) == "?gv@inner@outer@@3HA"
     assert in_public_surface(v)
     assert out.unbound_exports == ()
 
 
-def test_binding_resets_the_mangled_indexes():
+def test_binding_keeps_the_identity_index_and_records_the_export():
+    # The binding is a fact, not an identity: the declaration stays keyed by its
+    # castxml spelling, and the export it was bound to is read from its fact.
     d = _decl((), "f", ("int",))
     snap = _snap(d)
     assert snap.function_map.get("_Z1fi") is d
     bind_header_declarations_to_exports(snap, ["?f@@YAHH@Z"])
-    assert snap.function_map.get("?f@@YAHH@Z") is d
-    assert "_Z1fi" not in snap.function_map
+    assert snap.function_map.get("_Z1fi") is d
+    assert "?f@@YAHH@Z" not in snap.function_map
+    assert bound_export_spelling(d) == "?f@@YAHH@Z"
 
 
 @pytest.mark.parametrize("params", [p for p in _PARAMS])

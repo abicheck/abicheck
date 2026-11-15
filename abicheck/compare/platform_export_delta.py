@@ -28,7 +28,8 @@ tables as name sets. Two rules decide what that comparison may conclude:
 
 from __future__ import annotations
 
-from ..model import AbiSnapshot
+from ..model import AbiSnapshot, Function, Variable
+from ..model.surface_facts import bound_export_spelling
 from .edge_query import export_table_covered
 
 __all__ = ["both_export_tables_read", "declared_export_names"]
@@ -42,10 +43,12 @@ def declared_export_names(snap: AbiSnapshot) -> set[str]:
     """
     names: set[str] = set()
     decls = snap.declarations
-    for spelled in (
-        *((f.name, f.mangled) for f in decls.functions),
-        *((v.name, v.mangled) for v in decls.variables),
-    ):
+    decl_list: list[Function | Variable] = [*decls.functions, *decls.variables]
+    for decl in decl_list:
+        # A declaration the header-to-export join bound is also its export: the
+        # bound spelling is the export-table name for it, so the export is not
+        # reported a second time beside the declaration-level finding.
+        spelled = (decl.name, decl.mangled, bound_export_spelling(decl) or "")
         names.update(n for n in spelled if n)
     return names
 

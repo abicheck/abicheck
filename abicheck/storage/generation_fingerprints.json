@@ -74,14 +74,14 @@
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "fc6262e7eeaf5834cfd354cef88cff7610dcfd30961f42118623635b9c57736d",
-      "abicheck/extract/export_table_read.py": "58fdf78460a49cf1f906e3321c76aff912c27a70a3198050d9e532cdbbf39958",
+      "abicheck/extract/export_table_read.py": "10943a78cbd4f4aad3dd9ee4f78421bfde9ff785487118915f98da6485ebdfec",
       "abicheck/extract/extraction_limitations.py": "8cbb97de23d2c67bdcf1ddfef917072566295dbe1addaad316171bf7ce239588",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "96f50bab97c55b180e0a35e91c6e1749b6aa21307da6eabff1836878395c2134",
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "896fe0141ddb2b6e4148ab170a17e690d65b052f4e34e6455a104a3f05524496",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_export_binding.py": "3e44f1b3d5d8a40665e4845e8034f24509cd7b6ef46623d18d55642a3483683f",
+      "abicheck/extract/header_export_binding.py": "488763fae1497553517c4e8ecfcf9dbed441ef50a939ea13b13584bae3fdfb01",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -233,9 +233,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c5a213e0069cc49feb0089755949e3d10994f1c4da3a1327d9d30df2942a809f",
-    "generation": 72,
-    "reason": "WS-4 PR 1 review fixes within unreleased generation 72: ULEB operands bounded to 64 bits, chain visits budgeted by the slot limit (malformed inputs only), and a cleared Mach-O size state drops its stored fact. Valid decodes unchanged."
+    "fingerprint": "5388d8a273199bebdb16ba04885bff14f3f24ea4d5073bb2789f4d1b81c22ba3",
+    "generation": 73,
+    "reason": "bumped to 73 for a semantic change"
   },
   "resolver": {
     "files": {
