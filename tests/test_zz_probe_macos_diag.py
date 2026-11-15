@@ -27,7 +27,11 @@ def test_probe_diagnostic_macos() -> None:
         for opts in ((), ("-I" + str(tmp),), ("-std=c++17", "-I" + str(tmp))):
             argv = [cc, *opts, "-x", "c", str(src), "-o", str(tmp / "p")]
             c = subprocess.run(argv, capture_output=True, text=True)
-            run = subprocess.run([str(tmp / "p")], capture_output=True, text=True) if c.returncode == 0 else None
+            run = (
+                subprocess.run([str(tmp / "p")], capture_output=True, text=True)
+                if c.returncode == 0
+                else None
+            )
             probe = b.probe_builtin_abi(cc, tuple(opts))
             lines.append(
                 f"[{cc} {opts}] build rc={c.returncode} stderr={c.stderr.strip()[:200]!r} "
