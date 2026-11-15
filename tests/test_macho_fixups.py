@@ -247,3 +247,83 @@ def test_truncated_chained_starts_table_is_undecodable_not_no_fixups() -> None:
         )
         is None
     )
+
+
+def test_rebase_uleb_wider_than_64_bits_is_undecodable_even_with_no_fixups() -> None:
+    # REBASE_OPCODE_ADD_ADDR_ULEB whose operand runs ten 7-bit groups past 64
+    # bits. dyld's result is a uint64_t, so the stream is refused before any
+    # integer grows past it, and the refusal holds with a zero fixup limit too.
+    operand = bytes([0x80] * 9) + bytes([0x7F])
+    image = bytes([0x30]) + operand + bytes([0x00])
+    assert (
+        fixup_addresses(image, BASES, 8, rebase=(0, len(image)), binds=[], limit=0)
+        is None
+    )
+
+
+def test_rebase_uleb_of_exactly_64_bits_still_decodes() -> None:
+    # The sibling of the refusal above: the widest legal operand is read in full.
+    value = (1 << 64) - 1
+    encoded = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            encoded.append(byte | 0x80)
+        else:
+            encoded.append(byte)
+            break
+    assert len(encoded) == 10
+    image = bytes([0x30]) + bytes(encoded) + bytes([0x00])
+    # The operand is far past the segments, so the offset itself is not a
+    # fixup; the point is that the decoder accepts the width and returns.
+    result = fixup_addresses(
+        image, BASES, 8, rebase=(0, len(image)), binds=[], limit=1000
+    )
+    assert result is not None and not result
+
+
+def _multi_start_blob(overflow: list[int]) -> tuple[bytes, list[tuple[int, int, int]]]:
+    """One page at 0x1000 whose MULTI start indexes an overflow list of chains.
+
+    Chain offsets are page-relative; each chain is one slot at 0x1010 whose
+    value is 0 (no next link), so it is walked once per overflow entry.
+    """
+    seg_vm = 0x1000
+    page_starts = [0x8001, *overflow]
+    body = b"".join(v.to_bytes(2, "little") for v in page_starts)
+    starts_in_segment = (
+        (22 + len(body)).to_bytes(4, "little")
+        + (0x1000).to_bytes(2, "little")
+        + (2).to_bytes(2, "little")  # DYLD_CHAINED_PTR_64
+        + (seg_vm - _TEXT_BASE).to_bytes(8, "little")
+        + (0).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")  # one page
+        + body
+    )
+    header = (0).to_bytes(4, "little") + (28).to_bytes(4, "little") + bytes(20)
+    starts_image = (1).to_bytes(4, "little") + (8).to_bytes(4, "little")
+    blob = header + starts_image + starts_in_segment
+    fileoff = len(blob)
+    image = bytes(bytearray(blob) + bytearray(0x1000))
+    return image, [(seg_vm, fileoff, 0x1000)]
+
+
+def test_chain_named_by_repeated_overflow_entries_is_refused_not_rewalked() -> None:
+    # Two overflow entries name the same chain (page offset 0x10). The chain has
+    # one slot, so a legitimate decode reads one slot; the second entry would
+    # read it again. With a slot budget of one the decoder refuses the image.
+    image, segments = _multi_start_blob([0x0010, 0x0010 | 0x8000])
+    got = decode_chained_fixup_addresses(
+        image, 0, len(image) - 0x1000, segments, _TEXT_BASE, limit=1
+    )
+    assert got is None
+
+
+def test_the_same_chain_named_once_decodes_under_the_same_budget() -> None:
+    # Negative control: one overflow entry, one slot read, within a budget of one.
+    image, segments = _multi_start_blob([0x0010 | 0x8000])
+    got = decode_chained_fixup_addresses(
+        image, 0, len(image) - 0x1000, segments, _TEXT_BASE, limit=1
+    )
+    assert got == frozenset({0x1010})

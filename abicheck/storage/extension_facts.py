@@ -208,9 +208,14 @@ def sync_macho_sizes_fact(snap: Any) -> None:
         for index, exp in enumerate(macho.exports)
         if exp.size is not None or exp.size_bound_by is not None
     ]
+    blocked = _blocked_reason(snap, MACHO_OBJECT_SIZES.section) is not None
     if derived is None and not rows:
+        # A cleared model state claims no value: a fact loaded earlier must not
+        # be re-saved and restore sizes the caller removed.
+        if not blocked:
+            _drop_extension_fact(snap, MACHO_OBJECT_SIZES)
         return
-    if _blocked_reason(snap, MACHO_OBJECT_SIZES.section) is not None:
+    if blocked:
         return
     write_extension_fact(snap, MACHO_OBJECT_SIZES, {"derived": derived, "sizes": rows})
 

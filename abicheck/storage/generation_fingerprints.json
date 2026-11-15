@@ -186,7 +186,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_fixups.py": "fb475be1de52fddbd056e0bf51532b355d1779478ea7f69de74a8599edb2a55a",
+      "abicheck/extract/macho_fixups.py": "a3fd390b7a5f9ef83c560c97faf4a0675cc9598342e8883875a2897daf3b0f16",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
@@ -233,9 +233,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "37683c7ddd87e637a7c06f418ce30df64bdab3356a6451567f5f013c4718936a",
+    "fingerprint": "c5a213e0069cc49feb0089755949e3d10994f1c4da3a1327d9d30df2942a809f",
     "generation": 72,
-    "reason": "Unreleased generation 72 (this PR's single bump over main's 71): bounds checks and budgets on the fixup decoders and the sizes_derived gate, still before merge"
+    "reason": "WS-4 PR 1 review fixes within unreleased generation 72: ULEB operands bounded to 64 bits, chain visits budgeted by the slot limit (malformed inputs only), and a cleared Mach-O size state drops its stored fact. Valid decodes unchanged."
   },
   "resolver": {
     "files": {

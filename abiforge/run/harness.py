@@ -267,7 +267,8 @@ def _compile_library(
         # compiler runs in this process's cwd, so that is the directory the
         # commands' relative paths resolve against (out_dir may be relative).
         # One entry per translation unit, each the command compiling only it.
-        lead = [a for a in cmd if a not in {str(u) for u in units}]
+        linked = {str(u) for u in link_inputs}
+        lead = [a for a in cmd if a not in linked]
         entries = [
             {"directory": str(Path.cwd()), "file": str(u), "arguments": [*lead, str(u)]}
             for u in units
@@ -292,7 +293,10 @@ def _compile_macho_objects(
     """Compile each translation unit to an object file that outlives the link."""
     objects: list[Path] = []
     for unit in units:
-        obj = out_dir / f"{unit.name}.o"
+        # Keyed by the unit's path under out_dir, so two units that share a
+        # basename in different directories keep distinct objects.
+        obj = out_dir / f"{unit.relative_to(out_dir)}.o"
+        obj.parent.mkdir(parents=True, exist_ok=True)
         cmd = [*base, *extra.cflags, "-c", "-fPIC", "-I", str(out_dir), str(unit)]
         cmd += ["-o", str(obj)]
         _check(

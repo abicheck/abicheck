@@ -183,6 +183,9 @@ def test_stripped_local_inside_a_vtable_is_not_a_slot_change(tmp_path: Path) -> 
                 MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x1040),
             ],
             sections=[("__DATA_CONST", "__vtable", 0x1000, 0x48)],
+            # Span 32: the relocated words inside it are the three after offset-to-top.
+            fixup_slots=[0x1008, 0x1010, 0x1018],
+            fixup_encoding="classic",
         )
     )
     new = _macho_snap(
@@ -194,8 +197,16 @@ def test_stripped_local_inside_a_vtable_is_not_a_slot_change(tmp_path: Path) -> 
                 MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x1040),
             ],
             sections=[("__DATA_CONST", "__vtable", 0x1000, 0x48)],
+            # Span 40: four relocated words after offset-to-top.
+            **_vtable_fixups(0x28, "classic"),
         )
     )
+    # Both spans are kept only because their fixups corroborate them, and they
+    # measure different things: the closer is the local label on the old side.
+    old_v = {e.name: e for e in old.macho.exports}["_ZTV4Base"]
+    new_v = {e.name: e for e in new.macho.exports}["_ZTV4Base"]
+    assert (old_v.size, old_v.size_bound_by) == (0x20, "_mid")
+    assert (new_v.size, new_v.size_bound_by) == (0x28, "_ZTI4Base")
     assert _by_kind(_diff_elf_layout(old, new), "VTABLE_SLOT_COUNT_CHANGED") == []
     assert _by_kind(_diff_elf_layout(new, old), "VTABLE_SLOT_COUNT_CHANGED") == []
 
@@ -512,3 +523,22 @@ def test_a_reader_without_the_size_fact_declines_the_layout_check(
     ok, reason = _layout_support(blind, new)
     assert not ok
     assert "not derived" in reason
+
+
+def test_a_cleared_size_state_does_not_come_back_on_reload(tmp_path: Path) -> None:
+    """Load a stored snapshot, clear its derived sizes, save, reload: the reload
+    must read the sizes as absent, not restore the fact from the first save."""
+    first = tmp_path / "first.json"
+    save_snapshot(_macho_snap(_vtable_macho(tmp_path, "cleared.dylib", 0x30)), first)
+    loaded = load_snapshot(first)
+    assert loaded.macho is not None and loaded.macho.sizes_derived is True
+    loaded.macho.sizes_derived = None
+    for exp in loaded.macho.exports:
+        exp.size = None
+        exp.size_bound_by = None
+    second = tmp_path / "second.json"
+    save_snapshot(loaded, second)
+    reloaded = load_snapshot(second)
+    assert reloaded.macho is not None
+    assert reloaded.macho.sizes_derived is None
+    assert all(e.size is None for e in reloaded.macho.exports)

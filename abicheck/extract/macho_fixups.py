@@ -64,14 +64,21 @@ class FixupDecodeError(ValueError):
     """An opcode stream this decoder does not understand, or that runs off its end."""
 
 
+_ULEB_WIDTH = 64  # every operand is a 64-bit value (dyld's uint64_t result)
+
+
 def _uleb(data: bytes, pos: int) -> tuple[int, int]:
     value = shift = 0
     while True:
         if pos >= len(data):
             raise FixupDecodeError("ULEB128 runs past the end of the stream")
+        if shift >= _ULEB_WIDTH:
+            raise FixupDecodeError("ULEB128 operand is wider than 64 bits")
         byte = data[pos]
         pos += 1
         value |= (byte & 0x7F) << shift
+        if value >> _ULEB_WIDTH:
+            raise FixupDecodeError("ULEB128 operand is wider than 64 bits")
         if not byte & 0x80:
             return value, pos
         shift += 7
@@ -322,6 +329,7 @@ def _decode_chained(
     if starts_off + 4 + 4 * seg_count > len(blob):
         return None
     out: set[int] = set()
+    visits = [0]  # slots read across every chain of this image
     for index in range(seg_count):
         seg_info = struct.unpack_from("<I", blob, starts_off + 4 + 4 * index)[0]
         if seg_info == 0:
@@ -368,6 +376,7 @@ def _decode_chained(
                         width,
                         out,
                         limit,
+                        visits,
                     )
                     if entry & _CHAINED_START_LAST:
                         break
@@ -384,6 +393,7 @@ def _decode_chained(
                     width,
                     out,
                     limit,
+                    visits,
                 )
     return frozenset(out)
 
@@ -399,12 +409,21 @@ def _walk_chain(
     width: int,
     out: set[int],
     limit: int,
+    visits: list[int],
 ) -> None:
-    """Follow one chain from *loc*, adding every slot to *out*."""
+    """Follow one chain from *loc*, adding every slot to *out*.
+
+    *visits* counts every slot read across all chains of the image. A chain's
+    slots are distinct, so a legitimate decode reads at most *limit* of them;
+    a repeated MULTI overflow entry re-walks a chain and is refused here.
+    """
     page_end = page_vm + page_size
     while True:
         if not page_vm <= loc or loc + 8 > page_end:
             raise FixupDecodeError("chain leaves its page")
+        visits[0] += 1
+        if visits[0] > limit:
+            raise FixupDecodeError("chain visits exceed the image's slot budget")
         value = _read_vm(image, segments, loc, 8)
         if value is None:
             raise FixupDecodeError("chain slot is not in the file")
