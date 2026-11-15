@@ -781,7 +781,7 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | not started | — |
 | WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | B0 merged | #2069 (PR 1, B0) |
 | WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | PR 1 merged | #2070 (PR 1 of 3) |
-| WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | not started | — |
+| WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | PR 1 (standards axis) in review | this PR |
 
 ### 11.3 File ownership and conflict hotspots
 

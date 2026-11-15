@@ -12,9 +12,18 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
-from abiforge.model.config import LEVEL_SET, Config, Flags, has_feature
+from abiforge.model.config import (
+    LEVEL_SET,
+    Config,
+    Flags,
+    Standard,
+    StdRange,
+    describe_standards,
+    in_standards,
+)
 from abiforge.model.expect import Expectation, Rule, evidence_floor
 from abiforge.model.seeds import RoleText, Seed
+from abiforge.model.space import feature_standards
 
 Roles = Mapping[str, RoleText]
 Edit = Callable[[Roles], dict[str, RoleText]]
@@ -41,6 +50,11 @@ class EditOp:
     min_evidence: str | Callable[[Config], str] = "dwarf"
     # Language features (``abiforge.model.config.FEATURES``) the edit needs.
     features: tuple[str, ...] = ()
+    # The standards the edit is defined in, beyond its features (whose ranges
+    # come from ``space.FEATURE_STANDARDS``): an edit that a later standard
+    # removed, or that needs one only the edit's own text introduces, names
+    # the range and its citation here. Empty = no standard restriction.
+    standards: tuple[StdRange, ...] = ()
     # Config-dependent ground truth, first match wins.
     rules: tuple[Rule, ...] = ()
     # Extra applicability (None = applicable, else the reason it is not).
@@ -78,10 +92,42 @@ class EditOp:
             return False
         return all(r in seed.roles for r in self.roles)
 
+    def standard_groups(self) -> tuple[tuple[StdRange, ...], ...]:
+        """The range groups the edit must lie in, one per restriction (all must hold).
+
+        A group is a feature's ranges or the edit's own ``standards``; the edit
+        is in standard *S* only when *S* lies in every group.
+        """
+        groups = [feature_standards(f) for f in self.features]
+        if self.standards:
+            groups.append(self.standards)
+        return tuple(groups)
+
+    def consumer_gap(self, std: Standard) -> str | None:
+        """Why a consumer built with *std* cannot compile the edit's header, or None.
+
+        Only the introduction side of each range applies (see
+        ``config.in_standards``): removal is not a compile failure.
+        """
+        for group in self.standard_groups():
+            if not in_standards(group, std, introduced_only=True):
+                return (
+                    f"the edited header is defined in {describe_standards(group)}, "
+                    f"which the consumer's {std.name} predates"
+                )
+        return None
+
+    def standard_ok(self, std: Standard) -> bool:
+        """Whether the edit is defined in *std* (every range group contains it)."""
+        return all(in_standards(group, std) for group in self.standard_groups())
+
     def requires(self, config: Config) -> str | None:
-        for feat in self.features:
-            if not has_feature(config.std, feat):
-                return f"needs {feat}, which {config.std.name} lacks"
+        for group in self.standard_groups():
+            if not in_standards(group, config.std):
+                return (
+                    f"{config.std.name} is outside the standards this edit is "
+                    f"defined in: {describe_standards(group)}"
+                )
         if (
             self.new_evidence is not None
             and config.evidence_set <= LEVEL_SET[self.new_evidence]

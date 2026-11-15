@@ -90,6 +90,80 @@ def has_feature(std: Standard, feature: str) -> bool:
     return first is not None and std.year >= first
 
 
+@dataclass(frozen=True)
+class StdRange:
+    """The standards one language defines a construct or an edit in.
+
+    ``first`` is the standard that introduced it (inclusive), or the lowest one
+    abiforge models when it predates them (C++98 is not in ``STANDARDS``, so a
+    feature from C++98 starts at ``c++11`` and its ``cite`` names the 1998 text); ``last``, when
+    set, the newest standard that still has it (inclusive: a feature removed
+    in standard S has ``last`` = the standard before S). ``cite`` sources
+    ``first`` and ``end_cite`` sources ``last``: an ISO section or a WG21/WG14
+    paper number, as data rather than a comment. The range names one language;
+    a construct or edit defined in both languages carries one range per
+    language (see :func:`in_standards`).
+    """
+
+    lang: str
+    first: str
+    cite: str
+    last: str | None = None
+    end_cite: str = ""
+
+    def __post_init__(self) -> None:
+        lo = STANDARD_BY_NAME[self.first]
+        if lo.lang != self.lang:
+            raise ValueError(f"{self.first} is not a {self.lang} standard")
+        if not self.cite:
+            raise ValueError(f"{self.lang} range from {self.first} needs a citation")
+        if self.last is not None:
+            hi = STANDARD_BY_NAME[self.last]
+            if hi.lang != self.lang or hi.year < lo.year:
+                raise ValueError(
+                    f"{self.last} is not a {self.lang} standard >= {self.first}"
+                )
+            if not self.end_cite:
+                raise ValueError(f"removal at {self.last} needs a citation")
+
+    def contains(self, std: Standard, *, introduced_only: bool = False) -> bool:
+        if std.lang != self.lang or std.year < STANDARD_BY_NAME[self.first].year:
+            return False
+        if introduced_only or self.last is None:
+            return True
+        return std.year <= STANDARD_BY_NAME[self.last].year
+
+    def describe(self) -> str:
+        text = f"{self.lang} {self.first}-on (cited: {self.cite})"
+        if self.last is not None:
+            text += f"; last in {self.last} (cited: {self.end_cite})"
+        return text
+
+
+def in_standards(
+    ranges: tuple[StdRange, ...], std: Standard, *, introduced_only: bool = False
+) -> bool:
+    """Whether *std* is in *ranges*, a list of standard ranges.
+
+    An empty tuple means no standard restricts it (every standard of the
+    languages the construct is in). Otherwise *std* must lie in a range of its
+    own language: a language that no range names is never in, which keeps a
+    C++-only edit from being generated under a C standard.
+
+    ``introduced_only`` ignores each range's ``last``: a consumer compiles the
+    edit's header under its own standard, and a standard that removed a
+    feature still compiles a header that guards its use (the edits do), so only
+    a standard before ``first`` makes a consumer unable to compile the edit.
+    """
+    return not ranges or any(
+        r.contains(std, introduced_only=introduced_only) for r in ranges
+    )
+
+
+def describe_standards(ranges: tuple[StdRange, ...]) -> str:
+    return "; ".join(r.describe() for r in ranges) or "every standard"
+
+
 # --- toolchains ------------------------------------------------------------
 
 FAMILIES = ("gcc", "clang", "apple-clang", "msvc")
