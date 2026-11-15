@@ -81,7 +81,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "896fe0141ddb2b6e4148ab170a17e690d65b052f4e34e6455a104a3f05524496",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_export_binding.py": "488763fae1497553517c4e8ecfcf9dbed441ef50a939ea13b13584bae3fdfb01",
+      "abicheck/extract/header_export_binding.py": "2a0059ee601dea4d1489028fdb438c5cceef5dff9f4e21b497740061e2d7a6fc",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4816331fb7993f8116f2a52d82828a4725e41634d04bf833cfa6180eec025a56",
-    "generation": 72,
-    "reason": "generation 72 is unreleased (introduced by this PR); re-recorded in place: the header-to-export binding is now recorded only as the declaration's export fact, and its identity (mangled) is no longer rewritten to the export spelling. No snapshot has been stamped with generation 72"
+    "fingerprint": "504b50ee3f15a9504a76622b62abd2804af600e635ccfa0520c8756048692a5b",
+    "generation": 73,
+    "reason": "Refuse const and volatile declarations on the plain-name variable pass (CodeRabbit review); generation 73 is unreleased on this branch."
   },
   "resolver": {
     "files": {
