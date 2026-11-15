@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.macho_metadata import parse_macho_metadata
 from abiforge.operators import OP_BY_NAME, matrix
 from abiforge.run.harness import BaselineCache, _as_config, run_operator
 from abiforge.run.toolchains import capability_gap, header_backend_unavailable
@@ -41,6 +42,23 @@ def _seed_for(op_name: str):
         if op.name == op_name:
             return seed
     raise AssertionError(f"{op_name} is in no matrix seed; the matrix changed")
+
+
+def _thunk_exports(root: Path) -> list[str]:
+    """Mach-O export names of thunks (``_ZThn``/``_ZTv``) in every dylib under *root*.
+
+    A diagnostic for a failing cell only: it shows whether a thunk offset change
+    renames an exported thunk, which would surface as a removal plus an addition.
+    """
+    names: list[str] = []
+    for lib in sorted(root.rglob("*.dylib")):
+        meta = parse_macho_metadata(lib)
+        names += [
+            f"{lib.parent.name}/{lib.name}:{e.name}"
+            for e in meta.exports
+            if e.name.startswith(("_ZThn", "_ZTv"))
+        ]
+    return names
 
 
 @pytest.mark.parametrize("evidence", _EVIDENCE)
@@ -74,5 +92,7 @@ def test_macho_cell_meets_its_strict_expectation(
     assert outcome.failures == (), (
         f"{op_name} on {seed.name} at evidence={evidence}: verdict={outcome.verdict} "
         f"kinds={sorted(outcome.kinds)} problems={list(outcome.failures)} "
-        f"(why: {op.why})"
+        f"(why: {op.why})\n"
+        f"thunk exports, old: {_thunk_exports(tmp_path / 'old')}\n"
+        f"thunk exports, new: {_thunk_exports(tmp_path / 'new')}"
     )
