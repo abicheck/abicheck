@@ -185,9 +185,6 @@ class _Unclassified:
     def __reduce__(self) -> tuple[Callable[[], _Unclassified], tuple[()]]:
         return (_Unclassified, ())
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> _Unclassified:
-        return self
-
 
 UNCLASSIFIED: Final = _Unclassified()
 
@@ -285,12 +282,12 @@ def validate_catalog(entries: Mapping[str, Any]) -> None:
             if t.contract_subject != e.contract_subject:
                 raise ValueError(
                     f"{kind!r}: {name} target {target!r} declares a different "
-                    "contract_subject (ADR-049 amendment 2026-11-14)"
+                    "contract_subject"
                 )
             if name == "same_event_as" and t.default_verdict != e.default_verdict:
                 raise ValueError(
                     f"{kind!r}: same_event_as target {target!r} has a different "
-                    "default_verdict (ADR-093 D4)"
+                    "default_verdict"
                 )
     _check_implies_acyclic(entries)
 
