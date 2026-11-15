@@ -50,7 +50,8 @@ Purpose and claims: `README.md`.
   header the public header includes but the dump is not given (a private
   header) or another translation unit compiled into the library.
 - **Configs** (`model/config.py`): a `Config` is one library build (standard,
-  producer, flags, evidence and, for `headers`, the header backend: castxml,
+  producer, flags, evidence and, for `headers`, `stripped` (the `{B,H}` primary
+  configuration: no DWARF, so no `.debug_*` section) and the header backend: castxml,
   clang or the native gcc plugin, which needs
   `python -m abicheck.extract.headers.gcc.build --compiler g++` once) plus its
   `consumers`. `build_data=True` adds L3 evidence on top of `headers`: the
