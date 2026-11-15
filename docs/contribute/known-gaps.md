@@ -285,6 +285,12 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### Overload sets of two class-template specializations are compared as one (2026-11-13)
+
+**Status (2026-11-13): OPEN.** `diff_templates.detect_overload_set_rerouted` groups functions by `function_overload_stem`, a stem that drops every template argument list, the enclosing class's included, so `C<int>::f` and `C<long>::f` share one overload set. When each specialization loses one overload and gains another (`C<int>::f`: `{f(int), f(double)}` -> `{f(int), f(float)}`, and the reverse for `C<long>`), the merged old and new sets are equal and no `overload_set_rerouted` is reported. The removed overloads still read `func_removed`, so the release still gates, but the re-routing explanation is missing. `main` grouped by `_strip_template_args` with the same effect; #2028 kept it. Closing it means keying on the enclosing scope with its template arguments, normalized so that two backends' spellings (`C<long>`, `C<long int>`) still match. Found by review on #2049. Owner: `diff_templates.py` (`compare/`).
+`false-clean` — a reroute inside one class-template specialization is unreported when another specialization of the same template moves the opposite way.
+<!-- canary: tests/test_template_stem_real_mangling.py::test_two_specializations_swapping_overloads_read_as_no_reroute -->
+
 #### A failed bundle snapshot build is reported but does not floor the exit code (2026-11-13)
 
 **Status (2026-11-13): OPEN.** When a release's bundle snapshot cannot be built, `run_bundle_analysis` records `bundle snapshot could not be built: ...` in `BundleDiffResult.analysis_errors`. JSON (`bundle_analysis_errors`) and Markdown show it. No exit axis reads it, so a release that is otherwise clean still exits 0. ADR-071 §3 keeps assurance per-pair, and a new `0 -> 1` axis needs an ADR. Owner: `policy/release_exit_decision.py`.
