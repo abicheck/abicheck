@@ -329,6 +329,46 @@ def test_probe_reads_the_long_size_the_target_reports(
     assert result.plain_char_unsigned is False
 
 
+def test_int128_probe_lines_are_guarded_by_the_target_capability_macro(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # i386 rejects __int128 outright, and one rejected spelling fails the whole
+    # probe compile. Each spelling is therefore wrapped in the compiler's own
+    # capability macro, so a target without it still compiles the rest.
+    sources: list[str] = []
+    _install(
+        monkeypatch,
+        _plain_char_step(),
+        _compile_step(sources),
+        _run_step(),
+    )
+    probe_builtin_abi("cc", ("-m32",))
+    (source,) = sources
+    for spelling in ("__int128", "unsigned __int128"):
+        guarded = f"#ifdef __SIZEOF_INT128__\nP({spelling})\n#endif"
+        assert guarded in source, spelling
+    assert "P(int)" in source.splitlines()
+
+
+def test_probe_on_an_ilp32_target_without_int128_keeps_the_scalar_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The i386 probe prints no __int128 line; the scalars it does print must
+    # still reach the layout. Before the guard, the whole probe was discarded.
+    _install(
+        monkeypatch,
+        _plain_char_step(),
+        _compile_step([]),
+        _run_step(stdout=_probe_stdout(_ILP32_LONG_LAYOUT)),
+    )
+    result = probe_builtin_abi("cc", ("-m32",))
+    assert result is not None
+    assert result.layout["int"] == (4, 4)
+    assert result.layout["long"] == (4, 4)
+    assert "__int128" not in result.layout
+    assert "unsigned __int128" not in result.layout
+
+
 def test_probe_empty_output_yields_no_layout_but_a_known_signedness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

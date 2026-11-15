@@ -43,6 +43,7 @@ from ...._compiler_options import (
     explicit_target_triple as _explicit_target_triple,
     forwarded_driver_mode_token as _forwarded_driver_mode_token,
     forwards_response_file as _forwards_response_file,
+    split_gcc_options,
 )
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_clang import _ClangAstParser
@@ -109,6 +110,19 @@ EXPLICIT_INSTANTIATION_GAP = (
 #: Runs one clang command (``cmd``, ``timeout``, ``on_created``) and returns
 #: the completed process; the default checks the scan deadline first.
 ClangAstRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def parse_option_tokens(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
+) -> tuple[str, ...]:
+    """The compiler options a header parse runs with, in command-line order.
+
+    ``gcc_options`` is split first, then ``gcc_option_tokens`` follow: the same
+    order :func:`clang_header_argv.render_clang_header_argv` emits. A probe
+    compiled with any other set (the bare tokens alone drop ``-m32``) measures
+    a different target than the parse it describes.
+    """
+    return (*split_gcc_options(gcc_options or ""), *gcc_option_tokens)
 
 
 def resolve_clang_langmode(
@@ -683,8 +697,11 @@ class ClangBackend:
             no_binary_evidence=r.no_binary_evidence,
             is_cxx=resolved_force_cpp,
         )
+        # The same options the parse was given, in the same order (the
+        # ``gcc_options`` string, then ``gcc_option_tokens``): a probe that
+        # drops ``-m32`` measures the host's builtins, not the parsed target's.
         parser.builtin_abi = probe_builtin_abi(
-            str(clang_bin), tuple(r.gcc_option_tokens)
+            str(clang_bin), parse_option_tokens(r.gcc_options, r.gcc_option_tokens)
         )
         if resolved_kind is None:
             parser.enum_underlying_types = probe_enum_types(
