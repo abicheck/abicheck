@@ -191,9 +191,12 @@ def strip_debug(so: Path) -> None:
 
     A ``{B}`` or ``{B,H}`` side must be a stripped binary: a leftover
     ``.debug_*`` section would hand the checker DWARF the cell does not claim.
-    Only ELF is stripped (binutils ``strip``); every format is checked.
+    ELF and PE are stripped with binutils ``strip`` (mingw's on PE: a link
+    without ``-g`` still pulls DWARF in from the toolchain's CRT and libgcc
+    objects). Every format is checked afterwards; a section that survives
+    the strip fails the build.
     """
-    if object_format() == "elf":
+    if object_format() in ("elf", "pe"):
         cmd = ["strip", "--strip-debug", str(so)]
         _check(
             cmd,
