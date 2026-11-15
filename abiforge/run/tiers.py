@@ -53,7 +53,6 @@ from abiforge.model.config import (
     Standard,
     Toolchain,
     default_config,
-    has_feature,
 )
 from abiforge.model.seeds import SEED_BY_NAME, Seed
 from abiforge.operators import OP_BY_NAME, EditOp, matrix
@@ -305,7 +304,7 @@ def consumer_std(op: EditOp, lang: str, which: str, tc: Toolchain) -> Standard |
     options = [
         s
         for s in stds(lang)
-        if all(has_feature(s, f) for f in op.features) and std_flag(tc, s) is not None
+        if op.consumer_gap(s) is None and std_flag(tc, s) is not None
     ]
     if not options:
         return None
@@ -486,16 +485,17 @@ def uncovered_pairs(
 
 
 def _repair_std(op: EditOp, lang: str, slot: int, tc: Toolchain) -> Standard:
-    """The row's standard, raised to the first one that has the op's features, and
-    lowered to one the producer accepts."""
+    """The row's standard, moved into the op's standard ranges (raised to the
+    first one that has its features and introduced, capped at the newest one
+    that still has it), then lowered to one the producer accepts."""
     options = stds(lang)
     idx = options.index(std_for_slot(lang, slot))
-    floor = 0
-    for feat in op.features:
-        floor = max(
-            floor, next((i for i, s in enumerate(options) if has_feature(s, feat)), 0)
-        )
-    idx = max(idx, floor)
+    inside = [i for i, s in enumerate(options) if op.standard_ok(s)] or [
+        0,
+        len(options) - 1,
+    ]
+    floor = inside[0]
+    idx = min(max(idx, floor), inside[-1])
     while idx > floor and std_flag(tc, options[idx]) is None:
         idx -= 1
     return options[idx]
@@ -625,17 +625,22 @@ def weekly_consumers(
 
 
 def _weekly_configs(
-    lang: str, tc: Toolchain, consumers: tuple[Consumer, ...] = ()
+    lang: str,
+    tc: Toolchain,
+    consumers: tuple[Consumer, ...] = (),
+    op: EditOp | None = None,
 ) -> list[Config]:
     # Newest standard both the producer and the header frontend's system
-    # compiler accept (castxml emulates the system cc/c++).
+    # compiler accept (castxml emulates the system cc/c++), and that the edit is
+    # defined in (a feature the standard removed is not in the edit's range).
     driver = "c++" if lang == "c++" else "cc"
     top = [
         s
         for s in stds(lang)
         if std_flag(tc, s) is not None and std_flag_for_driver(driver, s) is not None
     ]
-    newest_std = top[-1] if top else stds(lang)[-1]
+    defined = [s for s in top if op is None or op.standard_ok(s)]
+    newest_std = (defined or top or stds(lang))[-1]
     base = Config(std=newest_std, producer=tc)
     out = [
         replace(base, consumers=consumers),
@@ -662,6 +667,6 @@ def weekly_cells() -> list[Cell]:
         assert tc is not None
         for op, seed in matrix():
             cross = weekly_consumers(op, seed.lang, tc, users)
-            for cfg in _weekly_configs(seed.lang, tc, cross):
+            for cfg in _weekly_configs(seed.lang, tc, cross, op):
                 cells.append(Cell(op, seed, cfg))
     return shard(cells)

@@ -30,7 +30,6 @@ from abiforge.model.config import (
     ResolvedConsumer,
     Toolchain,
     default_config,
-    has_feature,
 )
 from abiforge.model.expect import (
     ExecTruth,
@@ -222,13 +221,8 @@ def pair_blocked(
             f"a {consumer.std.lang} consumer cannot use the {config.lang} seed "
             '(the C header has no extern "C" guards)',
         )
-    for feat in op.features:
-        if not has_feature(consumer.std, feat):
-            return (
-                "infeasible",
-                f"the edited header needs {feat}, which the consumer's "
-                f"{consumer.std.name} lacks",
-            )
+    if (why := op.consumer_gap(consumer.std)) is not None:
+        return "infeasible", why
     if consumer.flags.bits != config.flags.bits:
         return (
             "infeasible",
