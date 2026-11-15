@@ -25,7 +25,6 @@ from abicheck.model.change_catalog.observability import (
     Subsumption,
     SubsumptionKey,
     observable,
-    unclassified_kinds,
     validate_catalog,
 )
 from abicheck.model.change_catalog.registry import ChangeKindMeta, Verdict
@@ -298,7 +297,10 @@ def test_disjoint_conditions_are_accepted_and_unclassified_is_listed() -> None:
         _meta("c"),
     )
     validate_catalog(cat)
-    assert unclassified_kinds(cat) == ["b", "c"]
+    assert sorted(k for k, e in cat.items() if e.observable_at is UNCLASSIFIED) == [
+        "b",
+        "c",
+    ]
     assert repr(UNCLASSIFIED) == "UNCLASSIFIED"
 
 

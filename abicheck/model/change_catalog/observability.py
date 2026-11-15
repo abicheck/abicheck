@@ -309,8 +309,3 @@ def _check_implies_acyclic(entries: Mapping[str, Any]) -> None:
     for k in entries:
         if color[k] == white:
             visit(k, [k])
-
-
-def unclassified_kinds(entries: Mapping[str, Any]) -> list[str]:
-    """Kinds whose ``observable_at`` is still :data:`UNCLASSIFIED` (sorted)."""
-    return sorted(k for k, e in entries.items() if e.observable_at is UNCLASSIFIED)
