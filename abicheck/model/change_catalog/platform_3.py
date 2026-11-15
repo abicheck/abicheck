@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -50,6 +51,27 @@ _E = ChangeKindMeta
 _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
+
+_OBS_B = observable(("B",))
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
+_OBS_B_ELF_MACHO = observable(
+    ("B",),
+    condition=ObservabilityCondition(
+        platform=frozenset({Platform.ELF, Platform.MACHO})
+    ),
+)
+_OBS_DH = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="layout or type fact: DWARF and the public header both carry it",
+)
+_OBS_DBD = observable(
+    ("B", "D"),
+    ("B", "BD"),
+    rationale="compiler-flag fact: the header never carries it; DWARF and build data do",
+)
 
 PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
     _E(
@@ -71,6 +93,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "vector_abi_changed",
@@ -80,6 +103,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "version_script_missing",
@@ -91,6 +115,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "versioned_symbol_scheme_detected",
@@ -104,6 +129,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "visibility_leak",
@@ -123,6 +149,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_MACHO,),
     ),
     _E(
         "wchar_model_changed",
@@ -139,6 +166,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "whole_program_vtables_mode_changed",
@@ -154,6 +182,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "writable_executable_segment",
@@ -163,6 +192,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "x86_isa_baseline_raised",
@@ -176,6 +206,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "glibcxx_dual_abi_changed",
@@ -195,6 +226,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "sanitizer_runtime_required",
@@ -231,5 +263,6 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B,),
     ),
 ]
