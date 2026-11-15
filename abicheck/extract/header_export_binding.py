@@ -49,10 +49,12 @@ returned in :class:`ExportBindingOutcome`, never dropped.
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import overload
 
 from ..model import AbiSnapshot, Function, Variable, Visibility
 from ..model.export_index import ExportMatch
@@ -73,6 +75,7 @@ __all__ = [
     "ExportBindingOutcome",
     "bind_header_declarations_to_exports",
     "bind_pe_header_exports",
+    "bind_pe_header_operand",
     "binding_export_names",
     "msvc_builtin_param_types",
 ]
@@ -155,6 +158,35 @@ def bind_pe_header_exports(snap: AbiSnapshot) -> AbiSnapshot:
     if names:
         bind_header_declarations_to_exports(snap, names, x86_32=x86_32)
     return snap
+
+
+@overload
+def bind_pe_header_operand(snap: AbiSnapshot) -> AbiSnapshot: ...
+@overload
+def bind_pe_header_operand(snap: None) -> None: ...
+def bind_pe_header_operand(snap: AbiSnapshot | None) -> AbiSnapshot | None:
+    """A header-backed PE comparison operand with its declarations joined.
+
+    A dump binds at extraction (:func:`bind_pe_header_exports` via
+    ``finish_binary_snapshot``), but a stored baseline written before extractor
+    generation 72 never ran the join: its C++ declarations still carry
+    castxml's Itanium spelling and read as unexported. Every comparison path
+    passes through ``checker.compare``, which calls this on both operands before
+    any public surface is resolved. The join is idempotent; a copy is bound only
+    when a declaration is still unexported and the DLL exports something, so the
+    caller's snapshot is never mutated. ``None`` (no baseline) passes through.
+    """
+    if snap is None:
+        return None
+    if snap.pe is None or not snap.from_headers or not snap.pe.exports:
+        return snap
+    decls: list[Function | Variable] = [
+        *snap.declarations.functions,
+        *snap.declarations.variables,
+    ]
+    if not any(decl.visibility is Visibility.HIDDEN for decl in decls):
+        return snap
+    return bind_pe_header_exports(copy.deepcopy(snap))
 
 
 def _itanium_components(spelling: str) -> tuple[str, ...] | None:

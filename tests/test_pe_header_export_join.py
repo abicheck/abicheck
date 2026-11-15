@@ -255,3 +255,54 @@ def test_undecodable_parameter_declaration_does_not_bind_a_lone_export(
     bind_pe_header_exports(snap)
     assert decl.mangled == "_ZN10Calculator3addEPi"
     assert decl.visibility is Visibility.HIDDEN
+
+
+def test_no_baseline_run_joins_a_stored_pe_snapshot(monkeypatch) -> None:
+    # A no-baseline run is the one path with old=None. A single new-only run
+    # reports no pairwise change, so the observable effect is the operand that
+    # reaches the comparison: it must carry the joined MSVC spelling.
+    import abicheck.workflows.no_baseline_compare as nb
+
+    received: list[Function] = []
+    real_compare = nb._diff_pair
+
+    def spy(old, new, **kwargs):
+        received.extend(new.declarations.functions)
+        return real_compare(old, new, **kwargs)
+
+    monkeypatch.setattr(nb, "_diff_pair", spy)
+    stored = _stored_gen71_pe(
+        _decl("add", "_ZN10Calculator3addEii", ("int", "int")),
+        exports=["?add@Calculator@@QEAAHHH@Z"],
+    )
+    nb.run_no_baseline_compare(stored)
+    assert [d.mangled for d in received] == ["?add@Calculator@@QEAAHHH@Z"]
+
+
+def test_env_matrix_compare_joins_a_stored_pe_snapshot() -> None:
+    from abicheck.environment_matrix import EnvironmentMatrix
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    def members() -> list[Function]:
+        return [_decl("add", "_ZN10Calculator3addEii", ("int", "int"))]
+
+    exports = ["?add@Calculator@@QEAAHHH@Z"]
+    old = _stored_gen71_pe(*members(), exports=exports)
+    new = _bound_gen72_pe(*members(), exports=exports)
+    result = compare_snapshots(old, new, env_matrix=EnvironmentMatrix())
+    assert _kinds(result) == [], result.changes
+
+
+def test_raw_checker_compare_is_clean_on_bound_operands() -> None:
+    # Documented limitation: a raw checker.compare call does not bind a stored
+    # pre-72 PE operand itself. Callers must pass bound operands, as this does.
+    from abicheck.checker import compare
+    from abicheck.extract.header_export_binding import bind_pe_header_operand
+
+    def members() -> list[Function]:
+        return [_decl("add", "_ZN10Calculator3addEii", ("int", "int"))]
+
+    exports = ["?add@Calculator@@QEAAHHH@Z"]
+    old = bind_pe_header_operand(_stored_gen71_pe(*members(), exports=exports))
+    new = bind_pe_header_operand(_stored_gen71_pe(*members(), exports=exports))
+    assert _kinds(compare(old, new)) == []

@@ -81,7 +81,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "896fe0141ddb2b6e4148ab170a17e690d65b052f4e34e6455a104a3f05524496",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_export_binding.py": "203b0a6fed706dd6cd45efd70638b12222477130011f11d36c5d1b188db684d4",
+      "abicheck/extract/header_export_binding.py": "0072bba6fa601e74dcda682eb072ff04fbc23017072b6b609fe6231755f9454d",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "b5968247e25c4f747b4b74effdf417bc2a58fc387e591e8e745c653a7a08fc92",
+    "fingerprint": "10f5dd97072aa22de5e24b3039c374b76c6a2779e32f917f4ccc4597ba4d9e9f",
     "generation": 72,
-    "reason": "bumped to 72 for a semantic change"
+    "reason": "generation 72 is unreleased (introduced by this PR); re-recorded in place for a refinement of the same bind rule (a lone MSVC function export binds only on a decoded, agreeing parameter list). No snapshot has been stamped with generation 72"
   },
   "resolver": {
     "files": {

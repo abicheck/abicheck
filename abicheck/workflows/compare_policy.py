@@ -44,7 +44,6 @@ forces that mechanism here).
 
 from __future__ import annotations
 
-import copy
 import functools
 import logging
 from collections.abc import Callable
@@ -54,8 +53,8 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from ..checker import compare
 from ..checker_types import DiffResult
 from ..errors import ValidationError
-from ..extract.header_export_binding import bind_pe_header_exports
-from ..model import AbiSnapshot, Function, Variable, Visibility
+from ..extract.header_export_binding import bind_pe_header_operand
+from ..model import AbiSnapshot
 from ..model.comparison_memo import comparison_memo_scope
 from ..policy.public_surface_query import ComparisonPublicSurfaces, PublicSurfaceQuery
 from ..policy_file import (
@@ -306,29 +305,6 @@ def _within_comparison_memo_scope(fn: _F) -> _F:
 
 
 @_within_comparison_memo_scope
-def pe_header_operand_bound(snap: AbiSnapshot) -> AbiSnapshot:
-    """A header-backed PE operand with its declarations joined to its DLL's exports.
-
-    A dump binds at extraction (``finish_binary_snapshot``), but a stored
-    baseline written before extractor generation 72 never ran that join: its
-    C++ declarations still carry castxml's Itanium spelling and read as
-    unexported. Binding every operand here, before any public surface is
-    resolved, gives a stored baseline and a live dump the same join. The join
-    is idempotent, so an already bound snapshot is returned unchanged; a copy
-    is bound only when a declaration is still unexported and the DLL exports
-    something, so the caller's snapshot is never mutated.
-    """
-    if snap.pe is None or not snap.from_headers or not snap.pe.exports:
-        return snap
-    decls: list[Function | Variable] = [
-        *snap.declarations.functions,
-        *snap.declarations.variables,
-    ]
-    if not any(decl.visibility is Visibility.HIDDEN for decl in decls):
-        return snap
-    return bind_pe_header_exports(copy.deepcopy(snap))
-
-
 def compare_snapshots(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -388,8 +364,8 @@ def compare_snapshots(
             accepting a no-op or failing later inside the core (Codex review).
     """
     _validate_contract_mode(contract_mode, contract_evaluation)
-    old = pe_header_operand_bound(old)
-    new = pe_header_operand_bound(new)
+    old = bind_pe_header_operand(old)
+    new = bind_pe_header_operand(new)
     # Centralized POST committed-wrapper recovery: when a committed-surface
     # allowlist is supplied, union the callable `pp_*` wrappers exported by
     # the old snapshot (contract_scope_allowlist's snapshot half) -- keeps
@@ -454,7 +430,6 @@ __all__ = [
     "dedup_policy_override_warnings",
     "load_policy_inputs",
     "load_suppression_and_policy",
-    "pe_header_operand_bound",
 ]
 
 

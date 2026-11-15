@@ -72,6 +72,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..checker import compare as _diff_pair
+from ..extract.header_export_binding import bind_pe_header_operand
 from ..model.scope_acquisition import (
     AcquisitionState,
     InventoryCompleteness,
@@ -86,7 +87,6 @@ from ..policy.no_baseline_findings import (
     check_no_baseline_partition,
     partition_no_baseline_findings,
 )
-from .compare_policy import pe_header_operand_bound
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -487,9 +487,10 @@ def run_no_baseline_compare(
     # is that there is none (`old=None`). It therefore also does not force
     # `surface_metrics`, which the chokepoint sets; whether an audit should
     # carry those findings is an open question, not settled here.
+    new = bind_pe_header_operand(new)
     diff = _diff_pair(
         None,
-        pe_header_operand_bound(new),
+        new,
         suppression=suppression,
         policy=policy,
         policy_file=policy_file,
