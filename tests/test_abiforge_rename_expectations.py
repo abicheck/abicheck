@@ -100,8 +100,9 @@ SIZE_COMPILERS = ("gcc-14", "clang-18", "clang-19")
 @pytest.mark.integration
 @pytest.mark.parametrize("compiler", SIZE_COMPILERS)
 @pytest.mark.parametrize("opt", OPT_LEVELS)
+@pytest.mark.parametrize("std", ("c89", "c17"))
 def test_prefix_rename_body_is_above_the_fingerprint_floor(
-    tmp_path: Path, compiler: str, opt: str
+    tmp_path: Path, compiler: str, opt: str, std: str
 ) -> None:
     """The renamed function's body stays above ``_MIN_SYMBOL_SIZE``.
 
@@ -112,12 +113,16 @@ def test_prefix_rename_body_is_above_the_fingerprint_floor(
     """
     import shutil
     import subprocess
+    import sys
 
     from elftools.elf.elffile import ELFFile
 
     from abicheck.binary_fingerprint import _MIN_SYMBOL_SIZE
     from abiforge.operators import OP_BY_NAME
 
+    # ELFFile reads ELF output only: a named compiler on macOS emits Mach-O.
+    if sys.platform != "linux":
+        pytest.skip("the size check reads ELF output; it runs on Linux hosts")
     if shutil.which(compiler) is None:
         pytest.skip(f"{compiler} is not installed on this host")
     _, source = OP_BY_NAME["symbols_prefixed_batch"].edit(
@@ -125,9 +130,18 @@ def test_prefix_rename_body_is_above_the_fingerprint_floor(
     )["elf.ren"]
     src = tmp_path / "ren.c"
     src.write_text(source, encoding="utf-8")
-    lib = tmp_path / f"ren_{compiler}_{opt}.so"
+    lib = tmp_path / f"ren_{compiler}_{opt}_{std}.so"
     subprocess.run(
-        [compiler, "-shared", "-fPIC", f"-{opt}", "-o", str(lib), str(src)],
+        [
+            compiler,
+            "-shared",
+            "-fPIC",
+            f"-std={std}",
+            f"-{opt}",
+            "-o",
+            str(lib),
+            str(src),
+        ],
         check=True,
     )
     with lib.open("rb") as fh:

@@ -496,7 +496,7 @@ _ELF_ROLES: dict[str, RoleText] = {
         # symbols alone. The renamed twin in symbols_prefixed_batch has the
         # same body.
         "int r_init(void) { return 1; }\n"
-        "int r_run(int n) { int s = 0; for (int i = 0; i < n; i++) "
+        "int r_run(int n) { int s = 0; int i; for (i = 0; i < n; i++) "
         "s += i * n + (s ^ i); return s; }",
     ),
     # A reserved-name exported table (glibc's `_IO_2_1_stdin_` shape).

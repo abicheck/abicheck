@@ -302,7 +302,7 @@ _VALUES_AND_NAMES = (
             # optimisation level (measured: 45-277 bytes). The prefix pairing
             # is then a fact on binary evidence, not a size accident.
             "int mylib_r_init(void) { return 1; }\n"
-            "int mylib_r_run(int n) { int s = 0; for (int i = 0; i < n; i++) "
+            "int mylib_r_run(int n) { int s = 0; int i; for (i = 0; i < n; i++) "
             "s += i * n + (s ^ i); return s; }",
         ),
         "every function gains a mylib_ prefix: each old name an existing "
