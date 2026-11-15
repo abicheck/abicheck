@@ -1,17 +1,17 @@
 # -- symbols: export-table facts (B) --------------------------------------
-func_added  DH:ELF  # diff_symbols.py:249 & undeclared_exports.py:141-197: ELF binary-only mode emits func_added_elf_only; the header/DWARF kind needs declarations
-func_added_elf_only              B:ELF
+func_added  DH  # diff_symbols.py:249 & undeclared_exports.py:141-197: binary-only snapshots (ELF, PE, Mach-O: dumper.py:966, 1115) emit func_added_elf_only; the header/DWARF kind needs declarations
+func_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (dumper.py:966, 1115)
 func_export_added  U  # export_transition.py:221: emission depends on declaration state (_export_was_gained); not established from B alone
 func_language_linkage_changed  BH  # compare/function_signature.py:487: declaration linkage needs headers; B alone shows only the mangled name
 func_likely_renamed  B  # diff_symbols_renames.py:535-542: name-fingerprint candidates
-func_removed  DH:ELF  # diff_symbols.py:249: ELF binary-only removals emit FUNC_REMOVED_ELF_ONLY; FUNC_REMOVED needs DWARF or headers
-func_removed_elf_only            B:ELF
+func_removed  DH  # diff_symbols.py:249: binary-only snapshots (ELF, PE, Mach-O: dumper.py:966, 1115) emit FUNC_REMOVED_ELF_ONLY for export-table-only records; FUNC_REMOVED needs DWARF or headers
+func_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols.py:249)
 func_visibility_changed  BH  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
-var_added  DH:ELF  # undeclared_exports.py:141-197: ELF binary-only mode emits var_added_elf_only; VAR_ADDED needs DWARF or headers
-var_added_elf_only               B:ELF
+var_added  DH  # undeclared_exports.py:141-197: binary-only snapshots emit var_added_elf_only; VAR_ADDED needs DWARF or headers
+var_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (undeclared_exports.py:197)
 var_export_added  U  # export_transition.py:250: same path as func_export_added; not established from B alone
-var_removed  DH:ELF  # diff_symbols_variables.py:86: ELF binary-only removals emit VAR_REMOVED_ELF_ONLY
-var_removed_elf_only             B:ELF
+var_removed  DH  # diff_symbols_variables.py:86: binary-only snapshots emit VAR_REMOVED_ELF_ONLY for export-table-only records
+var_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols_variables.py:86)
 var_visibility_changed  U  # emitted only from template_instance_absence.py:516 (typed template evidence)
 symbol_renamed_batch  B  # diff_symbols_renames.py:682-690: rename pairs from symbol names with ELF binding
 symbol_size_changed              B:ELF  # st_size in .dynsym; no PE/Mach-O analogue

@@ -41,13 +41,12 @@ from .registry import ChangeKindMeta
 from .symbols_1 import SYMBOLS_ENTRIES_1
 from .symbols_2 import SYMBOLS_ENTRIES_2
 from .symbols_3 import SYMBOLS_ENTRIES_3
-from .symbols_4 import SYMBOLS_ENTRIES_4
 
 #: Assembled from the numbered parts above; split purely to keep each
 #: file under ADR-061's 800-line ceiling, exactly as
 #: ``kind_names_{1,2,3}.py`` already is. The public name is unchanged.
 SYMBOLS_ENTRIES: list[ChangeKindMeta] = (
-    SYMBOLS_ENTRIES_1 + SYMBOLS_ENTRIES_2 + SYMBOLS_ENTRIES_3 + SYMBOLS_ENTRIES_4
+    SYMBOLS_ENTRIES_1 + SYMBOLS_ENTRIES_2 + SYMBOLS_ENTRIES_3
 )
 
 __all__ = ["SYMBOLS_ENTRIES"]
