@@ -186,24 +186,28 @@ def test_build_data_cells_still_hand_the_dumper_the_layout_flags(
 # --- real binaries ------------------------------------------------------------
 
 
-#: The host's object format and an independent section listing for it (the
-#: platform's own tool, not the harness's helper).
-_ORACLE: dict[str, tuple[list[str], str]] = {
-    "linux": (["readelf", "-SW"], r"\]\s+(\.debug\S*)"),
-    "win32": (["objdump", "-h"], r"^\s+\d+\s+(\.debug_\S+)"),
-    "darwin": (["otool", "-l"], r"sectname\s+(__debug_\S+)"),
-}
-_HOST = next(k for k in _ORACLE if sys.platform.startswith(k))
+def _run_tool(cmd: list[str]) -> str:
+    # A failed tool fails the test; it is never read as "no DWARF".
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"{cmd[0]} failed: {proc.stderr}"
+    assert proc.stdout.strip(), f"{cmd[0]} printed nothing"
+    return proc.stdout
 
 
 def _debug_sections_of(so: Path) -> list[str]:
-    cmd, pattern = _ORACLE[_HOST]
-    proc = subprocess.run([*cmd, str(so)], capture_output=True, text=True, check=False)
-    # A failed listing must fail the test, never read as "no DWARF".
-    assert proc.returncode == 0, f"{cmd[0]} failed: {proc.stderr}"
-    names = re.findall(pattern, proc.stdout, re.MULTILINE)
-    assert names or proc.stdout.strip(), f"{cmd[0]} printed nothing"
-    return names
+    """The platform's own tools (not the harness's helper) for the host format."""
+    if sys.platform == "darwin":
+        sections = _run_tool(["otool", "-l", str(so)])
+        stabs = _run_tool(["nm", "-a", "-p", str(so)])
+        names = re.findall(r"sectname\s+(__debug_\S+)", sections)
+        return names + re.findall(r"\bOSO\b\s+(\S.*)$", stabs, re.M)
+    if sys.platform == "win32":
+        return re.findall(
+            r"^\s+\d+\s+(\.debug_\S+)",
+            _run_tool(["objdump", "-h", str(so)]),
+            re.M,
+        )
+    return re.findall(r"\]\s+(\.debug\S*)", _run_tool(["readelf", "-SW", str(so)]))
 
 
 @pytest.mark.integration
@@ -213,10 +217,6 @@ def test_the_stripped_headers_side_has_no_debug_sections(tmp_path: Path) -> None
         SEED_BY_NAME["c_core"], base.with_(stripped=True), tmp_path / "bh"
     )
     assert _debug_sections_of(stripped.so) == []
-    if _HOST == "darwin":
-        # ld64 keeps DWARF in the dSYM, not the image, so the image cannot
-        # show the control on this host; the stripped side above still holds.
-        pytest.skip("Mach-O images carry no DWARF to use as the control")
     # Control: the same build with DWARF does carry sections, so the check can fail.
     with_dwarf = harness.build(SEED_BY_NAME["c_core"], base, tmp_path / "bdh")
     assert _debug_sections_of(with_dwarf.so)

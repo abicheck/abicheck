@@ -139,15 +139,13 @@ def _check(cmd: list[str], proc: subprocess.CompletedProcess[str], what: str) ->
         )
 
 
-#: Per object format: the tool that lists a library's sections, and the pattern
-#: that picks out its DWARF section names from that tool's output.
+#: Per object format (ELF, PE): the tool that lists a library's sections, and
+#: the pattern that picks out its DWARF section names from that tool's output.
 _SECTION_LISTING: dict[str, tuple[list[str], str]] = {
     # ELF: readelf's section table, ``.debug_*`` names.
     "elf": (["readelf", "-SW"], r"\]\s+(\.debug\S*)"),
     # PE/COFF (mingw): objdump's section table; DWARF keeps its ``.debug_*`` names.
     "pe": (["objdump", "-h"], r"^\s+\d+\s+(\.debug_\S+)"),
-    # Mach-O: otool's load commands; DWARF sits in the ``__DWARF`` segment.
-    "macho": (["otool", "-l"], r"sectname\s+(__debug_\S+)"),
 }
 
 
@@ -160,19 +158,32 @@ def object_format() -> str:
     return "elf"
 
 
-def debug_sections(so: Path) -> list[str]:
-    """The DWARF section names a built library still carries, in its own format.
-
-    A tool that fails, or prints no section table, raises: a failed listing is
-    never read as "no DWARF".
-    """
-    listing, pattern = _SECTION_LISTING[object_format()]
-    cmd = [*listing, str(so)]
+def _listing(cmd: list[str], what: str) -> str:
+    """The stdout of a listing tool. A tool that fails or prints nothing raises:
+    a failed listing is never read as "no DWARF". A missing tool raises
+    ``FileNotFoundError`` from ``subprocess``, which is never caught here."""
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    _check(cmd, proc, "section list")
+    _check(cmd, proc, what)
     if not proc.stdout.strip():
-        raise CompileError(f"{' '.join(cmd)} printed no section table")
-    return re.findall(pattern, proc.stdout, re.MULTILINE)
+        raise CompileError(f"{' '.join(cmd)} printed no {what}")
+    return proc.stdout
+
+
+def debug_sections(so: Path) -> list[str]:
+    """The DWARF a built library still carries, named in its own format.
+
+    ELF and PE: the ``.debug_*`` sections. Mach-O: the ``__debug_*`` sections of
+    the ``__DWARF`` segment, and the N_OSO debug-map stabs that a ``-g`` link
+    leaves in the image, each naming the object file that holds the DWARF.
+    """
+    if object_format() == "macho":
+        sections = _listing(["otool", "-l", str(so)], "section table")
+        stabs = _listing(["nm", "-a", "-p", str(so)], "symbol table")
+        names = re.findall(r"sectname\s+(__debug_\S+)", sections)
+        names += [f"OSO {o}" for o in re.findall(r"\bOSO\b\s+(\S.*)$", stabs, re.M)]
+        return names
+    listing, pattern = _SECTION_LISTING[object_format()]
+    return re.findall(pattern, _listing([*listing, str(so)], "section table"), re.M)
 
 
 def strip_debug(so: Path) -> None:
