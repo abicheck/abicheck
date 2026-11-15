@@ -427,3 +427,52 @@ def test_unlabelled_blob_before_closer_is_not_a_slot_change(
     new = _blob_snapshot(tmp_path / "n.dylib", new_blob, encoding)
     kinds = [c.kind.name for c in _diff_elf_layout(old, new)]
     assert "VTABLE_SLOT_COUNT_CHANGED" not in kinds
+
+
+# ── removed local boundary with unchanged section contents ──────────────────
+
+
+def _local_boundary_snapshot(
+    path: Path, with_local: bool, encoding: str
+) -> AbiSnapshot:
+    """A 40-byte ``_ZTV4Base`` at 0x1000, relocated exactly as in the bytes.
+
+    The old image has a local label at 0x1028 that closes the vtable. The new
+    image strips it, so the span grows to the shared closer at 0x1040 while the
+    section contents, the vtable and its fixups are byte-for-byte the same.
+    """
+    syms = [MachoSymbol("__ZTV4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000)]
+    if with_local:
+        syms.append(MachoSymbol("__local_pad", N_SECT, n_sect=1, n_value=0x1028))
+    syms.append(MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1040))
+    lib = write_dylib(
+        path,
+        syms,
+        sections=[("__DATA_CONST", "__const", 0x1000, 0x80)],
+        **_vtable_fixups(0x28, encoding),
+    )
+    return AbiSnapshot(
+        library="libl.dylib",
+        version="1",
+        platform="macho",
+        macho=parse_macho_metadata(lib),
+    )
+
+
+@pytest.mark.parametrize("encoding", ["classic", "chained"])
+def test_removed_local_boundary_with_unchanged_contents_is_no_slot_change(
+    tmp_path, encoding
+):
+    """Stripping the local that closed a vtable must not report a slot change.
+
+    The vtable is 40 bytes in both images. Removing its closing label moves the
+    closer to ``_ZTI4Base``, so the two spans name different closers and the
+    detector compares nothing (not a false ``+3 pointer-sized words``). The
+    same-closer case, where padding moves the span, is covered by
+    ``test_unlabelled_blob_before_closer_is_not_a_slot_change``, which fails
+    without the fixup corroboration.
+    """
+    old = _local_boundary_snapshot(tmp_path / "old.dylib", True, encoding)
+    new = _local_boundary_snapshot(tmp_path / "new.dylib", False, encoding)
+    kinds = [c.kind.name for c in _diff_elf_layout(old, new)]
+    assert "VTABLE_SLOT_COUNT_CHANGED" not in kinds
