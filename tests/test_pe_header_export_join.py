@@ -380,3 +380,70 @@ def test_really_removed_member_is_still_reported() -> None:
 def test_no_baseline_operand_passes_through_unchanged() -> None:
     # A no-baseline comparison has no old operand: binding it is a no-op.
     assert bind_pe_header_operand(None) is None
+
+
+def _var(
+    name: str, mangled: str, typ: str, *, exported: ExportMatch = ExportMatch.ABSENT
+):
+    from abicheck.model import Variable
+
+    var = Variable(
+        name=name,
+        mangled=mangled,
+        type=typ,
+        visibility=Visibility.PUBLIC
+        if exported is ExportMatch.DYNAMIC
+        else Visibility.HIDDEN,
+        **header_ast_surface_facts(exported=exported, producer="castxml"),
+    )
+    var.origin = ScopeOrigin.PUBLIC_HEADER
+    return var
+
+
+def _variable_noise(decls, exports: list[str]) -> list[str]:
+    """Public-surface noise a header-backed PE variable snapshot reports."""
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    snap.platform = "pe"
+    snap.pe = PeMetadata(
+        machine=_AMD64, exports=[PeExport(name=sym) for sym in exports]
+    )
+    snap.declarations.variables = list(decls)
+    bound = bind_pe_header_operand(snap)
+    result = compare_snapshots(bound, bound)
+    return [
+        k
+        for k, _ in _kinds(result)
+        if k in ("public_not_exported", "exported_not_public")
+    ]
+
+
+def test_cpp_namespace_global_int_binds_to_its_data_export() -> None:
+    assert _variable_noise([_var("g", "g", "int")], ["?g@@3HA"]) == []
+
+
+def test_namespaced_global_int_binds_to_its_data_export() -> None:
+    assert _variable_noise([_var("g", "_ZN2ns1gE", "int")], ["?g@ns@@3HA"]) == []
+
+
+def test_c_global_with_its_plain_export_is_unchanged() -> None:
+    # A C global exports under its plain name: the header backend's exact lookup
+    # already matched it, and the binder has nothing to do.
+    decl = _var("g", "g", "int", exported=ExportMatch.DYNAMIC)
+    assert _variable_noise([decl], ["g"]) == []
+
+
+def test_c_global_with_missing_export_is_still_reported() -> None:
+    # A real missing export: no plain export and no C++ data symbol to pair with.
+    assert "public_not_exported" in _variable_noise([_var("g", "g", "int")], [])
+
+
+def test_cpp_global_with_a_disagreeing_type_is_refused() -> None:
+    # ?g@@3NA decodes to double; the declaration is int. Not the same variable.
+    noise = _variable_noise([_var("g", "g", "int")], ["?g@@3NA"])
+    assert "public_not_exported" in noise
+
+
+def test_static_data_member_binds_to_its_data_export() -> None:
+    assert _variable_noise([_var("s", "_ZN1C1sE", "int")], ["?s@C@@2HA"]) == []

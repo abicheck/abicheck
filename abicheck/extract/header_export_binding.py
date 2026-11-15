@@ -334,6 +334,26 @@ def msvc_builtin_param_types(sym: str) -> tuple[str, ...] | None:
     return None
 
 
+def msvc_data_type(sym: str) -> str | None:
+    """The builtin type of an MSVC data symbol, or ``None``.
+
+    ``?name@scope@@<storage><type><cv>``: storage ``3`` is a namespace-scope
+    global, ``2`` a static data member; the cv code must be ``A`` (non-const).
+    A plain C global never exports this form, so a ``?`` data symbol names a
+    C++-linkage variable (the export carries the linkage, not a fact).
+    """
+    idx = sym.find("@@")
+    if not sym.startswith("?") or idx == -1:
+        return None
+    i = idx + 2
+    if sym[i : i + 1] not in ("2", "3"):
+        return None
+    t, i = _msvc_type(sym, i + 1)
+    if t is None or t == "void" or sym[i:] != "A":
+        return None
+    return t
+
+
 def _decl_param_types(decl: Decl) -> tuple[str, ...] | None:
     if not isinstance(decl, Function):
         return None
@@ -477,6 +497,33 @@ def bind_header_declarations_to_exports(
             _apply(decl, sym)
             bound_syms.add(sym)
         ambiguous.extend(refused)
+    # A plain-name (C spelling) namespace-scope global binds to an MSVC data
+    # symbol ``?name@@<storage><type>A`` only when that symbol decodes to the
+    # declared builtin type. Only variables take this path: a C function never
+    # binds a C++ function export on name alone.
+    for (scheme, comps), cands in decls_by_key.items():
+        if scheme != "c":
+            continue
+        data_syms = [
+            s
+            for sch, s in exports_by_name.get(comps, ())
+            if sch == "msvc" and s not in bound_syms and msvc_data_type(s) is not None
+        ]
+        for decl in cands:
+            if not isinstance(decl, Variable):
+                continue
+            want = _canonical_builtin(decl.type)
+            hits = [
+                s
+                for s in data_syms
+                if msvc_data_type(s) == want and s not in bound_syms
+            ]
+            if len(hits) == 1:
+                bound.append((decl.mangled, hits[0]))
+                _apply(decl, hits[0])
+                bound_syms.add(hits[0])
+            else:
+                ambiguous.extend(hits)
     if bound:
         # The mangled-name indexes were built from the pre-binding spellings.
         snap.invalidate_indexes()
