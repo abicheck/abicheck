@@ -710,7 +710,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     73: GenerationSpellingChange(
         "WS-4 PR 1 (feat/ws4-macho-vtable-facts): Mach-O object sizes (_ZTV/_ZTI/_ZTT "
         "spans, kept only when pointer fixups corroborate them) are stored as the "
-        "ADR-062 D19 extension fact abicheck.macho_object_sizes. No type or name "
+        "extension fact abicheck.macho_object_sizes. No type or name "
         "spelling changes and no load-time rewrite; a snapshot without the fact reads "
         "as not derived, and the layout gate declines the Mach-O side."
     ),

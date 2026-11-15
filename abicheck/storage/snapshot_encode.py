@@ -426,7 +426,7 @@ def _refuse_macho_object_sizes(snap: AbiSnapshot) -> None:
 
     if macho_sizes_would_be_lost(snap):
         raise SnapshotError(
-            "Snapshot holds Mach-O object sizes (ADR-062 D19 extension fact "
+            "Snapshot holds Mach-O object sizes (extension fact "
             "abicheck.macho_object_sizes), which a flat snapshot_to_dict "
             "document cannot carry; refusing to store them as not derived. "
             "Write the AbiSnapshot instead: save_snapshot or write_snapshot "
