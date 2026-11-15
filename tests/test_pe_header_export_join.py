@@ -178,3 +178,58 @@ def test_headerless_pe_tail_leaves_declarations_alone() -> None:
     snap.from_headers = False
     finish_binary_snapshot(snap)
     assert decl.mangled == "_ZN10Calculator3addEii"
+
+
+def _stored_gen71_pe(*decls: Function, exports: list[str]) -> AbiSnapshot:
+    """A header-backed PE baseline as a pre-generation-72 extractor wrote it:
+    castxml's Itanium spellings, never joined to the DLL's exports."""
+    return _pe_snapshot(exports, *decls)
+
+
+def _bound_gen72_pe(*decls: Function, exports: list[str]) -> AbiSnapshot:
+    """The same library dumped at generation 72: the join ran at extraction."""
+    snap = _pe_snapshot(exports, *decls)
+    bind_pe_header_exports(snap)
+    return snap
+
+
+def _kinds(result) -> list[tuple[str, str]]:
+    return sorted((str(c.kind.value), c.symbol) for c in result.changes)
+
+
+def test_stored_gen71_baseline_compares_clean_against_gen72_dump() -> None:
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    def members() -> list[Function]:
+        return [
+            _decl("add", "_ZN10Calculator3addEii", ("int", "int")),
+            _decl("multiply", "_ZN10Calculator8multiplyEii", ("int", "int")),
+        ]
+
+    exports = ["?add@Calculator@@QEAAHHH@Z", "?multiply@Calculator@@QEAAHHH@Z"]
+    old = _stored_gen71_pe(*members(), exports=exports)
+    new = _bound_gen72_pe(*members(), exports=exports)
+    result = compare_snapshots(old, new)
+    assert _kinds(result) == [], result.changes
+    # The caller's stored baseline is not mutated by the join.
+    assert old.declarations.functions[0].mangled == "_ZN10Calculator3addEii"
+
+
+def test_member_really_removed_in_v2_is_still_reported() -> None:
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    old = _stored_gen71_pe(
+        _decl("add", "_ZN10Calculator3addEii", ("int", "int")),
+        _decl("multiply", "_ZN10Calculator8multiplyEii", ("int", "int")),
+        exports=["?add@Calculator@@QEAAHHH@Z", "?multiply@Calculator@@QEAAHHH@Z"],
+    )
+    # v2 drops multiply from the header and from the DLL.
+    new = _bound_gen72_pe(
+        _decl("add", "_ZN10Calculator3addEii", ("int", "int")),
+        exports=["?add@Calculator@@QEAAHHH@Z"],
+    )
+    kinds = _kinds(compare_snapshots(old, new))
+    assert kinds == [
+        ("func_removed", "?multiply@Calculator@@QEAAHHH@Z"),
+        ("public_surface_shrank", "<surface>"),
+    ], kinds

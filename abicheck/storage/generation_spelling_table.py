@@ -698,13 +698,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "the abstract detector skips"
     ),
     72: GenerationSpellingChange(
-        "WS-4 PR 2 (fix/ws4-pe-msvc-export-match): a header-backed PE dump now "
-        "binds each declaration castxml spells with an Itanium name to the "
-        "DLL's MSVC export (extract/header_export_binding.bind_pe_header_exports, "
-        "run before export reconciliation), so the stored mangled name and its "
-        "export fact change for those declarations. No stored type spelling "
-        "changes and no rewrite applies: an older snapshot keeps its Itanium "
-        "name, and comparison reads the stored fact as written"
+        "WS-4 PR 2 (fix/ws4-pe-msvc-export-match): no stored type spelling "
+        "changes and no load-time rewrite applies. The PE header-to-export "
+        "join (extract/header_export_binding.bind_pe_header_exports) is a "
+        "fact, applied at extraction for a live dump and at compare time for "
+        "every header-backed PE operand (workflows/compare_policy), so a "
+        "stored pre-72 baseline and a fresh dump meet at the same join"
     ),
 }
 

@@ -773,7 +773,7 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-1 | ADR-093, `observable_at` on all kinds | A0, A1 | in review (ADR) | ADR-093 docs PR |
 | WS-2 | `{B,H}` correctness | A2, A3, A4, A5 | not started | — |
 | WS-3 | Pure virtual, key function, vtable home | A6 | not started | — |
-| WS-4 | Platform facts | A7 | in progress (PR 2, PE) | #2068 (PR 1, Mach-O); this PR (PR 2, PE) |
+| WS-4 | Platform facts | A7 | in progress (PR 2, PE) | #2068 (PR 1, Mach-O); this PR (PR 2, PE); follow-up `fix/ws4-pe-variable-linkage` (plain C++ global variables, linkage fact, own generation bump) |
 | WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | not started | — |
 | WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | not started | — |
 | WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | not started | — |
