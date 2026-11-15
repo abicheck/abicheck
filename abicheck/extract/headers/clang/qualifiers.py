@@ -326,11 +326,6 @@ def clang_param_is_restrict(node: dict[str, Any]) -> bool:
 _VA_LIST_TAG_PTR_RE = re.compile(
     r"^(?:(?:const|volatile)\s+)*(?:struct\s+)?__va_list_tag\s*\*$"
 )
-#: The standard ``va_list`` typedef name as a parameter's *sugared* spelling
-#: (optionally cv-qualified). A target whose ``__builtin_va_list`` is a plain
-#: pointer (i386: ``char *``) keeps this name on the decayed parameter, so the
-#: decayed pointer is recognised by name, not by the x86-64 struct spelling.
-_VA_LIST_NAME_RE = re.compile(r"^(?:(?:const|volatile)\s+)*va_list$")
 #: A desugared pointer type, with any trailing cv-qualifiers (``char *const``).
 _POINTER_TAIL_RE = re.compile(r"\*\s*(?:(?:const|volatile)\s*)*$")
 
@@ -339,7 +334,55 @@ _POINTER_TAIL_RE = re.compile(r"\*\s*(?:(?:const|volatile)\s*)*$")
 _clang_param_is_restrict = clang_param_is_restrict
 
 
-def clang_param_is_va_list(node: dict[str, Any]) -> bool:
+#: The typedef name a builtin ``va_list`` declaration chains to.
+_BUILTIN_VA_LIST_NAME = "__builtin_va_list"
+#: Bound on a typedef chain (``va_list`` -> ``__builtin_va_list``, a user
+#: alias of it, and so on); a longer chain is not followed.
+_TYPEDEF_CHAIN_LIMIT = 8
+
+
+def builtin_va_list_decl_ids(root: dict[str, Any]) -> frozenset[str]:
+    """Ids of the translation unit's typedef declarations whose underlying
+    chain reaches ``__builtin_va_list``.
+
+    Clang's JSON AST gives a typedef-named parameter a ``typeAliasDeclId``
+    pointing at the typedef it names, and each top-level ``TypedefDecl``
+    carries its own ``id`` plus an underlying ``type.typeAliasDeclId`` when it
+    aliases another typedef. A declaration is in the set only when following
+    that chain (bounded) reaches a typedef named ``__builtin_va_list``. A typedef
+    spelled with a plain type (``typedef char *va_list;``) reaches nothing and is
+    excluded.
+    """
+    decls: dict[str, tuple[str, str | None]] = {}
+    for node in ast_inner(root):
+        if not isinstance(node, dict) or node.get("kind") != "TypedefDecl":
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+        under = (node.get("type") or {}).get("typeAliasDeclId")
+        decls[node_id] = (
+            str(node.get("name", "")),
+            under if isinstance(under, str) else None,
+        )
+
+    def reaches_builtin(decl_id: str) -> bool:
+        current: str | None = decl_id
+        for _ in range(_TYPEDEF_CHAIN_LIMIT):
+            if current is None or current not in decls:
+                return False
+            name, under = decls[current]
+            if name == _BUILTIN_VA_LIST_NAME:
+                return True
+            current = under
+        return False
+
+    return frozenset(d for d in decls if reaches_builtin(d))
+
+
+def clang_param_is_va_list(
+    node: dict[str, Any], va_list_decl_ids: frozenset[str] = frozenset()
+) -> bool:
     """Whether *node* (a ``ParmVarDecl``) is a ``va_list`` parameter.
 
     Public (no leading underscore) since ``extract.headers.clang.functions``
@@ -364,10 +407,12 @@ def clang_param_is_va_list(node: dict[str, Any]) -> bool:
     **Scope, stated rather than silently assumed**: this matches the x86-64
     System V spelling (``(const )?(struct )?__va_list_tag *``) and, for a
     pointer-valued target such as i386 (``__builtin_va_list`` is ``char *``),
-    the parameter's own ``va_list`` / ``const va_list`` name that the parse
-    keeps while desugaring it to a pointer. Verified with clang 18 for
-    x86-64 and ``-m32``. The name test is not an ABI proof: a user typedef
-    named ``va_list`` that desugars to a pointer is recognised too. ``va_list``'s underlying representation is
+    a parameter whose typedef link (``typeAliasDeclId``) reaches
+    ``__builtin_va_list`` through the translation unit's own typedef chain
+    (:func:`builtin_va_list_decl_ids`) and that desugars to a pointer. The
+    link is structural, not a name: a user ``typedef char *va_list;`` is not
+    recognised. Verified with clang 18 for x86-64 and ``-m32``.
+    ``va_list``'s underlying representation is
     genuinely target-defined -- AArch64 AAPCS uses a different multi-field
     struct, and other targets differ again -- and guessing an unverified
     spelling risks a false positive worse than the pre-existing "never
@@ -404,12 +449,15 @@ def clang_param_is_va_list(node: dict[str, Any]) -> bool:
     if _VA_LIST_TAG_PTR_RE.match(desugared):
         return True
     # i386 and other pointer-valued ``__builtin_va_list`` targets: the parse
-    # keeps the ``va_list`` name on the parameter (``va_list`` / ``const
-    # va_list``) and desugars it to a pointer (``char *``). A plain ``char *``
-    # parameter has no such name, so it stays a non-va_list.
-    sugared = str((node.get("type") or {}).get("qualType", "")).strip()
-    return bool(_VA_LIST_NAME_RE.match(sugared)) and bool(
-        _POINTER_TAIL_RE.search(desugared)
+    # keeps the typedef name on the parameter and links it to its declaration
+    # (``typeAliasDeclId``). Accept only a declaration whose chain reaches
+    # ``__builtin_va_list`` (see :func:`builtin_va_list_decl_ids`), so a user
+    # ``typedef char *va_list;`` or a plain ``char *`` stays a non-va_list.
+    alias_id = (node.get("type") or {}).get("typeAliasDeclId")
+    return (
+        isinstance(alias_id, str)
+        and alias_id in va_list_decl_ids
+        and bool(_POINTER_TAIL_RE.search(desugared))
     )
 
 

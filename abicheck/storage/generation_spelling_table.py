@@ -727,8 +727,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     75: GenerationSpellingChange(
         "fix/nightly-va-list-target: no stored type spelling changes. A clang header "
         "parse on a pointer-valued va_list target (-m32: __builtin_va_list is char *) "
-        "keeps the va_list name on a decayed parameter and now recognises it as a "
-        "va_list parameter (extract/headers/clang/qualifiers), so Param.is_va_list is "
+        "keeps the typedef link on a decayed parameter and now recognises it as a "
+        "va_list parameter when the link reaches __builtin_va_list "
+        "(extract/headers/clang/qualifiers), so Param.is_va_list is "
         "set where it was not before. The recorded parameter fact changes; the spelling "
         "does not"
     ),
