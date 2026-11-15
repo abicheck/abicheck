@@ -1071,12 +1071,12 @@ def test_a_consumer_printing_any_bytes_is_compared_not_a_crash(
     outputs into one."""
     from abiforge.run.exec import _run
 
-    results = []
-    for i, payload in enumerate((first, second)):
-        exe = tmp_path / f"c{i}"
-        octal = "".join(f"\\{b:03o}" for b in payload)
-        exe.write_text(f"#!/bin/sh\nprintf '{octal}'\n", encoding="ascii")
-        exe.chmod(0o755)
-        results.append(_run(exe, tmp_path))
+    # The consumer is the running interpreter, so the test executes on every
+    # host: a POSIX shell script cannot be exec'd on Windows (WinError 193).
+    writer = "import sys; sys.stdout.buffer.write(bytes.fromhex(sys.argv[1]))"
+    results = [
+        _run(Path(sys.executable), tmp_path, ("-c", writer, payload.hex()))
+        for payload in (first, second)
+    ]
     assert results[0].rc == results[1].rc == 0
     assert results[0].key() != results[1].key()

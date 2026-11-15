@@ -1091,4 +1091,24 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "record": ("internal", "public"),
         },
     ),
+    BugClass(
+        id="observability.declared_value_misses_observed_emission",
+        invariant=(
+            "If the compare path emits kind K for a run with evidence "
+            "configuration C on platform P, then K's observable_at for P's "
+            "condition observes C. Emission proves observability, so a "
+            "declared value that does not cover an observed emission is "
+            "wrong, whichever way it errs: an ELF condition on a kind the "
+            "Mach-O and PE runs emit, or a {B,D}/{B,H} requirement on a kind a "
+            "binary-only run emits through the ordinary diff. The oracle is "
+            "the emission itself, never the declaration table."
+        ),
+        fixed_by=(2072,),
+        seed_tests=("tests/test_observable_at_matches_emission.py",),
+        public_surfaces=("abicheck.checker.compare",),
+        axes={
+            "platform": ("elf", "pe", "macho"),
+            "evidence": ("export-table-only {B}", "header-backed {B,H}"),
+        },
+    ),
 )

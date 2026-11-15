@@ -106,7 +106,10 @@ FAMILIES: dict[str, Family] = {
                 "(checkout location, symlinks, hash seed, input order, platform "
                 "decoration) and distinct entities stay distinct."
             ),
-            harness_tests=("tests/test_family_f3_identity.py",),
+            harness_tests=(
+                "tests/test_family_f3_identity.py",
+                "tests/test_pe_header_export_join.py",
+            ),
         ),
         Family(
             key="F4",
@@ -229,7 +232,7 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
-            key="F20",
+            key="F21",
             title="An edit reads as its own kind on every evidence lane",
             invariant=(
                 "One source edit is reported with the change kind the catalog "
@@ -387,6 +390,18 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F20",
+            title="A declaration covers every emission it is paired with",
+            invariant=(
+                "If the compare path emits a change kind for a run with evidence "
+                "configuration C on platform P, that kind's declared observability "
+                "for P observes C. Emission proves observability, so no declaration "
+                "may leave out a configuration in which the detector was seen to "
+                "fire, and none may claim a platform the detector never fired on."
+            ),
+            harness_tests=("tests/test_observable_at_matches_emission.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -501,6 +516,7 @@ _F3 = (
     "identity.environment_taint",
     "identity.name_and_referent_compared_as_one",
     "identity.pe_x86_c_decoration_alias",
+    "extraction.pe_header_declaration_unjoined_from_msvc_export",
     "identity.platform_decorated_mangled_name",
     "identity.release_edge_keyed_on_side_summary",
     "identity.second_node_key_scheme",
@@ -645,7 +661,7 @@ _F10 = (
     "lifecycle.counter_or_handle_used_past_its_release",
 )
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
-_F20 = (
+_F21 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
     "comparability.runtime_abi_selector_refused_instead_of_reported",
     "classification.demangled_signature_used_as_entity_name",
@@ -733,7 +749,7 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
-    ("F20", _F20),
+    ("F21", _F21),
     ("F12", _F12),
     ("F13", _F13),
     ("F14", _F14),
@@ -755,6 +771,10 @@ for _key, _ids in (
             # A stale report at a destination read as this run's result.
             "tooling.host_tool_output_trusted_by_its_shape",
         ),
+    ),
+    (
+        "F20",
+        ("observability.declared_value_misses_observed_emission",),
     ),
     ("OTHER", tuple(OTHER_REASONS)),
 ):

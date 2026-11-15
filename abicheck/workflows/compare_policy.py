@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from ..checker import compare
 from ..checker_types import DiffResult
 from ..errors import ValidationError
+from ..extract.header_export_binding import bind_pe_header_operand
 from ..model import AbiSnapshot
 from ..model.comparison_memo import comparison_memo_scope
 from ..policy.public_surface_query import ComparisonPublicSurfaces, PublicSurfaceQuery
@@ -363,6 +364,8 @@ def compare_snapshots(
             accepting a no-op or failing later inside the core (Codex review).
     """
     _validate_contract_mode(contract_mode, contract_evaluation)
+    old = bind_pe_header_operand(old)
+    new = bind_pe_header_operand(new)
     # Centralized POST committed-wrapper recovery: when a committed-surface
     # allowlist is supplied, union the callable `pp_*` wrappers exported by
     # the old snapshot (contract_scope_allowlist's snapshot half) -- keeps
