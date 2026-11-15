@@ -708,6 +708,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "bound operands (extract.header_export_binding.bind_pe_header_operand)"
     ),
     73: GenerationSpellingChange(
+        "fix/ws4-pe-variable-linkage: no stored type spelling changes. A header-backed "
+        "PE declaration of a namespace-scope global with a plain (C) spelling now binds "
+        "to the MSVC data export ?name@@3<type>A that decodes to its declared type "
+        "(extract/header_export_binding); the binding is a fact recorded at compare "
+        "time and at dump time, and the identity (mangled) is unchanged"
+    ),
+    74: GenerationSpellingChange(
         "WS-4 PR 1 (feat/ws4-macho-vtable-facts): Mach-O object sizes (_ZTV/_ZTI/_ZTT "
         "spans, kept only when pointer fixups corroborate them) are stored as the "
         "extension fact abicheck.macho_object_sizes. No type or name "

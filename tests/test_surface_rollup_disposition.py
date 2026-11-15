@@ -2,7 +2,7 @@
 
 ``public_surface_shrank`` is computed from declaration counts, so it has no
 symbol a suppression can name. Its membership (which removal kinds it
-summarises, ELF-only variants included) is owned by ``kind_variants``; the
+summarises, ELF-only variants included) is owned by ``policy.kind_relations``; the
 disposition step in ``policy.finding_disposition.rollup`` applies it. The e2e
 file proves the same thing through the CLI with real libraries.
 """
@@ -15,10 +15,6 @@ import pytest
 
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Visibility
 from abicheck.model.change import Change
-from abicheck.model.change_catalog.kind_variants import (
-    ROLLUP_MEMBER_KINDS,
-    rollup_member_kinds,
-)
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.policy.acknowledgment import AcknowledgmentList
 from abicheck.policy.disposition_acknowledgment import resolve_acknowledgments
@@ -27,6 +23,10 @@ from abicheck.policy.finding_disposition.rollup import (
     SURFACE_ROLLUP_APPLICATION_POINT,
     dispose_surface_metric_rollups,
     dispose_surface_rollups,
+)
+from abicheck.policy.kind_relations import (
+    ROLLUP_MEMBER_KINDS,
+    rollup_member_kinds,
 )
 from abicheck.policy.rule_provenance import RuleProvenance
 

@@ -47,11 +47,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..model.change_catalog.kind_variants import expand_variant_overrides
 from .classification import (
     excluded_from_verdict_as_persistent_hygiene,
     policy_kind_sets,
 )
+from .kind_relations import expand_variant_overrides
 from .reclassify import reclassify_rules_for_kind
 
 if TYPE_CHECKING:

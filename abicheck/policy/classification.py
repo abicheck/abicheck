@@ -58,7 +58,6 @@ from ..model.change_catalog.assembled import (
     REGISTRY as _REGISTRY,
     RISK_KINDS,
 )
-from ..model.change_catalog.kind_variants import expand_variant_overrides
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
 from ..model.change_catalog.registry import (
     VALID_BASE_POLICIES as VALID_BASE_POLICIES,
@@ -71,6 +70,7 @@ from ..model.evidence_status import (
 )
 from ..model.execution_cache import memoized
 from .binary_gate_marker import is_binary_gate_demoted
+from .kind_relations import expand_variant_overrides
 
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from model/change_catalog/assembled.py (single source of truth)

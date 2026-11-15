@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from abiforge.model.config import Config
+from abiforge.model.config import Config, StdRange
 from abiforge.model.expect import Rule
 from abiforge.model.opkit import _REMOVED, Edit, EditOp, _set
 
@@ -148,12 +148,6 @@ def _x86_64_gnu(c: Config) -> str | None:
     return None
 
 
-def _cxx_before_17(c: Config) -> str | None:
-    if c.std.lang == "c++" and c.std.year < 2017:
-        return None
-    return "dynamic exception specifications were removed in C++17"
-
-
 _CONVENTIONS = (
     _op(
         "func_became_ms_abi",
@@ -210,7 +204,15 @@ _CONVENTIONS = (
         "throw(int) -> throw(int, long): the mangled name and call are "
         "unchanged, but the promised exception set grew",
         expected=frozenset({"FUNC_EXCEPTION_SPEC_CHANGED"}),
-        precondition=_cxx_before_17,
+        standards=(
+            StdRange(
+                "c++",
+                "c++11",
+                "ISO/IEC 14882:1998 [except.spec] (dynamic exception specifications)",
+                last="c++14",
+                end_cite="P0003R5 (removed from C++17)",
+            ),
+        ),
         **_RISK,
         **_HEADERS,
     ),

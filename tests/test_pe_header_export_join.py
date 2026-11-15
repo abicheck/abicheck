@@ -375,3 +375,169 @@ def test_really_removed_member_is_still_reported() -> None:
     kinds = _kinds(result)
     assert result.verdict.value == "BREAKING", kinds
     assert ("func_removed", "_ZN10Calculator3addEii") in kinds, kinds
+
+
+def test_no_baseline_operand_passes_through_unchanged() -> None:
+    # A no-baseline comparison has no old operand: binding it is a no-op.
+    assert bind_pe_header_operand(None) is None
+
+
+def _var(
+    name: str, mangled: str, typ: str, *, exported: ExportMatch = ExportMatch.ABSENT
+):
+    from abicheck.model import Variable
+
+    var = Variable(
+        name=name,
+        mangled=mangled,
+        type=typ,
+        visibility=Visibility.PUBLIC
+        if exported is ExportMatch.DYNAMIC
+        else Visibility.HIDDEN,
+        **header_ast_surface_facts(exported=exported, producer="castxml"),
+    )
+    var.origin = ScopeOrigin.PUBLIC_HEADER
+    return var
+
+
+def _variable_noise(decls, exports: list[str]) -> list[str]:
+    """Public-surface noise a header-backed PE variable snapshot reports."""
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    snap.platform = "pe"
+    snap.pe = PeMetadata(
+        machine=_AMD64, exports=[PeExport(name=sym) for sym in exports]
+    )
+    snap.declarations.variables = list(decls)
+    bound = bind_pe_header_operand(snap)
+    result = compare_snapshots(bound, bound)
+    return [
+        k
+        for k, _ in _kinds(result)
+        if k in ("public_not_exported", "exported_not_public")
+    ]
+
+
+def test_cpp_namespace_global_int_binds_to_its_data_export() -> None:
+    assert _variable_noise([_var("g", "g", "int")], ["?g@@3HA"]) == []
+
+
+def test_namespaced_global_int_binds_to_its_data_export() -> None:
+    assert _variable_noise([_var("g", "_ZN2ns1gE", "int")], ["?g@ns@@3HA"]) == []
+
+
+def test_c_global_with_its_plain_export_is_unchanged() -> None:
+    # A C global exports under its plain name: the header backend's exact lookup
+    # already matched it, and the binder has nothing to do.
+    decl = _var("g", "g", "int", exported=ExportMatch.DYNAMIC)
+    assert _variable_noise([decl], ["g"]) == []
+
+
+def test_c_global_with_missing_export_is_still_reported() -> None:
+    # A real missing export: no plain export and no C++ data symbol to pair with.
+    assert "public_not_exported" in _variable_noise([_var("g", "g", "int")], [])
+
+
+def test_cpp_global_with_a_disagreeing_type_is_refused() -> None:
+    # ?g@@3NA decodes to double; the declaration is int. Not the same variable.
+    noise = _variable_noise([_var("g", "g", "int")], ["?g@@3NA"])
+    assert "public_not_exported" in noise
+
+
+def test_static_data_member_binds_to_its_data_export() -> None:
+    assert _variable_noise([_var("s", "_ZN1C1sE", "int")], ["?s@C@@2HA"]) == []
+
+
+@pytest.mark.parametrize(
+    ("symbol", "builtin"),
+    [
+        ("?g@@3HA", "int"),
+        ("?g@@3NA", "double"),
+        ("?s@C@@2HA", "int"),
+        # Non-const, namespace or static-member data only; void and other storage
+        # classes, a function symbol, a non-MSVC name and a const object are refused.
+        ("?g@@3HB", None),
+        ("?g@@1HA", None),
+        ("?g@@3XA", None),
+        ("?g@@3PEAHA", None),
+        ("?f@@YAHH@Z", None),
+        ("g", None),
+    ],
+)
+def test_msvc_data_type_decodes_only_non_const_builtin_data(
+    symbol: str, builtin: str | None
+) -> None:
+    from abicheck.extract.header_export_binding import msvc_data_type
+
+    assert msvc_data_type(symbol) == builtin
+
+
+def test_ambiguous_plain_global_is_not_bound() -> None:
+    # Two data exports decode to the declared int: neither is provably the
+    # declaration's, so neither binds and the declaration stays unexported.
+    noise = _variable_noise([_var("g", "g", "int")], ["?g@@3HA", "?g@@2HA"])
+    assert "public_not_exported" in noise
+
+
+def test_c_function_does_not_bind_to_a_cpp_data_export() -> None:
+    # Only variables take the plain-name data path; a C function with the same
+    # spelling must not take the C++ global's data symbol.
+    fn = Function(
+        name="g",
+        mangled="g",
+        return_type="int",
+        visibility=Visibility.HIDDEN,
+        **header_ast_surface_facts(exported=ExportMatch.ABSENT, producer="castxml"),
+    )
+    fn.origin = ScopeOrigin.PUBLIC_HEADER
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    snap.platform = "pe"
+    snap.pe = PeMetadata(machine=_AMD64, exports=[PeExport(name="?g@@3HA")])
+    snap.declarations.functions = [fn]
+    bound = bind_pe_header_operand(snap)
+    decl = bound.declarations.functions[0]
+    assert bound_export_spelling(decl) is None
+    assert binary_export_match(decl) is ExportMatch.ABSENT
+
+
+def test_static_global_is_not_bound_to_a_cpp_data_export() -> None:
+    # A file-scope static has internal linkage: a DLL data export can't be it.
+    decl = _var("g", "g", "int")
+    decl.is_static = True
+    assert "public_not_exported" in _variable_noise([decl], ["?g@@3HA"])
+
+
+def test_x86_plain_global_is_bound_once_and_its_second_export_stays_unbound() -> None:
+    # On x86 the plain export is ``_g``: the first pass binds the declaration to it.
+    # The variable pass must not bind the same declaration again to ``?g@@3HA``.
+    from abicheck.extract.header_export_binding import (
+        bind_header_declarations_to_exports,
+    )
+
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    decl = _var("g", "g", "int")
+    snap.declarations.variables = [decl]
+    outcome = bind_header_declarations_to_exports(snap, ["_g", "?g@@3HA"], x86_32=True)
+    assert [sym for _, sym in outcome.bound] == ["_g"]
+    assert "?g@@3HA" in outcome.unbound_exports
+
+
+@pytest.mark.parametrize("qualified", ["const int", "volatile int"])
+def test_qualified_global_is_not_bound_to_a_non_const_data_export(
+    qualified: str,
+) -> None:
+    # A const or volatile object carries its own MSVC cv code, so the non-const
+    # ?g@@3HA export is a different object: no binding, and the export stays unbound.
+    from abicheck.extract.header_export_binding import (
+        bind_header_declarations_to_exports,
+    )
+
+    decl = _var("g", "g", qualified)
+    decl.is_const = qualified.startswith("const")
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    snap.declarations.variables = [decl]
+    outcome = bind_header_declarations_to_exports(snap, ["?g@@3HA"])
+    assert outcome.bound == ()
+    assert decl.mangled == "g"
+    assert "?g@@3HA" in outcome.unbound_exports

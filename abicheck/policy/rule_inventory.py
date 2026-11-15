@@ -62,9 +62,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
 
-from ..model.change_catalog.kind_variants import kind_match_set
 from ..model.change_catalog.kinds import ChangeKind
 from .detector_kind_map import DETECTOR_KINDS
+from .kind_relations import kind_match_set
 from .rule_identity import readable_identity_of, rule_id_of
 
 KIND_SUPPRESSION = "suppression"
@@ -183,7 +183,7 @@ def _kind_selector(value: object) -> frozenset[str] | None:
 
     ``None`` (no kind selector) stays ``None``: every kind. A base kind also
     stands for its ``*_elf_only`` variant, the kinds the selector matches
-    (:func:`~abicheck.model.change_catalog.kind_variants.kind_match_set`). An
+    (:func:`~abicheck.policy.kind_relations.kind_match_set`). An
     unrecognised spelling is kept verbatim, so no detector produces it and the
     rule reads ``not_evaluated`` rather than being guessed at.
     """

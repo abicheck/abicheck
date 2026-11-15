@@ -17,13 +17,13 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.model.change import Change
-from abicheck.model.change_catalog.kind_variants import (
-    ELF_ONLY_VARIANT_OF,
+from abicheck.policy.disposition_ledger import DispositionLedger
+from abicheck.policy.finding_disposition.suppression import dispose_by_suppression
+from abicheck.policy.kind_relations import (
+    VARIANTS_BY_BASE,
     kind_match_set,
     matched_via_variant,
 )
-from abicheck.policy.disposition_ledger import DispositionLedger
-from abicheck.policy.finding_disposition.suppression import dispose_by_suppression
 from abicheck.policy.reclassify import ReclassifyRule, first_matching_reclassify_verdict
 from abicheck.policy.rule_inventory import suppression_rules
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
@@ -71,7 +71,9 @@ def _suppresses(change_kind: str, change: Change) -> bool:
 
 def test_catalog_defines_exactly_the_expected_pairs() -> None:
     assert _oracle_pairs() == _EXPECTED_PAIRS
-    assert ELF_ONLY_VARIANT_OF == {base: variant for base, variant in _EXPECTED_PAIRS}
+    assert VARIANTS_BY_BASE == {
+        base: frozenset({variant}) for base, variant in _EXPECTED_PAIRS
+    }
 
 
 @pytest.mark.parametrize(("base", "variant"), _PAIRS)
