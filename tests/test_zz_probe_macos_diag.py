@@ -16,6 +16,7 @@ import pytest
 from abicheck.extract import builtin_abi as b
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS diagnostic")
 def test_probe_diagnostic_macos() -> None:
     lines: list[str] = []
