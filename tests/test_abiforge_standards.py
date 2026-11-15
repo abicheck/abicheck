@@ -122,17 +122,29 @@ def test_a_malformed_range_is_rejected(make) -> None:
         make()
 
 
-def test_an_edit_needing_consumer_side_introduction_only_gates_on_introduction() -> (
-    None
-):
-    # A consumer compiles the edit's header; one newer than a removal still
-    # compiles it (the header guards the removed spelling), so only a consumer
-    # older than the introduction cannot.
-    dyn = OP_BY_NAME["func_exception_spec_widened"]
-    assert dyn.consumer_gap(STANDARD_BY_NAME["c++17"]) is None
-    inline = OP_BY_NAME["object_became_inline_variable"]
-    assert inline.consumer_gap(STANDARD_BY_NAME["c++11"]) is not None
-    assert inline.consumer_gap(STANDARD_BY_NAME["c++17"]) is None
+@pytest.mark.parametrize(
+    ("op", "consumer_std", "gap"),
+    [
+        # The consumer compiles the old header, which an inline variable does not
+        # change: a C++14 consumer records its source break, it is not infeasible.
+        ("object_became_inline_variable", "c++14", False),
+        ("object_became_inline_variable", "c++11", False),
+        # The dynamic exception edit's header is guarded, so no consumer is gated.
+        ("func_exception_spec_widened", "c++17", False),
+    ],
+)
+def test_a_standard_range_does_not_gate_a_consumer(
+    op: str, consumer_std: str, gap: bool
+) -> None:
+    got = OP_BY_NAME[op].consumer_gap(STANDARD_BY_NAME[consumer_std]) is not None
+    assert got is gap
+
+
+def test_a_feature_still_gates_a_consumer_that_lacks_it() -> None:
+    atomic = next(op for op in OPERATORS if op.features == ("atomic",))
+    why = atomic.consumer_gap(STANDARD_BY_NAME["c99"])
+    assert why is not None and "atomic" in why
+    assert atomic.consumer_gap(STANDARD_BY_NAME["c11"]) is None
 
 
 # --- the feature table and its citations --------------------------------------
@@ -143,9 +155,10 @@ def test_a_feature_range_agrees_with_the_feature_table(feature: str) -> None:
     ranges = feature_standards(feature)
     assert all(r.last is None for r in ranges), "no feature is removed in this table"
     for std in STANDARDS:
-        assert in_standards(ranges, std, introduced_only=True) == has_feature(
-            std, feature
-        ), (feature, std.name)
+        assert in_standards(ranges, std) == has_feature(std, feature), (
+            feature,
+            std.name,
+        )
 
 
 # --- generation --------------------------------------------------------------

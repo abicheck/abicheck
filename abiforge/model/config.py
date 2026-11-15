@@ -126,12 +126,10 @@ class StdRange:
             if not self.end_cite:
                 raise ValueError(f"removal at {self.last} needs a citation")
 
-    def contains(self, std: Standard, *, introduced_only: bool = False) -> bool:
+    def contains(self, std: Standard) -> bool:
         if std.lang != self.lang or std.year < STANDARD_BY_NAME[self.first].year:
             return False
-        if introduced_only or self.last is None:
-            return True
-        return std.year <= STANDARD_BY_NAME[self.last].year
+        return self.last is None or std.year <= STANDARD_BY_NAME[self.last].year
 
     def describe(self) -> str:
         text = f"{self.lang} {self.first}-on (cited: {self.cite})"
@@ -140,24 +138,15 @@ class StdRange:
         return text
 
 
-def in_standards(
-    ranges: tuple[StdRange, ...], std: Standard, *, introduced_only: bool = False
-) -> bool:
+def in_standards(ranges: tuple[StdRange, ...], std: Standard) -> bool:
     """Whether *std* is in *ranges*, a list of standard ranges.
 
     An empty tuple means no standard restricts it (every standard of the
     languages the construct is in). Otherwise *std* must lie in a range of its
     own language: a language that no range names is never in, which keeps a
     C++-only edit from being generated under a C standard.
-
-    ``introduced_only`` ignores each range's ``last``: a consumer compiles the
-    edit's header under its own standard, and a standard that removed a
-    feature still compiles a header that guards its use (the edits do), so only
-    a standard before ``first`` makes a consumer unable to compile the edit.
     """
-    return not ranges or any(
-        r.contains(std, introduced_only=introduced_only) for r in ranges
-    )
+    return not ranges or any(r.contains(std) for r in ranges)
 
 
 def describe_standards(ranges: tuple[StdRange, ...]) -> str:

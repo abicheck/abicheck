@@ -19,6 +19,7 @@ from abiforge.model.config import (
     Standard,
     StdRange,
     describe_standards,
+    has_feature,
     in_standards,
 )
 from abiforge.model.expect import Expectation, Rule, evidence_floor
@@ -106,15 +107,15 @@ class EditOp:
     def consumer_gap(self, std: Standard) -> str | None:
         """Why a consumer built with *std* cannot compile the edit's header, or None.
 
-        Only the introduction side of each range applies (see
-        ``config.in_standards``): removal is not a compile failure.
+        Only the edit's language features gate a consumer. The consumer compiles
+        the *old* header (``exec``), which a standard range does not change: an
+        edit that a later standard defines (an inline variable under C++14, say)
+        leaves the old declaration valid in C++14, so that consumer's source
+        break must still be recorded rather than read as infeasible.
         """
-        for group in self.standard_groups():
-            if not in_standards(group, std, introduced_only=True):
-                return (
-                    f"the edited header is defined in {describe_standards(group)}, "
-                    f"which the consumer's {std.name} predates"
-                )
+        for feat in self.features:
+            if not has_feature(std, feat):
+                return f"the edited header needs {feat}, which the consumer's {std.name} lacks"
         return None
 
     def standard_ok(self, std: Standard) -> bool:
