@@ -43,6 +43,7 @@ GRID = {
     "toolchains": (GCC14, CLANG19),
     "flags": FLAGS,
     "evidence": EVIDENCE,
+    "platforms": (("linux", "elf"),),
 }
 
 
@@ -173,3 +174,36 @@ def test_widening_the_real_std_string_entry_is_caught(gate):
     assert problems[0].startswith("widening, needs review")
     assert "std_string_abi_flipped" in problems[0]
     assert "clang" in problems[0]
+
+
+@pytest.mark.parametrize("host", ["linux", "darwin", "win32"])
+def test_record_is_identical_on_every_host(gate, monkeypatch, host):
+    """The record must not depend on the runner. A ``when`` reads ``objfmt``, which
+    follows the host, so the probe grid pins every platform explicitly; faking
+    ``sys.platform`` as each host must give the committed record unchanged."""
+    import sys
+
+    from abiforge.known import KNOWN
+    from abiforge.known_coverage import known_record
+
+    reference = known_record(KNOWN, gate.known_entry_key)
+    monkeypatch.setattr(sys, "platform", host)
+    assert known_record(KNOWN, gate.known_entry_key) == reference
+    assert reference == load_baseline(BASELINE_PATH)
+
+
+def test_every_probe_config_pins_its_platform(gate, monkeypatch):
+    """Spy on the grid's ``Config`` construction: each probe configuration names its
+    platform, so none inherits the runner's (a host-free record needs no default)."""
+    from abiforge import known_coverage
+    from abiforge.model.config import Config
+
+    seen: list[bool] = []
+
+    def spy(**kwargs):
+        seen.append("platform" in kwargs)
+        return Config(**kwargs)
+
+    monkeypatch.setattr(known_coverage, "Config", spy)
+    known_coverage.covered_masks(lambda c: True)
+    assert seen and all(seen)
