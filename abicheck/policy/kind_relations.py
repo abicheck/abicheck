@@ -37,9 +37,9 @@ kind-keyed ``overrides:`` map routes through :func:`expand_variant_overrides`
 for the same reason.
 
 ``same_event_as``, ``subsumed_by`` and ``implies`` are declared on the
-metadata but are *not* resolved here yet: the declared-only accessors at the
-end of this module expose them, and the disposition pass that consumes them
-lands in a later WS-5 PR (ADR-093 D5, "every disposition visible").
+metadata, and the catalog validates them (:func:`validate_catalog`), but they
+are *not* resolved here yet. The resolution pass that consumes them, with its
+accessors, lands in a later WS-5 PR (ADR-093 D5, "every disposition visible").
 
 This module also owns the aggregate roll-up relation (:data:`ROLLUP_MEMBER_KINDS`):
 ``public_surface_shrank`` is computed from declaration *counts*, not emitted
@@ -54,7 +54,7 @@ from typing import TypeVar
 
 from ..model.change_catalog.assembled import REGISTRY
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.change_catalog.observability import KindRelations, Subsumption
+from ..model.change_catalog.observability import KindRelations
 
 _V = TypeVar("_V")
 
@@ -166,28 +166,3 @@ def expand_variant_overrides(
             if variant not in overrides:
                 expanded[variant] = verdict
     return expanded
-
-
-# --- Declared-only accessors (ADR-093 D4) -----------------------------------
-#
-# These expose the metadata of the three relations that the runtime pass does
-# not resolve yet. They read the declaration and nothing else; no caller may
-# treat them as a disposition. The consuming pass lands with its own tests.
-
-
-def declared_same_event_as(kind: str) -> str | None:
-    """The canonical kind *kind* declares as the same event, or ``None``."""
-    meta = REGISTRY.get(kind)
-    return None if meta is None else meta.relations.same_event_as
-
-
-def declared_subsumed_by(kind: str) -> tuple[Subsumption, ...]:
-    """The ``(kind, key)`` subsumptions *kind* declares, empty when none."""
-    meta = REGISTRY.get(kind)
-    return () if meta is None else meta.relations.subsumed_by
-
-
-def declared_implies(kind: str) -> tuple[str, ...]:
-    """The derived kinds *kind* declares it implies, empty when none."""
-    meta = REGISTRY.get(kind)
-    return () if meta is None else meta.relations.implies

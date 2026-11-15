@@ -10,25 +10,12 @@ are kinds.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.model.change_catalog.assembled import REGISTRY
-from abicheck.model.change_catalog.observability import (
-    KindRelations,
-    Subsumption,
-    SubsumptionKey,
-)
-from abicheck.policy import kind_relations
-from abicheck.policy.kind_relations import (
-    declared_implies,
-    declared_same_event_as,
-    declared_subsumed_by,
-    kind_match_set,
-    variant_index,
-)
+from abicheck.model.change_catalog.observability import KindRelations
+from abicheck.policy.kind_relations import kind_match_set, variant_index
 
 _SUFFIX = "_elf_only"
 _ALL_VALUES = frozenset(kind.value for kind in ChangeKind)
@@ -82,32 +69,3 @@ def test_variant_index_is_one_directional_and_groups_variants() -> None:
     )
     assert index == {"a": frozenset({"a_v1", "a_v2"})}
     assert "a_v1" not in index  # a variant never appears as a base
-
-
-def test_declared_only_accessors_read_the_declaration(monkeypatch) -> None:
-    fake = {
-        "x": KindRelations(
-            same_event_as="y",
-            subsumed_by=(Subsumption("y", SubsumptionKey.ENTITY),),
-            implies=("z",),
-        ),
-    }
-    stub = SimpleNamespace(
-        get=lambda kind: SimpleNamespace(relations=fake[kind]) if kind in fake else None
-    )
-    monkeypatch.setattr(kind_relations, "REGISTRY", stub)
-    assert declared_same_event_as("x") == "y"
-    assert declared_subsumed_by("x") == (Subsumption("y", SubsumptionKey.ENTITY),)
-    assert declared_implies("x") == ("z",)
-    assert declared_same_event_as("absent") is None
-    assert declared_subsumed_by("absent") == ()
-    assert declared_implies("absent") == ()
-
-
-def test_catalog_declares_no_same_event_subsumption_or_implication_yet() -> None:
-    # Only variant_of is declared in PR 1; the other relations stay empty
-    # until their resolution lands, so the accessors cannot change behaviour.
-    for kind in _ALL_VALUES:
-        assert declared_same_event_as(kind) is None
-        assert declared_subsumed_by(kind) == ()
-        assert declared_implies(kind) == ()
