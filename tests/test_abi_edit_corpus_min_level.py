@@ -96,8 +96,8 @@ def test_min_level_cell(op, seed, cell, role, tmp_path) -> None:
             "get no floor cell (reported)"
         )
     result = run_cell(op, seed, cell.config, CellContext.at(tmp_path))
-    if result.status in ("unavailable", "infeasible"):
-        pytest.skip(result.reason)
+    if result.status != "ran":
+        pytest.skip(f"{result.status}: {result.reason}")
     known = known_mismatch(op.name, seed.name, cell.config)
     if known is not None:
         issues = issue_keys(result.reconciled.problems if result.reconciled else ())

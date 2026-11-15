@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from abiforge.checkers.abicheck import observable_at
 from abiforge.model.config import Config
+from abiforge.model.expect import ADVISORY_KINDS
 from abiforge.model.opkit import EditOp
 
 #: Evidence atom sets the corpus can build, with the configuration that builds them.
@@ -35,7 +36,10 @@ SUPPORTED: dict[frozenset[str], dict[str, object]] = {
 
 
 def expected_kinds(op: EditOp) -> frozenset[str]:
-    """Every kind the operator can expect: its own, its ``any_of`` groups, its rules'."""
+    """The edit's own expected kinds: its own, its ``any_of`` groups, its rules'.
+
+    Advisory kinds (``ADVISORY_KINDS``) follow the verdict and are left out.
+    """
     kinds = set(op.expected)
     for group in op.any_of:
         kinds |= set(group)
@@ -43,7 +47,7 @@ def expected_kinds(op: EditOp) -> frozenset[str]:
         kinds |= set(rule.changes.get("expected", frozenset()))
         for group in rule.changes.get("any_of", ()):
             kinds |= set(group)
-    return frozenset(kinds)
+    return frozenset(kinds) - ADVISORY_KINDS
 
 
 def unclassified_kinds(op: EditOp) -> frozenset[str]:
@@ -79,7 +83,9 @@ def supported_config(base: Config, atoms: frozenset[str]) -> Config:
     return base.with_(**SUPPORTED[atoms])  # type: ignore[arg-type]
 
 
-def min_level_cells(op: EditOp, base: Config) -> tuple[tuple[Cell, ...], tuple[frozenset[str], ...]]:
+def min_level_cells(
+    op: EditOp, base: Config
+) -> tuple[tuple[Cell, ...], tuple[frozenset[str], ...]]:
     """The cells of *op* at *base*, and the minimal sets with no supported configuration.
 
     At-minimum cells: one per minimal set the corpus builds. Below-minimum

@@ -149,28 +149,27 @@ def kind_observable(kind: str, config: Config) -> bool:
     return False
 
 
+#: A kind that follows from the edit's verdict rather than from its own
+#: evidence (``with_derived``): it never decides whether the edit is observable.
+ADVISORY_KINDS: frozenset[str] = frozenset({"SONAME_BUMP_RECOMMENDED"})
+
+
 def observability_floor(
     exp: Expectation, config: Config, observed: frozenset[str] | None = None
 ) -> Expectation:
     """The expectation the evidence can show, kind by kind.
 
-    A kind the configuration does not observe is not required: it drops out of
-    ``expected`` (and out of any ``any_of`` group, which drops when empty),
-    and the note says so. When no required kind is observed the edit is
-    unobservable: nothing is required, the benign ceiling still holds.
+    The edit's own kinds decide whether it is observable: a kind the
+    configuration does not observe is not required, and when no edit kind is
+    observed the edit is unobservable (nothing is required, the benign ceiling
+    still holds). An advisory kind (``ADVISORY_KINDS``) follows the edit and is
+    never the reason an edit is observable. The note says what was dropped.
     """
-    if observed is None:
-        observed = frozenset(
-            k
-            for k in exp.expected | frozenset().union(*exp.any_of)
-            if kind_observable(k, config)
-        )
-    hidden = (exp.expected | frozenset().union(*exp.any_of)) - observed
-    if not hidden:
-        return exp
-    expected = exp.expected & observed
-    any_of = tuple(kept for group in exp.any_of if (kept := group & observed))
-    if not expected and not any_of:
+    del observed  # reserved: callers pass nothing; kinds are decided here
+    edit = (exp.expected | frozenset().union(*exp.any_of)) - ADVISORY_KINDS
+    seen = frozenset(k for k in edit if kind_observable(k, config))
+    hidden = edit - seen
+    if edit and not seen:
         return replace(
             exp,
             expected=frozenset(),
@@ -179,9 +178,13 @@ def observability_floor(
             observable=False,
             note=(
                 f"{config.evidence_label} evidence cannot show this edit "
-                f"(no required kind is observable: {sorted(hidden)})"
+                f"(no edit kind is observable: {sorted(hidden)})"
             ),
         )
+    if not hidden:
+        return exp
+    expected = (exp.expected & seen) | (exp.expected & ADVISORY_KINDS)
+    any_of = tuple(kept for group in exp.any_of if (kept := group & seen))
     return replace(
         exp,
         expected=expected,
