@@ -18,7 +18,7 @@ Two distinct engine-level layers, closed by two distinct classes below
 (Codex review, PR #905 -- an earlier draft of this file conflated them):
 
 - `_dedup_cross_kind` only ever calls `cross_tier_transition` for a change
-  whose kind is one of `_DWARF_TO_AST_EQUIV`'s keys/values (the five
+  whose kind is one of `_SUBSUMED_AST_KINDS`'s keys/values (the five
   struct/type size-alignment-field kinds it bridges AST vs. DWARF findings
   for) -- every other kind, `PYTHON_STABLE_ABI_VIOLATION` included, never
   reaches this function's own `cross_tier_transition` calls at all,
@@ -123,7 +123,7 @@ class TestListValuedFindingSurvivesTheRealDedupCrossKind:
     passes and `cross_tier_transition` directly, not this specific
     function's own transition-set logic), these use
     ``TYPE_SIZE_CHANGED``/``STRUCT_SIZE_CHANGED`` -- a real key/value pair
-    from ``_DWARF_TO_AST_EQUIV`` -- so `cross_tier_transition` is reached
+    from ``_SUBSUMED_AST_KINDS`` -- so `cross_tier_transition` is reached
     via `_dedup_cross_kind`'s own index-build (line ~1395) and match/drop
     decision (line ~1424), the exact call sites Codex review (PR #905)
     named as unreached by the compare()-level test below.
@@ -240,7 +240,7 @@ class TestRealCollisionReachesCompareOutput:
 
     Deliberately does NOT claim to reach `_dedup_cross_kind`'s own
     `cross_tier_transition` calls -- `PYTHON_STABLE_ABI_VIOLATION` is not
-    one of `_DWARF_TO_AST_EQUIV`'s keys/values, so it never does (see
+    one of `_SUBSUMED_AST_KINDS`'s keys/values, so it never does (see
     `TestListValuedFindingSurvivesTheRealDedupCrossKind` above for that).
     What this proves instead: the *rest* of `compare()`'s post-processing
     pipeline -- `_dedup_exact`, `_deduplicate_cross_detector`, and anything

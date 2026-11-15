@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ..model.change_catalog.registry import Verdict
 from .rule_inventory import RuleRef
 from .rule_provenance import RuleProvenance
 
@@ -183,3 +184,17 @@ class DispositionRecord:
         if self.reason_code is not None:
             entry["reason_code"] = self.reason_code
         return entry
+
+
+def verdict_class_of(change: object) -> str | None:
+    """*change*'s already-decided verdict class, as a wire string.
+
+    Prefers the per-finding compatibility decision the contract pipeline
+    stamped (ADR-049 D1), then the pattern/frozen-namespace override, and
+    finally nothing — this reads decisions, it never makes one.
+    """
+    for attribute in ("compatibility_decision", "effective_verdict"):
+        value = getattr(change, attribute, None)
+        if isinstance(value, Verdict):
+            return value.value
+    return None

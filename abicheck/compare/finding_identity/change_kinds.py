@@ -258,13 +258,13 @@ def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
 #: reverse). Keep in sync with the two mappings this generalizes:
 #: ``finding_dedup.DEDUP_CATEGORY_BY_KIND``
 #: (rich-vs-L0 function/variable add/remove, symbol-version-node pairs --
-#: wired) and module-level ``_DWARF_TO_AST_EQUIV``'s two *whole-type* pairs
+#: wired) and module-level ``_SUBSUMED_AST_KINDS``'s two *whole-type* pairs
 #: (``STRUCT_SIZE_CHANGED``/``TYPE_SIZE_CHANGED``,
 #: ``STRUCT_ALIGNMENT_CHANGED``/``TYPE_ALIGNMENT_CHANGED``) -- safe to
 #: collapse because ``symbol`` names the whole type on both sides, with no
 #: field-level substructure to lose.
 #:
-#: Deliberately excludes ``_DWARF_TO_AST_EQUIV``'s three *field-level*
+#: Deliberately excludes ``_SUBSUMED_AST_KINDS``'s three *field-level*
 #: pairs (``STRUCT_FIELD_OFFSET_CHANGED``/``STRUCT_FIELD_REMOVED``/
 #: ``STRUCT_FIELD_TYPE_CHANGED`` vs. their ``TYPE_FIELD_*`` counterparts):
 #: the DWARF side field-qualifies ``symbol`` (``"Point::x"``,
