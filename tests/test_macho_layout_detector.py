@@ -37,7 +37,6 @@ from tests._macho_synthetic import (
     N_EXT,
     N_SECT,
     MachoSymbol,
-    rebase_stream,
     write_dylib,
 )
 
@@ -62,16 +61,13 @@ def _elf_snap(*symbols: ElfSymbol) -> AbiSnapshot:
 
 
 def _vtable_fixups(vtable_size: int, encoding: str) -> dict:
-    """Fixup encoding for a ``_ZTV4Base`` at 0x1000 of *vtable_size* bytes.
+    """Fixup slots for a ``_ZTV4Base`` at 0x1000 of *vtable_size* bytes.
 
-    Every pointer word but offset-to-top (the first) is relocated, so the
-    classic stream names ``size // 8 - 1`` slots. ``chained`` declares chained
-    fixups, which the reader does not decode, so the vtable gets no size.
+    Every pointer word but offset-to-top (the first) is relocated. *encoding*
+    selects the classic rebase stream or real chained fixups.
     """
-    if encoding == "chained":
-        return {"chained_fixups": True}
     slots = [0x1000 + 8 * k for k in range(1, vtable_size // 8)]
-    return {"rebase_stream": rebase_stream(0, 0x1000, slots)}
+    return {"fixup_slots": slots, "fixup_encoding": encoding}
 
 
 def _vtable_macho(
@@ -256,9 +252,7 @@ def test_typeinfo_growing_a_base_is_reported_on_macho(tmp_path: Path) -> None:
                     MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x2000 + size),
                 ],
                 sections=[("__DATA_CONST", "__typeinfo", 0x2000, size + 0x8)],
-                rebase_stream=rebase_stream(
-                    0, 0x2000, [0x2000 + 8 * k for k in range(size // 8)]
-                ),
+                fixup_slots=[0x2000 + 8 * k for k in range(size // 8)],
             )
         )
 

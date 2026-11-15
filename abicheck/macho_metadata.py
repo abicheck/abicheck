@@ -56,7 +56,7 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
 from macholib.MachO import MachO  # type: ignore[import-untyped]
 from macholib.SymbolTable import SymbolTable  # type: ignore[import-untyped]
 
-from .extract.macho_fixups import fixup_addresses
+from .extract.macho_fixups import decode_chained_fixup_addresses, fixup_addresses
 from .extract.macho_object_sizes import corroborate_object_sizes, derive_object_sizes
 from .extract.parse_failures import note_export_read_failure
 
@@ -579,14 +579,34 @@ _LC_DYLD_CHAINED_FIXUPS = 0x80000034
 
 
 def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | None:
-    """Every rebased or bound pointer slot of the slice, or ``None`` if unknown.
+    """Every rebased, bound or chained pointer slot of the slice, or ``None``.
 
-    ``None`` covers an image with chained fixups (``LC_DYLD_CHAINED_FIXUPS``,
-    not decoded here) and an image whose opcode streams do not decode. Neither
-    means "no fixups", so the caller must not treat it as one.
+    ``None`` means the fixups could not be decoded (an unknown pointer format,
+    a truncated table). It is never "no fixups", so the caller must not treat
+    it as one. An image with neither encoding has no pointer fixups at all.
     """
-    if any(lc.cmd == _LC_DYLD_CHAINED_FIXUPS for lc, _cmd, _data in header.commands):
-        return None
+    start = int(getattr(header, "offset", 0))
+    size = int(getattr(header, "size", 0)) or (os.path.getsize(dylib_path) - start)
+    image = dylib_path.read_bytes()[start : start + size]
+    segments: list[tuple[int, int, int]] = []  # (vmaddr, fileoff, filesize)
+    text_base: int | None = None
+    for lc, cmd, _data in header.commands:
+        if lc.cmd not in (LC_SEGMENT, LC_SEGMENT_64):
+            continue
+        segments.append((int(cmd.vmaddr), int(cmd.fileoff), int(cmd.filesize)))
+        if text_base is None and bytes(cmd.segname).rstrip(b"\0") == b"__TEXT":
+            text_base = int(cmd.vmaddr)
+    chained = [
+        cmd for lc, cmd, _data in header.commands if lc.cmd == _LC_DYLD_CHAINED_FIXUPS
+    ]
+    if chained:
+        if not segments:
+            return None
+        base = text_base if text_base is not None else segments[0][0]
+        cmd = chained[0]
+        return decode_chained_fixup_addresses(
+            image, int(cmd.dataoff), int(cmd.datasize), segments, base
+        )
     dyld = [
         cmd
         for lc, cmd, _data in header.commands
@@ -596,18 +616,10 @@ def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | 
         return frozenset()
     magic = getattr(header, "MH_MAGIC", MH_MAGIC_64)
     pointer_size = 8 if magic in (MH_MAGIC_64, MH_CIGAM_64) else 4
-    bases = [
-        int(cmd.vmaddr)
-        for lc, cmd, _data in header.commands
-        if lc.cmd in (LC_SEGMENT, LC_SEGMENT_64)
-    ]
-    start = int(getattr(header, "offset", 0))
-    size = int(getattr(header, "size", 0)) or (os.path.getsize(dylib_path) - start)
-    image = dylib_path.read_bytes()[start : start + size]
     cmd = dyld[0]
     return fixup_addresses(
         image,
-        bases,
+        [vmaddr for vmaddr, _off, _size in segments],
         pointer_size,
         rebase=(int(cmd.rebase_off), int(cmd.rebase_size)),
         binds=[

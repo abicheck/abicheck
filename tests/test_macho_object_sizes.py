@@ -28,7 +28,6 @@ from tests._macho_synthetic import (
     N_PEXT,
     N_SECT,
     MachoSymbol,
-    rebase_stream,
     write_dylib,
 )
 
@@ -134,7 +133,7 @@ def test_reader_derives_sizes_with_locals_private_externs_and_stabs(
             ("__DATA_CONST", "__other", 0x2000, 0x30),
         ],
         # _ZTV4Base is 0x20 bytes: three relocated words after offset-to-top.
-        rebase_stream=rebase_stream(0, 0x1000, [0x1008, 0x1010, 0x1018]),
+        fixup_slots=[0x1008, 0x1010, 0x1018],
     )
     meta = parse_macho_metadata(lib)
     sizes = {e.name: e.size for e in meta.exports}
@@ -180,7 +179,34 @@ def test_stab_entries_with_a_symbol_type_bit_pattern_are_not_boundaries(
             MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1020),
         ],
         sections=[("__DATA_CONST", "__const", 0x1000, 0x40)],
-        rebase_stream=rebase_stream(0, 0x1000, [0x1008, 0x1010, 0x1018]),
+        fixup_slots=[0x1008, 0x1010, 0x1018],
+    )
+    meta = parse_macho_metadata(lib)
+    by_name = {e.name: e for e in meta.exports}
+    assert by_name["_ZTV4Base"].size == 0x20
+    assert by_name["_ZTV4Base"].size_bound_by == "_ZTI4Base"
+
+
+@pytest.mark.parametrize("encoding", ["classic", "chained"])
+def test_reader_sizes_a_vtable_the_same_under_both_fixup_encodings(
+    tmp_path: Path, encoding: str
+) -> None:
+    """A 0x20-byte vtable with three relocated words, closed by a label.
+
+    The size must be 0x20 whichever encoding the fixups use, which shows the
+    chained decoder runs end to end (a decoder returning nothing would leave the
+    size unset under chained fixups).
+    """
+    slots = [0x1008, 0x1010, 0x1018]
+    lib = write_dylib(
+        tmp_path / f"lib{encoding}.dylib",
+        [
+            MachoSymbol("__ZTV4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000),
+            MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1020),
+        ],
+        sections=[("__DATA_CONST", "__const", 0x1000, 0x40)],
+        fixup_slots=slots,
+        fixup_encoding=encoding,
     )
     meta = parse_macho_metadata(lib)
     by_name = {e.name: e for e in meta.exports}

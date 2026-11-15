@@ -63,10 +63,14 @@ class MachoSymbol:
 SectionSpec = tuple[str, str, int, int]
 
 
-def _segment_commands(sections: Sequence[SectionSpec] | None) -> tuple[bytes, int]:
+def _segment_commands(
+    sections: Sequence[SectionSpec] | None,
+    layout: Sequence[tuple[int, int]] | None = None,
+) -> tuple[bytes, int]:
     """LC_SEGMENT_64 commands for *sections* and their count.
 
-    Without *sections* this is one empty ``__TEXT`` segment.
+    Without *sections* this is one empty ``__TEXT`` segment. *layout* gives
+    each segment its ``(fileoff, filesize)``; by default they are empty.
     """
     if sections is None:
         return (
@@ -93,9 +97,10 @@ def _segment_commands(sections: Sequence[SectionSpec] | None) -> tuple[bytes, in
             groups[-1][1].append(spec)
         else:
             groups.append((spec[0], [spec]))
-    for segname, specs in groups:
+    for index, (segname, specs) in enumerate(groups):
         lo = min(addr for _s, _n, addr, _size in specs)
         hi = max(addr + size for _s, _n, addr, size in specs)
+        fileoff, filesize = layout[index] if layout else (0, 0)
         body = b"".join(
             struct.pack(
                 "<16s16sQQIIIIIIII",
@@ -122,8 +127,8 @@ def _segment_commands(sections: Sequence[SectionSpec] | None) -> tuple[bytes, in
                 segname.encode().ljust(16, b"\x00"),
                 lo,
                 hi - lo,
-                0,
-                0,
+                fileoff,
+                filesize,
                 7,
                 5,
                 len(specs),
@@ -179,28 +184,136 @@ def build_export_trie(exports: Sequence[tuple[str, int]]) -> bytes:
     raise AssertionError("export trie offsets did not converge")
 
 
+def _segment_groups(
+    sections: Sequence[SectionSpec] | None,
+) -> list[tuple[str, int, int]]:
+    """``(segname, lo, hi)`` per LC_SEGMENT_64, in load-command order."""
+    if sections is None:
+        return [("__TEXT", 0, 0)]
+    groups: list[tuple[str, list[SectionSpec]]] = []
+    for spec in sections:
+        if groups and groups[-1][0] == spec[0]:
+            groups[-1][1].append(spec)
+        else:
+            groups.append((spec[0], [spec]))
+    return [
+        (
+            segname,
+            min(addr for _s, _n, addr, _size in specs),
+            max(addr + size for _s, _n, addr, size in specs),
+        )
+        for segname, specs in groups
+    ]
+
+
+def _classic_rebase_for(
+    groups: list[tuple[str, int, int]], slots: Sequence[int]
+) -> bytes:
+    """A classic rebase stream rebasing every slot, segment by segment."""
+    out = bytearray()
+    for index, (_name, lo, hi) in enumerate(groups):
+        for addr in sorted(a for a in slots if lo <= a < hi):
+            out.append(_REBASE_SET_SEG_OFFSET | index)
+            out += _uleb128(addr - lo)
+            out.append(_REBASE_DO_IMM_TIMES_1)
+    out.append(_REBASE_DONE_OP)
+    return bytes(out)
+
+
+#: Chained-fixup page size and the pointer format the synthetic chains use.
+_CHAIN_PAGE_SIZE = 0x1000
+_CHAIN_PTR_64 = 2
+
+
+def chained_image(
+    groups: Sequence[tuple[str, int, int]],
+    slots: Sequence[int],
+    *,
+    pointer_format: int = _CHAIN_PTR_64,
+) -> tuple[bytes, dict[int, int]]:
+    """A chained-fixups blob and the pointer words it needs, for *slots*.
+
+    Each segment in *groups* (``(segname, lo, hi)``, load-command order) gets a
+    starts table. Every page holding slots carries one chain through them in
+    address order: each slot's ``next`` field is the distance to the following
+    slot in units of the pointer format's stride, and the last slot's is zero.
+    Returns ``(blob, memory)``: *memory* maps each slot address to the 8-byte
+    word it must hold (the chain link, with a zero target).
+    """
+    stride = 8 if pointer_format in (1, 9, 12) else 4
+    shift = 51
+    text_base = next((lo for name, lo, _hi in groups if name == "__TEXT"), groups[0][1])
+    memory: dict[int, int] = {}
+    seg_blobs: list[bytes] = []
+    for _name, lo, hi in groups:
+        in_seg = sorted(a for a in slots if lo <= a < hi)
+        if not in_seg:
+            seg_blobs.append(b"")
+            continue
+        page_count = (hi - lo + _CHAIN_PAGE_SIZE - 1) // _CHAIN_PAGE_SIZE
+        starts = [0xFFFF] * page_count
+        pages: dict[int, list[int]] = {}
+        for addr in in_seg:
+            pages.setdefault((addr - lo) // _CHAIN_PAGE_SIZE, []).append(addr)
+        for page, addrs in pages.items():
+            starts[page] = (addrs[0] - lo) % _CHAIN_PAGE_SIZE
+            for here, nxt in zip(addrs, addrs[1:] + [None]):
+                link = 0 if nxt is None else (nxt - here) // stride
+                memory[here] = link << shift
+        body = b"".join(v.to_bytes(2, "little") for v in starts)
+        seg_blobs.append(
+            struct.pack(
+                "<IHHQIH",
+                22 + len(body),
+                _CHAIN_PAGE_SIZE,
+                pointer_format,
+                lo - text_base,
+                0,
+                page_count,
+            )
+            + body
+        )
+    header_size = 28
+    table_size = 4 + 4 * len(groups)
+    starts_base = header_size
+    offsets: list[int] = []
+    cursor = starts_base + table_size
+    for seg in seg_blobs:
+        if seg:
+            offsets.append(cursor - starts_base)
+            cursor += len(seg)
+        else:
+            offsets.append(0)
+    blob = bytearray(struct.pack("<IIIIIII", 0, starts_base, cursor, cursor, 0, 1, 0))
+    blob += struct.pack("<I", len(groups)) + b"".join(
+        struct.pack("<I", o) for o in offsets
+    )
+    blob += b"".join(seg_blobs)
+    return bytes(blob), memory
+
+
 def write_dylib(
     path: Path,
     symbols: list[MachoSymbol],
     *,
     export_trie: Sequence[tuple[str, int]] | None = None,
     sections: Sequence[SectionSpec] | None = None,
-    rebase_stream: bytes | None = None,
-    bind_stream: bytes | None = None,
-    chained_fixups: bool = False,
+    fixup_slots: Sequence[int] | None = None,
+    fixup_encoding: str = "classic",
 ) -> Path:
     """Write a dylib whose symbol table holds *symbols* and return *path*.
-
-    *rebase_stream* / *bind_stream* are classic dyld opcode streams; either one
-    makes the image carry an LC_DYLD_INFO_ONLY command. *chained_fixups* adds
-    an LC_DYLD_CHAINED_FIXUPS command with no data, which the reader treats as
-    "fixups not decoded".
 
     With *export_trie* (``(name, flags)`` pairs, names with the leading
     underscore) the image also carries an LC_DYLD_EXPORTS_TRIE listing them;
     without it the image has no trie and its nlist is the only export table.
     With *sections* the image's segments carry those sections (see
     :data:`SectionSpec`); without it one empty ``__TEXT`` segment is written.
+
+    *fixup_slots* are the addresses of pointer words the image relocates. They
+    are encoded either as a classic rebase stream (``fixup_encoding="classic"``,
+    an LC_DYLD_INFO_ONLY command) or as chained fixups (``"chained"``, an
+    LC_DYLD_CHAINED_FIXUPS command whose segments hold the chain words, so the
+    reader can walk them from the file).
     """
     strtab = bytearray(b"\x00")
     entries = []
@@ -212,11 +325,33 @@ def write_dylib(
                 "<IBBHQ", offset, sym.n_type, sym.n_sect, sym.n_desc, sym.n_value
             )
         )
+    groups = _segment_groups(sections)
+    chained = fixup_slots is not None and fixup_encoding == "chained"
+    classic = fixup_slots is not None and fixup_encoding == "classic"
+    if fixup_encoding not in ("classic", "chained"):
+        raise ValueError(f"unknown fixup encoding {fixup_encoding!r}")
+    chain_blob, chain_memory = (
+        chained_image(groups, fixup_slots) if chained else (b"", {})
+    )
+    rebase_b = _classic_rebase_for(groups, fixup_slots) if classic else b""
+    # Chained segments hold their pointer words in the file, one region per
+    # segment appended after the tables; the others carry no bytes.
+    contents: list[bytes] = []
+    layout: list[tuple[int, int]] = []
+    for _name, lo, hi in groups:
+        if chained:
+            region = bytearray(hi - lo)
+            for addr, word in chain_memory.items():
+                if lo <= addr < hi:
+                    region[addr - lo : addr - lo + 8] = word.to_bytes(8, "little")
+            contents.append(bytes(region))
+        else:
+            contents.append(b"")
     segment, segment_count = _segment_commands(sections)
+    has_dyld_info = fixup_slots is not None and fixup_encoding == "classic"
     trie_cmd_size = 16 if export_trie is not None else 0
-    has_dyld_info = rebase_stream is not None or bind_stream is not None
     dyld_cmd_size = 48 if has_dyld_info else 0
-    chained_cmd_size = 16 if chained_fixups else 0
+    chained_cmd_size = 16 if chained else 0
     header_size = 32
     symtab_off = (
         header_size
@@ -232,9 +367,15 @@ def write_dylib(
     )
     trie = build_export_trie(export_trie) if export_trie is not None else b""
     trie_off = stroff + len(strtab)
-    rebase_b = rebase_stream or b""
-    bind_b = bind_stream or b""
     data_base = trie_off + len(trie)
+    chain_base = data_base + len(rebase_b)
+    content_base = chain_base + len(chain_blob)
+    cursor = content_base
+    for index, region in enumerate(contents):
+        layout.append((cursor if region else 0, len(region)))
+        cursor += len(region)
+    if chained:
+        segment, _ = _segment_commands(sections, layout)
     commands = segment + symtab
     ncmds = segment_count + 1
     if export_trie is not None:
@@ -247,18 +388,20 @@ def write_dylib(
             48,
             data_base if rebase_b else 0,
             len(rebase_b),
-            data_base + len(rebase_b) if bind_b else 0,
-            len(bind_b),
             0,
+            0,  # bind
             0,
+            0,  # weak bind
             0,
+            0,  # lazy bind
             0,
-            0,
-            0,  # weak/lazy bind and export: none
+            0,  # export
         )
         ncmds += 1
-    if chained_fixups:
-        commands += struct.pack("<IIII", _LC_DYLD_CHAINED_FIXUPS, 16, data_base, 0)
+    if chained:
+        commands += struct.pack(
+            "<IIII", _LC_DYLD_CHAINED_FIXUPS, 16, chain_base, len(chain_blob)
+        )
         ncmds += 1
     header = struct.pack(
         "<IIIIIIII",
@@ -272,7 +415,14 @@ def write_dylib(
         0,  # reserved
     )
     path.write_bytes(
-        header + commands + b"".join(entries) + bytes(strtab) + trie + rebase_b + bind_b
+        header
+        + commands
+        + b"".join(entries)
+        + bytes(strtab)
+        + trie
+        + rebase_b
+        + chain_blob
+        + b"".join(contents)
     )
     return path
 

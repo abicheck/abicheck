@@ -84,3 +84,113 @@ def test_fixup_addresses_combines_rebase_and_bind_streams() -> None:
         image, BASES, 8, rebase=(0, len(rebase)), binds=[(len(rebase), len(bind))]
     )
     assert got == frozenset({0x1000, 0x1008})
+
+
+# ── chained fixups (LC_DYLD_CHAINED_FIXUPS) ────────────────────────────────
+
+from abicheck.extract.macho_fixups import decode_chained_fixup_addresses  # noqa: E402
+from tests._macho_synthetic import chained_image  # noqa: E402
+
+_TEXT_BASE = 0x1000
+_SEG_VM = 0x1000
+_SEG_SIZE = 0x4000  # four 4 KiB pages
+
+
+def _chained_case(groups, slots, *, pointer_format=2):
+    """The blob and the image bytes it reads from, for one data segment.
+
+    The blob sits at offset 0; the segment's bytes follow it, so a pointer at
+    address A is read from ``fileoff + (A - vmaddr)``.
+    """
+    blob, memory = chained_image(groups, slots, pointer_format=pointer_format)
+    fileoff = len(blob)
+    image = bytearray(blob) + bytearray(_SEG_SIZE)
+    for addr, word in memory.items():
+        at = fileoff + (addr - _SEG_VM)
+        image[at : at + 8] = word.to_bytes(8, "little")
+    segments = [(_SEG_VM, fileoff, _SEG_SIZE)]
+    return bytes(image), segments
+
+
+def _decode(image, segments, blob_size, *, text_base=_TEXT_BASE):
+    return decode_chained_fixup_addresses(image, 0, blob_size, segments, text_base)
+
+
+_DATA = [("__DATA", _SEG_VM, _SEG_VM + _SEG_SIZE)]
+
+
+def test_chained_multi_page_chains_and_a_page_with_no_starts() -> None:
+    # Hand-written oracle. Page 0: a chain 0x1008 -> 0x1018 -> 0x1040.
+    # Page 1 has no starts (none of its slots may appear). Page 2: 0x3100.
+    slots = [0x1008, 0x1018, 0x1040, 0x3100]
+    blob, _memory = chained_image(_DATA, slots)
+    image, segments = _chained_case(_DATA, slots)
+    got = _decode(image, segments, len(blob))
+    assert got == frozenset({0x1008, 0x1018, 0x1040, 0x3100})
+
+
+def test_chained_arm64e_uses_an_eight_byte_stride() -> None:
+    # Format 1 (ARM64E): a link is next * 8 bytes. 0x1010 -> 0x1028 is two units.
+    slots = [0x1010, 0x1028]
+    image, segments = _chained_case(_DATA, slots, pointer_format=1)
+    blob, _ = chained_image(_DATA, slots, pointer_format=1)
+    assert _decode(image, segments, len(blob)) == frozenset({0x1010, 0x1028})
+
+
+def test_chained_multi_start_page_is_walked_from_every_start() -> None:
+    # Hand-encoded, independent of the builder. One page with two chains. The
+    # page_start entry 0x8001 is MULTI and points at overflow index 1; the
+    # overflow list is [0x0010, LAST|0x0200]. Chain A: 0x1010 -> 0x1018 (next 2
+    # units of 4 bytes, the last slot holds 0). Chain B: 0x1200 alone.
+    seg_vm = 0x1000
+    page_starts = [0x8001, 0x0010, 0x8200]
+    body = b"".join(v.to_bytes(2, "little") for v in page_starts)
+    starts_in_segment = (
+        (22 + len(body)).to_bytes(4, "little")
+        + (0x1000).to_bytes(2, "little")
+        + (2).to_bytes(2, "little")  # DYLD_CHAINED_PTR_64
+        + (seg_vm - _TEXT_BASE).to_bytes(8, "little")
+        + (0).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")  # one page
+        + body
+    )
+    header = (0).to_bytes(4, "little") + (28).to_bytes(4, "little") + bytes(20)
+    # starts_in_image: one segment, its table entry at 28 + 4 holds offset 8
+    # (relative to the starts_in_image table at 28).
+    starts_image = (1).to_bytes(4, "little") + (8).to_bytes(4, "little")
+    blob = header + starts_image + starts_in_segment
+    fileoff = len(blob)
+    image = bytearray(blob) + bytearray(0x1000)
+    image[fileoff + 0x010 : fileoff + 0x018] = (2 << 51).to_bytes(8, "little")
+    image[fileoff + 0x018 : fileoff + 0x020] = bytes(8)
+    image[fileoff + 0x200 : fileoff + 0x208] = bytes(8)
+    got = decode_chained_fixup_addresses(
+        bytes(image), 0, len(blob), [(seg_vm, fileoff, 0x1000)], _TEXT_BASE
+    )
+    assert got == frozenset({0x1010, 0x1018, 0x1200})
+
+
+def test_unknown_pointer_format_is_undecodable_not_empty() -> None:
+    image, segments = _chained_case(_DATA, [0x1008], pointer_format=2)
+    blob, _ = chained_image(_DATA, [0x1008], pointer_format=2)
+    corrupt = bytearray(image)
+    # The format is the u16 at starts_in_segment + 6; the table starts at 28+8.
+    fmt_at = 28 + 8 + 4 + 6
+    corrupt[fmt_at : fmt_at + 2] = (5).to_bytes(
+        2, "little"
+    )  # DYLD_CHAINED_PTR_32_FIRMWARE
+    assert _decode(bytes(corrupt), segments, len(blob)) is None
+
+
+def test_chain_that_leaves_its_page_is_undecodable() -> None:
+    blob, _ = chained_image(_DATA, [0x1008])
+    fileoff = len(blob)
+    image = bytearray(blob) + bytearray(_SEG_SIZE)
+    # 0xFFF units * 4 bytes = 16 KiB ahead: far past the 4 KiB page.
+    image[fileoff + 0x08 : fileoff + 0x10] = (0xFFF << 51).to_bytes(8, "little")
+    assert _decode(bytes(image), [(_SEG_VM, fileoff, _SEG_SIZE)], len(blob)) is None
+
+
+def test_truncated_blob_is_undecodable() -> None:
+    image, segments = _chained_case(_DATA, [0x1008])
+    assert decode_chained_fixup_addresses(image, 0, 10, segments, _TEXT_BASE) is None

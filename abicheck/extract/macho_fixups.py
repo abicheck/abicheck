@@ -235,3 +235,169 @@ def fixup_addresses(
     except FixupDecodeError:
         return None
     return frozenset(addresses)
+
+
+#: DYLD_CHAINED_PTR_* formats this decoder walks, with the pointer stride and the
+#: (shift, width) of the ``next`` field in an 8-byte chained pointer. A chain
+#: link is ``next * stride`` bytes forward; ``next == 0`` ends the chain. The bit
+#: layouts follow dyld's ``fixup-chains.h``: PTR_64 and PTR_64_OFFSET carry a
+#: 12-bit next at bit 51 with a 4-byte stride; the ARM64E family carries an
+#: 11-bit next at bit 51 with an 8-byte stride. Any other format is unknown.
+_CHAINED_FORMATS: dict[int, tuple[int, int, int]] = {
+    1: (8, 51, 11),  # DYLD_CHAINED_PTR_ARM64E
+    2: (4, 51, 12),  # DYLD_CHAINED_PTR_64
+    6: (4, 51, 12),  # DYLD_CHAINED_PTR_64_OFFSET
+    9: (8, 51, 11),  # DYLD_CHAINED_PTR_ARM64E_USERLAND
+    12: (8, 51, 11),  # DYLD_CHAINED_PTR_ARM64E_USERLAND24
+}
+_CHAINED_START_NONE = 0xFFFF
+_CHAINED_START_MULTI = 0x8000
+_CHAINED_START_LAST = 0x8000
+_CHAINED_OFFSET_MASK = 0x7FFF
+
+
+def _read_vm(
+    image: bytes, segments: Sequence[tuple[int, int, int]], addr: int, size: int
+) -> int | None:
+    """Little-endian value of *size* bytes at virtual address *addr*, or None.
+
+    *segments* are ``(vmaddr, fileoff, filesize)``; an address the file does
+    not hold (zero-fill, or outside every segment) reads as None.
+    """
+    for vmaddr, fileoff, filesize in segments:
+        if vmaddr <= addr and addr + size <= vmaddr + filesize:
+            start = fileoff + (addr - vmaddr)
+            raw = image[start : start + size]
+            if len(raw) != size:
+                return None
+            return int.from_bytes(raw, "little")
+    return None
+
+
+def decode_chained_fixup_addresses(
+    image: bytes,
+    blob_off: int,
+    blob_size: int,
+    segments: Sequence[tuple[int, int, int]],
+    text_base: int,
+) -> frozenset[int] | None:
+    """Every fixup location of an ``LC_DYLD_CHAINED_FIXUPS`` blob, or None.
+
+    The blob is ``dyld_chained_fixups_header`` followed by the starts tables.
+    Only the *locations* of fixups are decoded: each chain is walked from its
+    page start through the ``next`` links, and every visited pointer slot is a
+    fixup. Targets and imports are not needed. ``None`` means the blob could
+    not be decoded (absent, truncated, a pointer format this decoder does not
+    know, a chain that leaves its page, or a broken link); it is never "no
+    fixups".
+    """
+    try:
+        return _decode_chained(image, blob_off, blob_size, segments, text_base)
+    except (FixupDecodeError, IndexError, ValueError):
+        return None
+
+
+def _decode_chained(
+    image: bytes,
+    blob_off: int,
+    blob_size: int,
+    segments: Sequence[tuple[int, int, int]],
+    text_base: int,
+) -> frozenset[int] | None:
+    blob = image[blob_off : blob_off + blob_size]
+    if len(blob) < 28 or blob_size == 0:
+        return None
+    starts_off = int.from_bytes(blob[4:8], "little")
+    seg_count = int.from_bytes(blob[starts_off : starts_off + 4], "little")
+    out: set[int] = set()
+    for index in range(seg_count):
+        entry = starts_off + 4 + 4 * index
+        seg_info = int.from_bytes(blob[entry : entry + 4], "little")
+        if seg_info == 0:
+            continue
+        base = starts_off + seg_info
+        size = int.from_bytes(blob[base : base + 4], "little")
+        page_size = int.from_bytes(blob[base + 4 : base + 6], "little")
+        pointer_format = int.from_bytes(blob[base + 6 : base + 8], "little")
+        segment_offset = int.from_bytes(blob[base + 8 : base + 16], "little")
+        page_count = int.from_bytes(blob[base + 20 : base + 22], "little")
+        if pointer_format not in _CHAINED_FORMATS or page_size == 0:
+            return None
+        stride, shift, width = _CHAINED_FORMATS[pointer_format]
+        starts_array = base + 22
+        array_len = (size - 22) // 2
+        if page_count > array_len:
+            return None
+        starts = [
+            int.from_bytes(
+                blob[starts_array + 2 * i : starts_array + 2 * i + 2], "little"
+            )
+            for i in range(array_len)
+        ]
+        seg_base = text_base + segment_offset
+        for page in range(page_count):
+            start = starts[page]
+            if start == _CHAINED_START_NONE:
+                continue
+            page_vm = seg_base + page * page_size
+            if start & _CHAINED_START_MULTI:
+                # Several chains on this page: the overflow list holds one start
+                # per chain, the last one flagged with the LAST bit.
+                index = start & _CHAINED_OFFSET_MASK
+                while True:
+                    if index >= array_len:
+                        return None
+                    entry_val = starts[index]
+                    _walk_chain(
+                        image,
+                        segments,
+                        page_vm,
+                        page_size,
+                        page_vm + (entry_val & _CHAINED_OFFSET_MASK),
+                        stride,
+                        shift,
+                        width,
+                        out,
+                    )
+                    if entry_val & _CHAINED_START_LAST:
+                        break
+                    index += 1
+            else:
+                _walk_chain(
+                    image,
+                    segments,
+                    page_vm,
+                    page_size,
+                    page_vm + start,
+                    stride,
+                    shift,
+                    width,
+                    out,
+                )
+    return frozenset(out)
+
+
+def _walk_chain(
+    image: bytes,
+    segments: Sequence[tuple[int, int, int]],
+    page_vm: int,
+    page_size: int,
+    loc: int,
+    stride: int,
+    shift: int,
+    width: int,
+    out: set[int],
+) -> None:
+    """Follow one chain from *loc*, adding every slot to *out*."""
+    page_end = page_vm + page_size
+    while True:
+        if not page_vm <= loc or loc + 8 > page_end:
+            raise FixupDecodeError("chain leaves its page")
+        value = _read_vm(image, segments, loc, 8)
+        if value is None:
+            raise FixupDecodeError("chain slot is not in the file")
+        out.add(loc)
+        nxt = (value >> shift) & ((1 << width) - 1)
+        if nxt == 0:
+            return
+        loc += nxt * stride
