@@ -158,3 +158,54 @@ def test_a_type_outside_the_probed_builtins_is_never_touched() -> None:
         [change], _snap("int", 64), _snap("int", 32), 73, 74
     )
     assert change.effective_verdict is None
+
+
+def test_a_symbol_missing_on_one_side_is_never_touched() -> None:
+    change = Change(
+        ChangeKind.VAR_ALIGNMENT_CHANGED,
+        "value",
+        "alignment changed",
+        old_value="64",
+        new_value="32",
+    )
+    old = _snap("long", 64)
+    new = AbiSnapshot(library="libx.so", version="1", ast_producer="clang")
+    demote_pre74_builtin_alignment_drift([change], old, new, 73, 74)
+    assert change.effective_verdict is None
+
+
+def test_a_retyped_variable_is_never_touched() -> None:
+    change = Change(
+        ChangeKind.VAR_ALIGNMENT_CHANGED,
+        "value",
+        "alignment changed",
+        old_value="64",
+        new_value="32",
+    )
+    demote_pre74_builtin_alignment_drift(
+        [change], _snap("long", 64), _snap("long long", 32), 73, 74
+    )
+    assert change.effective_verdict is None
+
+
+def test_other_kinds_and_already_dispositioned_changes_are_never_touched() -> None:
+    other = Change(
+        ChangeKind.VAR_TYPE_CHANGED,
+        "value",
+        "type changed",
+        old_value="long",
+        new_value="int",
+    )
+    settled = Change(
+        ChangeKind.VAR_ALIGNMENT_CHANGED,
+        "value",
+        "alignment changed",
+        old_value="64",
+        new_value="32",
+    )
+    settled.effective_verdict = Verdict.BREAKING
+    demote_pre74_builtin_alignment_drift(
+        [other, settled], _snap("long", 64), _snap("long", 32), 73, 74
+    )
+    assert other.effective_verdict is None
+    assert settled.effective_verdict is Verdict.BREAKING
