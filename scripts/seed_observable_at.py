@@ -111,317 +111,8 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
 }
 
 # kind  CODE  [# note].  Kinds absent here (or coded U) stay UNCLASSIFIED.
-DECISIONS_TEXT = """
-# -- symbols: export-table facts (B) --------------------------------------
-func_added                       B
-func_added_elf_only              B:ELF
-func_export_added                B
-func_language_linkage_changed    B      # mangled names change
-func_likely_renamed              B
-func_removed                     B
-func_removed_elf_only            B:ELF
-func_visibility_changed          B
-var_added                        B
-var_added_elf_only               B:ELF
-var_export_added                 B
-var_removed                      B
-var_removed_elf_only             B:ELF
-var_visibility_changed           B
-symbol_renamed_batch             B
-symbol_size_changed              B:ELF  # st_size in .dynsym; no PE/Mach-O analogue
-symbol_size_changed_const_object B:ELF
-symbol_size_changed_internal     B:ELF
-# -- symbols: layout / type facts in DWARF and the header (DH) -------------
-anon_field_changed               DH
-calling_convention_changed       DH
-func_params_changed              DH
-func_return_changed              DH
-func_return_covariant_narrowed   DH
-func_variadic_added              DH
-func_variadic_removed            DH
-func_virtual_added               DH
-func_virtual_removed             DH
-param_pointer_level_changed      DH
-return_pointer_level_changed     DH
-var_alignment_changed            DH   # plan A2.1
-var_became_const                 DH
-var_lost_const                   DH
-var_type_changed                 DH
-# -- symbols: declaration-only facts (H) -----------------------------------
-constant_added                   H
-constant_changed                 H
-constant_removed                 H
-ctor_explicit_added              H
-ctor_explicit_removed            H
-ctor_overload_ambiguity_risk     H
-field_access_changed             H
-func_contract_attribute_added    H
-func_contract_attribute_removed  H
-func_deleted                     H
-func_deprecated_added            H
-func_deprecated_removed          H
-func_exception_spec_changed      H
-func_lost_final                  H
-func_lost_inline                 H
-func_became_final                H
-func_noexcept_added              H
-func_noexcept_removed            H
-func_override_specifier_added    H
-func_override_specifier_removed  H
-func_virtual_noexcept_added      H
-hidden_friend_added              H
-hidden_friend_removed            H
-method_access_changed            H
-overload_ambiguity_introduced    H
-param_became_va_list             H
-param_default_value_changed      H   # plan A2.4
-param_default_value_removed      H
-param_lost_va_list               H
-param_pointee_qualifier_added    H
-param_pointee_qualifier_changed  H
-param_renamed                    H
-param_restrict_added             H
-param_restrict_changed           H
-func_return_pointee_qualifier_added    H
-func_return_pointee_qualifier_changed  H
-func_return_pointee_qualifier_removed  H
-public_api_exposes_stl_by_value  H
-var_access_changed               H
-var_access_widened               H
-var_deprecated_added             H
-var_deprecated_removed           H
-# -- symbols: needs the source graph (L5) ---------------------------------
-internal_symbol_required_by_public_api L5
-# -- types: layout / type facts (DH) ---------------------------------------
-atomic_qualifier_changed         DH
-base_class_offset_changed        DH
-base_class_position_changed      DH
-base_class_virtual_changed       DH
-enum_last_member_value_changed   DH
-enum_member_added               DH
-enum_member_removed              DH
-enum_member_value_changed        DH
-field_bitfield_changed           DH
-field_became_const               DH
-field_became_volatile            DH
-field_lost_const                 DH
-field_lost_volatile              DH
-flexible_array_member_changed    DH
-func_cv_changed                  DH
-func_pure_virtual_added          DH
-func_ref_qual_changed            DH
-standard_layout_lost             DH
-struct_alignment_changed         DH
-struct_field_offset_changed      DH
-struct_field_removed             DH
-struct_field_type_changed        DH
-struct_packing_changed           DH   # plan A2.2: {B,D},{B,H}
-struct_size_changed              DH
-trivially_copyable_lost          DH   # plan A2.4: VALUE_ABI_TRAIT duplicate
-type_alignment_changed           DH
-type_base_changed                DH
-type_field_added                 DH
-type_field_added_compatible      DH
-type_field_offset_changed        DH
-type_field_removed               DH
-type_field_type_changed          DH
-type_kind_changed                DH
-type_size_changed                DH
-typedef_base_changed             DH
-union_field_added               DH
-union_field_removed              DH
-union_field_type_changed         DH
-virtual_base_offset_changed      DH
-virtual_method_added             DH
-vptr_introduced                  DH
-# -- types: declaration-only facts (H) -------------------------------------
-base_class_access_narrowed       H
-default_template_arg_changed      H
-enum_became_scoped               H
-enum_deprecated_added            H
-enum_deprecated_removed          H
-enum_lost_scoped                 H
-enum_member_renamed              H
-experimental_graduated           H
-experimental_removed_without_replacement H
-field_became_mutable             H
-field_default_initializer_changed H
-field_default_initializer_removed H
-field_deprecated_added           H
-field_deprecated_removed         H
-field_lost_mutable               H
-field_renamed                    H
-func_static_changed              H
-inline_body_references_renamed_member H
-inline_namespace_version_bumped  H
-mandatory_template_param_added   H
-polymorphic_type_non_virtual_dtor H
-removed_const_overload           H
-source_level_kind_changed        H
-std_reexport_removed             H
-template_param_default_changed   H
-type_became_abstract             H
-type_became_final                H
-type_became_opaque               H
-type_deprecated_added            H
-type_deprecated_removed          H
-type_lost_abstract               H
-type_lost_final                  H
-type_removed                     H
-typedef_removed                  H
-unspecified_return_now_named     H
-# -- types: binary facts (B) ----------------------------------------------
-rtti_inheritance_changed         B
-type_visibility_changed          B
-type_vtable_changed              B:ELF+MACHO  # plan §8: _ZTV sizes
-vtable_slot_count_changed        B:ELF+MACHO
-vtable_thunk_offset_changed      B:ELF+MACHO
-vtable_thunk_set_changed         B:ELF+MACHO
-vtt_slot_count_changed           B:ELF+MACHO
-# -- platform: ELF / Mach-O / PE header and dynamic facts (B) --------------
-abi_tag_changed                  B:ELF
-allocator_replacement_added      B:ELF
-allocator_replacement_removed    B:ELF
-bind_now_disabled                B:ELF
-branch_protection_improved       B:ELF
-branch_protection_weakened       B:ELF
-cet_protection_improved          B:ELF
-cet_protection_weakened          B:ELF
-dt_relr_introduced               B:ELF
-dt_relr_removed                  B:ELF
-dynamic_loading_flags_changed    B:ELF
-elf_abi_flags_changed            B:ELF
-elf_class_changed                B:ELF
-elf_endianness_changed           B:ELF
-elf_init_fini_changed            B:ELF
-elf_machine_changed              B:ELF
-elf_osabi_changed                B:ELF
-executable_stack                 B:ELF
-executable_stack_removed         B:ELF
-fortify_source_weakened          B:ELF
-func_visibility_protected_changed B:ELF
-glibcxx_dual_abi_changed         B
-glibcxx_dual_abi_flip_detected   B
-hash_style_removed               B:ELF
-ifunc_introduced                 B:ELF
-ifunc_removed                    B:ELF
-imported_symbol_added            B
-imported_symbol_removed          B
-imported_symbol_unprovided       B
-interpreter_changed              B:ELF
-macho_cpu_type_changed           B:MACHO
-macho_filetype_changed          B:MACHO
-macho_linkage_flags_changed     B:MACHO
-macho_reexport_changed          B:MACHO
-needed_added                     B
-needed_order_changed             B
-needed_removed                   B
-os_deployment_floor_raised       B:MACHO
-pe_forwarder_changed             B:PE
-pe_hardening_improved            B:PE
-pe_hardening_weakened            B:PE
-pe_import_load_mode_changed      B:PE
-pe_machine_changed               B:PE
-pe_ordinal_retargeted            B:PE
-pie_disabled                     B:ELF
-protected_visibility_changed     B:ELF
-relro_weakened                   B:ELF
-rpath_changed                    B:ELF
-rpath_type_changed               B:ELF
-runpath_changed                  B:ELF
-soname_changed                   B:ELF+MACHO
-soname_missing                   B:ELF
-stack_canary_removed             B:ELF
-static_tls_introduced            B:ELF
-static_tls_removed               B:ELF
-symbol_binding_became_unique     B:ELF
-symbol_binding_changed           B:ELF
-symbol_binding_lost_unique       B:ELF
-symbol_binding_strengthened      B:ELF
-symbol_elf_visibility_changed    B:ELF
-symbol_leaked_from_dependency_changed B:ELF
-symbol_moved_version_node        B:ELF
-symbol_type_changed              B:ELF
-symbol_version_alias_changed     B:ELF
-symbol_version_defined_added     B:ELF
-symbol_version_defined_removed   B:ELF
-symbol_version_node_removed      B:ELF
-symbol_version_required_added    B:ELF
-symbol_version_required_added_compat B:ELF
-symbol_version_required_removed  B:ELF
-symbolic_binding_mode_changed    B:ELF
-text_relocation_introduced       B:ELF
-text_relocation_removed          B:ELF
-tls_var_size_changed             B:ELF
-unversioned_exported_symbol      B:ELF
-runtime_floor_raised             B:ELF
-version_script_missing           B:ELF
-versioned_symbol_scheme_detected B:ELF
-vtable_symbol_identity_changed   B:ELF+MACHO
-writable_executable_segment      B:ELF
-x86_isa_baseline_raised          B:ELF
-# -- platform: compiler-flag facts (DBD) and layout (DH / D1) -------------
-bit_int_width_changed            DH
-char8t_migration                 DH
-char_signedness_changed          DBD  # plan A3
-enum_size_flag_changed           DBD
-enum_underlying_size_changed     D1   # header carries it only when explicit
-exceptions_mode_changed          DBD
-float_abi_changed                DBD
-integer_model_changed            DBD
-long_double_abi_changed          DBD  # plan A3
-lto_mode_changed                 DBD
-struct_packing_mode_changed      DBD
-struct_return_convention_changed DH   # plan: STRUCT_RETURN_CONVENTION
-stdlib_debug_mode_changed        DBD
-target_isa_changed               DBD  # plan A3
-threadsafe_statics_mode_changed  DBD
-time64_abi_changed               DBD
-tls_model_changed                DBD
-toolchain_flag_drift             DBD  # plan A3
-value_abi_trait_changed          DH   # plan A2.4
-vector_abi_changed               DBD  # plan A3
-whole_program_vtables_mode_changed DBD
-wchar_model_changed              DBD  # plan A3
-abi_relevant_build_flag_changed  DBD
-# -- build / source: declaration-only (H), header and export (BH) ---------
-concept_constraint_changed       H
-concept_tightened               H
-constexpr_value_changed          H
-default_argument_changed         H    # plan A2.4
-exported_not_public              BH
-header_only_function_params_changed H
-inline_body_changed              H    # plan A5
-inline_function_removed          H    # plan A2.4 / A5
-internal_template_leaks_via_public_api H
-internal_type_leaks_via_public_api H
-private_header_leak              H
-public_macro_removed             H    # plan A5
-public_macro_value_changed       H
-public_not_exported              BH
-public_surface_grew              H
-public_surface_shrank            H
-public_typedef_removed           H
-public_typedef_target_changed    H
-rtti_for_internal_type           BH
-source_decl_binary_symbol_mismatch BH
-template_body_changed            H    # plan A5
-uninstantiated_template_removed  H    # plan A2.4
-# -- build / source: binary (B) -------------------------------------------
-consumer_required_symbol_removed B
-runtime_symbol_provider_changed  B
-runtime_weak_resolution_changed  B
-# -- build / source: needs sources or the graph (L4, L5, BHSG) -----------
-call_graph_public_entry_reachability_changed BHSG
-public_api_internal_dependency_added L5
-public_api_internal_type_renamed L5
-public_dependency_role_changed   L5
-public_dependency_role_unknown   L5
-public_to_internal_dependency    L5
-public_virtual_dispatch_set_changed L5
-source_surface_dso_mismatch      L4
-target_dependency_added          L5
-"""
+DECISIONS_FILE = Path(__file__).with_name("seed_observable_decisions.txt")
+DECISIONS_TEXT = DECISIONS_FILE.read_text()
 
 # Kinds that stay UNCLASSIFIED on purpose, with the reason. Kept here so the
 # reviewer sees what was considered and not classified (not used by --apply).
@@ -624,8 +315,180 @@ def _ruff_format(path: Path, text: str) -> str:
     return proc.stdout
 
 
+FAMILIES = ("symbols", "types", "platform", "source")
+
+
+def _next_sibling(family: str, taken: dict[str, int]) -> int:
+    """Next free numeric suffix in *family* (``symbols_3`` after ``symbols_2``)."""
+    nums = [
+        int(m.group(1))
+        for path in CATALOG.glob(f"{family}*.py")
+        if (m := re.fullmatch(rf"{family}(?:_(\d+))?\.py", path.name)) and m.group(1)
+    ]
+    n = max(nums, default=0) + 1
+    n = max(n, taken.get(family, 0) + 1)
+    taken[family] = n
+    return n
+
+
+def _header_for_sibling(
+    owner_lines: list[str], head: int, family: str, stem: str, number: int
+) -> list[str]:
+    """Docstring, __future__, registry import and the ``_B``/``_E``-style aliases."""
+    reg = next(
+        i for i, ln in enumerate(owner_lines) if ln.startswith("from .registry import")
+    )
+    if owner_lines[reg].rstrip().endswith("("):
+        reg_end = next(i for i in range(reg, head) if owner_lines[i] == ")\n")
+        reg_block = owner_lines[reg : reg_end + 1]
+    else:
+        reg_block = [owner_lines[reg]]
+    aliases = [ln for ln in owner_lines[:head] if re.match(r"_[A-Z]+ = ", ln)]
+    doc = (
+        f'"""ADR-093 WS-1: entries of ``{stem}.py`` split out at the 800-line cap.\n\n'
+        f"Whole entries moved unchanged from ``{stem}.py`` (each gains only its\n"
+        f"``observable_at``). Registered in ``{family}.py``.\n"
+        '"""\n\n'
+    )
+    license_block = [ln for ln in owner_lines[:head] if ln.startswith("#")]
+    return [
+        *license_block,
+        doc,
+        "from __future__ import annotations\n\n",
+        *reg_block,
+        "\n",
+        *aliases,
+        "\n",
+    ]
+
+
+def _register_in_family(
+    family: str, sibling_stem: str, list_name: str, stem_lines: list[str] | None
+) -> list[str] | None:
+    """Add the sibling to the family's assembly. Returns the new family text, or None.
+
+    ``stem_lines`` is the owner's own text when the owner *is* the family module
+    (``source.py`` holds ``SOURCE_ENTRIES``); otherwise the family module is read.
+    """
+    if family == "source":
+        lines = stem_lines
+        assert lines is not None
+        imp = max(
+            i
+            for i, ln in enumerate(lines)
+            if re.match(r"from \.source_\d+ import ", ln)
+        )
+        lines.insert(imp + 1, f"from .{sibling_stem} import {list_name}\n")
+        ext = max(
+            i for i, ln in enumerate(lines) if ln.startswith("SOURCE_ENTRIES.extend(")
+        )
+        lines.insert(ext + 1, f"SOURCE_ENTRIES.extend({list_name})\n")
+        return lines
+    path = CATALOG / f"{family}.py"
+    lines = path.read_text().splitlines(keepends=True)
+    fam = family.upper()
+    imp = max(
+        i for i, ln in enumerate(lines) if re.match(rf"from \.{family}_\d+ import ", ln)
+    )
+    lines.insert(imp + 1, f"from .{sibling_stem} import {list_name}\n")
+    head = next(
+        i
+        for i, ln in enumerate(lines)
+        if ln.startswith(f"{fam}_ENTRIES: list[ChangeKindMeta] = ")
+    )
+    if lines[head].rstrip().endswith("("):
+        tail = next(i for i in range(head, len(lines)) if lines[i].strip() == ")")
+    else:
+        tail = head
+    names = sorted(
+        {
+            m.group(2)
+            for ln in lines
+            for m in [
+                re.match(rf"from \.({family}_\d+) import ({fam}_ENTRIES_\d+)", ln)
+            ]
+            if m
+        },
+        key=lambda n: int(n.rsplit("_", 1)[1]),
+    )
+    # The sibling's import was inserted above, so it is already in ``names``.
+    lines[head : tail + 1] = [
+        f"{fam}_ENTRIES: list[ChangeKindMeta] = {' + '.join(names)}\n"
+    ]
+    return lines
+
+
+def _split_owner(
+    path: Path,
+    lines: list[str],
+    decs: list[Decision],
+    spans: dict[str, tuple[int, int]],
+    taken: dict[str, int],
+    dry_run: bool,
+) -> tuple[str, int]:
+    """Move an overflowing owner's decided entries, unchanged, into a new sibling."""
+    family = next(
+        f for f in FAMILIES if path.stem == f or path.stem.startswith(f + "_")
+    )
+    number = _next_sibling(family, taken)
+    sibling_stem = f"{family}_{number}"
+    list_name = f"{family.upper()}_ENTRIES_{number}"
+    head = next(
+        i
+        for i, ln in enumerate(lines)
+        if re.match(r"[A-Z_0-9]+: list\[ChangeKindMeta\] = \[", ln)
+    )
+    body: list[str] = []
+    for dec in sorted(decs, key=lambda d: spans[d.kind][0]):
+        s, e = spans[dec.kind]
+        block = lines[s : e + 1]
+        block.insert(
+            len(block) - 1, f"        observable_at=({FORMS[dec.code][3]},),\n"
+        )
+        body += block
+    codes = {d.code for d in decs}
+    used = {"observable"}
+    if any(FORMS[c][2] for c in codes):
+        used |= {"ObservabilityCondition", "Platform"}
+    header = _header_for_sibling(lines, head, family, path.stem, number)
+    obs_line = f"from .observability import {', '.join(sorted(used))}\n"
+    # The observability import belongs with the other imports, before the aliases.
+    alias_at = next(i for i, ln in enumerate(header) if re.match(r"_[A-Z]+ = ", ln))
+    header = [*header[:alias_at], obs_line, *header[alias_at:]]
+    new_text = "".join(
+        header
+        + [ln + "\n" for ln in _constants_block(codes)]
+        + ["\n", f"{list_name}: list[ChangeKindMeta] = [\n"]
+        + body
+        + ["]\n"]
+    )
+    new_text = _ruff_format(CATALOG / f"{sibling_stem}.py", new_text)
+    if new_text.count("\n") > PRODUCTION_LINE_CAP:
+        raise SystemExit(f"{sibling_stem}.py would itself exceed the cap")
+    # The owner keeps everything except the moved entries.
+    moved = {spans[d.kind] for d in decs}
+    kept = [ln for i, ln in enumerate(lines) if not any(s <= i <= e for s, e in moved)]
+    if path.stem == family:
+        # source.py holds SOURCE_ENTRIES itself: register the sibling in the owner.
+        owner_text = _ruff_format(
+            path, "".join(_register_in_family(family, sibling_stem, list_name, kept))
+        )
+    else:
+        owner_text = _ruff_format(path, "".join(kept))
+        fam_text = _ruff_format(
+            CATALOG / f"{family}.py",
+            "".join(_register_in_family(family, sibling_stem, list_name, None)),
+        )
+        if not dry_run:
+            (CATALOG / f"{family}.py").write_text(fam_text)
+    if not dry_run:
+        (CATALOG / f"{sibling_stem}.py").write_text(new_text)
+        path.write_text(owner_text)
+    return sibling_stem, len(decs)
+
+
 def apply_decisions(dry_run: bool) -> dict[str, int]:
-    """Rewrite the taxonomy modules so each decided entry has an ``observable_at``."""
+    """Apply the decisions. Overflowing owners are split into numbered siblings."""
     owner = taxonomy_owner()
     by_file: dict[str, list[Decision]] = defaultdict(list)
     for dec in DECISIONS.values():
@@ -633,41 +496,41 @@ def apply_decisions(dry_run: bool) -> dict[str, int]:
             raise SystemExit(f"{dec.kind}: not a ChangeKind taxonomy entry")
         by_file[owner[dec.kind]].append(dec)
 
+    taken: dict[str, int] = {}
     counts: dict[str, int] = {}
     for name, decs in sorted(by_file.items()):
         path = CATALOG / name
-        lines = path.read_text().splitlines(keepends=True)
-        spans = {k: (s, e) for k, s, e in _entry_spans(lines)}
-        codes = {d.code for d in decs}
-        # Insert from the bottom up so earlier indices stay valid.
+        original = path.read_text().splitlines(keepends=True)
+        spans = {k: (s, e) for k, s, e in _entry_spans(original)}
+        # Try the in-place form first.
+        lines = list(original)
         for dec in sorted(decs, key=lambda d: -spans[d.kind][1]):
             _, end = spans[dec.kind]
-            const = FORMS[dec.code][3]
-            lines.insert(end, f"        observable_at=({const},),\n")
-        # Constants go before the list definition, the import before registry.
+            lines.insert(end, f"        observable_at=({FORMS[dec.code][3]},),\n")
         head = next(
             i
             for i, ln in enumerate(lines)
             if re.match(r"[A-Z_0-9]+: list\[ChangeKindMeta\] = \[", ln)
         )
-        lines[head:head] = [ln + "\n" for ln in _constants_block(codes)] + ["\n"]
+        lines[head:head] = [
+            ln + "\n" for ln in _constants_block({d.code for d in decs})
+        ] + ["\n"]
         imp = next(
             i for i, ln in enumerate(lines) if ln.startswith("from .registry import")
         )
         used = {"observable"}
-        if any(FORMS[c][2] for c in codes):
+        if any(FORMS[c][2] for c in {d.code for d in decs}):
             used |= {"ObservabilityCondition", "Platform"}
         lines.insert(imp, f"from .observability import {', '.join(sorted(used))}\n")
-        # A file that would exceed the production cap is left untouched and its
-        # kinds stay UNCLASSIFIED: splitting a module is a separate decision.
-        # The cap is checked on the file as ruff formats it, not the raw text.
         text = _ruff_format(path, "".join(lines))
-        if text.count("\n") > PRODUCTION_LINE_CAP:
-            counts[name] = -len(decs)
+        if text.count("\n") <= PRODUCTION_LINE_CAP:
+            counts[name] = len(decs)
+            if not dry_run:
+                path.write_text(text)
             continue
-        counts[name] = len(decs)
-        if not dry_run:
-            path.write_text(text)
+        sibling, n = _split_owner(path, original, decs, spans, taken, dry_run)
+        counts[name] = n
+        counts[f"  -> {sibling}.py"] = n
     return counts
 
 
@@ -699,7 +562,9 @@ def main(argv: list[str] | None = None) -> int:
         for name, n in counts.items():
             print(f"{name}: {n} observable_at lines" if n >= 0 else f"{name}: blocked")
         blocked = {n: -c for n, c in counts.items() if c < 0}
-        applied = sum(c for c in counts.values() if c > 0)
+        applied = sum(
+            c for k, c in counts.items() if c > 0 and not k.startswith("  ->")
+        )
         for name, n in blocked.items():
             print(f"{name}: {n} decisions NOT applied (file would exceed the cap)")
         print(f"applied: {applied} (run ruff format afterwards)")

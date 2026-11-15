@@ -8,12 +8,11 @@ it should read in CHANGELOG.md. Delete the other sections.
 
 ### Added
 
-- **`observable_at` on the ChangeKind taxonomy (ADR-093, WS-1)** — 104 of 434
+- **`observable_at` on the ChangeKind taxonomy (ADR-093, WS-1)** — 297 of 434
   kinds now declare the minimal evidence configurations in which they are
   physically observable (ELF/Mach-O/PE export-table facts, layout facts that
   DWARF and public headers both carry, compiler-flag facts, and declaration-only
-  facts). The other 330 stay `UNCLASSIFIED` until their owning modules can
-  take the change under the 800-line cap. `scripts/seed_observable_at.py`
+  facts). The other 137 stay `UNCLASSIFIED`: the evidence is ambiguous or absent. `scripts/seed_observable_at.py`
   records each decision and its evidence.
 <!--
 ### Performance
