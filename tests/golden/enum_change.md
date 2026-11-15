@@ -19,7 +19,7 @@
 | Confidence | MEDIUM |
 | Evidence tier | `header_aware` |
 | Evidence tiers | `header` |
-| Coverage gap | Detector 'elf_layout' disabled: missing ELF metadata on one side |
+| Coverage gap | Detector 'elf_layout' disabled: missing ELF or Mach-O symbol metadata on one side |
 | Coverage gap | Detector 'fingerprint_renames' disabled: missing ELF metadata on both sides |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'long_double' disabled: missing ELF metadata on one side |

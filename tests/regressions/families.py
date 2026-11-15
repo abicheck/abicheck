@@ -186,6 +186,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
                 "tests/test_family_f8_catalog_backend_parity.py",
+                # The Mach-O layout detectors against the ELF pair of the same
+                # logical change, in both fixup encodings, with seeded mutants.
+                "tests/test_family_f8_macho_layout.py",
                 # Each header backend reports a change's declared ChangeKinds
                 # (Clang, CastXML; native GCC in the native-gcc CI job).
                 "tests/test_header_backend_parity_regressions.py",
@@ -616,6 +619,9 @@ _F8 = (
     "extraction.linker_summary_flag_read_as_the_fact",
     "scoping.system_header_layout_unrecognized",
     "symbol_rule.single_object_format",
+    # A layout detector gated to ELF: a Mach-O pair lost its vtable and thunk
+    # findings (harness: test_family_f8_macho_layout.py).
+    "macho.layout_detector_blind",
     # A PE/Mach-O header parse discarded when no declaration's spelling met an
     # export (an MSVC DLL against an Itanium parse; a template-only header).
     "extraction.header_surface_discarded_on_export_mismatch",

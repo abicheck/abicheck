@@ -45,6 +45,15 @@ class MachoExport:
     sym_type: MachoSymbolType = MachoSymbolType.EXPORTED
     is_weak: bool = False
     is_data: bool = False  # True when symbol lives in __DATA segment (global variable)
+    # Derived byte size of a ``_ZTV``/``_ZTI``/``_ZTT`` object: the distance to
+    # the next defined symbol of its section (extract/macho_object_sizes.py),
+    # the Mach-O stand-in for ELF ``st_size``. None = not derived (a
+    # non-sized name, or a snapshot written before this field existed).
+    size: int | None = None
+    # The label that closes the derived span. The detector compares a size only
+    # when both sides name the same closer: a different closer is a different
+    # measurement (a stripped or moved label), not a changed object.
+    size_bound_by: str | None = None
 
 
 @dataclass
@@ -87,6 +96,13 @@ class MachoMetadata:
 
     # Exported symbols
     exports: list[MachoExport] = field(default_factory=list)
+
+    # Whether the size derivation (extract/macho_object_sizes) ran over this
+    # image's symbol table. None = not recorded (a snapshot written before this
+    # field existed); True = ran, so an export with no ``size`` has no closing
+    # label. The layout detector refuses a Mach-O side that is not True: an
+    # unrun derivation must read as not evaluated, never as zero findings.
+    sizes_derived: bool | None = field(default=None, kw_only=True)
 
     # Imported (undefined, N_UNDF) external symbol names — the Mach-O analogue
     # of ELF undefined imports. Needed to see a CPython extension's libpython

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from abicheck.checker_types import DiffResult
     from abicheck.model.change import Change
     from abicheck.model.snapshot import AbiSnapshot
 
@@ -169,42 +170,84 @@ def _snapshot(
     return snap
 
 
+def _projected(old: AbiSnapshot, new: AbiSnapshot) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Both operands at the evidence rung both reach, as ``abicheck compare`` does."""
+    from abicheck.policy.common_evidence_depth import common_evidence_depth
+    from abicheck.policy.depth_projection import project_pair_to_depth
+
+    return project_pair_to_depth(old, new, common_evidence_depth(old, new))
+
+
+def _judge(old: AbiSnapshot, new: AbiSnapshot) -> DiffResult:
+    """abicheck's own result for projected operands; raises ``AbicheckError`` on
+    refusal, which the callers decide on."""
+    from abicheck.checker import compare
+
+    # ``abicheck compare`` always runs the pattern-verdict pass (ADR-068
+    # made it unconditional on the CLI); the bare ``checker.compare()``
+    # keeps it opt-in so a direct caller can score raw detector output.
+    # Mirror the CLI: without it, HANDLE_TYPE_CHANGED,
+    # OPAQUE_INVARIANT_BROKEN and every newly-introduced anti-pattern
+    # finding can never be reported, whatever the snapshots say.
+    extra = _build_data_changes(old, new)
+    if extra is None:
+        return compare(old, new, pattern_verdicts=True)
+    # A pair carrying L3-L5 evidence is compared through the
+    # ``abicheck compare`` chokepoint itself (``compare_snapshots``:
+    # surface metrics, build-context reconciliation and each side's
+    # resolved public surface on top of the pattern verdicts), so the
+    # evidence variants judge exactly what the CLI reports.
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    return compare_snapshots(old, new, extra_changes=extra)
+
+
 def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     """(verdict name, ChangeKind names); ``REFUSED`` plus the error type on refusal.
 
     A refusal (``abicheck.errors.AbicheckError``, e.g. a profile mismatch) is
     abicheck's answer, not a harness failure: it is neither clean nor a break.
     """
-    from abicheck.checker import compare
     from abicheck.errors import AbicheckError
-    from abicheck.policy.common_evidence_depth import common_evidence_depth
-    from abicheck.policy.depth_projection import project_pair_to_depth
 
-    # ``abicheck compare`` judges operands of different evidence rungs
-    # (headers on one side only) at the rung both reach; mirror it.
-    old, new = project_pair_to_depth(old, new, common_evidence_depth(old, new))
+    old, new = _projected(old, new)
     try:
-        # ``abicheck compare`` always runs the pattern-verdict pass (ADR-068
-        # made it unconditional on the CLI); the bare ``checker.compare()``
-        # keeps it opt-in so a direct caller can score raw detector output.
-        # Mirror the CLI: without it, HANDLE_TYPE_CHANGED,
-        # OPAQUE_INVARIANT_BROKEN and every newly-introduced anti-pattern
-        # finding can never be reported, whatever the snapshots say.
-        extra = _build_data_changes(old, new)
-        if extra is None:
-            result = compare(old, new, pattern_verdicts=True)
-        else:
-            # A pair carrying L3-L5 evidence is compared through the
-            # ``abicheck compare`` chokepoint itself (``compare_snapshots``:
-            # surface metrics, build-context reconciliation and each side's
-            # resolved public surface on top of the pattern verdicts), so the
-            # evidence variants judge exactly what the CLI reports.
-            from abicheck.workflows.compare_policy import compare_snapshots
-
-            result = compare_snapshots(old, new, extra_changes=extra)
+        result = _judge(old, new)
     except AbicheckError as exc:
         return REFUSED, frozenset({type(exc).__name__})
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)
+
+
+def debug_evidence(snap: AbiSnapshot) -> str:
+    """What debug-info evidence the snapshot recorded, per channel.
+
+    A diagnostic for a failing cell: a DWARF-derived kind can only appear if
+    the snapshot carries the layout channel it reads.
+    """
+    from abicheck.model.debug_evidence import debug_info_evidence
+
+    ev = debug_info_evidence(snap)
+    return f"basic={ev.basic} advanced={ev.advanced} layout_content={ev.layout_content}"
+
+
+def function_findings(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, ...]:
+    """Each function-level finding (``FUNC_*``) as ``KIND symbol (qualified name)``.
+
+    A diagnostic for a failing cell only: it names the exact symbols abicheck
+    emitted, so a renamed thunk shows up as its removal plus its addition.
+    """
+    from abicheck.errors import AbicheckError
+
+    old, new = _projected(old, new)
+    try:
+        result = _judge(old, new)
+    except AbicheckError:
+        return ()
+    return tuple(
+        f"{c.kind.name} {c.symbol} ({c.qualified_name or c.description})"
+        for c in result.changes
+        if c.kind.name.startswith("FUNC_")
+    )
 
 
 def _build_data_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change] | None:

@@ -65,6 +65,7 @@ __all__ = [
     "CXX_TEMPLATE_DEFAULTS",
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
+    "MACHO_OBJECT_SIZES",
     "FINAL_MEMBER_FUNCTIONS",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
@@ -264,6 +265,57 @@ EXPORT_READ: ExtensionFact[dict[str, str]] = ExtensionFact(
     must_understand_when=lambda value: any(
         state in _EXPORT_READ_GAP_STATES for state in value.values()
     ),
+)
+
+
+def _macho_sizes_codec(value: Any) -> Any:
+    """``{"derived": bool | null, "sizes": [[index, size | null, closer | null], ...]}``.
+
+    *derived* is the Mach-O block's ``sizes_derived`` (null when never
+    recorded); each size row names an export by its position in the block's
+    export list, so a repeated name cannot make the mapping ambiguous.
+    """
+    if not isinstance(value, dict) or set(value) != {"derived", "sizes"}:
+        raise TypeError("macho_object_sizes must be {'derived', 'sizes'}")
+    derived = value["derived"]
+    if derived is not None and not isinstance(derived, bool):
+        raise TypeError("macho_object_sizes derived must be a bool or null")
+    if not isinstance(value["sizes"], list):
+        raise TypeError("macho_object_sizes sizes must be a list")
+    rows = []
+    for row in value["sizes"]:
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            raise ValueError("macho_object_sizes rows are [index, size, closer]")
+        index, size, closer = row
+        if not (isinstance(index, int) and not isinstance(index, bool) and index >= 0):
+            raise ValueError("macho_object_sizes index must be a non-negative int")
+        if size is not None and not (
+            isinstance(size, int) and not isinstance(size, bool) and size >= 0
+        ):
+            raise ValueError(
+                "macho_object_sizes size must be a non-negative int or null"
+            )
+        if closer is not None and not isinstance(closer, str):
+            raise ValueError("macho_object_sizes closer must be a string or null")
+        rows.append([index, size, closer])
+    return {"derived": derived, "sizes": rows}
+
+
+#: ADR-062 D19 extension fact: the Mach-O object-size derivation (ADR-062 WS-4).
+#: Carries the Mach-O block's derivation flag and the sizes it recorded. Absent,
+#: an older reader's sizes and flag stay None, so the layout detectors decline
+#: the Mach-O side as not evaluated rather than reading a clean zero.
+MACHO_OBJECT_SIZES: ExtensionFact[dict[str, Any]] = ExtensionFact(
+    name="abicheck.macho_object_sizes",
+    section="binary",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as=(
+        "not derived: the Mach-O object sizes were not derived for this image, "
+        "so the layout detectors decline its Mach-O side as not evaluated"
+    ),
+    owner="ADR-062",
+    encode=_macho_sizes_codec,
+    decode=_macho_sizes_codec,
 )
 
 
@@ -588,6 +640,7 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         CXX_TEMPLATE_DEFAULTS,
         EXPORT_READ,
         FINAL_MEMBER_FUNCTIONS,
+        MACHO_OBJECT_SIZES,
         NOEXCEPT_UNOBSERVED,
         STD_REEXPORTS,
         TYPEDEF_ORIGINS,

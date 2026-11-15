@@ -724,6 +724,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "alignment of a builtin variable is demoted across this boundary by "
         "policy/alignment_generation_drift (the exact LP64/ILP32 natural pair only)"
     ),
+    75: GenerationSpellingChange(
+        "WS-4 PR 1 (feat/ws4-macho-vtable-facts): Mach-O object sizes (_ZTV/_ZTI/_ZTT "
+        "spans, kept only when pointer fixups corroborate them) are stored as the "
+        "extension fact abicheck.macho_object_sizes. No type or name "
+        "spelling changes and no load-time rewrite; a snapshot without the fact reads "
+        "as not derived, and the layout gate declines the Mach-O side."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -92,6 +92,10 @@ class Outcome:
     verdict: str
     kinds: frozenset[str]
     failures: tuple[str, ...]
+    #: Function-level findings, named per symbol; filled only for a failing cell.
+    findings: tuple[str, ...] = ()
+    #: Per-side debug evidence and dSYM presence; filled only for a failing cell.
+    evidence: tuple[str, ...] = ()
 
 
 def label_toolchain(label: str) -> Toolchain:
@@ -231,8 +235,15 @@ def _compile_library(
     so = out_dir / LIB_NAME
     debug = "D" in config.evidence_set
     cmd = compile_cmd(config.producer, config.std, flags, debug=debug)
+    # A Mach-O debug link keeps DWARF in the object files it names (the debug
+    # map), and clang deletes those temporaries after a one-step link. So the
+    # units are compiled to objects that stay on disk, and dsymutil reads them.
+    macho_debug = debug and object_format() == "macho"
+    link_inputs = (
+        _compile_macho_objects(cmd, extra, out_dir, units) if macho_debug else units
+    )
     cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so)]
-    cmd += [str(u) for u in units]
+    cmd += [str(u) for u in link_inputs]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
     if sys.platform != "win32":
         cmd.append("-fPIC")
@@ -256,7 +267,8 @@ def _compile_library(
         # compiler runs in this process's cwd, so that is the directory the
         # commands' relative paths resolve against (out_dir may be relative).
         # One entry per translation unit, each the command compiling only it.
-        lead = [a for a in cmd if a not in {str(u) for u in units}]
+        linked = {str(u) for u in link_inputs}
+        lead = [a for a in cmd if a not in linked]
         entries = [
             {"directory": str(Path.cwd()), "file": str(u), "arguments": [*lead, str(u)]}
             for u in units
@@ -270,7 +282,46 @@ def _compile_library(
         )
     if not debug:
         strip_debug(so)
+    elif macho_debug:
+        make_dsym(so)
     return so
+
+
+def _compile_macho_objects(
+    base: list[str], extra: BuildArgs, out_dir: Path, units: list[Path]
+) -> list[Path]:
+    """Compile each translation unit to an object file that outlives the link."""
+    objects: list[Path] = []
+    for unit in units:
+        # Keyed by the unit's path under out_dir, so two units that share a
+        # basename in different directories keep distinct objects.
+        obj = out_dir / f"{unit.relative_to(out_dir)}.o"
+        obj.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [*base, *extra.cflags, "-c", "-fPIC", "-I", str(out_dir), str(unit)]
+        cmd += ["-o", str(obj)]
+        _check(
+            cmd,
+            subprocess.run(cmd, capture_output=True, text=True, check=False),
+            "compile",
+        )
+        objects.append(obj)
+    return objects
+
+
+def make_dsym(so: Path) -> Path:
+    """Collect a Mach-O debug-map link's DWARF into ``<so>.dSYM``, the bundle
+    abicheck resolves next to the dylib. A missing bundle is a build failure:
+    a cell that claims DWARF must not be checked without it."""
+    dsym = so.with_name(so.name + ".dSYM")
+    cmd = ["dsymutil", str(so), "-o", str(dsym)]
+    _check(
+        cmd,
+        subprocess.run(cmd, capture_output=True, text=True, check=False),
+        "dsymutil",
+    )
+    if not dsym.is_dir():
+        raise CompileError(f"dsymutil wrote no {dsym} for {so}")
+    return dsym
 
 
 def build(
@@ -416,10 +467,30 @@ def run_operator(
     old = cache.get(seed, cfg)
     new = build_new(op, seed, cfg, root)
     verdict, kinds = abicheck_answer(old, new)
+    failures = tuple(op.expect(cfg).problems(verdict, kinds))
+    if not failures:
+        return Outcome(verdict=verdict, kinds=kinds, failures=failures)
     return Outcome(
         verdict=verdict,
         kinds=kinds,
-        failures=tuple(op.expect(cfg).problems(verdict, kinds)),
+        failures=failures,
+        findings=checker.function_findings(old.snapshot, new.snapshot),
+        evidence=(_side_evidence("old", old), _side_evidence("new", new)),
+    )
+
+
+def _side_evidence(side: str, built: Built) -> str:
+    """One side's debug evidence in the snapshot, and whether its dSYM DWARF
+    file is on disk where the Mach-O debug resolver looks for it."""
+    dwarf_file = (
+        built.so.with_name(built.so.name + ".dSYM")
+        / "Contents/Resources/DWARF"
+        / built.so.name
+    )
+    state = "present" if dwarf_file.is_file() else "absent"
+    return (
+        f"{side}: {checker.debug_evidence(built.snapshot)}; "
+        f"dSYM DWARF {state} at {dwarf_file}"
     )
 
 

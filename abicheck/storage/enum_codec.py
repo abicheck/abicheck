@@ -42,6 +42,15 @@ def encode_platform_enums(d: dict[str, Any]) -> None:
         block = d.get(platform)
         if isinstance(block, dict):
             block.pop("export_read", None)
+    # Mach-O object sizes persist as the binary section's
+    # ``abicheck.macho_object_sizes`` extension fact (ADR-062 D19), so an older
+    # reader that lacks the fact reads them as not derived.
+    macho_block = d.get("macho")
+    if isinstance(macho_block, dict):
+        macho_block.pop("sizes_derived", None)
+        for exp in macho_block.get("exports", []):
+            exp.pop("size", None)
+            exp.pop("size_bound_by", None)
     if d.get("elf"):
         elf = d["elf"]
         for sym in elf.get("symbols", []):
