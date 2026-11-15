@@ -20,7 +20,7 @@ Whole entries moved unchanged from ``types_1.py`` (each gains only its
 
 from __future__ import annotations
 
-from .observability import observable
+from .observability import ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -38,6 +38,9 @@ _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
 
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
@@ -605,7 +608,7 @@ TYPES_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_DH,),
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "source_level_kind_changed",

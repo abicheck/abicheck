@@ -157,7 +157,7 @@ type_removed                     H
 typedef_removed                  H
 unspecified_return_now_named     H
 # -- types: binary facts (B) ----------------------------------------------
-rtti_inheritance_changed  DH  # diff_elf_layout.py:400-404: record-size shape uses typed sizes
+rtti_inheritance_changed  B:ELF  # diff_elf_layout.py:391-404: shape inferred from _ZTI symbol sizes alone (export-table fact); Mach-O left to #2068
 type_visibility_changed  DH  # compare/type_visibility.py:112-142: class-own-symbol visibility maps through typed class records
 type_vtable_changed  DH  # diff_types_vtable.py:350,579: vtable content from the typed vtable_fact (DWARF/header), not raw symbols
 vtable_slot_count_changed        B:ELF+MACHO
