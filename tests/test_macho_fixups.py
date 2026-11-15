@@ -21,18 +21,18 @@ BASES = [0x1000, 0x2000]  # segment 0 at 0x1000, segment 1 at 0x2000
 def test_rebase_set_offset_then_do_once() -> None:
     # SET_SEGMENT_AND_OFFSET(seg 0, offset 0x10); DO_REBASE_IMM_TIMES(1); DONE
     stream = bytes([0x20, 0x10, 0x51, 0x00])
-    assert decode_rebase_addresses(stream, BASES, 8) == [0x1010]
+    assert decode_rebase_addresses(stream, BASES, 8, 1000) == [0x1010]
 
 
 def test_rebase_do_uleb_times_advances_by_pointer_size() -> None:
     # SET(seg 1, offset 0x0); DO_ULEB_TIMES with count ULEB 3; DONE -> three words
     stream = bytes([0x21, 0x00, 0x60, 0x03, 0x00])
-    assert decode_rebase_addresses(stream, BASES, 8) == [0x2000, 0x2008, 0x2010]
+    assert decode_rebase_addresses(stream, BASES, 8, 1000) == [0x2000, 0x2008, 0x2010]
 
 
 def test_rebase_pointer_width_follows_the_slice() -> None:
     stream = bytes([0x20, 0x00, 0x52, 0x00])  # two slots
-    assert decode_rebase_addresses(stream, BASES, 4) == [0x1000, 0x1004]
+    assert decode_rebase_addresses(stream, BASES, 4, 1000) == [0x1000, 0x1004]
 
 
 @pytest.mark.parametrize(
@@ -42,38 +42,38 @@ def test_rebase_pointer_width_follows_the_slice() -> None:
     ],
 )
 def test_rebase_stream_without_done_is_still_read(stream: bytes) -> None:
-    assert decode_rebase_addresses(stream, BASES, 8) == [0x1000]
+    assert decode_rebase_addresses(stream, BASES, 8, 1000) == [0x1000]
 
 
 def test_bind_do_bind_names_the_bound_slot() -> None:
     # SET_DYLIB_ORDINAL_IMM(1); SET_SYMBOL "_x"; SET_SEGMENT_AND_OFFSET(seg 0, 0x8);
     # DO_BIND; DONE
     stream = bytes([0x11, 0x40]) + b"_x\x00" + bytes([0x70 | 0x0, 0x08, 0x90, 0x00])
-    assert decode_bind_addresses(stream, BASES, 8) == [0x1008]
+    assert decode_bind_addresses(stream, BASES, 8, 1000) == [0x1008]
 
 
 def test_bind_add_addr_then_do_bind_skips_one_word() -> None:
     # SET(seg 0, 0x0); DO_BIND_ADD_ADDR_ULEB(0x8) -> bind at 0x0, next slot at 0x10
     stream = bytes([0x70, 0x00, 0xA0, 0x08, 0x90, 0x00])
-    assert decode_bind_addresses(stream, BASES, 8) == [0x1000, 0x1010]
+    assert decode_bind_addresses(stream, BASES, 8, 1000) == [0x1000, 0x1010]
 
 
 def test_unknown_opcode_yields_no_fixup_list() -> None:
     # 0xF0 is not a rebase opcode: the stream is undecodable -> None, never "no fixups".
     image = bytes([0xF0, 0x00])
-    assert fixup_addresses(image, BASES, 8, rebase=(0, 2), binds=[]) is None
+    assert fixup_addresses(image, BASES, 8, rebase=(0, 2), binds=[], limit=1000) is None
 
 
 def test_truncated_uleb_is_undecodable() -> None:
     image = bytes([0x20, 0x80])  # offset ULEB continues past the stream end
-    assert fixup_addresses(image, BASES, 8, rebase=(0, 2), binds=[]) is None
+    assert fixup_addresses(image, BASES, 8, rebase=(0, 2), binds=[], limit=1000) is None
 
 
 def test_segment_index_outside_the_image_is_undecodable() -> None:
     image = bytes([0x25, 0x00, 0x51, 0x00])  # segment 5 does not exist
     with pytest.raises(FixupDecodeError):
-        decode_rebase_addresses(image, BASES, 8)
-    assert fixup_addresses(image, BASES, 8, rebase=(0, 4), binds=[]) is None
+        decode_rebase_addresses(image, BASES, 8, 1000)
+    assert fixup_addresses(image, BASES, 8, rebase=(0, 4), binds=[], limit=1000) is None
 
 
 def test_fixup_addresses_combines_rebase_and_bind_streams() -> None:
@@ -81,7 +81,12 @@ def test_fixup_addresses_combines_rebase_and_bind_streams() -> None:
     bind = bytes([0x70, 0x08, 0x90, 0x00])  # bind at 0x1008 (segment 0)
     image = rebase + bind
     got = fixup_addresses(
-        image, BASES, 8, rebase=(0, len(rebase)), binds=[(len(rebase), len(bind))]
+        image,
+        BASES,
+        8,
+        rebase=(0, len(rebase)),
+        binds=[(len(rebase), len(bind))],
+        limit=1000,
     )
     assert got == frozenset({0x1000, 0x1008})
 
@@ -113,7 +118,9 @@ def _chained_case(groups, slots, *, pointer_format=2):
 
 
 def _decode(image, segments, blob_size, *, text_base=_TEXT_BASE):
-    return decode_chained_fixup_addresses(image, 0, blob_size, segments, text_base)
+    return decode_chained_fixup_addresses(
+        image, 0, blob_size, segments, text_base, limit=1000
+    )
 
 
 _DATA = [("__DATA", _SEG_VM, _SEG_VM + _SEG_SIZE)]
@@ -165,7 +172,7 @@ def test_chained_multi_start_page_is_walked_from_every_start() -> None:
     image[fileoff + 0x018 : fileoff + 0x020] = bytes(8)
     image[fileoff + 0x200 : fileoff + 0x208] = bytes(8)
     got = decode_chained_fixup_addresses(
-        bytes(image), 0, len(blob), [(seg_vm, fileoff, 0x1000)], _TEXT_BASE
+        bytes(image), 0, len(blob), [(seg_vm, fileoff, 0x1000)], _TEXT_BASE, limit=1000
     )
     assert got == frozenset({0x1010, 0x1018, 0x1200})
 
@@ -175,7 +182,7 @@ def test_unknown_pointer_format_is_undecodable_not_empty() -> None:
     blob, _ = chained_image(_DATA, [0x1008], pointer_format=2)
     corrupt = bytearray(image)
     # The format is the u16 at starts_in_segment + 6; the table starts at 28+8.
-    fmt_at = 28 + 8 + 4 + 6
+    fmt_at = 28 + 8 + 6
     corrupt[fmt_at : fmt_at + 2] = (5).to_bytes(
         2, "little"
     )  # DYLD_CHAINED_PTR_32_FIRMWARE
@@ -193,4 +200,50 @@ def test_chain_that_leaves_its_page_is_undecodable() -> None:
 
 def test_truncated_blob_is_undecodable() -> None:
     image, segments = _chained_case(_DATA, [0x1008])
-    assert decode_chained_fixup_addresses(image, 0, 10, segments, _TEXT_BASE) is None
+    assert (
+        decode_chained_fixup_addresses(image, 0, 10, segments, _TEXT_BASE, limit=1000)
+        is None
+    )
+
+
+def test_classic_range_past_the_image_is_undecodable_not_a_short_stream() -> None:
+    # Declared 100 bytes, image holds 3: a short prefix must not decode.
+    image = bytes([0x20, 0x00, 0x51])
+    assert (
+        fixup_addresses(image, BASES, 8, rebase=(0, 100), binds=[], limit=1000) is None
+    )
+
+
+def test_classic_stream_claiming_more_fixups_than_the_segments_hold_is_undecodable() -> (
+    None
+):
+    # A 5-byte ULEB count of 2**32 rebases: refused before any address is built.
+    stream = bytes([0x20, 0x00, 0x60]) + _uleb(1 << 32) + bytes([0x00])
+    assert (
+        fixup_addresses(stream, BASES, 8, rebase=(0, len(stream)), binds=[], limit=16)
+        is None
+    )
+
+
+def _uleb(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def test_truncated_chained_starts_table_is_undecodable_not_no_fixups() -> None:
+    # A 28-byte header claiming a starts table at 28 with a segment count the
+    # blob cannot hold: unknown, never an empty fixup set.
+    blob = bytes(4) + (28).to_bytes(4, "little") + bytes(20)
+    assert (
+        decode_chained_fixup_addresses(
+            blob, 0, len(blob), [(0x1000, 0, 0x1000)], 0x1000, limit=1000
+        )
+        is None
+    )

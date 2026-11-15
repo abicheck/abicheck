@@ -89,8 +89,8 @@ def test_real_dylib_object_sizes_match_the_itanium_layout(
     if stripped:
         subprocess.run(["strip", "-x", str(lib)], check=True)
     sizes = _sizes(lib)
-    assert sizes.get("ZTV4Base") == 32, sizes
-    assert sizes.get("ZTI4Base") == 16, sizes
+    assert sizes.get("_ZTV4Base") == 32, sizes
+    assert sizes.get("_ZTI4Base") == 16, sizes
 
 
 @pytest.mark.parametrize("encoding", sorted(_ENCODINGS))
@@ -99,8 +99,8 @@ def test_vtable_growth_on_real_dylibs_is_a_slot_change(
 ) -> None:
     old = _build(_V1, tmp_path / "old" / "libbase.dylib", _ENCODINGS[encoding])
     new = _build(_V2, tmp_path / "new" / "libbase.dylib", _ENCODINGS[encoding])
-    assert _sizes(old)["ZTV4Base"] == 32
-    assert _sizes(new)["ZTV4Base"] == 40
+    assert _sizes(old)["_ZTV4Base"] == 32
+    assert _sizes(new)["_ZTV4Base"] == 40
     cmp = subprocess.run(
         abicheck_command("compare", str(old), str(new)),
         capture_output=True,

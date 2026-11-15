@@ -589,11 +589,13 @@ def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | 
     size = int(getattr(header, "size", 0)) or (os.path.getsize(dylib_path) - start)
     image = dylib_path.read_bytes()[start : start + size]
     segments: list[tuple[int, int, int]] = []  # (vmaddr, fileoff, filesize)
+    in_memory = 0  # total vmsize: every fixup lies inside some segment
     text_base: int | None = None
     for lc, cmd, _data in header.commands:
         if lc.cmd not in (LC_SEGMENT, LC_SEGMENT_64):
             continue
         segments.append((int(cmd.vmaddr), int(cmd.fileoff), int(cmd.filesize)))
+        in_memory += int(cmd.vmsize)
         if text_base is None and bytes(cmd.segname).rstrip(b"\0") == b"__TEXT":
             text_base = int(cmd.vmaddr)
     chained = [
@@ -605,7 +607,12 @@ def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | 
         base = text_base if text_base is not None else segments[0][0]
         cmd = chained[0]
         return decode_chained_fixup_addresses(
-            image, int(cmd.dataoff), int(cmd.datasize), segments, base
+            image,
+            int(cmd.dataoff),
+            int(cmd.datasize),
+            segments,
+            base,
+            limit=in_memory // 8,
         )
     dyld = [
         cmd
@@ -626,6 +633,7 @@ def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | 
             (int(cmd.bind_off), int(cmd.bind_size)),
             (int(cmd.weak_bind_off), int(cmd.weak_bind_size)),
         ],
+        limit=in_memory // pointer_size,
     )
 
 
@@ -712,7 +720,10 @@ def _parse_macho_symbols(
             )
         # Set after the whole export loop: a failure part-way leaves the flag
         # unset, so the layout gate refuses the snapshot (MachoMetadata.sizes_derived).
-        meta.sizes_derived = True
+        # Only with decoded fixups: undecodable fixups keep no sizes, so the
+        # derivation must not read as having run, and the layout gate refuses.
+        if fixups is not None:
+            meta.sizes_derived = True
     except Exception as exc:  # noqa: BLE001
         # SymbolTable may fail on binaries without LC_SYMTAB (stripped, .tbd stubs, etc.)
         log.debug(

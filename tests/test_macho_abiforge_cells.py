@@ -58,9 +58,10 @@ def test_macho_cell_meets_its_strict_expectation(
     gap = capability_gap(op, cfg)
     if gap:
         pytest.skip(gap)
-    backend_gap = header_backend_unavailable("clang", seed.lang)
-    if backend_gap:
-        pytest.skip(backend_gap)
+    if evidence == "headers":
+        backend_gap = header_backend_unavailable("clang", seed.lang)
+        if backend_gap:
+            pytest.skip(backend_gap)
     outcome = run_operator(
         op,
         seed,

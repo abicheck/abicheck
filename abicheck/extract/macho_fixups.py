@@ -12,22 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pointer fixup locations of a Mach-O image, decoded from classic dyld info.
+"""Pointer fixup locations of a Mach-O image.
 
-A pointer that the loader must rewrite (a *rebase*: an address inside the image)
-or resolve (a *bind*: an imported symbol) is recorded by the rebase and bind
-opcode streams of ``LC_DYLD_INFO`` / ``LC_DYLD_INFO_ONLY``. Each fixup records
-the address of one pointer-sized slot, so the number of fixups inside an object
-is independent evidence of its layout: an object whose span holds exactly as
-many pointer slots as the span implies is one the linker wrote as pointers.
+A pointer that the loader must rewrite (a *rebase*), resolve (a *bind*), or
+link through (a *chained* fixup) is a fixup. Only the *locations* of fixups
+are decoded: each names one pointer-sized slot. The count of fixups inside an
+object is independent evidence of its layout (see ``corroborate_object_sizes``).
 
-Only the classic encodings are decoded here. ``LC_DYLD_CHAINED_FIXUPS`` (the
-chained format) is not decoded, so an image that carries it has no fixup list:
-callers must treat that as "unknown", never as "no fixups".
+Two encodings are decoded:
+
+* classic: the rebase and bind opcode streams of ``LC_DYLD_INFO_ONLY``;
+* chained: the starts tables of ``LC_DYLD_CHAINED_FIXUPS``.
+
+Every decoder returns ``None`` for input it cannot fully decode: a stream or
+table that runs past its bytes, an unknown opcode or pointer format, a chain
+that leaves its page, or more fixups than the image's segments can hold. ``None``
+is "unknown", never "no fixups".
 """
 
 from __future__ import annotations
 
+import struct
 from collections.abc import Sequence
 
 _REBASE_DONE = 0x00
@@ -72,18 +77,14 @@ def _uleb(data: bytes, pos: int) -> tuple[int, int]:
         shift += 7
 
 
-def _sleb(data: bytes, pos: int) -> int:
-    value = shift = 0
+def _skip_sleb(data: bytes, pos: int) -> int:
     while True:
         if pos >= len(data):
             raise FixupDecodeError("SLEB128 runs past the end of the stream")
         byte = data[pos]
         pos += 1
-        value |= (byte & 0x7F) << shift
-        shift += 7
         if not byte & 0x80:
-            return value
-        # Only the position is needed here; the value is not used.
+            return pos
 
 
 def _address(bases: Sequence[int], seg: int, offset: int) -> int:
@@ -92,8 +93,15 @@ def _address(bases: Sequence[int], seg: int, offset: int) -> int:
     return bases[seg] + offset
 
 
+def _emit(out: list[int], addr: int, count: int, limit: int) -> None:
+    """Append *count* copies stepping by nothing: one fixup per call, bounded."""
+    if len(out) + count > limit:
+        raise FixupDecodeError("more fixups than the image's segments can hold")
+    out.extend([addr] * count)
+
+
 def decode_rebase_addresses(
-    data: bytes, segment_bases: Sequence[int], pointer_size: int
+    data: bytes, segment_bases: Sequence[int], pointer_size: int, limit: int
 ) -> list[int]:
     """Addresses of every rebased pointer slot in a classic rebase stream."""
     out: list[int] = []
@@ -118,22 +126,22 @@ def decode_rebase_addresses(
             offset += imm * pointer_size
         elif code == _REBASE_DO_IMM_TIMES:
             for _ in range(imm):
-                out.append(_address(segment_bases, seg, offset))
+                _emit(out, _address(segment_bases, seg, offset), 1, limit)
                 offset += pointer_size
         elif code == _REBASE_DO_ULEB_TIMES:
             count, pos = _uleb(data, pos)
             for _ in range(count):
-                out.append(_address(segment_bases, seg, offset))
+                _emit(out, _address(segment_bases, seg, offset), 1, limit)
                 offset += pointer_size
         elif code == _REBASE_DO_ADD_ADDR_ULEB:
-            out.append(_address(segment_bases, seg, offset))
+            _emit(out, _address(segment_bases, seg, offset), 1, limit)
             value, pos = _uleb(data, pos)
             offset += pointer_size + value
         elif code == _REBASE_DO_ULEB_TIMES_SKIPPING_ULEB:
             count, pos = _uleb(data, pos)
             skip, pos = _uleb(data, pos)
             for _ in range(count):
-                out.append(_address(segment_bases, seg, offset))
+                _emit(out, _address(segment_bases, seg, offset), 1, limit)
                 offset += pointer_size + skip
         else:
             raise FixupDecodeError(f"unknown rebase opcode 0x{op:02x}")
@@ -141,7 +149,7 @@ def decode_rebase_addresses(
 
 
 def decode_bind_addresses(
-    data: bytes, segment_bases: Sequence[int], pointer_size: int
+    data: bytes, segment_bases: Sequence[int], pointer_size: int, limit: int
 ) -> list[int]:
     """Addresses of every bound pointer slot in a classic (or weak) bind stream."""
     out: list[int] = []
@@ -154,7 +162,7 @@ def decode_bind_addresses(
         code, imm = op & 0xF0, op & 0x0F
         if code == _BIND_DONE:
             break
-        if code == _BIND_SET_DYLIB_ORDINAL_IMM or code == _BIND_SET_TYPE_IMM:
+        if code in (_BIND_SET_DYLIB_ORDINAL_IMM, _BIND_SET_TYPE_IMM):
             continue
         if code == _BIND_SET_DYLIB_ORDINAL_ULEB:
             _, pos = _uleb(data, pos)
@@ -166,7 +174,6 @@ def decode_bind_addresses(
                 raise FixupDecodeError("symbol name runs past the end of the stream")
             pos = end + 1
         elif code == _BIND_SET_ADDEND_SLEB:
-            _sleb(data, pos)
             pos = _skip_sleb(data, pos)
         elif code == _BIND_SET_SEGMENT_AND_OFFSET_ULEB:
             seg = imm
@@ -175,34 +182,24 @@ def decode_bind_addresses(
             value, pos = _uleb(data, pos)
             offset += value
         elif code == _BIND_DO_BIND:
-            out.append(_address(segment_bases, seg, offset))
+            _emit(out, _address(segment_bases, seg, offset), 1, limit)
             offset += pointer_size
         elif code == _BIND_DO_BIND_ADD_ADDR_ULEB:
-            out.append(_address(segment_bases, seg, offset))
+            _emit(out, _address(segment_bases, seg, offset), 1, limit)
             value, pos = _uleb(data, pos)
             offset += pointer_size + value
         elif code == _BIND_DO_BIND_ADD_ADDR_IMM_SCALED:
-            out.append(_address(segment_bases, seg, offset))
+            _emit(out, _address(segment_bases, seg, offset), 1, limit)
             offset += pointer_size + imm * pointer_size
         elif code == _BIND_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
             count, pos = _uleb(data, pos)
             skip, pos = _uleb(data, pos)
             for _ in range(count):
-                out.append(_address(segment_bases, seg, offset))
+                _emit(out, _address(segment_bases, seg, offset), 1, limit)
                 offset += pointer_size + skip
         else:
             raise FixupDecodeError(f"unknown bind opcode 0x{op:02x}")
     return out
-
-
-def _skip_sleb(data: bytes, pos: int) -> int:
-    while True:
-        if pos >= len(data):
-            raise FixupDecodeError("SLEB128 runs past the end of the stream")
-        byte = data[pos]
-        pos += 1
-        if not byte & 0x80:
-            return pos
 
 
 def fixup_addresses(
@@ -212,25 +209,30 @@ def fixup_addresses(
     *,
     rebase: tuple[int, int] | None,
     binds: Sequence[tuple[int, int]],
+    limit: int,
 ) -> frozenset[int] | None:
     """Every rebase and bind slot address, or ``None`` if any stream is undecodable.
 
     *rebase* and *binds* are ``(file_offset, size)`` pairs relative to the start
-    of the image slice; *segment_bases* are the segments' virtual addresses in
-    load-command order. ``None`` is "unknown", never "no fixups".
+    of the image slice. A range that runs past the image's bytes is undecodable,
+    not a shorter stream. *limit* bounds the fixup count (the image's segment
+    bytes divided by the pointer size): a stream that claims more is undecodable.
     """
-    addresses: set[int] = set()
+    ranges = [r for r in ([rebase] if rebase else []) + list(binds) if r[1]]
+    if any(off + size > len(image) for off, size in ranges):
+        return None
+    addresses: list[int] = []
     try:
         if rebase is not None and rebase[1]:
             stream = image[rebase[0] : rebase[0] + rebase[1]]
-            addresses.update(
-                decode_rebase_addresses(stream, segment_bases, pointer_size)
+            addresses += decode_rebase_addresses(
+                stream, segment_bases, pointer_size, limit
             )
         for off, size in binds:
             if size:
                 stream = image[off : off + size]
-                addresses.update(
-                    decode_bind_addresses(stream, segment_bases, pointer_size)
+                addresses += decode_bind_addresses(
+                    stream, segment_bases, pointer_size, limit - len(addresses)
                 )
     except FixupDecodeError:
         return None
@@ -254,6 +256,9 @@ _CHAINED_START_NONE = 0xFFFF
 _CHAINED_START_MULTI = 0x8000
 _CHAINED_START_LAST = 0x8000
 _CHAINED_OFFSET_MASK = 0x7FFF
+_STARTS_IN_SEGMENT_HEADER = (
+    22  # size u32, page_size u16, format u16, offset u64, max u32, count u16
+)
 
 
 def _read_vm(
@@ -280,20 +285,22 @@ def decode_chained_fixup_addresses(
     blob_size: int,
     segments: Sequence[tuple[int, int, int]],
     text_base: int,
+    *,
+    limit: int,
 ) -> frozenset[int] | None:
     """Every fixup location of an ``LC_DYLD_CHAINED_FIXUPS`` blob, or None.
 
     The blob is ``dyld_chained_fixups_header`` followed by the starts tables.
-    Only the *locations* of fixups are decoded: each chain is walked from its
-    page start through the ``next`` links, and every visited pointer slot is a
-    fixup. Targets and imports are not needed. ``None`` means the blob could
-    not be decoded (absent, truncated, a pointer format this decoder does not
-    know, a chain that leaves its page, or a broken link); it is never "no
-    fixups".
+    Each chain is walked from its page start through the ``next`` links, and
+    every visited pointer slot is a fixup. Targets and imports are not needed.
+    ``None`` means the blob could not be fully decoded (absent, truncated, a
+    pointer format this decoder does not know, a chain that leaves its page or
+    is not in the file, or more fixups than the segments can hold); it is never
+    "no fixups".
     """
     try:
-        return _decode_chained(image, blob_off, blob_size, segments, text_base)
-    except (FixupDecodeError, IndexError, ValueError):
+        return _decode_chained(image, blob_off, blob_size, segments, text_base, limit)
+    except (FixupDecodeError, IndexError, ValueError, struct.error):
         return None
 
 
@@ -303,37 +310,39 @@ def _decode_chained(
     blob_size: int,
     segments: Sequence[tuple[int, int, int]],
     text_base: int,
+    limit: int,
 ) -> frozenset[int] | None:
     blob = image[blob_off : blob_off + blob_size]
-    if len(blob) < 28 or blob_size == 0:
+    if blob_size == 0 or len(blob) != blob_size or len(blob) < 8:
         return None
-    starts_off = int.from_bytes(blob[4:8], "little")
-    seg_count = int.from_bytes(blob[starts_off : starts_off + 4], "little")
+    starts_off = struct.unpack_from("<I", blob, 4)[0]
+    if starts_off + 4 > len(blob):
+        return None
+    seg_count = struct.unpack_from("<I", blob, starts_off)[0]
+    if starts_off + 4 + 4 * seg_count > len(blob):
+        return None
     out: set[int] = set()
     for index in range(seg_count):
-        entry = starts_off + 4 + 4 * index
-        seg_info = int.from_bytes(blob[entry : entry + 4], "little")
+        seg_info = struct.unpack_from("<I", blob, starts_off + 4 + 4 * index)[0]
         if seg_info == 0:
             continue
         base = starts_off + seg_info
-        size = int.from_bytes(blob[base : base + 4], "little")
-        page_size = int.from_bytes(blob[base + 4 : base + 6], "little")
-        pointer_format = int.from_bytes(blob[base + 6 : base + 8], "little")
-        segment_offset = int.from_bytes(blob[base + 8 : base + 16], "little")
-        page_count = int.from_bytes(blob[base + 20 : base + 22], "little")
+        if base + _STARTS_IN_SEGMENT_HEADER > len(blob):
+            return None
+        size, page_size, pointer_format, segment_offset = struct.unpack_from(
+            "<IHHQ", blob, base
+        )
+        page_count = struct.unpack_from("<H", blob, base + 20)[0]
         if pointer_format not in _CHAINED_FORMATS or page_size == 0:
             return None
+        if base + size > len(blob) or size < _STARTS_IN_SEGMENT_HEADER:
+            return None
         stride, shift, width = _CHAINED_FORMATS[pointer_format]
-        starts_array = base + 22
-        array_len = (size - 22) // 2
+        starts_array = base + _STARTS_IN_SEGMENT_HEADER
+        array_len = (size - _STARTS_IN_SEGMENT_HEADER) // 2
         if page_count > array_len:
             return None
-        starts = [
-            int.from_bytes(
-                blob[starts_array + 2 * i : starts_array + 2 * i + 2], "little"
-            )
-            for i in range(array_len)
-        ]
+        starts = struct.unpack_from(f"<{array_len}H", blob, starts_array)
         seg_base = text_base + segment_offset
         for page in range(page_count):
             start = starts[page]
@@ -343,25 +352,26 @@ def _decode_chained(
             if start & _CHAINED_START_MULTI:
                 # Several chains on this page: the overflow list holds one start
                 # per chain, the last one flagged with the LAST bit.
-                index = start & _CHAINED_OFFSET_MASK
+                index_ = start & _CHAINED_OFFSET_MASK
                 while True:
-                    if index >= array_len:
+                    if index_ >= array_len:
                         return None
-                    entry_val = starts[index]
+                    entry = starts[index_]
                     _walk_chain(
                         image,
                         segments,
                         page_vm,
                         page_size,
-                        page_vm + (entry_val & _CHAINED_OFFSET_MASK),
+                        page_vm + (entry & _CHAINED_OFFSET_MASK),
                         stride,
                         shift,
                         width,
                         out,
+                        limit,
                     )
-                    if entry_val & _CHAINED_START_LAST:
+                    if entry & _CHAINED_START_LAST:
                         break
-                    index += 1
+                    index_ += 1
             else:
                 _walk_chain(
                     image,
@@ -373,6 +383,7 @@ def _decode_chained(
                     shift,
                     width,
                     out,
+                    limit,
                 )
     return frozenset(out)
 
@@ -387,6 +398,7 @@ def _walk_chain(
     shift: int,
     width: int,
     out: set[int],
+    limit: int,
 ) -> None:
     """Follow one chain from *loc*, adding every slot to *out*."""
     page_end = page_vm + page_size
@@ -397,6 +409,8 @@ def _walk_chain(
         if value is None:
             raise FixupDecodeError("chain slot is not in the file")
         out.add(loc)
+        if len(out) > limit:
+            raise FixupDecodeError("more fixups than the image's segments can hold")
         nxt = (value >> shift) & ((1 << width) - 1)
         if nxt == 0:
             return
