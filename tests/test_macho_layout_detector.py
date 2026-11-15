@@ -33,7 +33,13 @@ from abicheck.model import AbiSnapshot
 from abicheck.model.macho_facts import MachoMetadata
 from abicheck.serialization import load_snapshot
 from abicheck.storage.snapshot_codec import save_snapshot
-from tests._macho_synthetic import N_EXT, N_SECT, MachoSymbol, write_dylib
+from tests._macho_synthetic import (
+    N_EXT,
+    N_SECT,
+    MachoSymbol,
+    rebase_stream,
+    write_dylib,
+)
 
 _TEXT = ("__TEXT", "__text", 0x3000, 0x40)
 
@@ -55,12 +61,26 @@ def _elf_snap(*symbols: ElfSymbol) -> AbiSnapshot:
     )
 
 
+def _vtable_fixups(vtable_size: int, encoding: str) -> dict:
+    """Fixup encoding for a ``_ZTV4Base`` at 0x1000 of *vtable_size* bytes.
+
+    Every pointer word but offset-to-top (the first) is relocated, so the
+    classic stream names ``size // 8 - 1`` slots. ``chained`` declares chained
+    fixups, which the reader does not decode, so the vtable gets no size.
+    """
+    if encoding == "chained":
+        return {"chained_fixups": True}
+    slots = [0x1000 + 8 * k for k in range(1, vtable_size // 8)]
+    return {"rebase_stream": rebase_stream(0, 0x1000, slots)}
+
+
 def _vtable_macho(
     tmp: Path,
     name: str,
     vtable_size: int,
     extra: list[MachoSymbol] | tuple[()] = (),
     sections=None,
+    encoding: str = "classic",
 ) -> Path:
     """A dylib whose ``_ZTV4Base`` is closed by ``_ZTI4Base`` at +vtable_size.
 
@@ -80,7 +100,9 @@ def _vtable_macho(
         ("__DATA_CONST", "__vtable", 0x1000, vtable_size + 0x20),
         _TEXT,
     ]
-    return write_dylib(tmp / name, syms, sections=secs)
+    return write_dylib(
+        tmp / name, syms, sections=secs, **_vtable_fixups(vtable_size, encoding)
+    )
 
 
 def _kinds(changes) -> list[str]:
@@ -234,6 +256,9 @@ def test_typeinfo_growing_a_base_is_reported_on_macho(tmp_path: Path) -> None:
                     MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x2000 + size),
                 ],
                 sections=[("__DATA_CONST", "__typeinfo", 0x2000, size + 0x8)],
+                rebase_stream=rebase_stream(
+                    0, 0x2000, [0x2000 + 8 * k for k in range(size // 8)]
+                ),
             )
         )
 
@@ -367,3 +392,44 @@ def test_a_failure_part_way_through_the_export_list_leaves_derivation_unrecorded
     supported, reason = _layout_support(snap, snap)
     assert supported is False
     assert "not derived" in reason
+
+
+# ── unlabelled data before a shared closer (false-break regression) ─────────
+
+
+def _blob_snapshot(path: Path, blob: int, encoding: str) -> AbiSnapshot:
+    """A 40-byte vtable at 0x1000 (unchanged), *blob* unlabelled bytes after it,
+    then the typeinfo closer ``_ZTI4Base`` shared by both versions."""
+    vtable = 0x28
+    fixups = _vtable_fixups(vtable, encoding)
+    lib = write_dylib(
+        path,
+        [
+            MachoSymbol("__ZTV4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000),
+            MachoSymbol(
+                "__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000 + vtable + blob
+            ),
+        ],
+        sections=[("__DATA_CONST", "__vtable", 0x1000, vtable + blob + 0x18)],
+        **fixups,
+    )
+    return AbiSnapshot(
+        library="libb.dylib",
+        version="1",
+        platform="macho",
+        macho=parse_macho_metadata(lib),
+    )
+
+
+@pytest.mark.parametrize("encoding", ["classic", "chained"])
+@pytest.mark.parametrize("old_blob,new_blob", [(0x8, 0x10), (0x0, 0x8), (0x10, 0x20)])
+def test_unlabelled_blob_before_closer_is_not_a_slot_change(
+    tmp_path, encoding, old_blob, new_blob
+):
+    """The vtable is 40 bytes in both versions; only unlabelled data between it
+    and the shared closer changes. The span must not be read as the vtable's
+    size, so no VTABLE_SLOT_COUNT_CHANGED is reported on the unchanged vtable."""
+    old = _blob_snapshot(tmp_path / "o.dylib", old_blob, encoding)
+    new = _blob_snapshot(tmp_path / "n.dylib", new_blob, encoding)
+    kinds = [c.kind.name for c in _diff_elf_layout(old, new)]
+    assert "VTABLE_SLOT_COUNT_CHANGED" not in kinds

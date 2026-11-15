@@ -186,7 +186,8 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_object_sizes.py": "5d33870738c772c5a007575f6384d13695a47317e1f3ba17be478afcb1aee581",
+      "abicheck/extract/macho_fixups.py": "ddbf46357aa86840759b40be8fb27d558deccc9695e9c0271548051b3952a415",
+      "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
       "abicheck/extract/member_identity.py": "9045a480f6715aa8e3242b147c88eed503566487a49b7ecc6c57209aabbab102",
@@ -221,7 +222,7 @@
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
       "abicheck/header_utils.py": "05efbcfa5999722c6651f0802449aad5c20888c0465ab5aa43ee5e872a02586f",
-      "abicheck/macho_metadata.py": "06d2bc645c031193d2c0248710036228624f21df70edb6811053d33028415cc7",
+      "abicheck/macho_metadata.py": "f468197b6519c450b1b8e244d7c057725bf6b266cf3fd16c3dcb70bab202a8a0",
       "abicheck/model/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
       "abicheck/pdb_metadata.py": "d9e3674206483d001ebfd2853748b657a33d1f36cf9c99d63ed4c7a9669cf353",
       "abicheck/pdb_model.py": "c42cf25e4e3bd4d098575989cec9de94ab9795e171dde08e7b9a93d155a7ebe8",
@@ -232,9 +233,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4d803e94122d209302f700e8e9293d89a3c9d388f6a4541a35d60961183d3f83",
+    "fingerprint": "f5b62da14297e04098fc8aa092be65f73666a19fd97a3a2a84bcad7efdb86a1b",
     "generation": 72,
-    "reason": "same unreleased generation 72: flag set after the full export loop, closer label taken from the index bisect already found, and a migration that keeps header fields; no fact a successful parse records changes"
+    "reason": "Unreleased generation 72 (this PR's single bump over main's 71): refines the same generation's Mach-O size derivation before merge (corroboration by rebase/bind fixups); no packages exist at 72 outside this PR"
   },
   "resolver": {
     "files": {

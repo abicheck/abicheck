@@ -37,6 +37,8 @@ _MH_DYLIB = 6
 _LC_SEGMENT_64 = 0x19
 _LC_SYMTAB = 0x2
 _LC_DYLD_EXPORTS_TRIE = 0x80000033
+_LC_DYLD_INFO_ONLY = 0x80000022
+_LC_DYLD_CHAINED_FIXUPS = 0x80000034
 
 
 @dataclass(frozen=True)
@@ -183,8 +185,16 @@ def write_dylib(
     *,
     export_trie: Sequence[tuple[str, int]] | None = None,
     sections: Sequence[SectionSpec] | None = None,
+    rebase_stream: bytes | None = None,
+    bind_stream: bytes | None = None,
+    chained_fixups: bool = False,
 ) -> Path:
     """Write a dylib whose symbol table holds *symbols* and return *path*.
+
+    *rebase_stream* / *bind_stream* are classic dyld opcode streams; either one
+    makes the image carry an LC_DYLD_INFO_ONLY command. *chained_fixups* adds
+    an LC_DYLD_CHAINED_FIXUPS command with no data, which the reader treats as
+    "fixups not decoded".
 
     With *export_trie* (``(name, flags)`` pairs, names with the leading
     underscore) the image also carries an LC_DYLD_EXPORTS_TRIE listing them;
@@ -204,18 +214,51 @@ def write_dylib(
         )
     segment, segment_count = _segment_commands(sections)
     trie_cmd_size = 16 if export_trie is not None else 0
+    has_dyld_info = rebase_stream is not None or bind_stream is not None
+    dyld_cmd_size = 48 if has_dyld_info else 0
+    chained_cmd_size = 16 if chained_fixups else 0
     header_size = 32
-    symtab_off = header_size + len(segment) + 24 + trie_cmd_size
+    symtab_off = (
+        header_size
+        + len(segment)
+        + 24
+        + trie_cmd_size
+        + dyld_cmd_size
+        + chained_cmd_size
+    )
     stroff = symtab_off + 16 * len(entries)
     symtab = struct.pack(
         "<IIIIII", _LC_SYMTAB, 24, symtab_off, len(entries), stroff, len(strtab)
     )
     trie = build_export_trie(export_trie) if export_trie is not None else b""
     trie_off = stroff + len(strtab)
+    rebase_b = rebase_stream or b""
+    bind_b = bind_stream or b""
+    data_base = trie_off + len(trie)
     commands = segment + symtab
     ncmds = segment_count + 1
     if export_trie is not None:
         commands += struct.pack("<IIII", _LC_DYLD_EXPORTS_TRIE, 16, trie_off, len(trie))
+        ncmds += 1
+    if has_dyld_info:
+        commands += struct.pack(
+            "<12I",
+            _LC_DYLD_INFO_ONLY,
+            48,
+            data_base if rebase_b else 0,
+            len(rebase_b),
+            data_base + len(rebase_b) if bind_b else 0,
+            len(bind_b),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,  # weak/lazy bind and export: none
+        )
+        ncmds += 1
+    if chained_fixups:
+        commands += struct.pack("<IIII", _LC_DYLD_CHAINED_FIXUPS, 16, data_base, 0)
         ncmds += 1
     header = struct.pack(
         "<IIIIIIII",
@@ -228,5 +271,31 @@ def write_dylib(
         0,  # flags
         0,  # reserved
     )
-    path.write_bytes(header + commands + b"".join(entries) + bytes(strtab) + trie)
+    path.write_bytes(
+        header + commands + b"".join(entries) + bytes(strtab) + trie + rebase_b + bind_b
+    )
     return path
+
+
+# Classic rebase opcodes (dyld): one SET_SEGMENT_AND_OFFSET per slot, then
+# DO_REBASE_IMM_TIMES(1). Enough for a fixture; real images use compact forms.
+_REBASE_SET_SEG_OFFSET = 0x20
+_REBASE_DO_IMM_TIMES_1 = 0x51
+_REBASE_DONE_OP = 0x00
+
+
+def rebase_stream(
+    segment_index: int, segment_vmaddr: int, addresses: Sequence[int]
+) -> bytes:
+    """A classic rebase stream rebasing each absolute *addresses* slot.
+
+    *segment_index* is the segment's ordinal among the LC_SEGMENT commands and
+    *segment_vmaddr* its virtual address; slots are encoded as segment offsets.
+    """
+    out = bytearray()
+    for addr in addresses:
+        out.append(_REBASE_SET_SEG_OFFSET | segment_index)
+        out += _uleb128(addr - segment_vmaddr)
+        out.append(_REBASE_DO_IMM_TIMES_1)
+    out.append(_REBASE_DONE_OP)
+    return bytes(out)

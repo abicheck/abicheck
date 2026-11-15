@@ -92,3 +92,43 @@ def derive_object_sizes(
             if closer_addr - value > 0:
                 out.setdefault(name, (closer_addr - value, closer_name))
     return out
+
+
+def corroborate_object_sizes(
+    sizes: Mapping[str, tuple[int, str]],
+    addresses: Mapping[str, int],
+    fixups: frozenset[int] | None,
+    pointer_size: int,
+) -> dict[str, tuple[int, str]]:
+    """Keep only the sizes that the image's pointer fixups corroborate.
+
+    A derived span counts every byte up to the closing label, including data
+    no label names. Unlabelled data that changes size changes the span but not
+    the object, so a span is trusted only when an independent count agrees:
+    the rebase and bind streams must name one fixup per relocated pointer word
+    inside it.
+
+    * ``_ZTV``: every word but offset-to-top (the first) is relocated, so
+      ``size // pointer_size - 1``.
+    * ``_ZTI`` and ``_ZTT``: every word is a pointer (typeinfo base-class
+      pointers, VTT vtable pointers), so ``size // pointer_size``. A typeinfo
+      with non-pointer fields (``__vmi_class_type_info``) never matches and
+      keeps no size.
+
+    Unknown fixups (``None``: chained fixups, which are not decoded) keep no
+    size at all.
+    """
+    if fixups is None:
+        return {}
+    out: dict[str, tuple[int, str]] = {}
+    for name, (size, closer) in sizes.items():
+        if not name.startswith(SIZED_OBJECT_PREFIXES) or name not in addresses:
+            continue
+        if size % pointer_size:
+            continue
+        start = addresses[name]
+        relocated_words = size // pointer_size - (1 if name.startswith("_ZTV") else 0)
+        inside = sum(1 for addr in fixups if start <= addr < start + size)
+        if inside == relocated_words:
+            out[name] = (size, closer)
+    return out

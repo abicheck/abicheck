@@ -56,7 +56,8 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
 from macholib.MachO import MachO  # type: ignore[import-untyped]
 from macholib.SymbolTable import SymbolTable  # type: ignore[import-untyped]
 
-from .extract.macho_object_sizes import derive_object_sizes
+from .extract.macho_fixups import fixup_addresses
+from .extract.macho_object_sizes import corroborate_object_sizes, derive_object_sizes
 from .extract.parse_failures import note_export_read_failure
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -574,6 +575,48 @@ def _note_tables_past_end(dylib_path: Path, header: Any) -> None:
             )
 
 
+_LC_DYLD_CHAINED_FIXUPS = 0x80000034
+
+
+def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | None:
+    """Every rebased or bound pointer slot of the slice, or ``None`` if unknown.
+
+    ``None`` covers an image with chained fixups (``LC_DYLD_CHAINED_FIXUPS``,
+    not decoded here) and an image whose opcode streams do not decode. Neither
+    means "no fixups", so the caller must not treat it as one.
+    """
+    if any(lc.cmd == _LC_DYLD_CHAINED_FIXUPS for lc, _cmd, _data in header.commands):
+        return None
+    dyld = [
+        cmd
+        for lc, cmd, _data in header.commands
+        if lc.cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY)
+    ]
+    if not dyld:
+        return frozenset()
+    magic = getattr(header, "MH_MAGIC", MH_MAGIC_64)
+    pointer_size = 8 if magic in (MH_MAGIC_64, MH_CIGAM_64) else 4
+    bases = [
+        int(cmd.vmaddr)
+        for lc, cmd, _data in header.commands
+        if lc.cmd in (LC_SEGMENT, LC_SEGMENT_64)
+    ]
+    start = int(getattr(header, "offset", 0))
+    size = int(getattr(header, "size", 0)) or (os.path.getsize(dylib_path) - start)
+    image = dylib_path.read_bytes()[start : start + size]
+    cmd = dyld[0]
+    return fixup_addresses(
+        image,
+        bases,
+        pointer_size,
+        rebase=(int(cmd.rebase_off), int(cmd.rebase_size)),
+        binds=[
+            (int(cmd.bind_off), int(cmd.bind_size)),
+            (int(cmd.weak_bind_off), int(cmd.weak_bind_size)),
+        ],
+    )
+
+
 def _parse_macho_symbols(
     macho: MachO,
     header: Any,
@@ -586,8 +629,22 @@ def _parse_macho_symbols(
         symtab = SymbolTable(macho, header=header)
         # Object sizes need every defined symbol, locals included, because a
         # local label bounds the object before it (extract/macho_object_sizes).
-        sizes = derive_object_sizes(
-            _defined_section_symbols(symtab.nlists), _section_extents(header)
+        defined = _defined_section_symbols(symtab.nlists)
+        fixups = _pointer_fixup_addresses(dylib_path, header)
+        pointer_size = (
+            8
+            if getattr(header, "MH_MAGIC", MH_MAGIC_64)
+            in (
+                MH_MAGIC_64,
+                MH_CIGAM_64,
+            )
+            else 4
+        )
+        sizes = corroborate_object_sizes(
+            derive_object_sizes(defined, _section_extents(header)),
+            {name: value for _sect, value, name in defined},
+            fixups,
+            pointer_size,
         )
         # Prefer the split external tables (available when LC_DYSYMTAB is
         # present): extdefsyms = external *defined* (exports), undefsyms =
