@@ -447,3 +447,53 @@ def test_cpp_global_with_a_disagreeing_type_is_refused() -> None:
 
 def test_static_data_member_binds_to_its_data_export() -> None:
     assert _variable_noise([_var("s", "_ZN1C1sE", "int")], ["?s@C@@2HA"]) == []
+
+
+@pytest.mark.parametrize(
+    ("symbol", "builtin"),
+    [
+        ("?g@@3HA", "int"),
+        ("?g@@3NA", "double"),
+        ("?s@C@@2HA", "int"),
+        # Non-const, namespace or static-member data only; void and other storage
+        # classes, a function symbol, a non-MSVC name and a const object are refused.
+        ("?g@@3HB", None),
+        ("?g@@1HA", None),
+        ("?g@@3XA", None),
+        ("?g@@3PEAHA", None),
+        ("?f@@YAHH@Z", None),
+        ("g", None),
+    ],
+)
+def test_msvc_data_type_decodes_only_non_const_builtin_data(
+    symbol: str, builtin: str | None
+) -> None:
+    from abicheck.extract.header_export_binding import msvc_data_type
+
+    assert msvc_data_type(symbol) == builtin
+
+
+def test_ambiguous_plain_global_is_not_bound() -> None:
+    # Two data exports decode to the declared int: neither is provably the
+    # declaration's, so neither binds and the declaration stays unexported.
+    noise = _variable_noise([_var("g", "g", "int")], ["?g@@3HA", "?g@@2HA"])
+    assert "public_not_exported" in noise
+
+
+def test_c_function_does_not_bind_to_a_cpp_data_export() -> None:
+    # Only variables take the plain-name data path; a C function with the same
+    # spelling must not take the C++ global's data symbol.
+    fn = Function(
+        name="g",
+        mangled="g",
+        return_type="int",
+        visibility=Visibility.HIDDEN,
+        **header_ast_surface_facts(exported=ExportMatch.ABSENT, producer="castxml"),
+    )
+    fn.origin = ScopeOrigin.PUBLIC_HEADER
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    snap.platform = "pe"
+    snap.pe = PeMetadata(machine=_AMD64, exports=[PeExport(name="?g@@3HA")])
+    snap.declarations.functions = [fn]
+    bound = bind_pe_header_operand(snap)
+    assert bound.declarations.functions[0].mangled == "g"
