@@ -186,7 +186,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_dsym.py": "82006c584e398632ad742b3ce64f9c747ca397dbcbd0b00bf516377272eb0ced",
+      "abicheck/extract/macho_dsym.py": "fa4aa5fb1f24ac80b23e9de0a09c499afcf6c3bf5cc274aee92e522deac52418",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
@@ -234,7 +234,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "09ff1f8542abf115e855cc2210309cacf311f7edc0b87a6de75972c9ac813e5f",
+    "fingerprint": "ef94245fcdb06a5aa205d4ed7196f862b48cf7d5cb875eed73f5e0b9702a6920",
     "generation": 76,
     "reason": "Mach-O DWARF read from the adjacent dSYM (ADR-021 step 5)"
   },
