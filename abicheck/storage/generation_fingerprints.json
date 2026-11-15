@@ -128,7 +128,7 @@
       "abicheck/extract/headers/clang/abi_target.py": "2332941ddd9977c3f887b9ae3316bee3555e32ecd85a955ed45d5e7ab11adb16",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
-      "abicheck/extract/headers/clang/backend.py": "25316729fc6b34a80ec8fef401783e5fa02cb75f66aa3a31454382dc46477c5d",
+      "abicheck/extract/headers/clang/backend.py": "7e7f0b7cd5b6e86a9ae554237a062415f554ab9c86b12e356a75eabe507049a2",
       "abicheck/extract/headers/clang/base_resolution.py": "d8841a88a3a57fdb478c16cd9e1fb69d119c35bb90766456b4750bb0fb12e4c8",
       "abicheck/extract/headers/clang/concept_constraints.py": "acdd6745f33d330c722b249f2dcce05743a89c6cea5f504263ba3b4256f9f3db",
       "abicheck/extract/headers/clang/constraints.py": "a983103fce6534b18ec8694dd8152c95f1c0626908db92c6698c1082560ffa74",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "3535e299e84692d29c65198d6317518865a0a6227ad113f3f71cfa68db7d571d",
-    "generation": 74,
-    "reason": "bumped to 74 for a semantic change"
+    "fingerprint": "5997fcf96d3ba79729bbe725eb9a6514b5d51a76c65294be6f96158a5657eb0a",
+    "generation": 75,
+    "reason": "bumped to 75 for a semantic change"
   },
   "resolver": {
     "files": {

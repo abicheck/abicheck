@@ -722,6 +722,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "stored snapshot of such a parse recorded the x86-64 sizes. The fact changes, "
         "the spelling (the name a type is recorded under) does not"
     ),
+    75: GenerationSpellingChange(
+        "fix/nightly-builtin-probe-target (#2084), review follow-up: no stored type "
+        "spelling changed. The builtin probe drops -std=/--std= from its options "
+        "(the probe is C, and clang rejects a C++ standard in C mode). A C++ parse "
+        "given a -std= string now keeps its builtin facts (long, time_t) where the "
+        "probe used to fail and record none; the recorded facts change, the names do not"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.extract.headers.clang.backend import parse_option_tokens
+from abicheck.extract.headers.clang.backend import (
+    parse_option_tokens,
+    probe_option_tokens,
+)
 
 
 @pytest.mark.parametrize(
@@ -72,3 +75,40 @@ def test_an_ilp32_request_keeps_its_m32_for_the_probe(gcc_options: str) -> None:
     # Sibling of the reported case: whichever 32-bit flag set the parse was
     # given, the probe sees the -m32 that selects the target's builtins.
     assert "-m32" in parse_option_tokens(gcc_options, ())
+
+
+@pytest.mark.parametrize(
+    ("gcc_options", "gcc_option_tokens", "expected"),
+    [
+        # A C++ standard in the parse's options must not reach the C probe.
+        ("-m32 -std=c++17", (), ("-m32",)),
+        ("-std=c++20", ("-m32",), ("-m32",)),
+        ("--std=c++17 -m32", (), ("-m32",)),
+        # A C standard is also a language selector; the probe needs none of it.
+        ("-std=c99 -m32", (), ("-m32",)),
+        # Target and ABI flags survive, in their order.
+        (
+            "-m32 -D_TIME_BITS=64 -std=gnu11",
+            ("--target=i386-linux-gnu",),
+            ("-m32", "-D_TIME_BITS=64", "--target=i386-linux-gnu"),
+        ),
+        # Nothing to drop: unchanged.
+        ("-m32", (), ("-m32",)),
+        (None, (), ()),
+    ],
+)
+def test_the_c_probe_drops_language_standards_and_keeps_target_options(
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    expected: tuple[str, ...],
+) -> None:
+    assert probe_option_tokens(gcc_options, gcc_option_tokens) == expected
+
+
+@pytest.mark.parametrize("standard", ["-std=c++17", "--std=c++20", "-std=c99"])
+def test_no_language_standard_reaches_the_probe_for_any_standard(standard: str) -> None:
+    # Sibling of the reported C++ case: whichever standard the parse names,
+    # the probe's options never carry it, and the -m32 it needs stays.
+    options = probe_option_tokens(f"-m32 {standard}", ())
+    assert standard not in options
+    assert "-m32" in options

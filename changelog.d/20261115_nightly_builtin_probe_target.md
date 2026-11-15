@@ -8,3 +8,5 @@
   longer fails on i386, where `__int128` is rejected and one rejected spelling
   discarded every builtin: the 128-bit spellings are guarded by
   `__SIZEOF_INT128__`.
+  The probe also drops `-std=` / `--std=` from its options, since it compiles C
+  and a C++ standard would discard every builtin fact of a C++ parse.

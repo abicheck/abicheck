@@ -200,6 +200,8 @@ FAMILIES: dict[str, Family] = {
                 # The clang builtin-ABI probe measures the parse's own target
                 # (-m32 reaches it) and tolerates an ILP32 builtin set.
                 "tests/unit/extract/test_clang_builtin_probe_options.py",
+                # The same probe through the public dump of a real -m32 parse.
+                "tests/test_clang_builtin_probe_m32.py",
             ),
         ),
         Family(

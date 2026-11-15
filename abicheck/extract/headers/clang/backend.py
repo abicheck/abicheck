@@ -125,6 +125,27 @@ def parse_option_tokens(
     return (*split_gcc_options(gcc_options or ""), *gcc_option_tokens)
 
 
+#: Language-standard selectors. The builtin probe compiles C, and clang rejects
+#: a C++ ``-std=`` in C mode, which would discard every builtin fact.
+_LANGUAGE_STANDARD_PREFIXES = ("-std=", "--std=")
+
+
+def probe_option_tokens(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
+) -> tuple[str, ...]:
+    """The parse's target and ABI options, for the C builtin-layout probe.
+
+    :func:`parse_option_tokens` minus the language-standard flags: those pick
+    a language, not an ABI, and the probe is C, so a ``-std=c++17`` the parse
+    was given must not reach it. ``-m32`` and the other target options stay.
+    """
+    return tuple(
+        token
+        for token in parse_option_tokens(gcc_options, gcc_option_tokens)
+        if not token.startswith(_LANGUAGE_STANDARD_PREFIXES)
+    )
+
+
 def resolve_clang_langmode(
     lang: str | None,
     headers: list[Path],
@@ -701,7 +722,7 @@ class ClangBackend:
         # ``gcc_options`` string, then ``gcc_option_tokens``): a probe that
         # drops ``-m32`` measures the host's builtins, not the parsed target's.
         parser.builtin_abi = probe_builtin_abi(
-            str(clang_bin), parse_option_tokens(r.gcc_options, r.gcc_option_tokens)
+            str(clang_bin), probe_option_tokens(r.gcc_options, r.gcc_option_tokens)
         )
         if resolved_kind is None:
             parser.enum_underlying_types = probe_enum_types(
