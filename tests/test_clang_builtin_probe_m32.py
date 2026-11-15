@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,13 @@ def _clang_m32_available() -> bool:
     return probe.returncode == 0
 
 
+# ELF/Linux only: an i386 *shared library* needs the ELF i386 link. On macOS
+# ``-m32`` selects an armv4t Mach-O target that cannot link (as CI showed), so
+# this is the same platform scope as ``test_clang_header_backend_integration``.
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="ELF i386 link is Linux-scoped"
+)
 @pytest.mark.skipif(not _clang_m32_available(), reason="clang++ with -m32 libc")
 def test_the_clang_parse_probes_the_i386_long_it_parses_with(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
