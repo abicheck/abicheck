@@ -199,7 +199,7 @@ def test_catalog_accepts_sound_declarations() -> None:
 def test_unclassified_survives_copy_and_pickle_protocol() -> None:
     import copy
 
-    e = next(iter(REGISTRY.entries.values()))
+    e = _meta("a")  # an entry that declares nothing, independent of the live catalog
     assert copy.deepcopy(e).observable_at is UNCLASSIFIED
     # The pickle contract without unpickling data: __reduce__ rebuilds the singleton.
     factory, args = UNCLASSIFIED.__reduce__()
