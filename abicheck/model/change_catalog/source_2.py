@@ -23,6 +23,7 @@ file under ADR-061's 800-line ceiling, the same shape as ``platform_{1,2,3}.py``
 
 from __future__ import annotations
 
+from .observability import ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -40,6 +41,17 @@ _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
 
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
+_OBS_H = observable(
+    ("B", "H"), rationale="declaration-only fact: visible in the public header"
+)
+_OBS_L4 = observable(
+    ("B", "H", "BD", "S"), rationale="needs the source translation unit (S)"
+)
+_OBS_L5 = observable(("B", "H", "BD", "S", "G"), rationale="needs the source graph (G)")
+
 SOURCE_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "source_surface_dso_mismatch",
@@ -55,6 +67,7 @@ SOURCE_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.SOURCE,
         contract_subject=_CS.ANALYSIS,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_L4,),
     ),
     _E(
         "source_to_binary_mapping_changed",
@@ -107,6 +120,7 @@ SOURCE_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.ADDED,
+        observable_at=(_OBS_L5,),
     ),
     _E(
         "template_body_changed",
@@ -120,6 +134,7 @@ SOURCE_ENTRIES_2: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "undocumented_export_ratio_increased",
@@ -147,6 +162,7 @@ SOURCE_ENTRIES_2: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         entity_from_field="entity_discriminator",
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "unversioned_exported_symbol",
@@ -161,5 +177,6 @@ SOURCE_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
 ]

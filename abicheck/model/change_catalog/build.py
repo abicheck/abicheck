@@ -38,6 +38,7 @@ line-count reasons before this migration.
 
 from __future__ import annotations
 
+from .observability import ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -55,6 +56,15 @@ _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
 
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
+_OBS_DBD = observable(
+    ("B", "D"),
+    ("B", "BD"),
+    rationale="compiler-flag fact: the header never carries it; DWARF and build data do",
+)
+
 BUILD_ENTRIES: list[ChangeKindMeta] = [
     _E(
         "abi_relevant_build_flag_changed",
@@ -67,6 +77,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "behavioural_default_changed",
@@ -509,6 +520,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "stdlib_debug_mode_changed",
@@ -524,6 +536,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DBD,),
     ),
     _E(
         "toolchain_version_changed",

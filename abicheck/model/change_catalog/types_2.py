@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -51,6 +52,21 @@ _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
 
+_OBS_B_ELF_MACHO = observable(
+    ("B",),
+    condition=ObservabilityCondition(
+        platform=frozenset({Platform.ELF, Platform.MACHO})
+    ),
+)
+_OBS_H = observable(
+    ("B", "H"), rationale="declaration-only fact: visible in the public header"
+)
+_OBS_DH = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="layout or type fact: DWARF and the public header both carry it",
+)
+
 TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "std_reexport_removed",
@@ -66,6 +82,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "stdlib_implementation_changed",
@@ -88,6 +105,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "struct_field_offset_changed",
@@ -97,6 +115,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "struct_field_removed",
@@ -106,6 +125,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "struct_field_type_changed",
@@ -115,6 +135,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "struct_packing_changed",
@@ -123,6 +144,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "struct_size_changed",
@@ -132,6 +154,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "sycl_overload_set_removed",
@@ -225,6 +248,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_added",
@@ -244,6 +268,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "base_class_access_narrowed",
@@ -253,6 +278,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_base_changed",
@@ -261,6 +287,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_became_abstract",
@@ -274,6 +301,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_became_final",
@@ -289,6 +317,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_became_opaque",
@@ -298,6 +327,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_deprecated_added",
@@ -314,6 +344,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_deprecated_removed",
@@ -324,6 +355,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_field_added",
@@ -333,6 +365,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_field_added_compatible",
@@ -343,6 +376,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_field_offset_changed",
@@ -352,6 +386,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_field_removed",
@@ -361,6 +396,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_field_type_changed",
@@ -370,6 +406,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_kind_changed",
@@ -395,6 +432,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_lost_abstract",
@@ -416,6 +454,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_lost_final",
@@ -433,6 +472,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_removed",
@@ -444,6 +484,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "type_size_changed",
@@ -453,6 +494,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_visibility_changed",
@@ -466,6 +508,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "type_vtable_changed",
@@ -477,6 +520,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "typedef_base_changed",
@@ -486,6 +530,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "typedef_removed",
@@ -499,6 +544,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "typedef_version_sentinel",
@@ -520,6 +566,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "union_field_removed",
@@ -529,6 +576,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "union_field_type_changed",
@@ -538,6 +586,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "unnamed_type_in_public_abi",
@@ -572,6 +621,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "used_reserved_field",
@@ -627,6 +677,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "virtual_method_added",
@@ -643,6 +694,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "vptr_introduced",
@@ -655,6 +707,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "vtable_slot_count_changed",
@@ -671,6 +724,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_MACHO,),
     ),
     _E(
         "vtable_thunk_offset_changed",
@@ -689,6 +743,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_MACHO,),
     ),
     _E(
         "vtable_thunk_set_changed",
@@ -705,6 +760,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_MACHO,),
     ),
     _E(
         "vtt_slot_count_changed",
@@ -720,6 +776,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_MACHO,),
     ),
     _E(
         "template_param_default_changed",
@@ -737,5 +794,6 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_H,),
     ),
 ]
