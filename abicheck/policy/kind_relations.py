@@ -12,27 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ELF-only variant relation between ``ChangeKind`` values.
+"""Resolution of declared ``ChangeKind`` relations (ADR-093 D4, D5).
 
-A removal or addition that was detected from the ELF export table alone (no
+The relations are *declared* on each kind's registry entry
+(``ChangeKindMeta.relations``) and are never inferred from names. This module
+is the one owner of how they are *resolved*. PR 1 of WS-5 resolves
+``variant_of``: the same fact detected with the evidence the kind name
+encodes. A removal or addition found from the ELF export table alone (no
 header declaration to name it) is classified with an ``*_elf_only`` kind
-instead of the base kind: ``FUNC_REMOVED`` vs ``FUNC_REMOVED_ELF_ONLY``
+instead of the base kind, so ``FUNC_REMOVED`` vs ``FUNC_REMOVED_ELF_ONLY``
 depends on whether headers were supplied to the run, not on the change itself
 (see :mod:`abicheck.model.surface_facts`). A selector that names the base kind
 (``change_kind: func_removed``) must therefore match the variant too, or its
 acceptance would depend on the evidence supplied (AGENTS.md "Policy decides
 acceptance, not facts").
 
-The pairs are *derived* from the catalog, never listed by hand: a kind whose
-name is ``<base>_elf_only`` for another ``ChangeKind`` ``<base>`` is that
-base's variant. The rule is one-directional. A selector naming the variant
-still matches only the variant, so a deliberately ELF-only waiver stays narrow.
+The relation is one-directional. A selector naming the variant still matches
+only the variant, so a deliberately ELF-only waiver stays narrow.
 
-This module is the one owner of the relation; every matcher that compares a
-selector's ``change_kind`` against an observed kind routes through
-:func:`kind_match_set` (suppression, reclassification, acknowledgment, and the
-rule-inventory bookkeeping that mirrors them). A kind-keyed ``overrides:`` map
-routes through :func:`expand_variant_overrides` for the same reason.
+Every matcher that compares a selector's ``change_kind`` against an observed
+kind routes through :func:`kind_match_set` (suppression, reclassification,
+acknowledgment, and the rule-inventory bookkeeping that mirrors them). A
+kind-keyed ``overrides:`` map routes through :func:`expand_variant_overrides`
+for the same reason.
+
+``same_event_as``, ``subsumed_by`` and ``implies`` are declared on the
+metadata, and the catalog validates them (:func:`validate_catalog`), but they
+are *not* resolved here yet. The resolution pass that consumes them, with its
+accessors, lands in a later WS-5 PR (ADR-093 D5, "every disposition visible").
+
+This module also owns the aggregate roll-up relation (:data:`ROLLUP_MEMBER_KINDS`):
+``public_surface_shrank`` is computed from declaration *counts*, not emitted
+per symbol, so it is a roll-up over member kinds rather than a variant.
 """
 
 from __future__ import annotations
@@ -41,42 +52,50 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TypeVar
 
-from .kinds import ChangeKind
-
-ELF_ONLY_SUFFIX = "_elf_only"
+from ..model.change_catalog.assembled import REGISTRY
+from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.observability import KindRelations
 
 _V = TypeVar("_V")
 
 
-def _derive_elf_only_variants(values: frozenset[str]) -> Mapping[str, str]:
-    """``{base: base_elf_only}`` for every ``*_elf_only`` kind whose base is a kind."""
-    variants: dict[str, str] = {}
-    for value in values:
-        if not value.endswith(ELF_ONLY_SUFFIX):
-            continue
-        base = value[: -len(ELF_ONLY_SUFFIX)]
-        if base in values:
-            variants[base] = value
-    return MappingProxyType(dict(sorted(variants.items())))
+def variant_index(
+    relations: Mapping[str, KindRelations],
+) -> Mapping[str, frozenset[str]]:
+    """``{base: variants}`` from each kind's declared ``variant_of``.
+
+    *relations* maps kind value -> its :class:`KindRelations`. Pure: it reads
+    nothing but its argument, so the resolution rule is testable on synthetic
+    catalogs. The result is one-directional by construction: a variant appears
+    under its base, a base never appears under its variant.
+    """
+    by_base: dict[str, set[str]] = {}
+    for kind, rel in relations.items():
+        if rel.variant_of is not None:
+            by_base.setdefault(rel.variant_of, set()).add(kind)
+    return MappingProxyType(
+        {base: frozenset(variants) for base, variants in sorted(by_base.items())}
+    )
 
 
-#: ``{base kind value: its ELF-only variant value}``, derived from ``ChangeKind``.
-ELF_ONLY_VARIANT_OF: Mapping[str, str] = _derive_elf_only_variants(
-    frozenset(kind.value for kind in ChangeKind)
+#: ``{base kind value: frozenset of its variant values}``, resolved from the
+#: catalog's declared ``variant_of``. Computed once: the registry is immutable.
+VARIANTS_BY_BASE: Mapping[str, frozenset[str]] = variant_index(
+    {kind: meta.relations for kind, meta in REGISTRY.entries.items()}
 )
 
 
 def kind_match_set(kind: str) -> frozenset[str]:
     """The observed kind values a selector naming *kind* matches.
 
-    ``{kind}`` for a kind with no ELF-only variant, and ``{kind, variant}``
-    for a base kind that has one. A kind that is itself a variant (or any
-    unrecognised spelling) matches only itself.
+    ``{kind}`` for a kind with no declared variant, and ``{kind, variant...}``
+    for a base kind that has one. A variant (or any unrecognised spelling)
+    matches only itself.
     """
-    variant = ELF_ONLY_VARIANT_OF.get(kind)
-    if variant is None:
+    variants = VARIANTS_BY_BASE.get(kind)
+    if not variants:
         return frozenset({kind})
-    return frozenset({kind, variant})
+    return frozenset({kind}) | variants
 
 
 def matched_via_variant(selector_kind: str | None, observed_kind: str) -> bool:
@@ -98,7 +117,7 @@ def matched_via_variant(selector_kind: str | None, observed_kind: str) -> bool:
 #: symbol of its own to match a suppression against. It is the net count of
 #: public functions, variables, types and enums that went away, so every
 #: removal of one of those kinds contributes to it. A base removal kind here
-#: also covers its ``*_elf_only`` variant through :func:`kind_match_set`.
+#: also covers its variant through :func:`kind_match_set`.
 #: Over-listing a kind is the safe direction (the roll-up then stays visible);
 #: under-listing would hide a roll-up that a live removal still feeds.
 ROLLUP_MEMBER_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
@@ -125,13 +144,13 @@ def rollup_member_kinds(kind: str) -> frozenset[str]:
 def expand_variant_overrides(
     overrides: Mapping[ChangeKind, _V] | None,
 ) -> dict[ChangeKind, _V]:
-    """A kind-keyed verdict map with each base kind's verdict also covering its variant.
+    """A kind-keyed verdict map with each base kind's verdict also covering its variants.
 
     ``overrides:`` in a policy file pins a verdict per ``ChangeKind``. A base
-    entry (``func_removed: break``) is read as covering the ELF-only variant
+    entry (``func_removed: break``) is read as covering its ELF-only variant
     too, for the same reason a base selector does: the variant is chosen by
-    the evidence supplied, not by the change. The variant is covered only
-    when the mapping does not name it itself, so an explicit
+    the evidence supplied, not by the change. A variant is covered only when
+    the mapping does not name it itself, so an explicit
     ``func_removed_elf_only`` entry always wins over the base entry. The
     relation is one-directional: a variant entry never covers its base.
 
@@ -142,10 +161,8 @@ def expand_variant_overrides(
         return {}
     expanded: dict[ChangeKind, _V] = dict(overrides)
     for base, verdict in overrides.items():
-        variant_value = ELF_ONLY_VARIANT_OF.get(base.value)
-        if variant_value is None:
-            continue
-        variant = type(base)(variant_value)
-        if variant not in overrides:
-            expanded[variant] = verdict
+        for variant_value in VARIANTS_BY_BASE.get(base.value, frozenset()):
+            variant = type(base)(variant_value)
+            if variant not in overrides:
+                expanded[variant] = verdict
     return expanded

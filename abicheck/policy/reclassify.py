@@ -129,15 +129,15 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, TypeVar, cast
 
-from ..model.change_catalog.kind_variants import (
-    expand_variant_overrides,
-    kind_match_set,
-)
 from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
 from .binary_gate_marker import is_binary_gate_demoted
 from .classification import Verdict, effective_category, policy_kind_sets
+from .kind_relations import (
+    expand_variant_overrides,
+    kind_match_set,
+)
 from .release_outcome import compatibility_rank
 from .selectors import SelectorSet
 
