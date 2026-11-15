@@ -28,11 +28,15 @@ from abicheck.policy.alignment_generation_drift import (
 #: type -> (LP64 natural bits, ILP32 natural bits), written out by hand.
 _NATURAL = {
     "long": (64, 32),
+    "unsigned long": (64, 32),
     "long double": (128, 32),
+    "double": (64, 32),
+    "long long": (64, 32),
+    "unsigned long long": (64, 32),
     "size_t": (64, 32),
     "void *": (64, 32),
 }
-_TYPES = tuple(_NATURAL) + ("int", "double")
+_TYPES = tuple(_NATURAL) + ("int",)
 _GENERATIONS = (0, 73, 74, 75)
 #: Alignments a variable can carry: the two natural values of each type, an
 #: explicit ``alignas(16)`` (128) and an absent alignment (None).
@@ -209,3 +213,21 @@ def test_other_kinds_and_already_dispositioned_changes_are_never_touched() -> No
     )
     assert other.effective_verdict is None
     assert settled.effective_verdict is Verdict.BREAKING
+
+
+@pytest.mark.parametrize("producer", ["castxml", "gcc-experimental", None])
+def test_a_non_clang_snapshot_keeps_its_verdict(producer: str | None) -> None:
+    # The natural pair from a CastXML (or unknown-producer) operand is not the
+    # clang builtin probe's output, so a genuine change there is never demoted.
+    lp64, ilp32 = _NATURAL["long"]
+    change = Change(
+        ChangeKind.VAR_ALIGNMENT_CHANGED,
+        "value",
+        "alignment changed",
+        old_value=str(lp64),
+        new_value=str(ilp32),
+    )
+    demote_pre74_builtin_alignment_drift(
+        [change], _snap("long", lp64, producer), _snap("long", ilp32, producer), 73, 74
+    )
+    assert change.effective_verdict is None

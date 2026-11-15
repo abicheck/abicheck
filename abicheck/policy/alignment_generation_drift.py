@@ -61,6 +61,9 @@ _NATURAL_BYTES: dict[str, tuple[int, int]] = {
     "unsigned long": (8, 4),
     "signed long": (8, 4),
     "long double": (16, 4),
+    "double": (8, 4),
+    "long long": (8, 4),
+    "unsigned long long": (8, 4),
     "size_t": (8, 4),
     "ssize_t": (8, 4),
     "ptrdiff_t": (8, 4),
@@ -70,6 +73,7 @@ _NATURAL_BYTES: dict[str, tuple[int, int]] = {
 #: Any pointer type aligns to its pointer size.
 _POINTER_BYTES = (8, 4)
 _QUALIFIERS = frozenset({"const", "volatile"})
+_CLANG_PRODUCER = "clang"
 
 
 def _natural_bits(type_spelling: str) -> tuple[int, int] | None:
@@ -108,6 +112,11 @@ def demote_pre74_builtin_alignment_drift(
     if not stale_generation < ALIGNMENT_FIX_GENERATION <= fresh_generation:
         return changes
     stale, fresh = (old, new) if stale_is_old else (new, old)
+    # Only the clang builtin probe measured the host ABI. A CastXML, debug-info
+    # or unknown-producer snapshot's alignment is not that probe's output, so
+    # it keeps its verdict.
+    if stale.ast_producer != _CLANG_PRODUCER or fresh.ast_producer != _CLANG_PRODUCER:
+        return changes
     stale_vars, fresh_vars = _variables(stale), _variables(fresh)
     for change in changes:
         if (
