@@ -93,6 +93,9 @@ def test_macho_cell_meets_its_strict_expectation(
         f"{op_name} on {seed.name} at evidence={evidence}: verdict={outcome.verdict} "
         f"kinds={sorted(outcome.kinds)} problems={list(outcome.failures)} "
         f"(why: {op.why})\n"
+        "function findings, emitted by abicheck:\n  "
+        + "\n  ".join(outcome.findings)
+        + "\n"
         f"thunk exports, old: {_thunk_exports(tmp_path / 'old')}\n"
         f"thunk exports, new: {_thunk_exports(tmp_path / 'new')}"
     )

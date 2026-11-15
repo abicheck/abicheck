@@ -92,6 +92,8 @@ class Outcome:
     verdict: str
     kinds: frozenset[str]
     failures: tuple[str, ...]
+    #: Function-level findings, named per symbol; filled only for a failing cell.
+    findings: tuple[str, ...] = ()
 
 
 def label_toolchain(label: str) -> Toolchain:
@@ -459,10 +461,14 @@ def run_operator(
     old = cache.get(seed, cfg)
     new = build_new(op, seed, cfg, root)
     verdict, kinds = abicheck_answer(old, new)
+    failures = tuple(op.expect(cfg).problems(verdict, kinds))
     return Outcome(
         verdict=verdict,
         kinds=kinds,
-        failures=tuple(op.expect(cfg).problems(verdict, kinds)),
+        failures=failures,
+        findings=checker.function_findings(old.snapshot, new.snapshot)
+        if failures
+        else (),
     )
 
 
