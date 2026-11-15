@@ -15,7 +15,9 @@ from abicheck.extract.macho_fixups import (
     fixup_addresses,
 )
 
-BASES = [0x1000, 0x2000]  # segment 0 at 0x1000, segment 1 at 0x2000
+# (vmaddr, vmsize) per segment: segment 0 at 0x1000, segment 1 at 0x2000. The
+# size is large enough that every offset these oracles use lies inside it.
+BASES = [(0x1000, 0x100000), (0x2000, 0x100000)]
 
 
 def test_rebase_set_offset_then_do_once() -> None:

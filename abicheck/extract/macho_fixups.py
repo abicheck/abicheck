@@ -94,10 +94,23 @@ def _skip_sleb(data: bytes, pos: int) -> int:
             return pos
 
 
-def _address(bases: Sequence[int], seg: int, offset: int) -> int:
-    if not 0 <= seg < len(bases):
+def _address(
+    segments: Sequence[tuple[int, int]], seg: int, offset: int, pointer_size: int
+) -> int:
+    """The address of the pointer slot at *offset* in segment *seg*.
+
+    The whole slot must lie inside that segment: an offset past its end (or a
+    slot that straddles it) is not a fixup of this segment, and is undecodable
+    rather than a count against some other segment's bytes.
+    """
+    if not 0 <= seg < len(segments):
         raise FixupDecodeError(f"segment index {seg} names no segment")
-    return bases[seg] + offset
+    base, size = segments[seg]
+    if offset < 0 or offset + pointer_size > size:
+        raise FixupDecodeError(
+            f"fixup slot at offset 0x{offset:x} lies outside segment {seg}"
+        )
+    return base + offset
 
 
 def _emit(out: list[int], addr: int, count: int, limit: int) -> None:
@@ -108,7 +121,10 @@ def _emit(out: list[int], addr: int, count: int, limit: int) -> None:
 
 
 def decode_rebase_addresses(
-    data: bytes, segment_bases: Sequence[int], pointer_size: int, limit: int
+    data: bytes,
+    segments: Sequence[tuple[int, int]],
+    pointer_size: int,
+    limit: int,
 ) -> list[int]:
     """Addresses of every rebased pointer slot in a classic rebase stream."""
     out: list[int] = []
@@ -133,22 +149,22 @@ def decode_rebase_addresses(
             offset += imm * pointer_size
         elif code == _REBASE_DO_IMM_TIMES:
             for _ in range(imm):
-                _emit(out, _address(segment_bases, seg, offset), 1, limit)
+                _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
                 offset += pointer_size
         elif code == _REBASE_DO_ULEB_TIMES:
             count, pos = _uleb(data, pos)
             for _ in range(count):
-                _emit(out, _address(segment_bases, seg, offset), 1, limit)
+                _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
                 offset += pointer_size
         elif code == _REBASE_DO_ADD_ADDR_ULEB:
-            _emit(out, _address(segment_bases, seg, offset), 1, limit)
+            _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
             value, pos = _uleb(data, pos)
             offset += pointer_size + value
         elif code == _REBASE_DO_ULEB_TIMES_SKIPPING_ULEB:
             count, pos = _uleb(data, pos)
             skip, pos = _uleb(data, pos)
             for _ in range(count):
-                _emit(out, _address(segment_bases, seg, offset), 1, limit)
+                _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
                 offset += pointer_size + skip
         else:
             raise FixupDecodeError(f"unknown rebase opcode 0x{op:02x}")
@@ -156,7 +172,10 @@ def decode_rebase_addresses(
 
 
 def decode_bind_addresses(
-    data: bytes, segment_bases: Sequence[int], pointer_size: int, limit: int
+    data: bytes,
+    segments: Sequence[tuple[int, int]],
+    pointer_size: int,
+    limit: int,
 ) -> list[int]:
     """Addresses of every bound pointer slot in a classic (or weak) bind stream."""
     out: list[int] = []
@@ -189,20 +208,20 @@ def decode_bind_addresses(
             value, pos = _uleb(data, pos)
             offset += value
         elif code == _BIND_DO_BIND:
-            _emit(out, _address(segment_bases, seg, offset), 1, limit)
+            _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
             offset += pointer_size
         elif code == _BIND_DO_BIND_ADD_ADDR_ULEB:
-            _emit(out, _address(segment_bases, seg, offset), 1, limit)
+            _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
             value, pos = _uleb(data, pos)
             offset += pointer_size + value
         elif code == _BIND_DO_BIND_ADD_ADDR_IMM_SCALED:
-            _emit(out, _address(segment_bases, seg, offset), 1, limit)
+            _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
             offset += pointer_size + imm * pointer_size
         elif code == _BIND_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
             count, pos = _uleb(data, pos)
             skip, pos = _uleb(data, pos)
             for _ in range(count):
-                _emit(out, _address(segment_bases, seg, offset), 1, limit)
+                _emit(out, _address(segments, seg, offset, pointer_size), 1, limit)
                 offset += pointer_size + skip
         else:
             raise FixupDecodeError(f"unknown bind opcode 0x{op:02x}")
@@ -211,7 +230,7 @@ def decode_bind_addresses(
 
 def fixup_addresses(
     image: bytes,
-    segment_bases: Sequence[int],
+    segments: Sequence[tuple[int, int]],
     pointer_size: int,
     *,
     rebase: tuple[int, int] | None,
@@ -220,6 +239,8 @@ def fixup_addresses(
 ) -> frozenset[int] | None:
     """Every rebase and bind slot address, or ``None`` if any stream is undecodable.
 
+    *segments* is each segment's ``(vmaddr, vmsize)``, in load-command order:
+    a slot must lie wholly inside the segment its opcode names.
     *rebase* and *binds* are ``(file_offset, size)`` pairs relative to the start
     of the image slice. A range that runs past the image's bytes is undecodable,
     not a shorter stream. *limit* bounds the fixup count (the image's segment
@@ -232,19 +253,20 @@ def fixup_addresses(
     try:
         if rebase is not None and rebase[1]:
             stream = image[rebase[0] : rebase[0] + rebase[1]]
-            addresses += decode_rebase_addresses(
-                stream, segment_bases, pointer_size, limit
-            )
+            addresses += decode_rebase_addresses(stream, segments, pointer_size, limit)
         for off, size in binds:
             if size:
                 stream = image[off : off + size]
                 addresses += decode_bind_addresses(
-                    stream, segment_bases, pointer_size, limit - len(addresses)
+                    stream, segments, pointer_size, limit - len(addresses)
                 )
     except FixupDecodeError:
         return None
     return frozenset(addresses)
 
+
+#: Bytes in dyld_chained_fixups_header (seven 32-bit fields).
+_CHAINED_HEADER_SIZE = 28
 
 #: DYLD_CHAINED_PTR_* formats this decoder walks, with the pointer stride and the
 #: (shift, width) of the ``next`` field in an 8-byte chained pointer. A chain
@@ -320,12 +342,18 @@ def _decode_chained(
     limit: int,
 ) -> frozenset[int] | None:
     blob = image[blob_off : blob_off + blob_size]
-    if blob_size == 0 or len(blob) != blob_size or len(blob) < 8:
+    # dyld_chained_fixups_header is seven 32-bit fields: 28 bytes. A shorter
+    # blob is truncated, and the starts table cannot begin inside the header.
+    if blob_size == 0 or len(blob) != blob_size or len(blob) < _CHAINED_HEADER_SIZE:
         return None
     starts_off = struct.unpack_from("<I", blob, 4)[0]
-    if starts_off + 4 > len(blob):
+    if starts_off < _CHAINED_HEADER_SIZE or starts_off + 4 > len(blob):
         return None
     seg_count = struct.unpack_from("<I", blob, starts_off)[0]
+    # The starts table has one entry per segment of the image: a count past the
+    # image's own segments names segments that do not exist.
+    if seg_count > len(segments):
+        return None
     if starts_off + 4 + 4 * seg_count > len(blob):
         return None
     out: set[int] = set()

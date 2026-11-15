@@ -589,12 +589,14 @@ def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | 
     size = int(getattr(header, "size", 0)) or (os.path.getsize(dylib_path) - start)
     image = dylib_path.read_bytes()[start : start + size]
     segments: list[tuple[int, int, int]] = []  # (vmaddr, fileoff, filesize)
+    extents: list[tuple[int, int]] = []  # (vmaddr, vmsize), for classic fixups
     in_memory = 0  # total vmsize: every fixup lies inside some segment
     text_base: int | None = None
     for lc, cmd, _data in header.commands:
         if lc.cmd not in (LC_SEGMENT, LC_SEGMENT_64):
             continue
         segments.append((int(cmd.vmaddr), int(cmd.fileoff), int(cmd.filesize)))
+        extents.append((int(cmd.vmaddr), int(cmd.vmsize)))
         in_memory += int(cmd.vmsize)
         if text_base is None and bytes(cmd.segname).rstrip(b"\0") == b"__TEXT":
             text_base = int(cmd.vmaddr)
@@ -626,7 +628,7 @@ def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | 
     cmd = dyld[0]
     return fixup_addresses(
         image,
-        [vmaddr for vmaddr, _off, _size in segments],
+        extents,
         pointer_size,
         rebase=(int(cmd.rebase_off), int(cmd.rebase_size)),
         binds=[
