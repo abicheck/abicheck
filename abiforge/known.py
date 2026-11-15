@@ -229,7 +229,7 @@ _PLATFORM: tuple[Known, ...] = (
         "std_string_abi_flipped",
         _XA,
         "wrong-kind",
-        lambda c: c.std.year >= 2020,
+        lambda c: c.std.year >= 2020 and c.producer.family == "gcc",
         "from C++20 the new-ABI std::string is constexpr and exports nothing, "
         "while the old COW string exports ~37 weak members (_ZNSs...): they "
         "dilute the __cxx11 marker share below the flip threshold",
