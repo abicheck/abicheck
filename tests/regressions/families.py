@@ -197,6 +197,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_tool_probe_hang_guard.py",
                 # castxml's derived data size against each target's compilers.
                 "tests/test_castxml_data_size_integration.py",
+                # The time64 detector reads a typedef chain in either backend's
+                # spelling (clang chains, gcc flattens), to one finding.
+                "tests/test_time64_typedef_chain.py",
             ),
         ),
         Family(
