@@ -81,7 +81,7 @@ def _ext(lang: str) -> str:
     return "cpp" if lang == "c++" else "c"
 
 
-def _run(exe: Path, lib_dir: Path) -> RunResult:
+def _run(exe: Path, lib_dir: Path, args: Sequence[str] = ()) -> RunResult:
     env = dict(os.environ)
     # Prepend: a toolchain runtime found through an inherited path stays found.
     inherited = env.get("LD_LIBRARY_PATH")
@@ -91,7 +91,7 @@ def _run(exe: Path, lib_dir: Path) -> RunResult:
     env["LD_BIND_NOW"] = "1"
     try:
         proc = subprocess.run(
-            [str(exe)],
+            [str(exe), *args],
             capture_output=True,
             text=True,
             # A consumer mis-called by an ABI break can print any bytes; that
