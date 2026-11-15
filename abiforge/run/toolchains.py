@@ -632,6 +632,14 @@ def predefines(tc: Toolchain, macro: str, bits: int = 64) -> bool:
     return proc.returncode == 0 and f"#define {macro} " in proc.stdout
 
 
+#: Why a Mach-O cell at DWARF evidence is not judged here. Removed when the
+#: Mach-O DWARF reader lands (plan WS-4, feat/ws4-macho-dwarf-reader).
+MACHO_DWARF_GAP = (
+    "macho: abicheck reads no DWARF from a Mach-O library or its dSYM yet "
+    "(Mach-O DWARF reader not implemented)"
+)
+
+
 def capability_gap(op: object, config: Config) -> str | None:
     """A host capability *op* needs that ``op.requires`` cannot see without probing.
 
@@ -719,15 +727,19 @@ def unavailable(config: Config) -> str | None:
         # No cross toolchain: an ELF config on macOS would build Mach-O and
         # still enable the ELF execution oracle.
         return f"config targets {config.platform}, host is {host_platform()}"
+    if config.evidence == "dwarf" and config.objfmt == "macho":
+        # The harness builds a dSYM next to the dylib, but abicheck reads no
+        # DWARF from a Mach-O input yet (its debug reader opens ELF only), so a
+        # DWARF cell would be judged on binary evidence alone.
+        return MACHO_DWARF_GAP
     reason = _toolchain_unavailable(
         "producer", config.producer, config.std, config.flags
     )
     if reason:
         return reason
-    if config.evidence == "dwarf" and config.objfmt != "elf":
-        # Mach-O keeps -g debug info in the object files (no dSYM is produced
-        # here) and a PE DLL carries none, so the library has no DWARF to give.
-        return f"{config.objfmt} libraries built here carry no DWARF of their own"
+    if config.evidence == "dwarf" and config.objfmt == "pe":
+        # A PE DLL built here carries no DWARF of its own.
+        return "pe libraries built here carry no DWARF of their own"
     if config.evidence == "headers":
         # castxml emulates the system cc/c++, not the producer: the standard
         # must be spellable there too (gcc 13 has no -std=c++26).
