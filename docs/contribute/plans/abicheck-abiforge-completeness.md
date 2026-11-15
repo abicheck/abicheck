@@ -774,13 +774,13 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS | Scope | Plan items | Status | Current PR |
 |---|---|---|---|---|
 | WS-0 | Review follow-ups; this plan | A10, PR 2 | in review | #2065; this PR |
-| WS-1 | ADR-093, `observable_at` on all kinds | A0, A1 | not started | — |
+| WS-1 | ADR-093, `observable_at` on all kinds | A0, A1 | in review (ADR) | ADR-093 docs PR |
 | WS-2 | `{B,H}` correctness | A2, A3, A4, A5 | not started | — |
 | WS-3 | Pure virtual, key function, vtable home | A6 | not started | — |
 | WS-4 | Platform facts | A7 | not started | — |
 | WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | not started | — |
-| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | in review | this PR (PR 1, B0) |
-| WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | not started | — |
+| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | B0 merged | #2069 (PR 1, B0) |
+| WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | PR 1 merged | #2070 (PR 1 of 3) |
 | WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | not started | — |
 
 ### 11.3 File ownership and conflict hotspots
