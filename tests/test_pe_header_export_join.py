@@ -375,3 +375,8 @@ def test_really_removed_member_is_still_reported() -> None:
     kinds = _kinds(result)
     assert result.verdict.value == "BREAKING", kinds
     assert ("func_removed", "_ZN10Calculator3addEii") in kinds, kinds
+
+
+def test_no_baseline_operand_passes_through_unchanged() -> None:
+    # A no-baseline comparison has no old operand: binding it is a no-op.
+    assert bind_pe_header_operand(None) is None
