@@ -714,6 +714,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "(extract/header_export_binding); the binding is a fact recorded at compare "
         "time and at dump time, and the identity (mangled) is unchanged"
     ),
+    74: GenerationSpellingChange(
+        "fix/nightly-builtin-probe-target (#2084): no stored type spelling changed. "
+        "A clang header parse under -m32 (or another non-host target) now probes the "
+        "builtin layout of the parse's own options, so long/unsigned long/long long "
+        "and the time_t family carry the 32-bit sizes they have on that target; a "
+        "stored snapshot of such a parse recorded the x86-64 sizes. The fact changes, "
+        "the spelling (the name a type is recorded under) does not"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
