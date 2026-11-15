@@ -11,8 +11,6 @@ no xfail.
 
 from __future__ import annotations
 
-import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -29,13 +27,7 @@ from abiforge.run.harness import (
 )
 from abiforge.run.toolchains import capability_gap, elf_link_unavailable
 
-pytestmark = [
-    pytest.mark.edit_corpus_nightly,
-    pytest.mark.skipif(
-        not sys.platform.startswith("linux") or shutil.which("readelf") is None,
-        reason="the stripped-cell check reads ELF sections with readelf (Linux)",
-    ),
-]
+pytestmark = pytest.mark.edit_corpus_nightly
 
 
 def _stripped(seed_lang: str) -> Config:

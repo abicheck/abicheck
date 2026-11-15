@@ -139,12 +139,40 @@ def _check(cmd: list[str], proc: subprocess.CompletedProcess[str], what: str) ->
         )
 
 
+#: Per object format: the tool that lists a library's sections, and the pattern
+#: that picks out its DWARF section names from that tool's output.
+_SECTION_LISTING: dict[str, tuple[list[str], str]] = {
+    # ELF: readelf's section table, ``.debug_*`` names.
+    "elf": (["readelf", "-SW"], r"\]\s+(\.debug\S*)"),
+    # PE/COFF (mingw): objdump's section table; DWARF keeps its ``.debug_*`` names.
+    "pe": (["objdump", "-h"], r"^\s+\d+\s+(\.debug_\S+)"),
+    # Mach-O: otool's load commands; DWARF sits in the ``__DWARF`` segment.
+    "macho": (["otool", "-l"], r"sectname\s+(__debug_\S+)"),
+}
+
+
+def object_format() -> str:
+    """The object format of this host's libraries (``elf``, ``pe`` or ``macho``)."""
+    if sys.platform == "darwin":
+        return "macho"
+    if sys.platform == "win32":
+        return "pe"
+    return "elf"
+
+
 def debug_sections(so: Path) -> list[str]:
-    """The ``.debug_*`` section names an ELF file still carries (``readelf -SW``)."""
-    cmd = ["readelf", "-SW", str(so)]
+    """The DWARF section names a built library still carries, in its own format.
+
+    A tool that fails, or prints no section table, raises: a failed listing is
+    never read as "no DWARF".
+    """
+    listing, pattern = _SECTION_LISTING[object_format()]
+    cmd = [*listing, str(so)]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     _check(cmd, proc, "section list")
-    return re.findall(r"\]\s+(\.debug\S*)", proc.stdout)
+    if not proc.stdout.strip():
+        raise CompileError(f"{' '.join(cmd)} printed no section table")
+    return re.findall(pattern, proc.stdout, re.MULTILINE)
 
 
 def strip_debug(so: Path) -> None:
@@ -152,11 +180,15 @@ def strip_debug(so: Path) -> None:
 
     A ``{B}`` or ``{B,H}`` side must be a stripped binary: a leftover
     ``.debug_*`` section would hand the checker DWARF the cell does not claim.
+    Only ELF is stripped (binutils ``strip``); every format is checked.
     """
-    cmd = ["strip", "--strip-debug", str(so)]
-    _check(
-        cmd, subprocess.run(cmd, capture_output=True, text=True, check=False), "strip"
-    )
+    if object_format() == "elf":
+        cmd = ["strip", "--strip-debug", str(so)]
+        _check(
+            cmd,
+            subprocess.run(cmd, capture_output=True, text=True, check=False),
+            "strip",
+        )
     left = debug_sections(so)
     if left:
         raise CompileError(f"{so} still has DWARF after strip --strip-debug: {left}")
@@ -222,9 +254,7 @@ def _compile_library(
             f"{' '.join(cmd)} failed (exit {proc.returncode}):\n"
             f"--- source ---\n{source_text}\n--- stderr ---\n{proc.stderr}"
         )
-    # ELF hosts only: the corpus's shared libraries are ELF; the Mach-O and PE
-    # targets carry no DWARF in the binary to begin with.
-    if not debug and sys.platform.startswith("linux"):
+    if not debug:
         strip_debug(so)
     return so
 

@@ -1,15 +1,16 @@
 """abiforge's evidence sets and what the harness gives each side (plan B0).
 
 The unit tests pin the lattice and the dumper's flag contract. The integration
-tests build real libraries and read their sections with ``readelf``, so a
-``{B,H}`` side that still carried DWARF would fail here, not in a trust-the-flag
-assertion.
+tests build real libraries and list their sections with the host's own tool
+(``readelf``, ``objdump`` or ``otool``, by object format), so a ``{B,H}`` side
+that still carried DWARF would fail here, not in a trust-the-flag assertion.
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -185,11 +186,24 @@ def test_build_data_cells_still_hand_the_dumper_the_layout_flags(
 # --- real binaries ------------------------------------------------------------
 
 
-def _debug_sections_by_readelf(so: Path) -> list[str]:
-    proc = subprocess.run(
-        ["readelf", "-SW", str(so)], capture_output=True, text=True, check=True
-    )
-    return re.findall(r"\]\s+(\.debug\S*)", proc.stdout)
+#: The host's object format and an independent section listing for it (the
+#: platform's own tool, not the harness's helper).
+_ORACLE: dict[str, tuple[list[str], str]] = {
+    "linux": (["readelf", "-SW"], r"\]\s+(\.debug\S*)"),
+    "win32": (["objdump", "-h"], r"^\s+\d+\s+(\.debug_\S+)"),
+    "darwin": (["otool", "-l"], r"sectname\s+(__debug_\S+)"),
+}
+_HOST = next(k for k in _ORACLE if sys.platform.startswith(k))
+
+
+def _debug_sections_of(so: Path) -> list[str]:
+    cmd, pattern = _ORACLE[_HOST]
+    proc = subprocess.run([*cmd, str(so)], capture_output=True, text=True, check=False)
+    # A failed listing must fail the test, never read as "no DWARF".
+    assert proc.returncode == 0, f"{cmd[0]} failed: {proc.stderr}"
+    names = re.findall(pattern, proc.stdout, re.MULTILINE)
+    assert names or proc.stdout.strip(), f"{cmd[0]} printed nothing"
+    return names
 
 
 @pytest.mark.integration
@@ -198,10 +212,14 @@ def test_the_stripped_headers_side_has_no_debug_sections(tmp_path: Path) -> None
     stripped = harness.build(
         SEED_BY_NAME["c_core"], base.with_(stripped=True), tmp_path / "bh"
     )
-    assert _debug_sections_by_readelf(stripped.so) == []
+    assert _debug_sections_of(stripped.so) == []
+    if _HOST == "darwin":
+        # ld64 keeps DWARF in the dSYM, not the image, so the image cannot
+        # show the control on this host; the stripped side above still holds.
+        pytest.skip("Mach-O images carry no DWARF to use as the control")
     # Control: the same build with DWARF does carry sections, so the check can fail.
     with_dwarf = harness.build(SEED_BY_NAME["c_core"], base, tmp_path / "bdh")
-    assert _debug_sections_by_readelf(with_dwarf.so)
+    assert _debug_sections_of(with_dwarf.so)
 
 
 @pytest.mark.integration
@@ -211,4 +229,4 @@ def test_the_binary_side_has_no_debug_sections(tmp_path: Path) -> None:
         default_config("c", GCC).with_(evidence="binary"),
         tmp_path / "b",
     )
-    assert _debug_sections_by_readelf(built.so) == []
+    assert _debug_sections_of(built.so) == []
