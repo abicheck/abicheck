@@ -110,7 +110,11 @@ _C = frozenset({"c"})
 FEATURE_STANDARDS: dict[str, tuple[StdRange, ...]] = {
     "inline": (
         StdRange("c", "c99", "ISO/IEC 9899:1999 6.7.4 (function specifiers)"),
-        StdRange("c++", "c++11", "ISO/IEC 14882:2011 [dcl.fct.spec]"),
+        StdRange(
+            "c++",
+            "c++11",
+            "ISO/IEC 14882:1998 [dcl.fct.spec] (inline functions, C++98)",
+        ),
     ),
     "enum_class": (
         StdRange("c++", "c++11", "ISO/IEC 14882:2011 [dcl.enum] (scoped enumerations)"),
@@ -141,7 +145,7 @@ FEATURE_STANDARDS: dict[str, tuple[StdRange, ...]] = {
         StdRange(
             "c++",
             "c++11",
-            "N3337 [string.require] (copy-on-write banned; C++11 string layout)",
+            "N2668 (copy-on-write made non-conforming, C++11 string layout), N3337 [string.require]",
         ),
     ),
     "restrict": (StdRange("c", "c99", "ISO/IEC 9899:1999 6.7.3.1 (restrict)"),),
