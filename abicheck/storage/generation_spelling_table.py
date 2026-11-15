@@ -697,6 +697,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "applies, and a pre-71 side's is_abstract is unknown (None), which "
         "the abstract detector skips"
     ),
+    72: GenerationSpellingChange(
+        "WS-4 PR 2 (fix/ws4-pe-msvc-export-match): a header-backed PE dump now "
+        "binds each declaration castxml spells with an Itanium name to the "
+        "DLL's MSVC export (extract/header_export_binding.bind_pe_header_exports, "
+        "run before export reconciliation), so the stored mangled name and its "
+        "export fact change for those declarations. No stored type spelling "
+        "changes and no rewrite applies: an older snapshot keeps its Itanium "
+        "name, and comparison reads the stored fact as written"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

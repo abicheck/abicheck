@@ -72,6 +72,7 @@ __all__ = [
     "EXPORT_BINDING_UNRESOLVED",
     "ExportBindingOutcome",
     "bind_header_declarations_to_exports",
+    "bind_pe_header_exports",
     "binding_export_names",
     "msvc_builtin_param_types",
 ]
@@ -138,6 +139,22 @@ def binding_export_names(snap: AbiSnapshot) -> tuple[list[str], bool]:
     if snap.macho is not None:
         return [e.name for e in snap.macho.exports if e.name], False
     return [], False
+
+
+def bind_pe_header_exports(snap: AbiSnapshot) -> AbiSnapshot:
+    """Bind a header-backed PE snapshot's declarations to its DLL's exports.
+
+    The default header dump (``dumper._dump_pe``) runs this before the export
+    table is reconciled: castxml spells a C++ member ``_ZN10Calculator3addEii``
+    while the DLL exports ``?add@Calculator@@QEAAHHH@Z``, so without it every
+    such declaration reads as an unexported public one and every export as
+    undocumented. Returns *snap* for chaining; a snapshot with no PE export
+    names is returned unchanged.
+    """
+    names, x86_32 = binding_export_names(snap)
+    if names:
+        bind_header_declarations_to_exports(snap, names, x86_32=x86_32)
+    return snap
 
 
 def _itanium_components(spelling: str) -> tuple[str, ...] | None:

@@ -106,7 +106,10 @@ FAMILIES: dict[str, Family] = {
                 "(checkout location, symlinks, hash seed, input order, platform "
                 "decoration) and distinct entities stay distinct."
             ),
-            harness_tests=("tests/test_family_f3_identity.py",),
+            harness_tests=(
+                "tests/test_family_f3_identity.py",
+                "tests/test_pe_header_export_join.py",
+            ),
         ),
         Family(
             key="F4",
