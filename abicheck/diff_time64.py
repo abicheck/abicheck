@@ -99,7 +99,7 @@ def _fundamental_of(type_str: str, typedefs: dict[str, str]) -> str:
     """
     seen = 0
     current = type_str
-    while isinstance(current, str) and current in typedefs and seen < 8:
+    while current in typedefs and seen < 8:
         current = typedefs[current]
         seen += 1
     return current
