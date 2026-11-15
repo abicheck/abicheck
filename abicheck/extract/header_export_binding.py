@@ -62,6 +62,7 @@ from ..model.fact import Fact
 from ..model.mangled_name import itanium_scope_components, msvc_scope_components
 from ..model.name_decoration import macho_underscore, pe_x86
 from ..model.surface_facts import (
+    BOUND_EXPORT_DIAGNOSTIC_PREFIX,
     binary_exported,
     export_match_diagnostic,
     in_public_surface,
@@ -104,7 +105,6 @@ _SPELLING_GAPS = frozenset(
 )
 
 #: Diagnostic prefix naming the export a declaration was bound to.
-BOUND_EXPORT_DIAGNOSTIC_PREFIX = "bound-export:"
 
 
 @dataclass(frozen=True)
@@ -430,7 +430,6 @@ def _apply(decl: Decl, sym: str) -> None:
         producer=producer,
     )
     decl.visibility = Visibility.PUBLIC
-    decl.mangled = sym
     decl.declared_in_headers_fact = facts["declared_in_headers_fact"]
     decl.in_public_contract_fact = facts["in_public_contract_fact"]
     decl.binary_exported_fact = facts["binary_exported_fact"]

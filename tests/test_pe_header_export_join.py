@@ -26,12 +26,19 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.extract.header_export_binding import bind_pe_header_exports
+from abicheck.extract.header_export_binding import (
+    bind_pe_header_exports,
+    bind_pe_header_operand,
+)
 from abicheck.extract.surface_fact_producers import header_ast_surface_facts
-from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model import AbiSnapshot, Function, Param, ScopeOrigin, Visibility
 from abicheck.model.export_index import ExportMatch
 from abicheck.model.pe_facts import PeExport, PeMetadata
-from abicheck.model.surface_facts import binary_export_match, in_public_surface
+from abicheck.model.surface_facts import (
+    binary_export_match,
+    bound_export_spelling,
+    in_public_surface,
+)
 
 _AMD64 = "IMAGE_FILE_MACHINE_AMD64"
 
@@ -100,7 +107,7 @@ _CASES = [
 def test_declaration_binds_to_its_msvc_export(decl: Function, export: str) -> None:
     snap = _pe_snapshot([export], decl)
     bind_pe_header_exports(snap)
-    assert decl.mangled == export
+    assert bound_export_spelling(decl) == export
     assert binary_export_match(decl) is ExportMatch.DEMANGLED
     assert in_public_surface(decl)
 
@@ -115,8 +122,8 @@ def test_overloads_bind_by_their_own_parameter_list() -> None:
         dbl_add,
     )
     bind_pe_header_exports(snap)
-    assert int_add.mangled == "?add@Calculator@@QEAAHHH@Z"
-    assert dbl_add.mangled == "?add@Calculator@@QEAANNN@Z"
+    assert bound_export_spelling(int_add) == "?add@Calculator@@QEAAHHH@Z"
+    assert bound_export_spelling(dbl_add) == "?add@Calculator@@QEAANNN@Z"
 
 
 def test_extern_c_declaration_binds_to_its_plain_export() -> None:
@@ -166,7 +173,8 @@ def test_header_pe_dump_tail_binds_before_export_reconciliation() -> None:
     decl = _decl("add", "_ZN10Calculator3addEii", ("int", "int"))
     snap = _pe_snapshot(["?add@Calculator@@QEAAHHH@Z"], decl)
     finish_binary_snapshot(snap)
-    assert decl.mangled == "?add@Calculator@@QEAAHHH@Z"
+    assert bound_export_spelling(decl) == "?add@Calculator@@QEAAHHH@Z"
+    assert decl.mangled == "_ZN10Calculator3addEii"
     assert binary_export_match(decl) is ExportMatch.DEMANGLED
 
 
@@ -230,7 +238,7 @@ def test_member_really_removed_in_v2_is_still_reported() -> None:
     )
     kinds = _kinds(compare_snapshots(old, new))
     assert kinds == [
-        ("func_removed", "?multiply@Calculator@@QEAAHHH@Z"),
+        ("func_removed", "_ZN10Calculator8multiplyEii"),
         ("public_surface_shrank", "<surface>"),
     ], kinds
 
@@ -276,7 +284,9 @@ def test_no_baseline_run_joins_a_stored_pe_snapshot(monkeypatch) -> None:
         exports=["?add@Calculator@@QEAAHHH@Z"],
     )
     nb.run_no_baseline_compare(stored)
-    assert [d.mangled for d in received] == ["?add@Calculator@@QEAAHHH@Z"]
+    assert [bound_export_spelling(d) for d in received] == [
+        "?add@Calculator@@QEAAHHH@Z"
+    ]
 
 
 def test_env_matrix_compare_joins_a_stored_pe_snapshot() -> None:
@@ -306,3 +316,62 @@ def test_raw_checker_compare_is_clean_on_bound_operands() -> None:
     old = bind_pe_header_operand(_stored_gen71_pe(*members(), exports=exports))
     new = bind_pe_header_operand(_stored_gen71_pe(*members(), exports=exports))
     assert _kinds(compare(old, new)) == []
+
+
+_CALC_EXPORT = "?add@Calculator@@QEAAHHH@Z"
+
+
+def _calc_side(*, inline: bool, exported: bool, present: bool = True) -> AbiSnapshot:
+    """One version of Calculator::add as a header-backed PE operand."""
+    if not present:
+        return _pe_snapshot([], *[])
+    decl = _decl("add", "_ZN10Calculator3addEii", ("int", "int"))
+    decl.is_inline = inline
+    decl.origin = ScopeOrigin.PUBLIC_HEADER
+    return _pe_snapshot([_CALC_EXPORT] if exported else [], decl)
+
+
+def _compare_public(old: AbiSnapshot, new: AbiSnapshot):
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    return compare_snapshots(bind_pe_header_operand(old), bind_pe_header_operand(new))
+
+
+def test_inline_to_outlined_is_compatible_without_an_inline_pair() -> None:
+    # case47's shape: inline and unexported in v1, out-of-line and exported in v2.
+    result = _compare_public(
+        _calc_side(inline=True, exported=False),
+        _calc_side(inline=False, exported=True),
+    )
+    kinds = _kinds(result)
+    assert result.verdict.value == "COMPATIBLE", kinds
+    assert ("func_added", "_ZN10Calculator3addEii") in kinds, kinds
+    assert all(kind != "inline_function_removed" for kind, _ in kinds), kinds
+
+
+def test_outlined_to_inline_is_a_break() -> None:
+    result = _compare_public(
+        _calc_side(inline=False, exported=True),
+        _calc_side(inline=True, exported=False),
+    )
+    assert result.verdict.value == "BREAKING", _kinds(result)
+    assert ("func_visibility_changed", "_ZN10Calculator3addEii") in _kinds(result)
+
+
+def test_unchanged_exported_member_is_no_change() -> None:
+    result = _compare_public(
+        _calc_side(inline=False, exported=True),
+        _calc_side(inline=False, exported=True),
+    )
+    assert result.verdict.value == "NO_CHANGE", _kinds(result)
+    assert _kinds(result) == []
+
+
+def test_really_removed_member_is_still_reported() -> None:
+    result = _compare_public(
+        _calc_side(inline=False, exported=True),
+        _calc_side(inline=False, exported=False, present=False),
+    )
+    kinds = _kinds(result)
+    assert result.verdict.value == "BREAKING", kinds
+    assert ("func_removed", "_ZN10Calculator3addEii") in kinds, kinds
