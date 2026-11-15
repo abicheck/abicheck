@@ -38,7 +38,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
-from abiforge.model.config import Config, EvidenceSet
+from abiforge.checkers.abicheck import observable_at
+from abiforge.model.config import Config
 
 # Verdict names in increasing severity (see abicheck.checker_types.Verdict).
 VERDICT_RANK: dict[str, int] = {
@@ -117,37 +118,78 @@ class Rule:
     when: Callable[[Config], bool]
     changes: dict[str, object]
     why: str
-    # Overrides the operator's evidence floor while this rule holds.
-    min_evidence: str | None = None
 
     def apply(self, base: Expectation) -> Expectation:
         return replace(base, note=self.why, **self.changes)  # type: ignore[arg-type]
 
 
-#: The atoms a legacy ``min_evidence`` name needs in order to show a fact. A
-#: header-visible fact needs ``H``, not ``D``: the stripped ``{B,H}`` cell must
-#: be able to see it too. Replaced by ``EvidenceSet`` values in PR 2 (plan B1).
-MIN_EVIDENCE_NEEDS: dict[str, EvidenceSet] = {
-    "binary": EvidenceSet.of("B"),
-    "dwarf": EvidenceSet.of("B", "D"),
-    "headers": EvidenceSet.of("B", "H"),
-}
+#: Language names as ``abicheck``'s observability conditions spell them.
+_LANGUAGE_NAME = {"c": "c", "c++": "cxx"}
 
 
-def evidence_floor(exp: Expectation, config: Config, min_evidence: str) -> Expectation:
-    """Below *min_evidence* the edit is invisible: require nothing, keep the ceiling."""
-    if MIN_EVIDENCE_NEEDS[min_evidence] <= config.evidence_set:
+def kind_observable(kind: str, config: Config) -> bool:
+    """Whether *config* observes *kind*: some ``observable_at`` alternative is inside it.
+
+    A kind with no declared ``observable_at`` (UNCLASSIFIED) is taken as
+    observable: the edit is never weakened on a missing declaration. Such
+    kinds are listed by ``coverage`` as unclassified, not dropped silently.
+    """
+    spec = observable_at(kind)
+    if spec is None:
+        return True
+    atoms = config.evidence_set.atoms
+    language = _LANGUAGE_NAME[config.lang]
+    for cond in spec:
+        if cond.platform is not None and config.objfmt not in cond.platform:
+            continue
+        if cond.language is not None and language not in cond.language:
+            continue
+        if any(alt <= atoms for alt in cond.alternatives):
+            return True
+    return False
+
+
+def observability_floor(
+    exp: Expectation, config: Config, observed: frozenset[str] | None = None
+) -> Expectation:
+    """The expectation the evidence can show, kind by kind.
+
+    A kind the configuration does not observe is not required: it drops out of
+    ``expected`` (and out of any ``any_of`` group, which drops when empty),
+    and the note says so. When no required kind is observed the edit is
+    unobservable: nothing is required, the benign ceiling still holds.
+    """
+    if observed is None:
+        observed = frozenset(
+            k
+            for k in exp.expected | frozenset().union(*exp.any_of)
+            if kind_observable(k, config)
+        )
+    hidden = (exp.expected | frozenset().union(*exp.any_of)) - observed
+    if not hidden:
         return exp
+    expected = exp.expected & observed
+    any_of = tuple(kept for group in exp.any_of if (kept := group & observed))
+    if not expected and not any_of:
+        return replace(
+            exp,
+            expected=frozenset(),
+            any_of=(),
+            verdict_min="NO_CHANGE",
+            observable=False,
+            note=(
+                f"{config.evidence_label} evidence cannot show this edit "
+                f"(no required kind is observable: {sorted(hidden)})"
+            ),
+        )
     return replace(
         exp,
-        expected=frozenset(),
-        any_of=(),
-        verdict_min="NO_CHANGE",
-        observable=False,
+        expected=expected,
+        any_of=any_of,
         note=(
-            f"{config.evidence_label} evidence cannot show this edit "
-            f"(needs {min_evidence})"
-        ),
+            f"{exp.note} "
+            f"[reduced: {sorted(hidden)} not observable at {config.evidence_label}]"
+        ).strip(),
     )
 
 
