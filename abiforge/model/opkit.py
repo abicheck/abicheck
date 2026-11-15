@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
-from abiforge.model.config import Config, Flags, has_feature
+from abiforge.model.config import LEVEL_SET, Config, Flags, has_feature
 from abiforge.model.expect import Expectation, Rule, evidence_floor
 from abiforge.model.seeds import RoleText, Seed
 
@@ -84,7 +84,7 @@ class EditOp:
                 return f"needs {feat}, which {config.std.name} lacks"
         if (
             self.new_evidence is not None
-            and _EVIDENCE_RANK[config.evidence] <= _EVIDENCE_RANK[self.new_evidence]
+            and config.evidence_set <= LEVEL_SET[self.new_evidence]
         ):
             return (
                 f"the new side is dumped at {self.new_evidence} evidence; "
@@ -94,8 +94,11 @@ class EditOp:
             return self.precondition(config)
         return None
 
-    def new_side_evidence(self, config: Config) -> str:
-        return self.new_evidence or config.evidence
+    def new_side_config(self, config: Config) -> Config:
+        """The config the new side is built and dumped under (less evidence, if any)."""
+        if self.new_evidence is None:
+            return config
+        return config.with_(evidence=self.new_evidence, stripped=False)
 
     def base(self) -> Expectation:
         return Expectation(
@@ -139,9 +142,6 @@ class EditOp:
 
     def new_flags(self, flags: Flags) -> Flags:
         return self.rebuild(flags) if self.rebuild else flags
-
-
-_EVIDENCE_RANK = {"binary": 0, "dwarf": 1, "headers": 2}
 
 
 def _set(

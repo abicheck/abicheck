@@ -38,7 +38,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
-from abiforge.model.config import EVIDENCE_RANK, Config
+from abiforge.model.config import Config, EvidenceSet
 
 # Verdict names in increasing severity (see abicheck.checker_types.Verdict).
 VERDICT_RANK: dict[str, int] = {
@@ -124,9 +124,19 @@ class Rule:
         return replace(base, note=self.why, **self.changes)  # type: ignore[arg-type]
 
 
+#: The atoms a legacy ``min_evidence`` name needs in order to show a fact. A
+#: header-visible fact needs ``H``, not ``D``: the stripped ``{B,H}`` cell must
+#: be able to see it too. Replaced by ``EvidenceSet`` values in PR 2 (plan B1).
+MIN_EVIDENCE_NEEDS: dict[str, EvidenceSet] = {
+    "binary": EvidenceSet.of("B"),
+    "dwarf": EvidenceSet.of("B", "D"),
+    "headers": EvidenceSet.of("B", "H"),
+}
+
+
 def evidence_floor(exp: Expectation, config: Config, min_evidence: str) -> Expectation:
     """Below *min_evidence* the edit is invisible: require nothing, keep the ceiling."""
-    if EVIDENCE_RANK[config.evidence] >= EVIDENCE_RANK[min_evidence]:
+    if MIN_EVIDENCE_NEEDS[min_evidence] <= config.evidence_set:
         return exp
     return replace(
         exp,
@@ -134,7 +144,10 @@ def evidence_floor(exp: Expectation, config: Config, min_evidence: str) -> Expec
         any_of=(),
         verdict_min="NO_CHANGE",
         observable=False,
-        note=f"{config.evidence} evidence cannot show this edit (needs {min_evidence})",
+        note=(
+            f"{config.evidence_label} evidence cannot show this edit "
+            f"(needs {min_evidence})"
+        ),
     )
 
 
