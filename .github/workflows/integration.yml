@@ -104,9 +104,12 @@ jobs:
         # PR-tier floor (abiforge/coverage_ledger.json) lists the kinds only
         # those cells verify (ELF_CLASS_CHANGED, ELF_MACHINE_CHANGED,
         # STDLIB_IMPLEMENTATION_CHANGED, TIME64_ABI_CHANGED).
+        # The CI image also has gcc 14 as a producer toolchain, and its -m32 link
+        # needs the gcc-14 multilib runtime (time_bits_64 failed on gcc14 with
+        # `collect2: ld returned 1` without it).
         uses: ./.github/actions/install-system-deps
         with:
-          packages: gcc g++ cmake clang lld llvm abi-compliance-checker zlib1g-dev curl ca-certificates gcc-multilib g++-multilib libc6-dev-i386 libc6-x32 libx32gcc-13-dev libx32stdc++-13-dev libc++-dev libc++abi-dev
+          packages: gcc g++ cmake clang lld llvm abi-compliance-checker zlib1g-dev curl ca-certificates gcc-multilib g++-multilib libc6-dev-i386 libc6-x32 libx32gcc-13-dev libx32stdc++-13-dev gcc-14-multilib g++-14-multilib lib32gcc-14-dev libx32gcc-14-dev libx32stdc++-14-dev libc++-dev libc++abi-dev
       - name: Install abidiff (Linux)
         if: runner.os == 'Linux'
         # Spelled `abigail-tools` on some releases, `libabigail-tools` on
