@@ -88,6 +88,38 @@ def _is_32bit_elf(snap: AbiSnapshot) -> bool:
     return getattr(elf, "pointer_size", 8) == 4
 
 
+def _fundamental_of(type_str: str, typedefs: dict[str, str]) -> str:
+    """*type_str* followed through typedef aliases to its fundamental spelling.
+
+    glibc spells the family as a chain: ``time_t`` is ``__time_t`` (32-bit
+    ``long``) or ``__time64_t`` (``__int64_t``), so one alias lookup leaves a
+    typedef name the width buckets cannot read. GCC's header backend records
+    the flattened type; clang's records each link. The chain is followed in
+    the same side's alias map, bounded so a cyclic typedef terminates.
+    """
+    seen = 0
+    current = type_str
+    while isinstance(current, str) and current in typedefs and seen < 8:
+        current = typedefs[current]
+        seen += 1
+    return current
+
+
+#: Fixed-width integer typedefs, whose width the name itself fixes on every
+#: target (POSIX / glibc ``bits/types.h``). A chain that ends on one of these
+#: is 64-bit (or 32-bit) on any ABI, so it needs no alias map entry.
+_FIXED_WIDTH: dict[str, str] = {
+    "__int32_t": "32",
+    "__uint32_t": "32",
+    "__int64_t": "64",
+    "__uint64_t": "64",
+    "int32_t": "32",
+    "uint32_t": "32",
+    "int64_t": "64",
+    "uint64_t": "64",
+}
+
+
 def _bucket(type_str: str, bits32: bool) -> str | None:
     """Width bucket for *type_str*, resolving the ``long`` family per target.
 
@@ -101,6 +133,8 @@ def _bucket(type_str: str, bits32: bool) -> str | None:
     if not isinstance(type_str, str):
         return None
     t = " ".join(type_str.split())
+    if t in _FIXED_WIDTH:
+        return _FIXED_WIDTH[t]
     core = " ".join(w for w in t.split() if w not in ("unsigned", "signed", "int"))
     if core == "long long":
         return "64"
@@ -291,8 +325,8 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new_under = new_typedefs.get(name)
         if new_under is None:
             continue
-        ob = _bucket(old_under, old_32)
-        nb = _bucket(new_under, new_32)
+        ob = _bucket(_fundamental_of(old_under, old_typedefs), old_32)
+        nb = _bucket(_fundamental_of(new_under, new_typedefs), new_32)
         if ob is None or nb is None or ob == nb:
             continue
         candidates.append((name, old_under, new_under, nb))
