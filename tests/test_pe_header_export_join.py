@@ -496,4 +496,28 @@ def test_c_function_does_not_bind_to_a_cpp_data_export() -> None:
     snap.pe = PeMetadata(machine=_AMD64, exports=[PeExport(name="?g@@3HA")])
     snap.declarations.functions = [fn]
     bound = bind_pe_header_operand(snap)
-    assert bound.declarations.functions[0].mangled == "g"
+    decl = bound.declarations.functions[0]
+    assert bound_export_spelling(decl) is None
+    assert binary_export_match(decl) is ExportMatch.ABSENT
+
+
+def test_static_global_is_not_bound_to_a_cpp_data_export() -> None:
+    # A file-scope static has internal linkage: a DLL data export can't be it.
+    decl = _var("g", "g", "int")
+    decl.is_static = True
+    assert "public_not_exported" in _variable_noise([decl], ["?g@@3HA"])
+
+
+def test_x86_plain_global_is_bound_once_and_its_second_export_stays_unbound() -> None:
+    # On x86 the plain export is ``_g``: the first pass binds the declaration to it.
+    # The variable pass must not bind the same declaration again to ``?g@@3HA``.
+    from abicheck.extract.header_export_binding import (
+        bind_header_declarations_to_exports,
+    )
+
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    decl = _var("g", "g", "int")
+    snap.declarations.variables = [decl]
+    outcome = bind_header_declarations_to_exports(snap, ["_g", "?g@@3HA"], x86_32=True)
+    assert [sym for _, sym in outcome.bound] == ["_g"]
+    assert "?g@@3HA" in outcome.unbound_exports

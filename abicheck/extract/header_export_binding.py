@@ -483,6 +483,7 @@ def bind_header_declarations_to_exports(
     bound: list[tuple[str, str]] = []
     ambiguous: list[str] = []
     bound_syms: set[str] = set()
+    bound_decls: set[int] = set()
     for (scheme, comps), cands in decls_by_key.items():
         syms = [
             s
@@ -496,6 +497,7 @@ def bind_header_declarations_to_exports(
             bound.append((decl.mangled, sym))
             _apply(decl, sym)
             bound_syms.add(sym)
+            bound_decls.add(id(decl))
         ambiguous.extend(refused)
     # A plain-name (C spelling) namespace-scope global binds to an MSVC data
     # symbol ``?name@@<storage><type>A`` only when that symbol decodes to the
@@ -510,7 +512,13 @@ def bind_header_declarations_to_exports(
             if sch == "msvc" and s not in bound_syms and msvc_data_type(s) is not None
         ]
         for decl in cands:
-            if not isinstance(decl, Variable):
+            # A static variable has internal linkage, so no DLL export names it;
+            # a declaration the first pass bound keeps that binding alone.
+            if (
+                not isinstance(decl, Variable)
+                or decl.is_static
+                or id(decl) in bound_decls
+            ):
                 continue
             want = _canonical_builtin(decl.type)
             hits = [
