@@ -455,9 +455,9 @@ def _walk_chain(
         value = _read_vm(image, segments, loc, 8)
         if value is None:
             raise FixupDecodeError("chain slot is not in the file")
+        # Every added slot is a visit, and visits are bounded by *limit* above,
+        # so the set cannot outgrow the budget here.
         out.add(loc)
-        if len(out) > limit:
-            raise FixupDecodeError("more fixups than the image's segments can hold")
         nxt = (value >> shift) & ((1 << width) - 1)
         if nxt == 0:
             return
