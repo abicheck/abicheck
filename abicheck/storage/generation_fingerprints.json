@@ -10,7 +10,7 @@
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
-      "abicheck/dwarf_unified.py": "573a50584f1c4f59d18034ffc561a4008d1802abc4db2c99eb01d3dd5b3438c3",
+      "abicheck/dwarf_unified.py": "890710d8299957ac78a7b823b71c0ebe2771e448a8ee077cc4b4cf3fdf27343f",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
       "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
@@ -186,6 +186,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
+      "abicheck/extract/macho_dsym.py": "82006c584e398632ad742b3ce64f9c747ca397dbcbd0b00bf516377272eb0ced",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
@@ -233,9 +234,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c5cb254582492ac3b4a8d553c9142be7043715aa0cb60f841f7fd01c750c867c",
-    "generation": 75,
-    "reason": "renumber to 75 after #2084 took 74 (WS-4 PR 1 Mach-O object sizes)"
+    "fingerprint": "09ff1f8542abf115e855cc2210309cacf311f7edc0b87a6de75972c9ac813e5f",
+    "generation": 76,
+    "reason": "Mach-O DWARF read from the adjacent dSYM (ADR-021 step 5)"
   },
   "resolver": {
     "files": {

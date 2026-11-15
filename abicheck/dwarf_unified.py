@@ -49,6 +49,7 @@ from __future__ import annotations
 import logging
 import os
 import stat
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -123,6 +124,66 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
     return session
 
 
+_MACHO64_LE_MAGIC = b"\xcf\xfa\xed\xfe"  # MH_MAGIC_64, little-endian
+_CPU_X86_64 = 0x01000007
+_CPU_ARM64 = 0x0100000C
+
+
+def _adjacent_dsym_binary(so_path: Path) -> Path | None:
+    """The DWARF file of the bundle beside *so_path* (ADR-021 step 5).
+
+    ``<lib>.dSYM/Contents/Resources/DWARF/<lib>``, and for a framework
+    ``Foo.framework/Foo`` the bundle is ``Foo.framework.dSYM``.
+    """
+    name = so_path.name
+    candidates = [so_path.parent / f"{name}.dSYM" / "Contents/Resources/DWARF" / name]
+    if so_path.parent.name.endswith(".framework"):
+        fw = so_path.parent
+        candidates.append(
+            fw.parent / f"{fw.name}.dSYM" / "Contents/Resources/DWARF" / name
+        )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _macho_arch(f: BinaryIO) -> str:
+    f.seek(4)
+    cputype = struct.unpack("<I", f.read(4))[0]
+    f.seek(0)
+    return {_CPU_X86_64: "x64", _CPU_ARM64: "aarch64"}.get(cputype, "unknown")
+
+
+def _macho_dsym_session(
+    so_path: Path, f: BinaryIO
+) -> tuple[DwarfSession | None, AdvancedExtractionStatus]:
+    """DWARF of a Mach-O library, read from its adjacent ``.dSYM`` bundle.
+
+    A library with no bundle, or a bundle that does not belong to it (UUID
+    mismatch, fat, malformed), yields no session with status ``NOT_RUN``:
+    nothing was read, which is absent evidence, never an empty DWARF surface.
+    """
+    from .extract.macho_dsym import DsymDwarf, macho_uuid, read_dsym_dwarf
+
+    dsym = _adjacent_dsym_binary(so_path)
+    if dsym is None:
+        log.debug("parse_dwarf: no dSYM bundle beside %s", so_path)
+        return None, AdvancedExtractionStatus.NOT_RUN
+    got = read_dsym_dwarf(dsym, dylib_uuid=macho_uuid(so_path))
+    if not isinstance(got, DsymDwarf):
+        log.warning("parse_dwarf: dSYM for %s not used: %s", so_path, got.reason)
+        return None, AdvancedExtractionStatus.NOT_RUN
+    session = DwarfSession(
+        path=Path(so_path),
+        _file=f,
+        elf=None,
+        dwarf=got.dwarf,
+        arch=_macho_arch(f),
+    )
+    return session, AdvancedExtractionStatus.COMPLETED
+
+
 def _open_dwarf_session_with_status(
     so_path: Path,
 ) -> tuple[DwarfSession | None, AdvancedExtractionStatus]:
@@ -145,6 +206,12 @@ def _open_dwarf_session_with_status(
             log.warning("parse_dwarf: not a regular file: %s", so_path)
             f.close()
             return None, AdvancedExtractionStatus.NOT_RUN
+
+        f.seek(0)
+        if f.read(4) == _MACHO64_LE_MAGIC:
+            f.seek(0)
+            return _macho_dsym_session(so_path, f)
+        f.seek(0)
 
         elf = ELFFile(f)  # type: ignore[no-untyped-call]
 
