@@ -478,7 +478,7 @@ def test_floor_check_holds_the_merged_run_to_the_whole_floor() -> None:
         _rec(expected=("A",), produced=("A",)),
         _rec(cls="wrong-kind", expected=("B",)),
     ]
-    assert cov.check_floor(recs, ledger, "pr") == [
+    assert [p.split("\n")[0] for p in cov.check_floor(recs, ledger, "pr")] == [
         "B: in the pr verified floor, not verified by this run"
     ]
     # Two shards: one's skipped / known-xfail / any_of cells expect A and B
@@ -546,7 +546,7 @@ def test_cli_reports_and_gates_the_floor(
         == 1
     )
     rep = json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))
-    assert rep["floor_problems"]["pr"] == [
+    assert [p.split("\n")[0] for p in rep["floor_problems"]["pr"]] == [
         "FUNC_REMOVED: in the pr verified floor, not verified by this run"
     ]
     # --raise-floor only ever adds.
@@ -814,9 +814,12 @@ def test_only_a_checked_tier_reports_floor_drops() -> None:
     ledger = _ledger(pr=["A"])
     shard = [_rec(expected=("B",), produced=("B",))]  # A is verified elsewhere
     assert "floor_problems" not in cov.report(shard, ledger)
-    assert cov.report(shard, ledger, ["pr"])["floor_problems"] == {
-        "pr": ["A: in the pr verified floor, not verified by this run"]
-    }
+    assert {
+        tier: [p.split("\n")[0] for p in problems]
+        for tier, problems in cov.report(shard, ledger, ["pr"])[
+            "floor_problems"
+        ].items()
+    } == {"pr": ["A: in the pr verified floor, not verified by this run"]}
     assert "Verified-floor drops" not in cov.summary_markdown(cov.report(shard, ledger))
 
 

@@ -42,6 +42,7 @@ from dataclasses import MISSING, dataclass, field, fields
 from enum import StrEnum
 from typing import Any
 
+from . import observability as _obs
 from ._immutable_mapping import _ImmutableDict as _ImmutableDict
 from .dimensions import (
     ChangeEntity as ChangeEntity,
@@ -211,6 +212,9 @@ class ChangeKindMeta:
     # fact contract evaluation calls ``NOT_APPLICABLE``. Mandatory on a
     # registry entry (``_validate_entry``); appended last for pickle order.
     contract_subject: ContractSubject | None = field(default=None, kw_only=True)
+    # ADR-093: minimal evidence configurations, and declared kind relations.
+    observable_at: _obs.ObservableAt = field(default=_obs.UNCLASSIFIED, kw_only=True)
+    relations: _obs.KindRelations = field(default=_obs.NO_RELATIONS, kw_only=True)
 
     def __post_init__(self) -> None:
         # ``frozen=True`` only stops reassigning the *attribute*
@@ -640,6 +644,7 @@ class ChangeKindRegistry:
                 raise ValueError(f"Duplicate registry entry for {e.kind!r}")
             _validate_entry(e)
             self._entries[e.kind] = e
+        _obs.validate_catalog(self._entries)
 
     def __reduce__(
         self,

@@ -111,6 +111,10 @@ DERIVED_FROM_LEGACY = "derived-from-legacy-visibility"
 #: :class:`~abicheck.model.export_index.ExportMatch`). Persisted with the
 #: fact's diagnostics, so no stored field is needed to recover the tier.
 EXPORT_MATCH_DIAGNOSTIC_PREFIX = "export-match:"
+#: Diagnostic prefix naming the export spelling a header declaration was bound
+#: to (``extract.header_export_binding``). The fact carries the binding; the
+#: declaration's identity (``mangled``) stays its castxml spelling.
+BOUND_EXPORT_DIAGNOSTIC_PREFIX = "bound-export:"
 
 #: The type an export-table stub carries where a declaration would carry a
 #: return or object type (no header or debug entry described it).
@@ -224,6 +228,34 @@ def binary_exported(decl: SurfaceFactBearing) -> Fact[bool]:
     if vis is Visibility.HIDDEN:
         return _LEGACY_PARTIAL_FALSE
     return _LEGACY_PARTIAL_TRUE
+
+
+def bound_export_spelling(decl: SurfaceFactBearing) -> str | None:
+    """The export spelling *decl* was bound to, read from its (c) fact, or ``None``.
+
+    Only a binding recorded by the header-to-export join carries it; a declaration
+    the exact lookup matched, or one never bound, returns ``None``.
+    """
+    fact = binary_exported(decl)
+    if fact.status is FactStatus.PARTIAL and fact.value is True:
+        for diag in fact.diagnostics:
+            if diag.startswith(BOUND_EXPORT_DIAGNOSTIC_PREFIX):
+                return diag[len(BOUND_EXPORT_DIAGNOSTIC_PREFIX) :]
+    return None
+
+
+def decl_export_satisfied(decl: SurfaceFactBearing, satisfied: set[str]) -> bool:
+    """Whether *decl*'s export obligation is met by the *satisfied* export names.
+
+    Its own spelling, or the export the header-to-export join bound it to (its
+    (c) fact, :func:`bound_export_spelling`), is in *satisfied*. The identity
+    (``mangled``) is never compared to the export table on its own: a bound
+    declaration keeps the castxml spelling, and its export is named by the fact.
+    """
+    if getattr(decl, "mangled", "") in satisfied:
+        return True
+    bound = bound_export_spelling(decl)
+    return bound is not None and bound in satisfied
 
 
 def binary_export_match(decl: SurfaceFactBearing) -> ExportMatch | None:

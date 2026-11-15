@@ -35,6 +35,7 @@ from ..model.export_index import ExportTableState, snapshot_export_table_state
 from ..model.export_read import ExportReadState
 from ..storage import closure_identity
 from ..storage.snapshot_load_normalization import stamp_macho_elf_binding
+from .header_export_binding import bind_pe_header_exports
 from .parse_failures import export_table_read_required
 from .surface_fact_producers import reconcile_export_absence, unread_export_fact
 
@@ -119,6 +120,10 @@ def finish_binary_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
     absences (:func:`reconcile_snapshot_export_absence`), stamp a Mach-O
     export's linkage onto its declarations (ELF's is stamped by the ELF
     builder itself), then renumber anonymous closure identities."""
+    if snapshot.pe is not None and snapshot.from_headers:
+        # Bind before reconciling: a header-backed PE declaration must already
+        # carry its DLL's MSVC spelling when its export fact is judged.
+        bind_pe_header_exports(snapshot)
     stamp_macho_elf_binding(snapshot)
     reconcile_snapshot_export_absence(snapshot)
     return closure_identity.renumber_anonymous_closure_identities(snapshot)
