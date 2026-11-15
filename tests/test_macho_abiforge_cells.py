@@ -56,7 +56,9 @@ def _thunk_exports(root: Path) -> list[str]:
         names += [
             f"{lib.parent.name}/{lib.name}:{e.name}"
             for e in meta.exports
-            if e.name.startswith(("_ZThn", "_ZTv"))
+            # Mach-O export names are normalized without the leading underscore
+            # (macho_metadata strips it), so match the Itanium prefix after it.
+            if e.name.lstrip("_").startswith(("ZThn", "ZTv"))
         ]
     return names
 
