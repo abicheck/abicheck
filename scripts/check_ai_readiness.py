@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -3597,22 +3597,22 @@ if TYPE_CHECKING:
 #: divergence and leaves this baseline in the same change that removes it, and a
 #: new entry fails the gate. Never raise this tuple.
 ABIFORGE_KNOWN_BASELINE: tuple[str, ...] = (
-    'char_made_unsigned|c_elf|wrong-verdict||missing:CHAR_SIGNEDNESS_CHANGED;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth',
-    'func_contract_attribute_added|c_elf|wrong-verdict||missing:FUNC_CONTRACT_ATTRIBUTE_ADDED;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|castxml records no GNU contract attribute on a function',
-    'func_contract_attribute_removed|c_elf|wrong-verdict||missing:FUNC_CONTRACT_ATTRIBUTE_REMOVED;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|castxml records no GNU contract attribute on a function',
-    'func_exception_spec_widened|cxx_more|wrong-verdict||missing:FUNC_EXCEPTION_SPEC_CHANGED;weaker-than:COMPATIBLE_WITH_RISK|COMPATIBLE|The native gcc header backend records no dynamic exception specification',
-    'glibc_version_required_added|c_elf|wrong-kind||missing:SYMBOL_VERSION_REQUIRED_ADDED|COMPATIBLE_WITH_RISK|A version requirement on a newly needed library reads as compatible, whatever its version',
-    'gnu_unique_disabled|cxx_alt|wrong-verdict||missing:SYMBOL_BINDING_LOST_UNIQUE;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth',
+    "char_made_unsigned|c_elf|wrong-verdict||missing:CHAR_SIGNEDNESS_CHANGED;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth",
+    "func_contract_attribute_added|c_elf|wrong-verdict||missing:FUNC_CONTRACT_ATTRIBUTE_ADDED;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|castxml records no GNU contract attribute on a function",
+    "func_contract_attribute_removed|c_elf|wrong-verdict||missing:FUNC_CONTRACT_ATTRIBUTE_REMOVED;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|castxml records no GNU contract attribute on a function",
+    "func_exception_spec_widened|cxx_more|wrong-verdict||missing:FUNC_EXCEPTION_SPEC_CHANGED;weaker-than:COMPATIBLE_WITH_RISK|COMPATIBLE|The native gcc header backend records no dynamic exception specification",
+    "glibc_version_required_added|c_elf|wrong-kind||missing:SYMBOL_VERSION_REQUIRED_ADDED|COMPATIBLE_WITH_RISK|A version requirement on a newly needed library reads as compatible, whatever its version",
+    "gnu_unique_disabled|cxx_alt|wrong-verdict||missing:SYMBOL_BINDING_LOST_UNIQUE;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth",
     "gnu_unique_static_added|cxx_more|false-positive||stronger-than:COMPATIBLE|COMPATIBLE_WITH_RISK|An inline function's static local, exported by clang, reads as an undeclared export",
-    'gnu_unique_static_added|cxx_more|wrong-kind||missing:SYMBOL_BINDING_BECAME_UNIQUE|COMPATIBLE|A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth',
+    "gnu_unique_static_added|cxx_more|wrong-kind||missing:SYMBOL_BINDING_BECAME_UNIQUE|COMPATIBLE|A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth",
     "object_alignment_reduced|c_elf|wrong-verdict||none-of:VAR_ALIGNMENT_CHANGED;weaker-than:COMPATIBLE_WITH_RISK|COMPATIBLE|castxml headers read a variable's alignment specifier only as a lower bound",
-    'param_became_va_list|c_elf|wrong-kind||missing:PARAM_BECAME_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter',
-    'param_became_va_list|c_elf|wrong-kind||missing:PARAM_BECAME_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter',
-    'param_lost_va_list|c_elf|wrong-kind||missing:PARAM_LOST_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter',
-    'param_lost_va_list|c_elf|wrong-kind||missing:PARAM_LOST_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter',
-    'rebuild_optimized|c_core|false-positive||stronger-than:COMPATIBLE|COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW',
-    'rebuild_optimized|cxx_stdlib|false-positive||stronger-than:COMPATIBLE|BREAKING,COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW',
-    'rebuild_optimized|cxx_stdlib|false-positive||stronger-than:COMPATIBLE|COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW',
+    "param_became_va_list|c_elf|wrong-kind||missing:PARAM_BECAME_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
+    "param_became_va_list|c_elf|wrong-kind||missing:PARAM_BECAME_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
+    "param_lost_va_list|c_elf|wrong-kind||missing:PARAM_LOST_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
+    "param_lost_va_list|c_elf|wrong-kind||missing:PARAM_LOST_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
+    "rebuild_optimized|c_core|false-positive||stronger-than:COMPATIBLE|COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW",
+    "rebuild_optimized|cxx_stdlib|false-positive||stronger-than:COMPATIBLE|BREAKING,COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW",
+    "rebuild_optimized|cxx_stdlib|false-positive||stronger-than:COMPATIBLE|COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW",
     "std_string_abi_flipped|cxx_alt|wrong-kind||missing:GLIBCXX_DUAL_ABI_FLIP_DETECTED|BREAKING|A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported",
     "var_alignment_raised|c_elf|wrong-verdict||missing:SONAME_BUMP_RECOMMENDED;missing:VAR_ALIGNMENT_CHANGED;weaker-than:BREAKING|NO_CHANGE|castxml headers read a variable's alignment specifier only as a lower bound",
 )
@@ -3659,6 +3659,80 @@ def check_known_no_growth(current: Iterable[str], baseline: Iterable[str]) -> li
     return problems
 
 
+_KNOWN_BASELINE_PATH = "scripts/check_ai_readiness.py"
+
+
+def parse_known_baseline(source: str) -> Counter[str] | None:
+    """``ABIFORGE_KNOWN_BASELINE`` read from a script's source text, or ``None``."""
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        else:
+            continue
+        if isinstance(target, ast.Name) and target.id == "ABIFORGE_KNOWN_BASELINE":
+            return Counter(ast.literal_eval(value)) if value is not None else None
+    return None
+
+
+def check_known_baseline_growth(current: Counter[str], base: Counter[str]) -> list[str]:
+    """Keys whose recorded count is higher in *current* than in the base branch's baseline."""
+    return [
+        f"ABIFORGE_KNOWN_BASELINE grew against the base branch for {key} "
+        f"({base[key]} -> {current[key]}): a raised baseline needs its entry removed "
+        "from abiforge/known.py, never a higher count"
+        for key in sorted(current)
+        if current[key] > base[key]
+    ]
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def base_ref_for_known_gate(root: Path, env: Mapping[str, str]) -> str | None:
+    """The base branch's remote ref: ``GITHUB_BASE_REF`` in CI, else ``origin/main``."""
+    candidates = []
+    if env.get("GITHUB_BASE_REF"):
+        candidates.append(f"origin/{env['GITHUB_BASE_REF']}")
+    candidates.append("origin/main")
+    for ref in candidates:
+        if (
+            _git(
+                root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"
+            ).returncode
+            == 0
+        ):
+            return ref
+    return None
+
+
+def check_known_baseline_vs_base(
+    root: Path, env: Mapping[str, str], current: Counter[str]
+) -> tuple[list[str], str | None]:
+    """The no-growth leg against the base branch: ``(problems, note)``.
+
+    *note* says why the leg was not evaluated (no base ref, or the base has no
+    baseline), so a skipped leg is reported rather than passing silently.
+    """
+    ref = base_ref_for_known_gate(root, env)
+    if ref is None:
+        return [], "no base ref resolved (GITHUB_BASE_REF, origin/main)"
+    shown = _git(root, "show", f"{ref}:{_KNOWN_BASELINE_PATH}")
+    if shown.returncode != 0:
+        return [], f"{ref} has no {_KNOWN_BASELINE_PATH}"
+    base = parse_known_baseline(shown.stdout)
+    if base is None:
+        return [], f"{ref}:{_KNOWN_BASELINE_PATH} has no ABIFORGE_KNOWN_BASELINE"
+    return check_known_baseline_growth(current, base), None
+
+
 def check_abiforge_known_no_growth(f: Findings) -> None:
     from abiforge.known import KNOWN
 
@@ -3666,6 +3740,16 @@ def check_abiforge_known_no_growth(f: Findings) -> None:
         (known_entry_key(entry) for entry in KNOWN), ABIFORGE_KNOWN_BASELINE
     ):
         f.err("abiforge-known-no-growth", problem)
+    problems, note = check_known_baseline_vs_base(
+        ROOT, os.environ, Counter(ABIFORGE_KNOWN_BASELINE)
+    )
+    for problem in problems:
+        f.err("abiforge-known-no-growth", problem)
+    if note is not None:
+        f.info(
+            "abiforge-known-no-growth",
+            f"base-branch leg not evaluated: {note}",
+        )
 
 
 CHECKS: dict[str, Callable[[Findings], None]] = {
