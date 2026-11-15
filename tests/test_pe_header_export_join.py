@@ -521,3 +521,23 @@ def test_x86_plain_global_is_bound_once_and_its_second_export_stays_unbound() ->
     outcome = bind_header_declarations_to_exports(snap, ["_g", "?g@@3HA"], x86_32=True)
     assert [sym for _, sym in outcome.bound] == ["_g"]
     assert "?g@@3HA" in outcome.unbound_exports
+
+
+@pytest.mark.parametrize("qualified", ["const int", "volatile int"])
+def test_qualified_global_is_not_bound_to_a_non_const_data_export(
+    qualified: str,
+) -> None:
+    # A const or volatile object carries its own MSVC cv code, so the non-const
+    # ?g@@3HA export is a different object: no binding, and the export stays unbound.
+    from abicheck.extract.header_export_binding import (
+        bind_header_declarations_to_exports,
+    )
+
+    decl = _var("g", "g", qualified)
+    decl.is_const = qualified.startswith("const")
+    snap = AbiSnapshot(library="lib.dll", version="1", from_headers=True)
+    snap.declarations.variables = [decl]
+    outcome = bind_header_declarations_to_exports(snap, ["?g@@3HA"])
+    assert outcome.bound == ()
+    assert decl.mangled == "g"
+    assert "?g@@3HA" in outcome.unbound_exports

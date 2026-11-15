@@ -514,9 +514,14 @@ def bind_header_declarations_to_exports(
         for decl in cands:
             # A static variable has internal linkage, so no DLL export names it;
             # a declaration the first pass bound keeps that binding alone.
+            # A const or volatile object carries its own MSVC cv code, not the
+            # non-const ``A`` the decoder accepts, so a qualified declaration never
+            # matches here.
             if (
                 not isinstance(decl, Variable)
                 or decl.is_static
+                or decl.is_const
+                or "volatile" in decl.type
                 or id(decl) in bound_decls
             ):
                 continue

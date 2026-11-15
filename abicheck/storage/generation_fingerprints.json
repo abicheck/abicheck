@@ -81,7 +81,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "896fe0141ddb2b6e4148ab170a17e690d65b052f4e34e6455a104a3f05524496",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_export_binding.py": "b3a644aaf40e12c83f71f7c2727d680b96266f80667fd1bebdc876cebcd6ed45",
+      "abicheck/extract/header_export_binding.py": "2a0059ee601dea4d1489028fdb438c5cceef5dff9f4e21b497740061e2d7a6fc",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7eaece23d253936623b7f8362b5e32499d2fc8396b59050cd06300e44922824e",
+    "fingerprint": "504b50ee3f15a9504a76622b62abd2804af600e635ccfa0520c8756048692a5b",
     "generation": 73,
-    "reason": "Refuse static variables and avoid a second bind of a declaration the first pass bound (PE variable pass review fixes); generation 73 is unreleased on this branch."
+    "reason": "Refuse const and volatile declarations on the plain-name variable pass (CodeRabbit review); generation 73 is unreleased on this branch."
   },
   "resolver": {
     "files": {
