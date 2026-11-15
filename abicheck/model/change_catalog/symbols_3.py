@@ -339,7 +339,7 @@ SYMBOLS_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
-        observable_at=(_OBS_DH,),
+        observable_at=(_OBS_B,),
     ),
     _E(
         "var_alignment_changed",

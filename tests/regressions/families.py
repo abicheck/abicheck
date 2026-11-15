@@ -387,6 +387,18 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F20",
+            title="A declaration covers every emission it is paired with",
+            invariant=(
+                "If the compare path emits a change kind for a run with evidence "
+                "configuration C on platform P, that kind's declared observability "
+                "for P observes C. Emission proves observability, so no declaration "
+                "may leave out a configuration in which the detector was seen to "
+                "fire, and none may claim a platform the detector never fired on."
+            ),
+            harness_tests=("tests/test_observable_at_matches_emission.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -753,6 +765,10 @@ for _key, _ids in (
             # A stale report at a destination read as this run's result.
             "tooling.host_tool_output_trusted_by_its_shape",
         ),
+    ),
+    (
+        "F20",
+        ("observability.declared_value_misses_observed_emission",),
     ),
     ("OTHER", tuple(OTHER_REASONS)),
 ):

@@ -248,7 +248,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
-        observable_at=(_OBS_DH,),
+        observable_at=(_OBS_B,),
     ),
     _E(
         "func_became_inline",
