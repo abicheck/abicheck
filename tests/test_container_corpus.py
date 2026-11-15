@@ -327,6 +327,23 @@ def _moved_versions(key: str) -> list[str]:
     return moved
 
 
+def test_a_frozen_container_without_the_extension_loads_not_derived() -> None:
+    """ADR-062 D19 from the older side: the frozen Mach-O container predates
+    ``abicheck.macho_object_sizes``. Loaded, its sizes are not derived, and the
+    layout gate declines the Mach-O side rather than reading a clean zero."""
+    from abicheck.diff_elf_layout import _layout_support
+
+    key = "macho_snapshot/1"
+    sample, path = _entry(key)["sample"], _frozen_path(key)
+    snap = snapshot_from_dict(json.loads(_frozen_bytes(sample, path)))
+    assert snap.macho is not None
+    assert snap.macho.sizes_derived is None
+    assert all(e.size is None for e in snap.macho.exports)
+    ok, reason = _layout_support(snap, snap)
+    assert not ok
+    assert "not derived" in reason
+
+
 @pytest.mark.parametrize("key", ENTRIES)
 def test_reencoding_a_frozen_container_is_identity_or_a_declared_migration(
     key: str, tmp_path: Path
