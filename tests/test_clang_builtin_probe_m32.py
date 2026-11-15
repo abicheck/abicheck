@@ -60,16 +60,22 @@ def _i386_shared_link_available() -> bool:
         return built.returncode == 0
 
 
+@pytest.fixture
+def i386_shared_link() -> None:
+    # Checked per selected test, not at collection: the link attempt is a
+    # compiler run every collecting worker would otherwise repeat.
+    if not _i386_shared_link_available():
+        pytest.skip(
+            "optional capability: clang++ cannot link an i386 shared library here"
+        )
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="ELF i386 link is Linux-scoped"
 )
-@pytest.mark.skipif(
-    not _i386_shared_link_available(),
-    reason="optional capability: clang++ cannot link an i386 shared library here",
-)
 def test_the_clang_parse_probes_the_i386_long_it_parses_with(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, i386_shared_link: None
 ) -> None:
     (tmp_path / "tick.h").write_text(_HEADER)
     src = tmp_path / "tick.cpp"

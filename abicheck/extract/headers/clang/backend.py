@@ -133,7 +133,7 @@ _LANGUAGE_STANDARD_PREFIXES = ("-std=", "--std=")
 #: ``-include x``, ``--include=x``) can be C++-only, and the C probe would fail to
 #: compile it, discarding every builtin fact. The probe needs target and ABI flags
 #: only, so these are dropped in their separate-argument and joined forms.
-_FORCED_INCLUDE_SEPARATE = ("-include", "-imacros")
+_FORCED_INCLUDE_SEPARATE = ("-include", "-imacros", "-include-pch")
 _FORCED_INCLUDE_JOINED = ("-include", "-imacros", "--include=", "--imacros=")
 
 

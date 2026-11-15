@@ -128,7 +128,7 @@
       "abicheck/extract/headers/clang/abi_target.py": "2332941ddd9977c3f887b9ae3316bee3555e32ecd85a955ed45d5e7ab11adb16",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
-      "abicheck/extract/headers/clang/backend.py": "b7bead2f4465e9339996be86ea35bb8aa07c04ad9490a71c42fdff4275742eb4",
+      "abicheck/extract/headers/clang/backend.py": "2301fd4161806cf69e1b4d12b075e858a2583e3008490d56543dbcbe9fe7f505",
       "abicheck/extract/headers/clang/base_resolution.py": "d8841a88a3a57fdb478c16cd9e1fb69d119c35bb90766456b4750bb0fb12e4c8",
       "abicheck/extract/headers/clang/concept_constraints.py": "acdd6745f33d330c722b249f2dcce05743a89c6cea5f504263ba3b4256f9f3db",
       "abicheck/extract/headers/clang/constraints.py": "a983103fce6534b18ec8694dd8152c95f1c0626908db92c6698c1082560ffa74",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "a2745c8a87d003675409082d7d8dea4437dbe7038a2d8caed53b7f67a17cdce5",
+    "fingerprint": "d5315bf87a0d96346940ff68087676a1bf32b97dcef738d74f8ead9d92048092",
     "generation": 74,
-    "reason": "in-place re-record of unreleased generation 74 (PR #2084): the probe's forced-include filter (probe_option_tokens) is part of the same unreleased bump; no released build has written generation 74"
+    "reason": "generation 74 is unreleased: re-recorded in place for the -include-pch operand drop in the builtin probe and the policy/alignment_generation_drift annotation of the pre-74 host-ABI alignment; no stored spelling changes"
   },
   "resolver": {
     "files": {

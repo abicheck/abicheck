@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from ..model.change import Change
 from ..model.snapshot import AbiSnapshot
+from ..policy.alignment_generation_drift import demote_pre74_builtin_alignment_drift
 from ..policy.bitfield_generation_drift import demote_gcc_byte_bitfield_drift
 from ..policy.generation_drift_demotion import (
     demote_erased_extent_drift,
@@ -99,6 +100,9 @@ def demote_cross_generation_drift(
         changes, old, new, old_generation, new_generation
     )
     changes = demote_gcc_byte_bitfield_drift(
+        changes, old, new, old_generation, new_generation
+    )
+    changes = demote_pre74_builtin_alignment_drift(
         changes, old, new, old_generation, new_generation
     )
     return demote_retired_function_drift(

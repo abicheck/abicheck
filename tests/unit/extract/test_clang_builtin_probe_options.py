@@ -120,6 +120,8 @@ def test_no_language_standard_reaches_the_probe_for_any_standard(standard: str) 
         # Separate-argument forced include: both the flag and its file are dropped.
         ("-include /tmp/prelude.hpp -m32", ("-m32",)),
         ("-imacros /tmp/macros.h -m32", ("-m32",)),
+        # A precompiled-header include takes a separate operand: the path goes too.
+        ("-include-pch /tmp/prelude.hpp.pch -m32", ("-m32",)),
         # Joined forms.
         ("-include/tmp/prelude.hpp -m32", ("-m32",)),
         ("--include=/tmp/prelude.hpp -m32", ("-m32",)),
