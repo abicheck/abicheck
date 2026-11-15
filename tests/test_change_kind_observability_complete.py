@@ -18,12 +18,14 @@ from abicheck.model.change_catalog.observability import (
     UNCLASSIFIED,
     EvidenceSource,
     KindRelations,
+    Language,
     Observability,
     ObservabilityCondition,
     Platform,
     Subsumption,
     SubsumptionKey,
     observable,
+    unclassified_kinds,
     validate_catalog,
 )
 from abicheck.model.change_catalog.registry import ChangeKindMeta, Verdict
@@ -203,3 +205,126 @@ def test_unclassified_survives_copy_and_pickle_protocol() -> None:
     # The pickle contract without unpickling data: __reduce__ rebuilds the singleton.
     factory, args = UNCLASSIFIED.__reduce__()
     assert factory(*args) is UNCLASSIFIED
+
+
+_AXIS_VALUES = {
+    "platform": [
+        None,
+        *[frozenset(c) for r in (1, 2, 3) for c in itertools.combinations(Platform, r)],
+    ],
+    "language": [
+        None,
+        *[frozenset(c) for r in (1, 2) for c in itertools.combinations(Language, r)],
+    ],
+}
+
+
+def _conditions() -> list[ObservabilityCondition]:
+    return [
+        ObservabilityCondition(platform=p, language=lang)
+        for p in _AXIS_VALUES["platform"]
+        for lang in _AXIS_VALUES["language"]
+        if p is not None or lang is not None
+    ]
+
+
+def _points(cond: ObservabilityCondition | None) -> set[tuple[Platform, Language]]:
+    """Oracle: the explicit set of (platform, language) points a condition admits."""
+    return {
+        (p, lang)
+        for p in Platform
+        for lang in Language
+        if cond is None
+        or (
+            (cond.platform is None or p in cond.platform)
+            and (cond.language is None or lang in cond.language)
+        )
+    }
+
+
+def test_condition_overlap_and_match_agree_with_point_sets() -> None:
+    conds = _conditions()
+    for a in conds:
+        assert a.overlaps(None)
+        for b in conds:
+            assert a.overlaps(b) is bool(_points(a) & _points(b)), (a, b)
+        for p in Platform:
+            for lang in Language:
+                assert a.matches(p, lang) is ((p, lang) in _points(a))
+        # An unstated run axis never hides a kind.
+        assert a.matches(None, None)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"platform": frozenset()}, {"language": frozenset()}],
+)
+def test_condition_must_restrict_a_nonempty_axis(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="ObservabilityCondition"):
+        ObservabilityCondition(**kwargs)  # type: ignore[arg-type]
+
+
+def test_empty_configuration_is_refused() -> None:
+    with pytest.raises(ValueError, match="may not be empty"):
+        Observability(frozenset({frozenset()}), rationale="r")
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ((), "non-empty tuple"),
+        ([observable(("B",))], "non-empty tuple"),
+        (("not an observability",), "non-Observability"),
+        ((observable(("B",)), observable(("B", "D"), rationale="r")), "disjoint"),
+    ],
+)
+def test_malformed_observable_at_is_refused(value: object, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_catalog(_catalog(_meta("a", observable_at=value)))
+
+
+def test_disjoint_conditions_are_accepted_and_unclassified_is_listed() -> None:
+    elf = ObservabilityCondition(platform=frozenset({Platform.ELF}))
+    pe = ObservabilityCondition(platform=frozenset({Platform.PE}))
+    cat = _catalog(
+        _meta(
+            "a",
+            observable_at=(
+                observable(("B",), condition=elf),
+                observable(("B", "D"), rationale="pdb", condition=pe),
+            ),
+        ),
+        _meta("b"),
+        _meta("c"),
+    )
+    validate_catalog(cat)
+    assert unclassified_kinds(cat) == ["b", "c"]
+    assert repr(UNCLASSIFIED) == "UNCLASSIFIED"
+
+
+def test_relations_truthiness_follows_declared_fields() -> None:
+    assert not KindRelations()
+    for rel in (
+        KindRelations(variant_of="x"),
+        KindRelations(same_event_as="x"),
+        KindRelations(subsumed_by=(Subsumption("x", SubsumptionKey.ENTITY_FIELD),)),
+        KindRelations(implies=("x",)),
+    ):
+        assert rel and rel.targets() == ["x"]
+
+
+def test_contract_subject_mismatch_is_refused() -> None:
+    from abicheck.model.change_catalog.dimensions import ContractSubject
+
+    subjects = list(ContractSubject)
+    with pytest.raises(ValueError, match="contract_subject"):
+        validate_catalog(
+            _catalog(
+                _meta(
+                    "a",
+                    contract_subject=subjects[0],
+                    relations=KindRelations(variant_of="b"),
+                ),
+                _meta("b", contract_subject=subjects[1]),
+            )
+        )
