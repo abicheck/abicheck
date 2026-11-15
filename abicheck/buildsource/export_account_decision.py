@@ -44,6 +44,7 @@ from ..model import AbiSnapshot, Function, ScopeOrigin, Variable
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.execution_cache import request_key
 from ..model.execution_cache_scoped import ScopedCache
+from ..model.surface_facts import bound_export_spelling
 from .export_accounting import (
     _ALLOCATOR_INTERPOSER_MARKER,
     _ALLOCATOR_INTERPOSER_SYMBOLS,
@@ -92,6 +93,11 @@ def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
     un-mangled decl (C / ``extern "C"`` / C data, where the extractor left the
     bare name) exports under that bare name.
     """
+    bound = bound_export_spelling(decl)
+    if bound is not None:
+        # The header-to-export join named the export this declaration is
+        # documented by; its identity (``mangled``) is not that export.
+        return (bound,)
     if decl.mangled.startswith(_MANGLE_SIGILS):
         return (decl.mangled,)
     return tuple({s for s in (decl.mangled, decl.name) if s})

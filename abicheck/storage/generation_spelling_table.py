@@ -697,6 +697,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "applies, and a pre-71 side's is_abstract is unknown (None), which "
         "the abstract detector skips"
     ),
+    72: GenerationSpellingChange(
+        "WS-4 PR 2 (fix/ws4-pe-msvc-export-match): no stored type spelling "
+        "changes and no load-time rewrite applies. The PE header-to-export "
+        "join (extract/header_export_binding.bind_pe_header_exports) is a "
+        "fact, applied at extraction for a live dump and at compare time by "
+        "the comparison workflows (compare_policy, no_baseline_compare) for "
+        "every header-backed PE operand, so a stored pre-72 baseline and a "
+        "fresh dump meet at the same join; a raw checker.compare call takes "
+        "bound operands (extract.header_export_binding.bind_pe_header_operand)"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

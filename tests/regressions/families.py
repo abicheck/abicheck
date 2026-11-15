@@ -106,7 +106,10 @@ FAMILIES: dict[str, Family] = {
                 "(checkout location, symlinks, hash seed, input order, platform "
                 "decoration) and distinct entities stay distinct."
             ),
-            harness_tests=("tests/test_family_f3_identity.py",),
+            harness_tests=(
+                "tests/test_family_f3_identity.py",
+                "tests/test_pe_header_export_join.py",
+            ),
         ),
         Family(
             key="F4",
@@ -501,6 +504,7 @@ _F3 = (
     "identity.environment_taint",
     "identity.name_and_referent_compared_as_one",
     "identity.pe_x86_c_decoration_alias",
+    "extraction.pe_header_declaration_unjoined_from_msvc_export",
     "identity.platform_decorated_mangled_name",
     "identity.release_edge_keyed_on_side_summary",
     "identity.second_node_key_scheme",
