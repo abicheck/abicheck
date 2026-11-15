@@ -82,6 +82,32 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "consumer_required_symbol_removed",
+        _B,
+        impact="A real consumer binary's own dynamic-symbol table (ELF undefined "
+        "symbol / PE import / Mach-O undefined symbol, collected via "
+        "--used-by) required this exact symbol from the "
+        "library at load time — empirical ground truth independent of "
+        "any header/namespace/visibility reasoning. The new library no "
+        "longer exports it: the consumer's existing binary will fail to "
+        "load, or crash the first time it calls the symbol, with no "
+        "recompilation involved.",
+        description_template="Consumer '{name}' requires symbol '{symbol}', which the new library no longer exports",
+        # BINARY, not FUNCTION (Codex review, PR #1284): the evidence behind
+        # this finding is a consumer's dynamic-symbol table, and
+        # `AppRequirements.undefined_symbols` is a bare `set[str]` -- the ELF
+        # symbol type is discarded at collection, and the PE/Mach-O paths
+        # retain no function/variable discriminator either. A required *data*
+        # symbol is therefore indistinguishable from a required function
+        # here, so declaring FUNCTION hid such findings from `output.view
+        # show=variables` and serialized an entity the evidence does not
+        # support. BINARY is the symbol-table-level fallback its exact
+        # structural sibling `imported_symbol_removed` already uses.
+        entity=_ENT.BINARY,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.REMOVED,
+    ),
+    _E(
         "declaration_coordinates_shifted",
         _C,
         impact="The L5 source graph matched an old and a new declaration/type "

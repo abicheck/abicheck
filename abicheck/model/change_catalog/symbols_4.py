@@ -45,6 +45,12 @@ _OBS_B_ELF = observable(
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
+_OBS_DH_ELF = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="ELF binary-only mode emits the *_elf_only twin: needs DWARF or headers",
+    condition=ObservabilityCondition(platform=frozenset({Platform.ELF})),
+)
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
@@ -339,7 +345,7 @@ SYMBOLS_ENTRIES_4: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
-        observable_at=(_OBS_B,),
+        observable_at=(_OBS_DH_ELF,),
     ),
     _E(
         "var_alignment_changed",
@@ -437,7 +443,7 @@ SYMBOLS_ENTRIES_4: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
-        observable_at=(_OBS_B,),
+        observable_at=(_OBS_DH_ELF,),
     ),
     _E(
         "var_type_changed",

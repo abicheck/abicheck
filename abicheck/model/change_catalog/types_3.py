@@ -38,7 +38,6 @@ _ENT = ChangeEntity
 _OP = ChangeOperation
 _CS = ContractSubject
 
-_OBS_B = observable(("B",))
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
@@ -606,7 +605,7 @@ TYPES_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_B,),
+        observable_at=(_OBS_DH,),
     ),
     _E(
         "source_level_kind_changed",

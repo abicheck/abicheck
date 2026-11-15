@@ -72,6 +72,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_H",
     ),
+    "DH:ELF": (
+        (("B", "D"), ("B", "H")),
+        "ELF binary-only mode emits the *_elf_only twin: needs DWARF or headers",
+        ("elf",),
+        "_OBS_DH_ELF",
+    ),
     "DH": (
         (("B", "D"), ("B", "H")),
         "layout or type fact: DWARF and the public header both carry it",

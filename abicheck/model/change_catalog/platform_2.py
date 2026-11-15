@@ -69,6 +69,9 @@ _OBS_DH = observable(
     ("B", "H"),
     rationale="layout or type fact: DWARF and the public header both carry it",
 )
+_OBS_D = observable(
+    ("B", "D"), rationale="underlying size set by the compiler: only DWARF records it"
+)
 _OBS_DBD = observable(
     ("B", "D"),
     ("B", "BD"),
@@ -727,7 +730,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_DBD,),
+        observable_at=(_OBS_D,),
     ),
     _E(
         "tls_model_changed",

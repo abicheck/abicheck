@@ -1,19 +1,19 @@
 # -- symbols: export-table facts (B) --------------------------------------
-func_added                       B
+func_added  DH:ELF  # diff_symbols.py:249 & undeclared_exports.py:141-197: ELF binary-only mode emits func_added_elf_only; the header/DWARF kind needs declarations
 func_added_elf_only              B:ELF
-func_export_added                B
-func_language_linkage_changed    B      # mangled names change
-func_likely_renamed              B
-func_removed                     B
+func_export_added  U  # export_transition.py:221: emission depends on declaration state (_export_was_gained); not established from B alone
+func_language_linkage_changed  BH  # compare/function_signature.py:487: declaration linkage needs headers; B alone shows only the mangled name
+func_likely_renamed  B  # diff_symbols_renames.py:535-542: name-fingerprint candidates
+func_removed  DH:ELF  # diff_symbols.py:249: ELF binary-only removals emit FUNC_REMOVED_ELF_ONLY; FUNC_REMOVED needs DWARF or headers
 func_removed_elf_only            B:ELF
-func_visibility_changed          B
-var_added                        B
+func_visibility_changed  BH  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
+var_added  DH:ELF  # undeclared_exports.py:141-197: ELF binary-only mode emits var_added_elf_only; VAR_ADDED needs DWARF or headers
 var_added_elf_only               B:ELF
-var_export_added                 B
-var_removed                      B
+var_export_added  U  # export_transition.py:250: same path as func_export_added; not established from B alone
+var_removed  DH:ELF  # diff_symbols_variables.py:86: ELF binary-only removals emit VAR_REMOVED_ELF_ONLY
 var_removed_elf_only             B:ELF
-var_visibility_changed           B
-symbol_renamed_batch             B
+var_visibility_changed  U  # emitted only from template_instance_absence.py:516 (typed template evidence)
+symbol_renamed_batch  B  # diff_symbols_renames.py:682-690: rename pairs from symbol names with ELF binding
 symbol_size_changed              B:ELF  # st_size in .dynsym; no PE/Mach-O analogue
 symbol_size_changed_const_object B:ELF
 symbol_size_changed_internal     B:ELF
@@ -157,9 +157,9 @@ type_removed                     H
 typedef_removed                  H
 unspecified_return_now_named     H
 # -- types: binary facts (B) ----------------------------------------------
-rtti_inheritance_changed         B
-type_visibility_changed          B
-type_vtable_changed              B:ELF+MACHO  # plan §8: _ZTV sizes
+rtti_inheritance_changed  DH  # diff_elf_layout.py:400-404: record-size shape uses typed sizes
+type_visibility_changed  DH  # compare/type_visibility.py:112-142: class-own-symbol visibility maps through typed class records
+type_vtable_changed  DH  # diff_types_vtable.py:350,579: vtable content from the typed vtable_fact (DWARF/header), not raw symbols
 vtable_slot_count_changed        B:ELF+MACHO
 vtable_thunk_offset_changed      B:ELF+MACHO
 vtable_thunk_set_changed         B:ELF+MACHO
@@ -262,7 +262,7 @@ struct_return_convention_changed DH   # plan: STRUCT_RETURN_CONVENTION
 stdlib_debug_mode_changed        DBD
 target_isa_changed               DBD  # plan A3
 threadsafe_statics_mode_changed  DBD
-time64_abi_changed               DBD
+time64_abi_changed  D1  # diff_time64.py:26: detector requires typedef evidence (L1 DWARF / L2 headers); DWARF records the size
 tls_model_changed                DBD
 toolchain_flag_drift             DBD  # plan A3
 value_abi_trait_changed          DH   # plan A2.4
@@ -294,7 +294,7 @@ source_decl_binary_symbol_mismatch BH
 template_body_changed            H    # plan A5
 uninstantiated_template_removed  H    # plan A2.4
 # -- build / source: binary (B) -------------------------------------------
-consumer_required_symbol_removed B
+consumer_required_symbol_removed  U  # needs a consumer artifact (workflows/consumer_scope.py:261); not a source in the lattice
 runtime_symbol_provider_changed  B
 runtime_weak_resolution_changed  B
 # -- build / source: needs sources or the graph (L4, L5, BHSG) -----------

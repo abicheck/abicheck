@@ -42,8 +42,18 @@ _OBS_B = observable(("B",))
 _OBS_B_ELF = observable(
     ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
 )
+_OBS_BH = observable(
+    ("B", "H"),
+    rationale="declared in the public header and present in the export table",
+)
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
+)
+_OBS_DH_ELF = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="ELF binary-only mode emits the *_elf_only twin: needs DWARF or headers",
+    condition=ObservabilityCondition(platform=frozenset({Platform.ELF})),
 )
 _OBS_DH = observable(
     ("B", "D"),
@@ -233,7 +243,7 @@ SYMBOLS_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
-        observable_at=(_OBS_B,),
+        observable_at=(_OBS_DH_ELF,),
     ),
     _E(
         "func_contract_attribute_added",
@@ -328,7 +338,7 @@ SYMBOLS_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_B,),
+        observable_at=(_OBS_BH,),
     ),
     _E(
         "func_likely_renamed",
@@ -472,7 +482,7 @@ SYMBOLS_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
-        observable_at=(_OBS_B,),
+        observable_at=(_OBS_DH_ELF,),
     ),
     _E(
         "func_added_elf_only",
@@ -594,52 +604,7 @@ SYMBOLS_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_B,),
-    ),
-    _E(
-        "var_visibility_changed",
-        _B,
-        impact="Data symbol no longer exported for dynamic linking while its "
-        "declaration remains; an already-linked consumer that resolves "
-        "it fails at load time, and nothing in the headers signals it.",
-        description_template="Variable no longer exported by the binary: {name}",
-        entity=_ENT.VARIABLE,
-        contract_subject=_CS.DECLARATION,
-        operation=_OP.MODIFIED,
-        observable_at=(_OBS_B,),
-    ),
-    _E(
-        "func_export_added",
-        _C,
-        is_addition=True,
-        impact="An already-declared function gained a binary export -- a "
-        "version script, visibility attribute or link-map change now "
-        "emits a dynamic symbol for a declaration that was already "
-        "promised. Pure addition: every consumer that could bind "
-        "before still can, and one that could not now can. Reported "
-        "rather than dropped because the declaration is present on "
-        "both sides, so the pair matches and no added-symbol path "
-        "sees it -- leaving the run silent about a real, observed "
-        "change to the export table.",
-        description_template="Function now exported by the binary: {name}",
-        entity=_ENT.FUNCTION,
-        contract_subject=_CS.DECLARATION,
-        operation=_OP.ADDED,
-        observable_at=(_OBS_B,),
-    ),
-    _E(
-        "var_export_added",
-        _C,
-        is_addition=True,
-        impact="Data symbol gained a binary export while its declaration was "
-        "already present; the `func_export_added` counterpart for data "
-        "symbols. Pure addition, and reported for the same reason: a "
-        "matched pair reaches no added-symbol path.",
-        description_template="Variable now exported by the binary: {name}",
-        entity=_ENT.VARIABLE,
-        contract_subject=_CS.DECLARATION,
-        operation=_OP.ADDED,
-        observable_at=(_OBS_B,),
+        observable_at=(_OBS_BH,),
     ),
     _E(
         "hidden_friend_added",
