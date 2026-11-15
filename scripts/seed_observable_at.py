@@ -490,6 +490,13 @@ def _split_owner(
 def apply_decisions(dry_run: bool) -> dict[str, int]:
     """Apply the decisions. Overflowing owners are split into numbered siblings."""
     owner = taxonomy_owner()
+    applied = [p.name for p in taxonomy_files() if "observable_at=(" in p.read_text()]
+    if applied:
+        raise SystemExit(
+            "taxonomy already carries observable_at lines in "
+            f"{', '.join(sorted(applied))}: restore abicheck/model/change_catalog/ "
+            "from the base commit before applying again"
+        )
     by_file: dict[str, list[Decision]] = defaultdict(list)
     for dec in DECISIONS.values():
         if dec.kind not in owner:
