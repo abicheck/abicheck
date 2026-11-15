@@ -232,8 +232,8 @@
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
     "fingerprint": "5997fcf96d3ba79729bbe725eb9a6514b5d51a76c65294be6f96158a5657eb0a",
-    "generation": 75,
-    "reason": "bumped to 75 for a semantic change"
+    "generation": 74,
+    "reason": "in-place re-record of unreleased generation 74 (PR #2084): the probe's language-standard filter (probe_option_tokens) and its tests are part of the same unreleased bump; no released build has written generation 74"
   },
   "resolver": {
     "files": {
