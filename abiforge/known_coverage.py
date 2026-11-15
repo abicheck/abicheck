@@ -7,9 +7,9 @@ configurations its ``when`` matches over a fixed probe grid, and the ratchet
 fails when a later ``when`` covers a configuration the record does not hold.
 
 The grid is ``STANDARDS`` x ``PROBE_TOOLCHAINS`` x ``PROBE_FLAGS`` x
-``PROBE_EVIDENCE``. A covered set is stored as one bitmask per
-``"<standard>|<toolchain>"`` pair, whose bit ``i * len(evidence) + j`` stands for
-flag set ``i`` at evidence ``j``. That keeps each entry near a kilobyte, where
+``PROBE_EVIDENCE`` x ``PROBE_PLATFORMS``, every platform pinned explicitly. A covered set is stored as one bitmask per
+``"<standard>|<toolchain>"`` pair, whose bit ``(p * len(flags) + i) * len(evidence) + j`` stands
+for platform ``p``, flag set ``i`` at evidence ``j``. That keeps each entry near a kilobyte, where
 the explicit configuration-id lists run to tens of kilobytes.
 
 The record is exact: a covered set that grows is widening and needs review, and
@@ -47,6 +47,14 @@ PROBE_FLAGS: tuple[Flags, ...] = tuple(
     )
 )
 PROBE_EVIDENCE: tuple[str, ...] = ("binary", "dwarf", "headers")
+#: (platform, object format) pinned for every probe configuration. A ``when``
+#: may read ``objfmt``, so the grid enumerates the axis instead of taking the
+#: runner's host (``Config``'s default), which made the record host-dependent.
+PROBE_PLATFORMS: tuple[tuple[str, str], ...] = (
+    ("linux", "elf"),
+    ("darwin", "macho"),
+    ("win32", "pe"),
+)
 
 #: The committed record, next to the module it describes.
 BASELINE_PATH = Path(__file__).resolve().parent / "known_when_baseline.json"
@@ -61,6 +69,7 @@ def covered_masks(
     toolchains: Sequence[Toolchain] = PROBE_TOOLCHAINS,
     flags: Sequence[Flags] = PROBE_FLAGS,
     evidence: Sequence[str] = PROBE_EVIDENCE,
+    platforms: Sequence[tuple[str, str]] = PROBE_PLATFORMS,
 ) -> Covered:
     """The probe-grid configurations *when* matches, as one bitmask per standard and toolchain.
 
@@ -72,14 +81,21 @@ def covered_masks(
     for std in stds:
         for tc in toolchains:
             mask = 0
-            for i, fl in enumerate(flags):
-                for j, ev in enumerate(evidence):
-                    try:
-                        cfg = Config(std=std, producer=tc, flags=fl, evidence=ev)
-                    except ValueError:
-                        continue
-                    if when(cfg):
-                        mask |= 1 << (i * width + j)
+            for p, plat in enumerate(platforms):
+                for i, fl in enumerate(flags):
+                    for j, ev in enumerate(evidence):
+                        try:
+                            cfg = Config(
+                                std=std,
+                                producer=tc,
+                                flags=fl,
+                                evidence=ev,
+                                platform=plat,
+                            )
+                        except ValueError:
+                            continue
+                        if when(cfg):
+                            mask |= 1 << ((p * len(flags) + i) * width + j)
             if mask:
                 masks[f"{std.name}|{tc.id}"] = mask
     return masks
