@@ -547,6 +547,41 @@ def apply_decisions(dry_run: bool) -> dict[str, int]:
     return counts
 
 
+def pr_table() -> str:
+    """Applied kinds as PR-body rows, plus the undecided names (same columns as the PR)."""
+    from abicheck.model.change_catalog.assembled import REGISTRY
+    from abicheck.model.change_catalog.observability import UNCLASSIFIED
+
+    owner = taxonomy_owner()
+    ops = operator_evidence()
+    tiers = designed_tiers()
+    dets = detector_modules()
+    rows = []
+    for kind, dec in DECISIONS.items():
+        if REGISTRY.entries[kind].observable_at is UNCLASSIFIED:
+            continue
+        rationale = dec.note or FORMS[dec.code][1] or "exported-symbol fact"
+        op_names = ", ".join(sorted({n for n, _ in ops.get(kind, [])})[:2]) or "-"
+        det = ", ".join(sorted(dets.get(kind, set()))[:1]) or "-"
+        form = FORMS[dec.code]
+        shape = " , ".join("{" + ",".join(a) + "}" for a in form[0])
+        if dec.code.startswith("B:"):
+            shape += " on " + dec.code[2:]
+        rows.append(
+            f"| `{kind}` | {owner[kind]} | {shape} | {rationale} | {op_names} "
+            f"| {tiers.get(kind, '-')} | {det} |"
+        )
+    undecided = sorted(
+        k for k, e in REGISTRY.entries.items() if e.observable_at is UNCLASSIFIED
+    )
+    return (
+        "\n".join(rows)
+        + "\n\nUNDECIDED:"
+        + ", ".join(f"`{k}`" for k in undecided)
+        + "\n"
+    )
+
+
 def write_baseline() -> int:
     from abicheck.model.change_catalog.assembled import REGISTRY
     from abicheck.model.change_catalog.observability import UNCLASSIFIED
@@ -564,12 +599,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--table", action="store_true", help="print the evidence table")
+    group.add_argument("--pr-table", action="store_true", help="print the PR-body rows")
     group.add_argument("--apply", action="store_true", help="write observable_at lines")
     group.add_argument("--baseline", action="store_true", help="rewrite the U baseline")
     group.add_argument("--dry-run", action="store_true", help="count, write nothing")
     args = parser.parse_args(argv)
     if args.table:
         sys.stdout.write(markdown_table())
+    elif args.pr_table:
+        sys.stdout.write(pr_table())
     elif args.apply or args.dry_run:
         counts = apply_decisions(dry_run=args.dry_run)
         for name, n in counts.items():
