@@ -49,10 +49,12 @@ returned in :class:`ExportBindingOutcome`, never dropped.
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import overload
 
 from ..model import AbiSnapshot, Function, Variable, Visibility
 from ..model.export_index import ExportMatch
@@ -60,6 +62,7 @@ from ..model.fact import Fact
 from ..model.mangled_name import itanium_scope_components, msvc_scope_components
 from ..model.name_decoration import macho_underscore, pe_x86
 from ..model.surface_facts import (
+    BOUND_EXPORT_DIAGNOSTIC_PREFIX,
     binary_exported,
     export_match_diagnostic,
     in_public_surface,
@@ -72,6 +75,8 @@ __all__ = [
     "EXPORT_BINDING_UNRESOLVED",
     "ExportBindingOutcome",
     "bind_header_declarations_to_exports",
+    "bind_pe_header_exports",
+    "bind_pe_header_operand",
     "binding_export_names",
     "msvc_builtin_param_types",
 ]
@@ -100,7 +105,6 @@ _SPELLING_GAPS = frozenset(
 )
 
 #: Diagnostic prefix naming the export a declaration was bound to.
-BOUND_EXPORT_DIAGNOSTIC_PREFIX = "bound-export:"
 
 
 @dataclass(frozen=True)
@@ -138,6 +142,51 @@ def binding_export_names(snap: AbiSnapshot) -> tuple[list[str], bool]:
     if snap.macho is not None:
         return [e.name for e in snap.macho.exports if e.name], False
     return [], False
+
+
+def bind_pe_header_exports(snap: AbiSnapshot) -> AbiSnapshot:
+    """Bind a header-backed PE snapshot's declarations to its DLL's exports.
+
+    The default header dump (``dumper._dump_pe``) runs this before the export
+    table is reconciled: castxml spells a C++ member ``_ZN10Calculator3addEii``
+    while the DLL exports ``?add@Calculator@@QEAAHHH@Z``, so without it every
+    such declaration reads as an unexported public one and every export as
+    undocumented. Returns *snap* for chaining; a snapshot with no PE export
+    names is returned unchanged.
+    """
+    names, x86_32 = binding_export_names(snap)
+    if names:
+        bind_header_declarations_to_exports(snap, names, x86_32=x86_32)
+    return snap
+
+
+@overload
+def bind_pe_header_operand(snap: AbiSnapshot) -> AbiSnapshot: ...
+@overload
+def bind_pe_header_operand(snap: None) -> None: ...
+def bind_pe_header_operand(snap: AbiSnapshot | None) -> AbiSnapshot | None:
+    """A header-backed PE comparison operand with its declarations joined.
+
+    A dump binds at extraction (:func:`bind_pe_header_exports` via
+    ``finish_binary_snapshot``), but a stored baseline written before extractor
+    generation 72 never ran the join: its C++ declarations still carry
+    castxml's Itanium spelling and read as unexported. Every comparison path
+    passes through ``checker.compare``, which calls this on both operands before
+    any public surface is resolved. The join is idempotent; a copy is bound only
+    when a declaration is still unexported and the DLL exports something, so the
+    caller's snapshot is never mutated. ``None`` (no baseline) passes through.
+    """
+    if snap is None:
+        return None
+    if snap.pe is None or not snap.from_headers or not snap.pe.exports:
+        return snap
+    decls: list[Function | Variable] = [
+        *snap.declarations.functions,
+        *snap.declarations.variables,
+    ]
+    if not any(decl.visibility is Visibility.HIDDEN for decl in decls):
+        return snap
+    return bind_pe_header_exports(copy.deepcopy(snap))
 
 
 def _itanium_components(spelling: str) -> tuple[str, ...] | None:
@@ -322,12 +371,30 @@ def _claimed_spellings(decls: Iterable[Decl]) -> set[str]:
     return claimed
 
 
+def _singleton_binds(decl: Decl, sym: str) -> bool:
+    """Whether a lone declaration may bind a lone export of the same key.
+
+    An MSVC-decorated function export binds only when both parameter lists
+    decode and agree. Undecodable on either side leaves the parameter identity
+    unestablished: ``int*`` declared against an export that is really
+    ``add(int, int)`` would otherwise hide a real missing export. Variables
+    have no signature, and C-decorated or undecorated exports carry none to
+    compare, so they keep the name-level binding.
+    """
+    agrees = _signature_agrees(decl, sym)
+    if agrees is False:
+        return False
+    if agrees is None and isinstance(decl, Function) and sym.startswith("?"):
+        return False
+    return True
+
+
 def _pair(
     decls: list[Decl], syms: list[str]
 ) -> tuple[list[tuple[Decl, str]], list[str]]:
     """Bind one key's candidates; return the pairs and the refused exports."""
     if len(decls) == 1 and len(syms) == 1:
-        if _signature_agrees(decls[0], syms[0]) is False:
+        if not _singleton_binds(decls[0], syms[0]):
             return [], syms
         return [(decls[0], syms[0])], []
     # Overloads: pair by a fully decoded builtin parameter list, uniquely.
@@ -363,7 +430,6 @@ def _apply(decl: Decl, sym: str) -> None:
         producer=producer,
     )
     decl.visibility = Visibility.PUBLIC
-    decl.mangled = sym
     decl.declared_in_headers_fact = facts["declared_in_headers_fact"]
     decl.in_public_contract_fact = facts["in_public_contract_fact"]
     decl.binary_exported_fact = facts["binary_exported_fact"]

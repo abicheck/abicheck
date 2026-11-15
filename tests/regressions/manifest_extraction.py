@@ -1071,4 +1071,20 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         },
     ),
+    BugClass(
+        id="extraction.pe_header_declaration_unjoined_from_msvc_export",
+        invariant=(
+            "A header-backed PE declaration that castxml spells with an Itanium "
+            "name is bound to the MSVC export of the same entity whatever the "
+            "signature, namespace or class scope, so a compatible DLL reads as "
+            "compatible. Declarations with a different parameter list stay "
+            "unbound, and a declaration with no export stays unexported."
+        ),
+        fixed_by=(2073,),
+        seed_tests=("tests/test_pe_header_export_join.py",),
+        axes={
+            "scope": ("free", "namespaced", "class_member", "extern_c"),
+            "overloads": ("unique", "overloaded"),
+        },
+    ),
 )

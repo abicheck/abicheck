@@ -98,9 +98,15 @@ jobs:
         # test_pe_macho_header_binding_integration.py cross-build PE (MSVC ABI)
         # and Mach-O from the same sources as its ELF oracle. Routed through the shared action, which owns
         # the "tolerate a flaky pre-baked third-party apt repo" rule.
+        # The 32-bit, x32 and libc++ packages make the edit corpus's
+        # rebuild_m32, rebuild_x32, time_bits_64 and rebuild_against_libcxx
+        # cells available here: without them they are capability gaps, and the
+        # PR-tier floor (abiforge/coverage_ledger.json) lists the kinds only
+        # those cells verify (ELF_CLASS_CHANGED, ELF_MACHINE_CHANGED,
+        # STDLIB_IMPLEMENTATION_CHANGED, TIME64_ABI_CHANGED).
         uses: ./.github/actions/install-system-deps
         with:
-          packages: gcc g++ cmake clang lld llvm abi-compliance-checker zlib1g-dev curl ca-certificates
+          packages: gcc g++ cmake clang lld llvm abi-compliance-checker zlib1g-dev curl ca-certificates gcc-multilib g++-multilib libc6-dev-i386 libc6-x32 libx32gcc-13-dev libx32stdc++-13-dev libc++-dev libc++abi-dev
       - name: Install abidiff (Linux)
         if: runner.os == 'Linux'
         # Spelled `abigail-tools` on some releases, `libabigail-tools` on

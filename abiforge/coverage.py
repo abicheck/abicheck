@@ -48,7 +48,7 @@ import json
 import os
 import sys
 from collections.abc import Iterable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from abiforge.checkers import abicheck as checker
@@ -229,6 +229,12 @@ class CellRecord:
     produced: tuple[str, ...] = ()
     expected: tuple[str, ...] = ()
     points: tuple[str, ...] = ()
+    # Why an unavailable cell was skipped (the skip message), so a floor failure
+    # can say what stopped the cell rather than only that nothing verified.
+    reason: str = ""
+    # The artifact directory this record was loaded from (``load_records``).
+    # Not written to disk: the same record has the same origin wherever it is read.
+    origin: str = field(default="", compare=False)
 
     @property
     def ran(self) -> bool:
@@ -256,7 +262,9 @@ class CellRecord:
         return frozenset(self.produced) - frozenset(self.expected)
 
     def to_json(self) -> dict[str, object]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("origin", None)
+        return data
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> CellRecord:
@@ -284,6 +292,7 @@ def make_record(
     expectation: Expectation | None = None,
     source: str = "",
     ran_consumers: frozenset[str] = frozenset(),
+    reason: str = "",
 ) -> CellRecord:
     """One cell's record. *source* names the test that ran it when two tests
     of one tier can run the same (op, seed, config) cell, so their records
@@ -308,6 +317,7 @@ def make_record(
         points=tuple(p.id for p in cell_points(op, config, ran_consumers))
         if ran
         else (),
+        reason=reason,
     )
 
 
@@ -342,12 +352,24 @@ def write_record(
 
 
 def load_records(paths: Sequence[str | os.PathLike[str]]) -> list[CellRecord]:
+    """The records under *paths*, each tagged with the artifact it came from.
+
+    For a directory, the origin is the first path component below it (the CI
+    job downloads each shard's artifact into its own subdirectory); for a file,
+    the file's own name.
+    """
     out: list[CellRecord] = []
     for raw in paths:
         p = Path(raw)
         files = sorted(p.rglob("*.json")) if p.is_dir() else [p]
         for f in files:
-            out.append(CellRecord.from_json(json.loads(f.read_text(encoding="utf-8"))))
+            if not p.is_dir():
+                origin = p.name
+            else:
+                parts = f.relative_to(p).parts
+                origin = parts[0] if len(parts) > 1 else ""
+            record = CellRecord.from_json(json.loads(f.read_text(encoding="utf-8")))
+            out.append(replace(record, origin=origin))
     return out
 
 
@@ -456,6 +478,33 @@ def _verified(records: Sequence[CellRecord], tier: str) -> set[str]:
     return set().union(*(r.verified for r in records if r.tier == tier))
 
 
+def _floor_gap_lines(records: Sequence[CellRecord], kind: str) -> list[str]:
+    """What the run has for one unverified floor kind, for the job log.
+
+    Every record whose cell expected the kind (it could have verified it), with
+    the reason an unavailable cell was skipped. With none, says so, and names
+    the artifacts the run's records came from.
+    """
+    shards = sorted({r.origin or "(no origin)" for r in records})
+    cells = sorted(
+        (r for r in records if kind in r.expected),
+        key=lambda r: (r.tier, r.op, r.seed, r.config),
+    )
+    if not cells:
+        return [
+            f"no cell for this kind ran; records came from: {', '.join(shards) or 'none'}"
+        ]
+    lines = [
+        f"{r.tier} {r.op} seed={r.seed} config={r.config} status={r.status} "
+        f"cls={r.cls or '-'} expected={','.join(r.expected)} "
+        f"produced={','.join(r.produced) or '-'} reason={r.reason or '-'} "
+        f"from={r.origin or '-'}"
+        for r in cells
+    ]
+    lines.append(f"records came from: {', '.join(shards)}")
+    return lines
+
+
 def check_floor(records: Sequence[CellRecord], ledger: dict, tier: str) -> list[str]:
     """Floor kinds this run of *tier* failed to verify.
 
@@ -467,10 +516,13 @@ def check_floor(records: Sequence[CellRecord], ledger: dict, tier: str) -> list[
     floor = set(ledger.get("verified_floor", {}).get(tier, ()))
     if not floor:
         return []
-    return [
-        f"{kind}: in the {tier} verified floor, not verified by this run"
-        for kind in sorted(floor - _verified(records, tier))
-    ]
+    problems = []
+    for kind in sorted(floor - _verified(records, tier)):
+        detail = "".join(f"\n    {line}" for line in _floor_gap_lines(records, kind))
+        problems.append(
+            f"{kind}: in the {tier} verified floor, not verified by this run{detail}"
+        )
+    return problems
 
 
 def _scope_lines(rep: dict) -> list[str]:
