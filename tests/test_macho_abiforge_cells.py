@@ -53,13 +53,15 @@ def test_macho_cell_meets_its_strict_expectation(
     cfg = _as_config(seed, "clang").with_(
         platform=("darwin", "macho"),
         evidence=evidence,
-        header_backend="clang",
+        # castxml is the reference header backend and the macOS integration lane
+        # installs it (setup-castxml, conda-forge 0.7.0); clang is not used here.
+        header_backend="castxml",
     )
     gap = capability_gap(op, cfg)
     if gap:
         pytest.skip(gap)
     if evidence == "headers":
-        backend_gap = header_backend_unavailable("clang", seed.lang)
+        backend_gap = header_backend_unavailable("castxml", seed.lang)
         if backend_gap:
             pytest.skip(backend_gap)
     outcome = run_operator(
