@@ -32,6 +32,7 @@ import pathlib
 from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
+from ..errors import SnapshotError
 from ..model import AbiSnapshot
 from ..model.declaration_store import STORE_ATTRIBUTE
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
@@ -411,7 +412,26 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     the flat document.
     """
     refuse_lossy_flattening(snap)
+    _refuse_macho_object_sizes(snap)
     return _snapshot_to_dict(snap, _encode_value)
+
+
+def _refuse_macho_object_sizes(snap: AbiSnapshot) -> None:
+    """Refuse a flat document of a snapshot whose Mach-O object sizes live
+    only in the MACHO_OBJECT_SIZES extension fact (ADR-062 D19). A flat
+    document has no place for the fact, so it would store the derivation as
+    "not derived". The sectioned writers keep it: `save_snapshot`,
+    `write_snapshot`, and the `abicheck dump -o` path."""
+    from .extension_facts import macho_sizes_would_be_lost
+
+    if macho_sizes_would_be_lost(snap):
+        raise SnapshotError(
+            "Snapshot holds Mach-O object sizes (ADR-062 D19 extension fact "
+            "abicheck.macho_object_sizes), which a flat snapshot_to_dict "
+            "document cannot carry; refusing to store them as not derived. "
+            "Write the AbiSnapshot instead: save_snapshot or write_snapshot "
+            "(abicheck dump -o does the same)."
+        )
 
 
 def flat_document_and_carriers(

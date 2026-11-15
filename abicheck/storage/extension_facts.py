@@ -192,6 +192,23 @@ def sync_export_read_fact(snap: Any) -> None:
     write_extension_fact(snap, EXPORT_READ, value)
 
 
+def macho_sizes_would_be_lost(snap: Any) -> bool:
+    """Whether *snap* holds Mach-O size state a flat document cannot carry.
+
+    Read-only, so a flat encoder can refuse without touching the caller's
+    snapshot: a derivation flag or any export size or closer is state that
+    lives only in the MACHO_OBJECT_SIZES extension fact.
+    """
+    macho = _platform_blocks(snap).get("macho")
+    if macho is None:
+        return False
+    if getattr(macho, "sizes_derived", None) is not None:
+        return True
+    return any(
+        exp.size is not None or exp.size_bound_by is not None for exp in macho.exports
+    )
+
+
 def sync_macho_sizes_fact(snap: Any) -> None:
     """Record the Mach-O object-size derivation as MACHO_OBJECT_SIZES.
 

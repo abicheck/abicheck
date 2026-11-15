@@ -28,6 +28,7 @@ import pytest
 
 from abicheck.diff_elf_layout import _diff_elf_layout, _layout_support
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
+from abicheck.errors import SnapshotError
 from abicheck.macho_metadata import parse_macho_metadata
 from abicheck.model import AbiSnapshot
 from abicheck.model.macho_facts import MachoMetadata
@@ -542,3 +543,54 @@ def test_a_cleared_size_state_does_not_come_back_on_reload(tmp_path: Path) -> No
     assert reloaded.macho is not None
     assert reloaded.macho.sizes_derived is None
     assert all(e.size is None for e in reloaded.macho.exports)
+
+
+def test_flat_encoder_refuses_derived_sizes_and_names_the_sectioned_writer(
+    tmp_path: Path,
+) -> None:
+    """snapshot_to_dict cannot carry the size fact: it refuses rather than store
+    the derivation as not derived, and the message names the writer to use."""
+    from abicheck.serialization import snapshot_to_dict
+
+    snap = _macho_snap(_vtable_macho(tmp_path, "flat.dylib", 0x30))
+    with pytest.raises(SnapshotError, match="save_snapshot"):
+        snapshot_to_dict(snap)
+
+
+def test_the_sectioned_writer_keeps_derived_sizes_the_flat_one_refuses(
+    tmp_path: Path,
+) -> None:
+    """The writer the refusal names keeps the derivation through a reload."""
+    snap = _macho_snap(_vtable_macho(tmp_path, "kept.dylib", 0x30))
+    out = tmp_path / "kept.json"
+    save_snapshot(snap, out)
+    loaded = load_snapshot(out)
+    assert loaded.macho is not None and loaded.macho.sizes_derived is True
+    assert {e.name: e.size for e in loaded.macho.exports}["_ZTV4Base"] == 0x30
+
+
+def test_an_underived_macho_snapshot_still_flattens(tmp_path: Path) -> None:
+    """Negative control: with no size state there is nothing to refuse."""
+    from abicheck.serialization import snapshot_to_dict
+
+    snap = _macho_snap(_vtable_macho(tmp_path, "plain.dylib", 0x30))
+    snap.macho.sizes_derived = None
+    for exp in snap.macho.exports:
+        exp.size = None
+        exp.size_bound_by = None
+    flat = snapshot_to_dict(snap)
+    assert flat["macho"]["exports"]
+    assert "sizes_derived" not in flat["macho"]
+
+
+def test_a_bundle_member_with_derived_sizes_takes_the_sectioned_document(
+    tmp_path: Path,
+) -> None:
+    """The bundle path syncs the size fact first, so it never reaches the flat
+    refusal and writes the sectioned member document, which keeps the sizes."""
+    from abicheck.storage.bundle_member_carriers import encode_bundle_member
+
+    snap = _macho_snap(_vtable_macho(tmp_path, "bundle.dylib", 0x30))
+    doc, sectioned = encode_bundle_member(snap)
+    assert sectioned is True
+    assert doc is not None
