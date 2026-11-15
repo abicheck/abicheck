@@ -202,6 +202,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/unit/extract/test_clang_builtin_probe_options.py",
                 # The same probe through the public dump of a real -m32 parse.
                 "tests/test_clang_builtin_probe_m32.py",
+                # The va_list parameter is recognised on a pointer-valued target
+                # (-m32) by the name the parse keeps, not only the x86-64 spelling.
+                "tests/test_clang_param_va_list.py",
                 # The time64 detector reads a typedef chain in either backend's
                 # spelling (clang chains, gcc flattens), to one finding.
                 "tests/test_time64_typedef_chain.py",

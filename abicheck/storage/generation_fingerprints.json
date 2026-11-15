@@ -149,7 +149,7 @@
       "abicheck/extract/headers/clang/owned_tag.py": "61b5cd585abf22d1a2ad78e38d67c4dc32be54001001cb2a7bfe9adb5390a60c",
       "abicheck/extract/headers/clang/param_kind.py": "5f23882fce9965286398d2cf89d02e845051179dd5774a448c700d0498373fca",
       "abicheck/extract/headers/clang/pointer_depth.py": "88afcca3b65a1a95f6cea563085af926b45e5ed2d8e1bdd74b9332a129b07441",
-      "abicheck/extract/headers/clang/qualifiers.py": "6bc49f77950c0613c620fec731576f17951f836d51404d1862b522d41a6f0432",
+      "abicheck/extract/headers/clang/qualifiers.py": "4ae2068ee99289ebb4d82e637dc0786af7d5819e97de84b3cf5f3f25c21fd01c",
       "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
       "abicheck/extract/headers/clang/records.py": "214671b358860f0fa02318f91701ba079de8a8e4fcef601d68f0613911ca36cf",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d5315bf87a0d96346940ff68087676a1bf32b97dcef738d74f8ead9d92048092",
-    "generation": 74,
-    "reason": "generation 74 is unreleased: re-recorded in place for the -include-pch operand drop in the builtin probe and the policy/alignment_generation_drift annotation of the pre-74 host-ABI alignment; no stored spelling changes"
+    "fingerprint": "81eb7f45c0a61422c71b9cbc27bbd954ad2090c86b541e57f4ac92425e25fb4e",
+    "generation": 75,
+    "reason": "a clang header parse on a pointer-valued va_list target (-m32: __builtin_va_list is char *) now recognises a va_list parameter by its kept va_list name, so Param.is_va_list is set where it was not before"
   },
   "resolver": {
     "files": {

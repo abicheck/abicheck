@@ -457,3 +457,87 @@ class TestCrossBackendFalsePositiveClosed:
         assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(result)
         assert ChangeKind.PARAM_LOST_VA_LIST not in _kinds(result)
         assert result.verdict == Verdict.NO_CHANGE
+
+
+class TestClangParamIsVaListPointerTarget:
+    """The i386-style spelling: the parse keeps the ``va_list`` name and
+    desugars it to a plain pointer (``__builtin_va_list`` is ``char *``).
+    Spellings below are what clang 18 emits for ``-m32`` (verified live)."""
+
+    @pytest.mark.parametrize(
+        ("qual_type", "desugared", "expected"),
+        [
+            ("va_list", "char *", True),
+            ("const va_list", "char *const", True),
+            ("volatile va_list", "char *volatile", True),
+            # The same name over a non-pointer desugaring is not a pointer
+            # va_list; a plain pointer with no va_list name is not one either.
+            ("va_list", "int", False),
+            ("char *", "char *", False),
+            ("my_va_list", "int *", False),
+            # The name must be the whole sugared spelling.
+            ("va_list_like", "char *", False),
+        ],
+    )
+    def test_name_path_spellings(
+        self, qual_type: str, desugared: str, expected: bool
+    ) -> None:
+        assert _clang_param_is_va_list(_param_node(qual_type, desugared)) is expected
+
+    def test_live_m32_parse_recognises_va_list(self, tmp_path: Path) -> None:
+        import json
+        import subprocess
+
+        if shutil.which("clang") is None:
+            pytest.skip("clang not installed")
+        probe = subprocess.run(
+            ["clang", "-m32", "-fsyntax-only", "-x", "c", "-"],
+            input="int x;\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            pytest.skip("clang cannot target -m32 on this host")
+        header = tmp_path / "v.h"
+        header.write_text(
+            "#include <stdarg.h>\n"
+            "void plain(int n, va_list ap);\n"
+            "void qualified(int n, const va_list ap);\n"
+            "void not_va_list(int n, char *p);\n"
+        )
+        out = subprocess.run(
+            [
+                "clang",
+                "-m32",
+                "-x",
+                "c",
+                "-fsyntax-only",
+                "-Xclang",
+                "-ast-dump=json",
+                str(header),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        root = json.loads(out)
+        params: dict[str, list[dict]] = {}
+
+        def walk(node: object, fn: str | None) -> None:
+            if isinstance(node, dict):
+                if node.get("kind") == "FunctionDecl":
+                    fn = str(node.get("name", ""))
+                if node.get("kind") == "ParmVarDecl" and fn is not None:
+                    params.setdefault(fn, []).append(node)
+                for value in node.values():
+                    walk(value, fn)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item, fn)
+
+        walk(root, None)
+        expected = {"plain": True, "qualified": True, "not_va_list": False}
+        for fn, want in expected.items():
+            target = next(p for p in params[fn] if p.get("name") != "n")
+            assert _clang_param_is_va_list(target) is want, fn

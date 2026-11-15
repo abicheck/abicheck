@@ -724,6 +724,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "alignment of a builtin variable is demoted across this boundary by "
         "policy/alignment_generation_drift (the exact LP64/ILP32 natural pair only)"
     ),
+    75: GenerationSpellingChange(
+        "fix/nightly-va-list-target: no stored type spelling changes. A clang header "
+        "parse on a pointer-valued va_list target (-m32: __builtin_va_list is char *) "
+        "keeps the va_list name on a decayed parameter and now recognises it as a "
+        "va_list parameter (extract/headers/clang/qualifiers), so Param.is_va_list is "
+        "set where it was not before. The recorded parameter fact changes; the spelling "
+        "does not"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

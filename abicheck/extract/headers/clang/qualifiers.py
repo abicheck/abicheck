@@ -326,6 +326,13 @@ def clang_param_is_restrict(node: dict[str, Any]) -> bool:
 _VA_LIST_TAG_PTR_RE = re.compile(
     r"^(?:(?:const|volatile)\s+)*(?:struct\s+)?__va_list_tag\s*\*$"
 )
+#: The standard ``va_list`` typedef name as a parameter's *sugared* spelling
+#: (optionally cv-qualified). A target whose ``__builtin_va_list`` is a plain
+#: pointer (i386: ``char *``) keeps this name on the decayed parameter, so the
+#: decayed pointer is recognised by name, not by the x86-64 struct spelling.
+_VA_LIST_NAME_RE = re.compile(r"^(?:(?:const|volatile)\s+)*va_list$")
+#: A desugared pointer type, with any trailing cv-qualifiers (``char *const``).
+_POINTER_TAIL_RE = re.compile(r"\*\s*(?:(?:const|volatile)\s*)*$")
 
 
 #: Back-compat alias -- see :func:`clang_param_is_restrict`'s own docstring.
@@ -354,9 +361,13 @@ def clang_param_is_va_list(node: dict[str, Any]) -> bool:
     consistency with :func:`_clang_param_is_restrict` and in case a deeper
     indirection someday needs it.
 
-    **Scope, stated rather than silently assumed**: this matches ONLY the
-    x86-64 System V spelling (``(const )?(struct )?__va_list_tag *``), the
-    one ABI verified here. ``va_list``'s underlying representation is
+    **Scope, stated rather than silently assumed**: this matches the x86-64
+    System V spelling (``(const )?(struct )?__va_list_tag *``) and, for a
+    pointer-valued target such as i386 (``__builtin_va_list`` is ``char *``),
+    the parameter's own ``va_list`` / ``const va_list`` name that the parse
+    keeps while desugaring it to a pointer. Verified with clang 18 for
+    x86-64 and ``-m32``. The name test is not an ABI proof: a user typedef
+    named ``va_list`` that desugars to a pointer is recognised too. ``va_list``'s underlying representation is
     genuinely target-defined -- AArch64 AAPCS uses a different multi-field
     struct, and other targets differ again -- and guessing an unverified
     spelling risks a false positive worse than the pre-existing "never
@@ -389,8 +400,17 @@ def clang_param_is_va_list(node: dict[str, Any]) -> bool:
     new, isolated problem -- closing it here alone, ahead of that general
     mechanism, would be an inconsistent one-off fix for a structural gap.
     """
-    desugared = _desugared_qualtype(node)
-    return bool(_VA_LIST_TAG_PTR_RE.match(desugared.strip()))
+    desugared = _desugared_qualtype(node).strip()
+    if _VA_LIST_TAG_PTR_RE.match(desugared):
+        return True
+    # i386 and other pointer-valued ``__builtin_va_list`` targets: the parse
+    # keeps the ``va_list`` name on the parameter (``va_list`` / ``const
+    # va_list``) and desugars it to a pointer (``char *``). A plain ``char *``
+    # parameter has no such name, so it stays a non-va_list.
+    sugared = str((node.get("type") or {}).get("qualType", "")).strip()
+    return bool(_VA_LIST_NAME_RE.match(sugared)) and bool(
+        _POINTER_TAIL_RE.search(desugared)
+    )
 
 
 #: Back-compat alias -- see :func:`clang_param_is_va_list`'s own docstring.
