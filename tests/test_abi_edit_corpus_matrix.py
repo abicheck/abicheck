@@ -854,6 +854,7 @@ def _check_cell(cell: Cell, ctx: CellContext, tier: str) -> None:
             expectation=result.expectation,
             source="matrix",
             ran_consumers=ran_consumers(result.exec_truth),
+            reason=result.reason,
         )
     )
     if result.status != "ran":
