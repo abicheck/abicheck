@@ -207,3 +207,21 @@ def test_every_probe_config_pins_its_platform(gate, monkeypatch):
     monkeypatch.setattr(known_coverage, "Config", spy)
     known_coverage.covered_masks(lambda c: True)
     assert seen and all(seen)
+
+
+def test_computing_the_record_runs_no_toolchain_probe(gate, monkeypatch):
+    """A ``when`` that probes the installed toolchain (``uses_libstdcxx`` runs the
+    driver) makes the record depend on the runner. Computing it must start no
+    process and look up no executable."""
+    import shutil
+    import subprocess
+
+    from abiforge.known import KNOWN
+    from abiforge.known_coverage import known_record
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError(f"record computation probed the host: {args!r}")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(shutil, "which", forbidden)
+    assert known_record(KNOWN, gate.known_entry_key)

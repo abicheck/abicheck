@@ -16,7 +16,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from abiforge.model.config import Config
-from abiforge.run.toolchains import uses_libstdcxx
 
 _CLASSES = frozenset({"cxx_classes"})
 
@@ -352,7 +351,9 @@ KNOWN: tuple[Known, ...] = (
         "false-positive",
         # PE records no binding, so the coalesced-copy rule has no signal there
         # (ADR-089's PE limit); against libc++ (macOS) the rebuild reads NO_CHANGE.
-        lambda c: c.objfmt == "pe" and uses_libstdcxx(c.producer),
+        # gcc (MinGW) is libstdc++; the old probe of the installed driver made the
+        # record depend on the runner. A pinned family is the same condition here.
+        lambda c: c.objfmt == "pe" and c.producer.family == "gcc",
         "MinGW: -O2 inlines the std::string instantiations the -O0 build exported; a PE "
         "export carries no WEAK binding, so their loss reads func_removed / "
         "func_visibility_changed (BREAKING) while every consumer still runs",
