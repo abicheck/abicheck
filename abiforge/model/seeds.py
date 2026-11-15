@@ -491,7 +491,13 @@ _ELF_ROLES: dict[str, RoleText] = {
     ),
     "elf.ren": (
         "int r_init(void);\nint r_run(int n);",
-        "int r_init(void) { return 1; }\nint r_run(int n) { return n + 1; }",
+        # r_run has a loop body so it stays above the fingerprint size floor
+        # (8 bytes) on every toolchain: a rename of it is then a fact from
+        # symbols alone. The renamed twin in symbols_prefixed_batch has the
+        # same body.
+        "int r_init(void) { return 1; }\n"
+        "int r_run(int n) { int s = 0; int i; for (i = 0; i < n; i++) "
+        "s += i * n + (s ^ i); return s; }",
     ),
     # A reserved-name exported table (glibc's `_IO_2_1_stdin_` shape).
     "elf.itab": ("extern int _lib_table[4];", "int _lib_table[4] = {1, 2, 3, 4};"),

@@ -3733,11 +3733,69 @@ def check_known_baseline_vs_base(
     return check_known_baseline_growth(current, base), None
 
 
+def known_when_widening(
+    current: Mapping[str, Mapping[str, str]], recorded: Mapping[str, Mapping[str, str]]
+) -> list[str]:
+    """Every difference between a ``when`` record and the one ``known.py`` computes.
+
+    *current* and *recorded* map ``"<key>#<n>"`` to ``{standard|toolchain: hex
+    mask}`` (``abiforge.known_coverage.known_record``). The record is exact: an
+    entry whose covered set grew needs review (widening); one whose set shrank
+    needs its record shrunk in the same change (narrowing); an entry the record
+    lacks, or the record keeps after its entry is gone, is stale. An entry with
+    no difference passes.
+
+    A universe change (a new standard or toolchain the ``when`` matches, or a
+    removed one) shows up here as widening or narrowing, and is regenerated the
+    same way, after review.
+    """
+    from abiforge.known_coverage import narrowed_pairs, widened_pairs
+
+    problems: list[str] = []
+    for ident in sorted(set(current) | set(recorded)):
+        if ident not in current:
+            problems.append(
+                f"abiforge/known_when_baseline.json records {ident}, which abiforge/known.py "
+                "no longer has: regenerate the record with --write-known-when in this PR"
+            )
+            continue
+        now, then = current[ident], recorded.get(ident, {})
+        grown = widened_pairs(now, then)
+        if grown:
+            detail = ", ".join(f"{pair} +{n}" for pair, n in sorted(grown.items()))
+            problems.append(
+                f"widening, needs review: abiforge/known.py entry {ident} now covers "
+                f"configurations its recorded `when` does not ({detail}). If the probe grid "
+                "or STANDARDS changed instead, review that, then regenerate with "
+                "--write-known-when"
+            )
+        shrunk = narrowed_pairs(now, then)
+        if shrunk:
+            detail = ", ".join(f"{pair} -{n}" for pair, n in sorted(shrunk.items()))
+            problems.append(
+                f"narrowed entry {ident} ({detail}): regenerate the record with "
+                "--write-known-when in this PR, so the ceiling shrinks in the same diff"
+            )
+    return problems
+
+
+def write_known_when_baseline() -> None:
+    from abiforge.known import KNOWN
+    from abiforge.known_coverage import BASELINE_PATH, known_record, write_baseline
+
+    write_baseline(known_record(KNOWN, known_entry_key), BASELINE_PATH)
+
+
 def check_abiforge_known_no_growth(f: Findings) -> None:
     from abiforge.known import KNOWN
+    from abiforge.known_coverage import known_record, load_baseline
 
     for problem in check_known_no_growth(
         (known_entry_key(entry) for entry in KNOWN), ABIFORGE_KNOWN_BASELINE
+    ):
+        f.err("abiforge-known-no-growth", problem)
+    for problem in known_when_widening(
+        known_record(KNOWN, known_entry_key), load_baseline()
     ):
         f.err("abiforge-known-no-growth", problem)
     problems, note = check_known_baseline_vs_base(
@@ -3873,7 +3931,17 @@ def main(argv: list[str] | None = None) -> int:
         "are independent whole-tree scans, so the wall time drops to roughly "
         "the slowest one; findings are merged in registry order either way.",
     )
+    parser.add_argument(
+        "--write-known-when",
+        action="store_true",
+        help="Regenerate abiforge/known_when_baseline.json from abiforge/known.py "
+        "and exit (review the diff: a raised record is a widened `when`).",
+    )
     args = parser.parse_args(argv)
+    if args.write_known_when:
+        write_known_when_baseline()
+        print("wrote abiforge/known_when_baseline.json")
+        return 0
 
     findings = Findings()
     selected = [n for n in (args.only or list(CHECKS)) if n not in args.skip]
