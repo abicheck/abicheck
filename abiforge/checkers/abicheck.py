@@ -218,6 +218,18 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)
 
 
+def debug_evidence(snap: AbiSnapshot) -> str:
+    """What debug-info evidence the snapshot recorded, per channel.
+
+    A diagnostic for a failing cell: a DWARF-derived kind can only appear if
+    the snapshot carries the layout channel it reads.
+    """
+    from abicheck.model.debug_evidence import debug_info_evidence
+
+    ev = debug_info_evidence(snap)
+    return f"basic={ev.basic} advanced={ev.advanced} layout_content={ev.layout_content}"
+
+
 def function_findings(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, ...]:
     """Each function-level finding (``FUNC_*``) as ``KIND symbol (qualified name)``.
 

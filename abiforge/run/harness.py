@@ -94,6 +94,8 @@ class Outcome:
     failures: tuple[str, ...]
     #: Function-level findings, named per symbol; filled only for a failing cell.
     findings: tuple[str, ...] = ()
+    #: Per-side debug evidence and dSYM presence; filled only for a failing cell.
+    evidence: tuple[str, ...] = ()
 
 
 def label_toolchain(label: str) -> Toolchain:
@@ -462,13 +464,29 @@ def run_operator(
     new = build_new(op, seed, cfg, root)
     verdict, kinds = abicheck_answer(old, new)
     failures = tuple(op.expect(cfg).problems(verdict, kinds))
+    if not failures:
+        return Outcome(verdict=verdict, kinds=kinds, failures=failures)
     return Outcome(
         verdict=verdict,
         kinds=kinds,
         failures=failures,
-        findings=checker.function_findings(old.snapshot, new.snapshot)
-        if failures
-        else (),
+        findings=checker.function_findings(old.snapshot, new.snapshot),
+        evidence=(_side_evidence("old", old), _side_evidence("new", new)),
+    )
+
+
+def _side_evidence(side: str, built: Built) -> str:
+    """One side's debug evidence in the snapshot, and whether its dSYM DWARF
+    file is on disk where the Mach-O debug resolver looks for it."""
+    dwarf_file = (
+        built.so.with_name(built.so.name + ".dSYM")
+        / "Contents/Resources/DWARF"
+        / built.so.name
+    )
+    state = "present" if dwarf_file.is_file() else "absent"
+    return (
+        f"{side}: {checker.debug_evidence(built.snapshot)}; "
+        f"dSYM DWARF {state} at {dwarf_file}"
     )
 
 

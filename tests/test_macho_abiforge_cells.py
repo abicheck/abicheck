@@ -98,6 +98,7 @@ def test_macho_cell_meets_its_strict_expectation(
         "function findings, emitted by abicheck:\n  "
         + "\n  ".join(outcome.findings)
         + "\n"
+        "debug evidence per side:\n  " + "\n  ".join(outcome.evidence) + "\n"
         f"thunk exports, old: {_thunk_exports(tmp_path / 'old')}\n"
         f"thunk exports, new: {_thunk_exports(tmp_path / 'new')}"
     )
