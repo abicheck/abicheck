@@ -298,10 +298,16 @@ def test_edit_produces_declared_ground_truth(
         gap = elf_link_unavailable(seed, config) or capability_gap(op, config)
         if gap:
             pytest.skip(gap)
-    except pytest.skip.Exception:
+    except pytest.skip.Exception as skip:
         write_record(
             make_record(
-                "pr", op, seed.name, config, status="unavailable", source="default"
+                "pr",
+                op,
+                seed.name,
+                config,
+                status="unavailable",
+                source="default",
+                reason=str(skip),
             )
         )
         raise
