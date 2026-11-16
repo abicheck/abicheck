@@ -33,6 +33,19 @@ from abicheck.report.evidence_summary import evidence_summary
 from abicheck.report.review_compute import compact_coverage_warnings
 
 
+def _beside(directory: Path) -> str:
+    """Names on disk beside the fixture: a failure shows any debug bundle that was there."""
+    return ", ".join(sorted(p.name for p in directory.iterdir()))
+
+
+def _dwarf_flags(directory: Path) -> dict[str, bool]:
+    """Per dumped snapshot, whether its JSON records real DWARF (``has_dwarf``)."""
+    return {
+        p.name: '"has_dwarf": true' in p.read_text(encoding="utf-8")
+        for p in sorted(directory.glob("*.json"))
+    }
+
+
 def _excluded(name: str, depth: str = "binary") -> DetectorResult:
     return DetectorResult(
         name=name,
@@ -197,7 +210,10 @@ def test_binary_depth_on_header_snapshots_matches_binary_only(tmp_path: Path) ->
     # header snapshot's projection cannot rebuild: that run reads ``partial``
     # and names it (known-gaps: depth-binary projection), never a clean claim
     # stronger than the oracle's.
-    assert exit_depth == exit_oracle
+    assert exit_depth == exit_oracle, (
+        _beside(tmp_path),
+        _dwarf_flags(tmp_path),
+    )
     projection_gap = any(
         n.startswith("not assessed at depth binary:")
         for n in depth["analysis_assurance"]["notes"]
