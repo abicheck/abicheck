@@ -513,6 +513,31 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="tests.producer_fact_expectation_assumed_one_producer",
+        invariant=(
+            "A generated-corpus expectation that depends on a fact a compiler "
+            "may or may not emit (DW_AT_deleted for a = delete member) is keyed "
+            "on the measured per-producer table, not one expectation for every "
+            "producer; the table is pinned by re-measuring each installed "
+            "producer. Clang 16 omits the attribute, so one expectation for "
+            "every producer read its deleted member as FUNC_DELETED_DWARF where "
+            "the DWARF holds only a removal."
+        ),
+        fixed_by=(2092,),
+        seed_tests=("tests/test_producer_dw_at_deleted.py",),
+        axes={
+            "producer": (
+                "gcc12",
+                "gcc13",
+                "gcc14",
+                "clang16",
+                "clang17",
+                "clang18",
+                "clang19",
+            )
+        },
+    ),
+    BugClass(
         id="tests.export_expectation_assumed_default_visibility",
         invariant=(
             "A corpus expectation for a symbol whose export depends on the "

@@ -26,6 +26,7 @@ from abiforge.model.opkit import (
     _binary_mangled,
     _set,
 )
+from abiforge.model.producer_dwarf import records_deleted_member
 from abiforge.model.seeds import XCXX_SEED
 
 __all__ = ["CXX_OPERATORS"]
@@ -279,7 +280,18 @@ _MEMBERS = (
                 "the clang and gcc header backends record = delete",
             ),
             Rule(
-                lambda c: c.evidence == "dwarf",
+                lambda c: (
+                    c.evidence == "dwarf"
+                    and records_deleted_member(c.producer) is False
+                ),
+                {"expected": frozenset({"FUNC_REMOVED"}), "any_of": ()},
+                "this producer's DWARF omits DW_AT_deleted, so the deleted member "
+                "is simply absent from DWARF and reads as a removal",
+            ),
+            Rule(
+                lambda c: (
+                    c.evidence == "dwarf" and records_deleted_member(c.producer) is True
+                ),
                 {"expected": frozenset({"FUNC_DELETED_DWARF"}), "any_of": ()},
                 "DWARF records the deleted member (DW_AT_deleted)",
             ),
