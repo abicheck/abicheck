@@ -53,7 +53,7 @@
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
-      "abicheck/extract/dwarf_type_alignment.py": "f338fc168722b77183b6c3345bedca1b53c80c81d849d53fdbe6b5c7b7c45cd9",
+      "abicheck/extract/dwarf_type_alignment.py": "26897230d2b88662cd61e3e64180f6ca57a6ff361baebe33e61b046ebee68951",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
@@ -189,7 +189,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_debug.py": "8aaed081cb41a5e85ec0361fc9a6dac90125b7b4546bdec9642abaf2984badec",
+      "abicheck/extract/macho_debug.py": "d345548176ac744a374fe6c5592e57d2d1293e7f8787acb93fa716d4a36193ba",
       "abicheck/extract/macho_dsym.py": "50d9107d628f7439e430ff84a643c8689d24ea47437c8b2e9e54db19d7955c87",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
@@ -243,9 +243,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "b4ebef22a05a1a99207898660cd57f4347006d26f5bb2e13b794f6bc34c15056"
     },
-    "fingerprint": "8e29fac8ef3704853c050ff0e53b3c76c7c749ce0889560293a43497026f783b",
-    "generation": 83,
-    "reason": "symbols-only and presence-only dumps keep the presence fact and skip the advanced type pass on every format"
+    "fingerprint": "d2a8ffc7c68550e41df14bcb4467bf6763308051ef11970b2a7c20a0255aec37",
+    "generation": 84,
+    "reason": "Provisional: the alignment walk keeps ancestor-cut visits out of completed work (a misaligned sibling is no longer skipped by member order), and an unreadable adjacent dSYM records a fixed limitation sentence and is not cached. Renumber to main's next generation after #2102 lands."
   },
   "resolver": {
     "files": {

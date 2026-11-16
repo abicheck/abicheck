@@ -761,20 +761,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "adjacent .dSYM bundle, and the dump cache keys the bundle."
     ),
     80: GenerationSpellingChange(
-        "no type or name spelling changes. The DWARF alignment walk stops a "
-        "by-value cycle at any offset; terminating inputs keep their answer."
+        "no type or name spelling changes. The DWARF alignment walk stops a by-value cycle at any offset; terminating inputs keep their answer."
     ),
     81: GenerationSpellingChange(
-        "no type or name spelling changes. The header-free and header-built "
-        "Mach-O dumps read the same adjacent dSYM under the same options."
+        "no type or name spelling changes. The header-free and header-built Mach-O dumps read the same adjacent dSYM under the same options."
     ),
     82: GenerationSpellingChange(
-        "no type or name spelling changes. A PE snapshot built from headers "
-        "records its PDB debug information, as the header-free build does."
+        "no type or name spelling changes. A PE snapshot built from headers records its PDB debug information, as the header-free build does."
     ),
     83: GenerationSpellingChange(
-        "no type or name spelling changes. Symbols-only and presence-only dumps keep "
-        "the DWARF or PDB presence fact and skip the advanced type pass, on every format."
+        "no type or name spelling changes. Symbols-only and presence-only dumps keep the DWARF or PDB presence fact and skip the advanced type pass, on every format."
+    ),
+    84: GenerationSpellingChange(
+        "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable adjacent dSYM stores a fixed limitation and is not cached."
     ),
 }
 
