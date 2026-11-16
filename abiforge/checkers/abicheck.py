@@ -344,6 +344,17 @@ class ObservableSpec:
     language: frozenset[str] | None = None
 
 
+def binary_gated_kind_names() -> frozenset[str]:
+    """The kinds ADR-084 caps to COMPATIBLE_WITH_RISK at binary or DWARF depth.
+
+    The policy's own set (``BINARY_GATED``): a binary-producible kind whose
+    API_BREAK verdict needs header or source evidence to be backed.
+    """
+    from abicheck.policy.binary_gated_contract import BINARY_GATED
+
+    return frozenset(k.name for k in BINARY_GATED)
+
+
 def observable_at(kind_name: str) -> tuple[ObservableSpec, ...] | None:
     """The ``observable_at`` of ``ChangeKind`` *kind_name*, or None when UNCLASSIFIED.
 

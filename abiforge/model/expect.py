@@ -196,6 +196,35 @@ def observability_floor(
     )
 
 
+def binary_depth_cap(exp: Expectation, config: Config) -> Expectation:
+    """ADR-084 at the expectation: an API_BREAK the edit's observed kinds back
+    only through binary-producible kinds is COMPATIBLE_WITH_RISK at binary or
+    DWARF depth, unless header or source evidence is present.
+
+    Mirrors ``policy.binary_gated_contract``: the verdict cap applies only when
+    every observed kind of the edit is ``BINARY_GATED`` and no ``H`` or ``S``
+    atom is in the configuration. A header-gated kind keeps its verdict.
+    """
+    from abiforge.checkers.abicheck import binary_gated_kind_names
+
+    if not exp.observable or exp.verdict_min != "API_BREAK":
+        return exp
+    if {"H", "S"} & set(config.evidence_set.atoms):
+        return exp
+    kinds = (exp.expected | frozenset().union(*exp.any_of)) - ADVISORY_KINDS
+    if not kinds or not kinds <= binary_gated_kind_names():
+        return exp
+    return replace(
+        exp,
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="COMPATIBLE_WITH_RISK",
+        note=(
+            f"{exp.note} [ADR-084: {config.evidence_label} evidence without headers "
+            "or sources cannot back an API_BREAK for binary-gated kinds]"
+        ).strip(),
+    )
+
+
 # A (build, consumer) pair's status. Only "ran" is a signal: "infeasible" is a
 # mix that cannot work whatever the edit (libstdc++ against libc++, the two
 # _GLIBCXX_USE_CXX11_ABI std::strings, a standard the header does not compile
