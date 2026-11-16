@@ -256,6 +256,11 @@ abicheck helper.
 | A2.4 | identity duplicates: `VALUE_ABI_TRAIT_CHANGED`/`TRIVIALLY_COPYABLE_LOST`; `DEFAULT_ARGUMENT_CHANGED`/`PARAM_DEFAULT_VALUE_CHANGED` (different verdicts); `UNINSTANTIATED_TEMPLATE_REMOVED`/`INLINE_FUNCTION_REMOVED` | one fact, two kinds. Fix: canonicalize with `same_event_as` (A0) |
 | A2.5 | `PUBLIC_NOT_EXPORTED` noise in stripped cells (`short_wchar`, packed) | header declarations are matched against exports differently without DWARF. First decide whether some hits are legitimate without a version script |
 | A2.6 | four castxml backend misses on `headers` operators (contract attributes, `va_list` params, alignment lower bound) and gcc plugin misses (`va_list`, dynamic exception spec) | backend parity; owned by g28 and the header-backend parity plan |
+| A2.7 | `func_became_ms_abi` c_elf BD: `CALLING_CONVENTION_CHANGED` missing (NO_CHANGE at DWARF, a consumer breaks) | DWARF calling-convention facts are not read, so an ABI change of the same function's convention is invisible at DWARF. Hypothesis: the attribute is not extracted; verify before fixing |
+| A2.8 | `field_became_const` c_elf BD and `field_access_narrowed` cxx_more BD (the latter appears once FIELD_ACCESS_CHANGED is observable at DWARF): `FIELD_BECAME_CONST` (catalog default API_BREAK) reported as COMPATIBLE_WITH_RISK on a binary-only-consumer ELF cell | a verdict downgrade in policy for this kind; the kind is found, its severity is not kept. Hypothesis: policy demotes source-only breaks on ELF; verify |
+| A2.9 | `record_lost_standard_layout` cxx_more BD: `STANDARD_LAYOUT_LOST` not emitted at DWARF; `FIELD_ACCESS_CHANGED` (COMPATIBLE_WITH_RISK) emitted instead | detector gap for the standard-layout kind, plus `FIELD_ACCESS_CHANGED` is declared {B,H} only while it is emitted at DWARF (a catalog declaration to correct, orchestrator's call) |
+| A2.10 | `rebuild_pack_struct` c_core and cxx_classes BH: a -fpack-struct rebuild that breaks consumers (layout alignof 8 -> 1, offsets move) reads NO_CHANGE on stripped headers | a flag-induced layout change is invisible to a stripped header dump, so the checker must report it evidence-limited, never clean (ADR-066: unknown is not clean). Detector gap, not an expectation error: the oracle shows a real binary break |
+| A2.11 | `rebuild_optimized` cxx_stdlib BH below-minimum: COMPATIBLE_WITH_RISK with STACK_CANARY_REMOVED and STACK-protector/import kinds at -O2; the B cell is a known.py xfail, the BH cell is not | the same false positive as the known.py entry, one configuration up: the headers configuration carries no protector census. Add no xfail: fix the census or record the gap as A2.11 |
 
 Each is accepted when the `{B,H}` cell for its operators is green on gcc and
 clang and the matching `known.py` entries are deleted.
@@ -779,9 +784,11 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-3 | Pure virtual, key function, vtable home | A6 | not started | — |
 | WS-4 | Platform facts | A7 | in progress (PR 3, PE variables) | #2068 (PR 1, Mach-O); #2073 (PR 2, PE, merged); `fix/ws4-pe-variable-linkage` (PR 3: plain C++ globals bound to MSVC data exports by decoded type, own generation bump) |
 | WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | in progress (PR 1 `variant_of` pass merged #2078; PR 2 `subsumed_by` collapse in review; ADR-093 D5 "related finding" not yet recorded: lands in PR 3 as an optional `related` field plus relation code on the disposition record) | this PR. First relation candidate (confirmed on macOS, #2068): an exported thunk renamed by its offset (`_ZThn`/`_ZTv`) is reported as FUNC_REMOVED_ELF_ONLY/FUNC_ADDED, duplicating VTABLE_THUNK_OFFSET_CHANGED (`test_macho_cell_meets_its_strict_expectation[primary_base_grew-dwarf]`). |
-| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | B0 merged | #2069 (PR 1, B0) |
+| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | PR 2 in review (per-kind floor, min-level nightly baseline, triage pending) | #2069 (PR 1, B0); this PR (PR 2, B1+B2) |
 | WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | in review (PR 2 of 3) | this PR (PR 1: #2070, merged); nightly corpus fix `fix/nightly-builtin-probe-target` (clang -m32 builtin probe; time64 typedef chain landed in #2085) |
 | WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | PR 1 (standards axis) in review | this PR |
+
+**WS-6 PE follow-up (open).** `object_became_weak` on PE (`tests/test_edit_corpus_platform_expectations.py`) owes `VAR_REMOVED` only where `observable_at` admits it at the cell's evidence (catalog `{B,D}`/`{B,H}`, so not at binary). Whether abicheck emits `VAR_REMOVED` on PE at binary is **unverified**: there is no PE corpus lane, so no run shows it. A real PE run decides whether `VAR_REMOVED` gets a PE `{B}` alternative. Until then the test derives the owed group from the catalog.
 
 ### 11.3 File ownership and conflict hotspots
 
@@ -909,6 +916,14 @@ Every brief assumes the house rules in §11.5. Paste one into a new session.
 > test over current cells. Done when: new cells are red exactly on the known
 > A2/A3 defects (each tracked by a WS-2 PR, not an xfail), and §11.2 is
 > updated.
+
+**WS-6 minimum-level red set (`tests/data/min_level_red_cells.json`).** A ratchet, not a gate: a new red cell fails the nightly lane, a fixed one must leave the file in the same PR.
+
+| Category | Cells | Owner |
+|---|---|---|
+| unclassified-triage-pending | 56 | this PR (triage E or D before merge) |
+| E: expectation wrong | 0 | fixed in the PR that triages it |
+| D: detector gap, A-numbered | 0 | the WS-2 PR named by the A-number |
 
 **WS-7 — abiforge self-testing**
 > Read the plan's §6 and §7.2. PR 1 (no prerequisite): Hypothesis properties

@@ -57,7 +57,26 @@ _OBS_DH = observable(
     rationale="layout or type fact: DWARF and the public header both carry it",
 )
 
+#: Record alignment is a layout fact the public header determines. DWARF
+#: carries DW_AT_alignment only for explicitly aligned records, so an
+#: unannotated record's alignment change is not observable at {B,D}
+#: (test_pack_rebuild_alignment_only_needs_the_header_dump, nightly #1992).
+_OBS_ALIGN_H = observable(
+    ("B", "H"),
+    rationale="record alignment is a header layout fact; DWARF records it only when explicit",
+)
+
 TYPES_ENTRIES_3: list[ChangeKindMeta] = [
+    _E(
+        "type_alignment_changed",
+        _B,
+        impact="Misaligned access can cause bus errors on strict architectures or silent data corruption with SIMD.",
+        description_template="Alignment changed: {name} ({old} → {new} bits)",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+        observable_at=(_OBS_ALIGN_H,),
+    ),
     _E(
         "atomic_qualifier_changed",
         _B,

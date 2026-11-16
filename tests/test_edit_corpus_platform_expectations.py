@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from abiforge.model.config import Toolchain, default_config
+from abiforge.model.expect import kind_observable
 from abiforge.operators import OP_BY_NAME
 
 _GCC = Toolchain("gcc", 13, "gcc", "g++")
@@ -87,6 +88,11 @@ def test_variable_binding_expectations_per_platform(op_name: str, objfmt: str) -
     exp = OP_BY_NAME[op_name].expect(cfg)
     vmin, vmax, group = _VAR_ORACLE[(op_name, objfmt)]
     assert (exp.verdict_min, exp.verdict_max) == (vmin, vmax)
-    assert (group in exp.any_of) if group else not exp.any_of
+    # The owed group is derived from the catalog, not hard-coded: exactly the
+    # kinds of the group that observable_at admits at this cell's evidence.
+    # PE emission of VAR_REMOVED is unverified (no PE corpus lane), so its
+    # catalog {B,D}/{B,H} decides it; a real PE run is the follow-up (plan §11.2).
+    owed = frozenset(k for k in (group or ()) if kind_observable(k, cfg))
+    assert (owed in exp.any_of) if owed else not exp.any_of
     if objfmt == "pe":
         assert "SYMBOL_BINDING_CHANGED" not in exp.expected

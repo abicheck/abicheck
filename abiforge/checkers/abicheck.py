@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -327,3 +328,49 @@ def header_backend_problem(backend: str, driver: str, lang: str) -> str | None:
     except (SnapshotError, OSError, subprocess.SubprocessError) as exc:
         return f"gcc header backend: {str(exc).splitlines()[0]}"
     return None
+
+
+@dataclass(frozen=True)
+class ObservableSpec:
+    """One ``Observability`` of a kind: its minimal evidence configurations.
+
+    ``alternatives`` are frozensets of evidence atoms (``"B"``, ``"D"``, ``"H"``,
+    ``"BD"``, ``"S"``, ``"G"``), an antichain. ``platform`` and ``language``
+    restrict the spec to some values of those axes (``None`` = every value).
+    """
+
+    alternatives: frozenset[frozenset[str]]
+    platform: frozenset[str] | None = None
+    language: frozenset[str] | None = None
+
+
+def observable_at(kind_name: str) -> tuple[ObservableSpec, ...] | None:
+    """The ``observable_at`` of ``ChangeKind`` *kind_name*, or None when UNCLASSIFIED.
+
+    None is a value, not an empty answer: the kind has no declared minimal
+    configuration, so a cell cannot be built for it from its metadata.
+    """
+    from abicheck.model.change_catalog.assembled import REGISTRY
+    from abicheck.model.change_catalog.kinds import ChangeKind
+
+    meta = REGISTRY.get(ChangeKind[kind_name].value)
+    if meta is None or not isinstance(meta.observable_at, tuple):
+        return None
+    return tuple(
+        ObservableSpec(
+            alternatives=frozenset(
+                frozenset(str(s.value) for s in alt) for alt in obs.alternatives
+            ),
+            platform=(
+                None
+                if obs.condition is None or obs.condition.platform is None
+                else frozenset(str(p.value) for p in obs.condition.platform)
+            ),
+            language=(
+                None
+                if obs.condition is None or obs.condition.language is None
+                else frozenset(str(x.value) for x in obs.condition.language)
+            ),
+        )
+        for obs in meta.observable_at
+    )

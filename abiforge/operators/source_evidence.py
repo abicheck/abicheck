@@ -78,7 +78,6 @@ def _op(
         verdict_min=verdict_min,
         verdict_max=verdict_max,
         touches=(role,),
-        min_evidence="headers",
         **kw,
     )
 

@@ -21,21 +21,7 @@ import seed_observable_at as seed  # noqa: E402
 from abicheck.model.change_catalog.assembled import REGISTRY  # noqa: E402
 from abicheck.model.change_catalog.observability import (  # noqa: E402
     UNCLASSIFIED,
-    Observability,
-    ObservabilityCondition,
-    Platform,
-    observable,
 )
-
-
-def _spec(code: str) -> Observability:
-    alts, rationale, platforms, _const = seed.FORMS[code]
-    condition = (
-        ObservabilityCondition(platform=frozenset(Platform(p) for p in platforms))
-        if platforms
-        else None
-    )
-    return observable(*alts, rationale=rationale, condition=condition)
 
 
 def test_applied_decisions_match_registry() -> None:
@@ -44,9 +30,22 @@ def test_applied_decisions_match_registry() -> None:
         value = REGISTRY.entries[kind].observable_at
         if value is UNCLASSIFIED:
             continue  # blocked by the production line cap; reported, not applied
-        assert value == (_spec(dec.code),), kind
+        assert value == seed.decision_observability(dec.code), kind
         applied += 1
     assert applied > 0
+
+
+def test_ledger_round_trips_through_the_catalog_value() -> None:
+    """ledger -> catalog value -> ledger: a row is reproduced from the value it
+    gives, for single- and multi-condition rows alike."""
+    for kind, dec in seed.DECISIONS.items():
+        assert seed.codes_of(seed.decision_observability(dec.code)) == dec.code, kind
+
+
+def test_multi_condition_row_reads_as_one_form_per_condition() -> None:
+    assert seed.DECISIONS["func_removed"].codes == ("DH:ELFPE", "B:MACHO")
+    assert seed.DECISIONS["func_params_changed"].codes == ("DH:C", "B:CXX")
+    assert len(seed.decision_observability("DH:ELFPE+B:MACHO")) == 2
 
 
 def test_no_kind_outside_decisions_is_classified() -> None:

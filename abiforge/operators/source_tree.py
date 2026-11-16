@@ -60,7 +60,6 @@ def _op(
         verdict_min=verdict_min,
         verdict_max=verdict_max,
         touches=(role,),
-        min_evidence="headers",
         precondition=needs_clang_replay,
         **kw,
     )
@@ -166,7 +165,6 @@ SOURCE_TREE_OPERATORS += (
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max="API_BREAK",
         touches=("tree.privref", "tree.priv"),
-        min_evidence="headers",
         precondition=needs_clang_replay,
     ),
 )

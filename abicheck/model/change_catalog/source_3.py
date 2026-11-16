@@ -46,11 +46,23 @@ _OBS_BH = observable(
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
-_OBS_BHSG = observable(
-    ("B", "H", "S", "G"),
-    rationale="call edges across translation units: needs sources and the graph",
-)
 _OBS_L5 = observable(("B", "H", "BD", "S", "G"), rationale="needs the source graph (G)")
+#: A single-translation-unit source fact: the call, reference or override is in
+#: one TU, so the sources (S) carry it; only cross-TU edges need the graph (G).
+#: Verified by abiforge's one-TU source operators (src_public_entry_*,
+#: src_virtual_dispatch_target_added) at {B,D,H,S} with no G axis.
+#: A source-tree fact: the source replay of the library's tree (S) carries it,
+#: across its translation units and private headers, without the multi-TU
+#: graph. Verified by tree_private_pointee_type_renamed on cxx_tree at
+#: {B,D,H,S} with no G axis.
+_OBS_BHS_TREE = observable(
+    ("B", "H", "S"),
+    rationale="source-tree fact: carried by the source replay of the tree",
+)
+_OBS_BHS = observable(
+    ("B", "H", "S"),
+    rationale="single-TU source fact: carried by the translation unit's sources",
+)
 
 SOURCE_ENTRIES_3: list[ChangeKindMeta] = [
     _E(
@@ -63,7 +75,7 @@ SOURCE_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.SOURCE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_BHSG,),
+        observable_at=(_OBS_BHS,),
     ),
     _E(
         "public_virtual_dispatch_set_changed",
@@ -76,7 +88,7 @@ SOURCE_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.SOURCE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_L5,),
+        observable_at=(_OBS_BHS,),
     ),
     _E(
         "concept_tightened",
@@ -246,7 +258,7 @@ SOURCE_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.SOURCE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_L5,),
+        observable_at=(_OBS_BHS_TREE,),
     ),
     _E(
         "public_api_internal_dependency_added",
@@ -263,7 +275,7 @@ SOURCE_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.SOURCE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
-        observable_at=(_OBS_L5,),
+        observable_at=(_OBS_BHS,),
     ),
     _E(
         "public_dependency_role_changed",
@@ -385,7 +397,7 @@ SOURCE_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.SOURCE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_L5,),
+        observable_at=(_OBS_BHS,),
     ),
     _E(
         "public_typedef_removed",

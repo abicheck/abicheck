@@ -10,7 +10,7 @@ currently reports.
   else why not (a language feature the standard lacks, a flag the edit needs).
 - ``expect(config)``: the ``Expectation`` for *config*: the base fields below,
   then the first matching ``Rule`` in ``rules``, then the evidence floor
-  (below ``min_evidence`` the edit is unobservable).
+  (below the kinds' ``observable_at`` the edit is unobservable).
 
 ``expected`` ChangeKinds must all appear; each ``any_of`` group needs at least
 one member; the verdict must be no weaker than ``verdict_min`` and, for benign
@@ -35,7 +35,6 @@ from abiforge.model.opkit import (
     Roles,
     _binary,
     _binary_mangled,
-    _cxx_binary_else_dwarf,
     _merge,
     _no_edit,
     _set,
@@ -533,7 +532,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _func_param_type_change,
         "parameter type changes the mangled/ABI signature",
         expected=frozenset({"FUNC_PARAMS_CHANGED"}),
-        min_evidence=_cxx_binary_else_dwarf,
         rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
         touches=("func.add",),
     ),
@@ -545,7 +543,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "C++ mangled name) changes, and an old caller's arguments arrive in the "
         "wrong parameters",
         expected=frozenset({"FUNC_PARAMS_CHANGED"}),
-        min_evidence=_cxx_binary_else_dwarf,
         rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
         touches=("func.fill",),
     ),
@@ -555,7 +552,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _func_param_append,
         "adding a parameter changes the signature",
         expected=frozenset({"FUNC_PARAMS_CHANGED"}),
-        min_evidence=_cxx_binary_else_dwarf,
         rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
         touches=("func.add",),
     ),
@@ -565,7 +561,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _func_param_remove,
         "removing a parameter changes the signature",
         expected=frozenset({"FUNC_PARAMS_CHANGED"}),
-        min_evidence=_cxx_binary_else_dwarf,
         rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
         touches=("func.add",),
     ),
@@ -590,7 +585,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
                 "from symbols alone the removal is an export-table removal",
             ),
         ),
-        min_evidence="binary",
         touches=("func.count",),
     ),
     EditOp(
@@ -601,7 +595,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"FUNC_ADDED"}),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE",
-        min_evidence="binary",
         touches=("func.make",),
     ),
     EditOp(
@@ -623,7 +616,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
             ),
         ),
         verdict_min="BREAKING",
-        min_evidence="binary",
         touches=("func.twice",),
     ),
     # PARAM_RENAMED is the taxonomy's source-level risk (COMPATIBLE_WITH_RISK),
@@ -636,7 +628,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"PARAM_RENAMED"}),
         verdict_min="NO_CHANGE",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="headers",
         touches=("func.add",),
     ),
     # variables
@@ -646,7 +637,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _var_type_change,
         "changing an exported variable's type changes its ABI",
         expected=frozenset({"VAR_TYPE_CHANGED"}),
-        min_evidence="binary",
         rules=(
             Rule(
                 _binary,
@@ -667,7 +657,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "a comment changes no ABI or API",
         verdict_min="NO_CHANGE",
         verdict_max="NO_CHANGE",
-        min_evidence="headers",
         touches=("func.scale",),
     ),
     EditOp(
@@ -677,7 +666,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "declaration order in a header changes no ABI",
         verdict_min="NO_CHANGE",
         verdict_max="NO_CHANGE",
-        min_evidence="headers",
         touches=("func.add", "func.scale"),
     ),
     EditOp(
@@ -690,7 +678,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "a new static inline helper exports no symbol; at most it adds to the API",
         verdict_min="NO_CHANGE",
         verdict_max="COMPATIBLE",
-        min_evidence="headers",
         features=("inline",),
         touches=("func.handle",),
     ),
@@ -701,7 +688,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _virtual_method_add,
         "a new virtual method changes the vtable layout",
         any_of=(frozenset({"TYPE_VTABLE_CHANGED"}),),
-        min_evidence="binary",
         rules=(
             Rule(
                 _binary,
@@ -735,7 +721,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _virtual_remove,
         "removing a virtual method removes its vtable slot",
         expected=frozenset({"FUNC_VIRTUAL_REMOVED"}),
-        min_evidence="binary",
         rules=(_binary_mangled("FUNC_VIRTUAL_REMOVED"),),
         touches=("shape.kind",),
     ),
@@ -749,7 +734,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
             frozenset({"FUNC_VIRTUAL_BECAME_PURE"}),
             frozenset({"TYPE_BECAME_ABSTRACT"}),
         ),
-        min_evidence="binary",
         rules=(_binary_mangled("FUNC_VIRTUAL_BECAME_PURE", "TYPE_BECAME_ABSTRACT"),),
         touches=("shape.kind",),
     ),
@@ -759,7 +743,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _method_const_drop,
         "dropping const changes the method's mangled name and type",
         expected=frozenset({"FUNC_CV_CHANGED"}),
-        min_evidence="binary",
         rules=(_binary_mangled("FUNC_CV_CHANGED"),),
         touches=("shape.area",),
     ),
@@ -774,7 +757,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"FUNC_NOEXCEPT_ADDED"}),
         verdict_min="API_BREAK",
         verdict_max="API_BREAK",
-        min_evidence="headers",
         touches=("shape.area",),
     ),
     EditOp(
@@ -792,7 +774,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "a changed template default alters the header-only instantiation",
         any_of=(frozenset({"TEMPLATE_PARAM_DEFAULT_CHANGED"}),),
         verdict_min="API_BREAK",
-        min_evidence="headers",
         touches=("buf.decl",),
     ),
     # --- config-sensitive edits: the expectation is a function of the config
@@ -840,7 +821,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "moving a declaration out of the default-visibility block",
         verdict_min="NO_CHANGE",
         verdict_max="NO_CHANGE",
-        min_evidence="headers",
         precondition=_visibility_attr,
         rules=(
             Rule(
@@ -851,7 +831,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
                     "verdict_max": None,
                 },
                 "under -fvisibility=hidden the moved function stops being exported",
-                min_evidence="binary",
             ),
         ),
         touches=("func.count", "hidden.slot"),
@@ -912,7 +891,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "constraint set strictly grows (none -> one), a tightening",
         expected=frozenset({"CONCEPT_TIGHTENED"}),
         verdict_min="API_BREAK",
-        min_evidence="headers",
         features=("concepts",),
         touches=("tmpl.clamp",),
     ),
@@ -926,7 +904,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"CONCEPT_CONSTRAINT_CHANGED"}),
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="headers",
         features=("concepts",),
         touches=("tmpl.req",),
     ),
@@ -954,6 +931,19 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "rebuilding with -fpack-struct=1 removes padding: offsets and sizes move",
         any_of=(_SIZE | _OFFSET,),
         rules=(
+            # Without the header dump the packing shows no size or offset change
+            # at this pack/bits: DWARF cannot see the alignment drop either.
+            Rule(
+                lambda c: (
+                    c.evidence != "headers"
+                    and (
+                        c.flags.bits == 32
+                        or (c.flags.pack is not None and c.flags.pack <= 4)
+                    )
+                ),
+                {"any_of": (_ALIGN,)},
+                "alignof drop is visible only in the header dump; DWARF shows no size or offset change here",
+            ),
             Rule(
                 lambda c: (
                     c.flags.bits == 32
@@ -966,7 +956,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
                 # DWARF records no alignment for an unannotated record and the
                 # sizes and offsets it does record are unchanged: only the header
                 # dump (built with the same -fpack-struct) can show alignof drop.
-                min_evidence="headers",
             ),
             Rule(
                 lambda c: c.evidence == "headers",
@@ -989,7 +978,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         # Symbols alone show the old names gone; a tool that pairs by demangled
         # name sees std::__cxx11::basic_string become std::basic_string instead.
         any_of=(_REMOVED | {"FUNC_PARAMS_CHANGED", "FUNC_RETURN_CHANGED"},),
-        min_evidence="binary",
         precondition=_libstdcxx,
         rebuild=_with(cxx11_abi=0),
         needs_libstdcxx=True,
@@ -1008,7 +996,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
             _REMOVED
             | {"FUNC_PARAMS_CHANGED", "FUNC_RETURN_CHANGED", "FUNC_VISIBILITY_CHANGED"},
         ),
-        min_evidence="binary",
         precondition=_libcxx_rebuild,
         rebuild=_with(stdlib="libc++"),
         # The baseline must be libstdc++; libc++ itself is probed through the
@@ -1022,7 +1009,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "-fvisibility=hidden changes nothing when every public declaration is in a default-visibility block",
         verdict_min="NO_CHANGE",
         verdict_max="NO_CHANGE",
-        min_evidence="binary",
         precondition=_all(_gnu, _visibility_attr, _not_already("visibility", "hidden")),
         rebuild=_with(visibility="hidden"),
     ),
@@ -1035,7 +1021,6 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "-O2 changes code, not the interface",
         verdict_min="NO_CHANGE",
         verdict_max="COMPATIBLE",
-        min_evidence="binary",
         precondition=_not_already("opt", "O2"),
         rebuild=_with(opt="O2"),
     ),

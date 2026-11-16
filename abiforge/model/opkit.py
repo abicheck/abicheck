@@ -22,7 +22,7 @@ from abiforge.model.config import (
     has_feature,
     in_standards,
 )
-from abiforge.model.expect import Expectation, Rule, evidence_floor
+from abiforge.model.expect import Expectation, Rule, observability_floor
 from abiforge.model.seeds import RoleText, Seed
 from abiforge.model.space import feature_standards
 
@@ -46,9 +46,6 @@ class EditOp:
     verdict_max: str | None = None
     # Roles this op re-spells; used only to check the edit actually changes text.
     touches: tuple[str, ...] = field(default=())
-    # Weakest evidence that can show the edit: "binary" (exported symbols),
-    # "dwarf" (types of exported entities), "headers" (declarations only).
-    min_evidence: str | Callable[[Config], str] = "dwarf"
     # Language features (``abiforge.model.config.FEATURES``) the edit needs.
     features: tuple[str, ...] = ()
     # The standards the edit is defined in, beyond its features (whose ranges
@@ -156,18 +153,14 @@ class EditOp:
         )
 
     def expect(self, config: Config) -> Expectation:
+        """The ground truth for *config*: the base, the first matching rule, then the
+        kinds the configuration observes (``observability_floor``, plan B1)."""
         exp = self.base()
-        floor = (
-            self.min_evidence(config)
-            if callable(self.min_evidence)
-            else self.min_evidence
-        )
         for rule in self.rules:
             if rule.when(config):
                 exp = rule.apply(exp)
-                floor = rule.min_evidence or floor
                 break
-        return self.with_derived(evidence_floor(exp, config, floor), config.objfmt)
+        return self.with_derived(observability_floor(exp, config), config.objfmt)
 
     def with_derived(self, exp: Expectation, objfmt: str = "elf") -> Expectation:
         """*exp* plus the kinds that follow from it rather than from the edit.
@@ -242,16 +235,16 @@ def _binary(c: Config) -> bool:
     return c.evidence == "binary"
 
 
+def _cxx_binary(c: Config) -> bool:
+    return c.evidence == "binary" and c.std.lang == "c++"
+
+
 def _binary_mangled(*kinds: str) -> Rule:
     # From symbols alone the change shows as the old mangled name gone; a tool
-    # that demangles and pairs may name the specific change instead.
+    # that demangles and pairs may name the specific change instead. A mangled
+    # name exists only in C++: a C library's same change is not a symbol removal.
     return Rule(
-        _binary,
+        _cxx_binary,
         {"expected": frozenset(), "any_of": (_REMOVED | frozenset(kinds),)},
         "binary evidence sees the old mangled symbol disappear (or pairs it by demangled name)",
     )
-
-
-def _cxx_binary_else_dwarf(c: Config) -> str:
-    # A C++ signature is in the mangled name; a C one is only in debug info.
-    return "binary" if c.lang == "c++" else "dwarf"
