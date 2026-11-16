@@ -25,6 +25,7 @@ of the extractor it wraps.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -168,6 +169,14 @@ def test_real_adapter_is_registered_and_satisfies_the_protocol(
     assert adapter.format == fmt
 
 
+# Extractor parameters an adapter derives rather than forwards: each maps the
+# request fields it is built from. Presence-only is the ELF contract for both
+# symbols-only and debug-presence-only requests (PE has one presence switch).
+_DERIVED_PARAMS: dict[str, Callable[[dict[str, Any]], Any]] = {
+    "presence_only": lambda v: v["symbols_only"] or v["debug_presence_only"],
+}
+
+
 @pytest.mark.parametrize(("fmt", "owner", "name"), _REAL)
 def test_real_adapter_forwards_every_extractor_parameter(
     monkeypatch: pytest.MonkeyPatch, fmt: str, owner: object, name: str
@@ -192,4 +201,11 @@ def test_real_adapter_forwards_every_extractor_parameter(
     FORMAT_ADAPTERS[fmt].extract(request)
     assert sorted(received) == sorted(params)
     for param in params:
-        assert received[param] is values[param], param
+        if param in values:
+            assert received[param] is values[param], param
+        else:
+            # A parameter the adapter derives from more than one request field.
+            # It must be the derivation the adapter documents, not a same-named
+            # field, so it is checked against that derivation explicitly.
+            assert param in _DERIVED_PARAMS, f"undeclared derived parameter {param!r}"
+            assert received[param] is _DERIVED_PARAMS[param](values), param
