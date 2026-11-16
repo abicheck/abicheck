@@ -94,6 +94,18 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "KSD's second base gains a vtable pointer: KSD now has a secondary vtable "
         "group for KSB, its KSB subobject grows, and d moves",
         expected=frozenset({"SECONDARY_VTABLE_GROUP_CHANGED"}),
+        rules=(
+            Rule(
+                # ``diff_vtable_layout`` reconstructs the secondary group from
+                # DWARF inheritance; a stripped binary carries no inheritance
+                # graph. What the binary shows is the vtable itself growing a
+                # slot, which is the binary-visible face of the same break.
+                lambda c: c.evidence == "binary",
+                {"expected": frozenset({"VTABLE_SLOT_COUNT_CHANGED"})},
+                "binary evidence has no inheritance graph: the secondary group "
+                "shows as the vtable slot count growing",
+            ),
+        ),
     ),
     _op(
         "reserved_field_used",
@@ -487,6 +499,33 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "the empty tag type used to select a template instantiation is "
         "renamed: kfam<ktag_a> re-mangles as kfam<ktag_b>",
         expected=frozenset({"TAG_TYPE_RENAMED"}),
+        rules=(
+            Rule(
+                # ``tag_type_renamed``'s catalog impact: the tag is an empty
+                # struct, so layout detectors see nothing, and "when an exported
+                # explicit instantiation referenced the old tag it is re-mangled
+                # and the old symbol disappears -- that binary break is reported
+                # by the removal findings ... (func_removed /
+                # instantiation_missing_from_binary), not by this one." Binary
+                # evidence has no header, so the tag rename itself is invisible;
+                # the re-mangled instantiation is what it shows.
+                lambda c: c.evidence == "binary" and c.std.lang == "c++",
+                {
+                    "expected": frozenset(),
+                    "any_of": (
+                        frozenset(
+                            {
+                                "FUNC_REMOVED",
+                                "FUNC_REMOVED_ELF_ONLY",
+                                "INSTANTIATION_MISSING_FROM_BINARY",
+                            }
+                        ),
+                    ),
+                },
+                "binary evidence sees the re-mangled instantiation disappear "
+                "(catalog tag_type_renamed impact), not the tag rename",
+            ),
+        ),
     ),
     _op(
         "mandatory_template_param_added",
@@ -516,6 +555,23 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         precondition=_no_pack,
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max=None,
+        rules=(
+            Rule(
+                # ``dwarf_snapshot`` leaves ``data_size_bits`` None by design
+                # ("DWARF can't tell a defaulted special member from a
+                # user-provided one"), so the DWARF operand cannot show the
+                # reused tail padding. What it does show is the field added:
+                # the edit reads as the compatible addition abicheck reports.
+                lambda c: c.evidence == "dwarf",
+                {
+                    "expected": frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}),
+                    "verdict_min": "COMPATIBLE",
+                    "verdict_max": "COMPATIBLE",
+                },
+                "dwarf evidence has no data size: the tail-padding reuse is "
+                "unobservable, the added field is the observable fact",
+            ),
+        ),
     ),
     _op(
         "polymorphic_type_added_without_virtual_dtor",
