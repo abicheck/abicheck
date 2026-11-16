@@ -126,8 +126,10 @@ def test_clang_join_skips_a_variable_declared_inside_a_function_body() -> None:
 def _castxml_ctx(joined: dict[str, int] | None) -> tuple[CastxmlParserContext, Element]:
     root = Element("CastXML")
     SubElement(root, "File", id="f1", name="/x/api.h")
+    SubElement(root, "Namespace", id="_0", name="::")
     SubElement(root, "FundamentalType", id="_1", name="int", size="32", align="32")
-    var = SubElement(root, "Variable", id="_2", name="g_al", mangled="g_al", type="_1")
+    # castxml writes no mangled name for a file-scope variable, only its context.
+    var = SubElement(root, "Variable", id="_2", name="g_al", context="_0", type="_1")
     var.set("file", "f1")
     # The variable's file spells an alignment specifier, so castxml's natural
     # value alone is only a lower bound.
@@ -136,6 +138,60 @@ def _castxml_ctx(joined: dict[str, int] | None) -> tuple[CastxmlParserContext, E
     ctx.build_id_map()
     ctx.clang_semantics = CastxmlClangSemantics(variable_alignment=joined)
     return ctx, var
+
+
+def test_mach_o_mangling_does_not_hide_a_file_scope_declaration() -> None:
+    """clang on a Mach-O target records a C global's mangledName as "_g_v"
+    while castxml writes no mangled name for it: the join must key it by "g_v"."""
+    decl = {
+        "kind": "VarDecl",
+        "name": "g_v",
+        "mangledName": "_g_v",
+        "inner": [
+            {
+                "kind": "AlignedAttr",
+                "inner": [{"kind": "IntegerLiteral", "value": "16"}],
+            }
+        ],
+    }
+    keyed = clang_variable_alignment_map(
+        {"kind": "TranslationUnitDecl", "inner": [decl]}
+    )
+    assert keyed == {"g_v": 128}
+    root = Element("CastXML")
+    SubElement(root, "Namespace", id="_0", name="::")
+    SubElement(root, "FundamentalType", id="_1", name="int", size="32", align="32")
+    var = SubElement(root, "Variable", id="_2", name="g_v", context="_0", type="_1")
+    attach_preprocessed_text(root, PreprocessedText({}, "", frozenset({"/x/api.h"})))
+    ctx = CastxmlParserContext(root, set(), set())
+    ctx.build_id_map()
+    ctx.clang_semantics = CastxmlClangSemantics(variable_alignment=keyed)
+    fact = variable_alignment_fact(ctx, var, 32)
+    assert (fact.status, fact.value) == (FactStatus.PRESENT, 128)
+
+
+def test_a_namespace_member_is_keyed_by_its_mangled_name_only() -> None:
+    """n::g (mangled _ZN1n1gE) and the global g must not share a key."""
+    nested = {
+        "kind": "VarDecl",
+        "name": "g",
+        "mangledName": "_ZN1n1gE",
+        "inner": [
+            {
+                "kind": "AlignedAttr",
+                "inner": [{"kind": "IntegerLiteral", "value": "64"}],
+            }
+        ],
+    }
+    tree = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {"kind": "NamespaceDecl", "name": "n", "inner": [nested]},
+        ],
+    }
+    keyed = clang_variable_alignment_map(tree)
+    assert keyed == {"_ZN1n1gE": 512}
+    assert "g" not in keyed
 
 
 def test_castxml_never_reads_another_variables_value_by_plain_name() -> None:

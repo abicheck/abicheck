@@ -121,7 +121,7 @@
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
       "abicheck/extract/headers/castxml/type_resolution.py": "36aa982df5872038bad515dbe068522f6235c37f299ee41abb4dfedd64441c84",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
-      "abicheck/extract/headers/castxml/variable_alignment.py": "51253a41cacb4b2a81fb310f215d57df67ce7dfc855d3e453ef73722d5cd01bf",
+      "abicheck/extract/headers/castxml/variable_alignment.py": "f6ac94a93f1c9c1fac888e69753a7e40a9a9848c66e2d38cb5a894b1baeca1f5",
       "abicheck/extract/headers/castxml/variable_template_join.py": "120d86ede886ecf370fc31763332f2889f557764ef3c54c23f72c5985e4289fb",
       "abicheck/extract/headers/castxml/vector_join.py": "60ee7069a80ab9457929b0dc48f53a4149ba03fcff4e0c821716ccb67185092e",
       "abicheck/extract/headers/castxml/vector_spellings.py": "1048c21245235f6857beacf4668fc888bea7117c88c18300aae666a90aac763d",
@@ -166,7 +166,7 @@
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
       "abicheck/extract/headers/clang/type_identity.py": "702248290b2d42f931f9be5bf8450be3e90327f840e4dcfb357a48feff2f84f7",
       "abicheck/extract/headers/clang/typedefs.py": "112486b3fd0a842f45c154334587639f23e9455adc125b93aa90b6dd47804202",
-      "abicheck/extract/headers/clang/var_alignment.py": "bc97b79cbf54dc8284c1021b6b5b7a95f4b48cc1310d4201b46c0762088553b0",
+      "abicheck/extract/headers/clang/var_alignment.py": "f313f0f9c2941929fa649c7944c182adbbe6522743cf5a1972e477c2a7cd8d71",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
@@ -237,9 +237,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "a2c7c0abe1fb6a888c038b40ac6f714cea9da4a061d85c710d2aed42cb3f2068",
+    "fingerprint": "ca1e3a05ab8aba1264cd83b255c23f50aafbbd0d19a5545d01ca3dedf765408b",
     "generation": 79,
-    "reason": "macOS: match table entries by resolved path (generation 79 not yet shipped)"
+    "reason": "macOS: key file-scope alignment by plain name (Mach-O mangles C globals with a leading underscore); generation 79 not yet shipped"
   },
   "resolver": {
     "files": {

@@ -30,6 +30,9 @@ __all__ = [
     "clang_variable_alignment_map",
 ]
 
+#: Scopes whose members castxml names by a mangled name (not file scope).
+_SCOPE_KINDS = frozenset({"NamespaceDecl", "CXXRecordDecl"})
+
 #: Nodes whose bodies cannot declare a namespace-scope variable: the walk does
 #: not descend into them (a ``static`` local is not part of the public surface).
 _BODY_KINDS = frozenset(
@@ -103,15 +106,21 @@ def clang_variable_alignment_map(clang_root: dict[str, Any]) -> dict[str, int]:
     # Per key, the value each declaration states (None: unresolved).
     stated: dict[str, list[int | None]] = {}
 
-    def walk(node: Any) -> None:
+    def walk(node: Any, nested: bool) -> None:
         if isinstance(node, list):
             for child in node:
-                walk(child)
+                walk(child, nested)
             return
         if not isinstance(node, dict) or node.get("kind") in _BODY_KINDS:
             return
         if node.get("kind") == "VarDecl" and not node.get("isImplicit"):
-            key = str(node.get("mangledName") or node.get("name") or "")
+            # File-scope: castxml writes no mangled name, so the plain name is its
+            # key. Mach-O clang mangles a C global as "_name", so mangledName would
+            # never match. A namespace or class member is keyed by its mangled name.
+            if nested:
+                key = str(node.get("mangledName") or "")
+            else:
+                key = str(node.get("name") or "")
             values = [_attr_alignment_bits(a) for a in _aligned_attrs(node)]
             if key and values:
                 if None in values:
@@ -122,9 +131,10 @@ def clang_variable_alignment_map(clang_root: dict[str, Any]) -> dict[str, int]:
                     stated.setdefault(key, []).append(
                         max(v for v in values if v is not None)
                     )
-        walk(ast_inner(node))
+        inner_nested = nested or node.get("kind") in _SCOPE_KINDS
+        walk(ast_inner(node), inner_nested)
 
-    walk(ast_inner(clang_root))
+    walk(ast_inner(clang_root), False)
     out: dict[str, int] = {}
     for key, values in stated.items():
         first = values[0]
