@@ -109,16 +109,23 @@ def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: Any) -> 
     misaligned when ``base_offset`` is not a multiple of its natural alignment.
 
     The walk is an explicit stack, so nesting depth is not bounded by the
-    interpreter's recursion limit. A (type, offset) pair is visited at most
-    once: revisiting it can only reach leaves already examined, so a reference
-    cycle in the DIE graph (declaration and definition DIEs can refer back to
-    each other) terminates without changing the answer.
+    interpreter's recursion limit. Each pending entry carries the offsets of the
+    aggregates on its own ancestor chain. A branch stops when its aggregate
+    already appears on that chain: a by-value cycle at any offset (a member of
+    its own type, shifted by a nonzero offset, revisits the type at a new base
+    every time) would otherwise grow the stack without bound. Sibling members of
+    one type at different offsets are separate branches with separate chains,
+    so each is still checked. A (type, offset) pair is also visited at most once,
+    which only prunes repeats of work whose answer is already known.
     """
-    stack: list[tuple[Any, int]] = [(type_die, base_offset)]
+    stack: list[tuple[Any, int, frozenset[int]]] = [
+        (type_die, base_offset, frozenset())
+    ]
     seen: set[tuple[int, int]] = set()
     while stack:
-        die, base = stack.pop()
-        key = (getattr(die, "offset", id(die)), base)
+        die, base, ancestors = stack.pop()
+        die_offset = getattr(die, "offset", id(die))
+        key = (die_offset, base)
         if key in seen:
             continue
         seen.add(key)
@@ -129,17 +136,24 @@ def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: Any) -> 
         elif t.tag == "DW_TAG_array_type":
             elem = _resolve_type_die(t, CU)
             if elem is not None:
-                stack.append((elem, base))
+                stack.append((elem, base, ancestors))
         elif t.tag in _AGGREGATE_TAGS:
-            _push_member_types(t, CU, base, stack)
+            if die_offset in ancestors:
+                continue  # by-value cycle: this branch is already on its own chain
+            _push_member_types(t, CU, base, ancestors | {die_offset}, stack)
     return False
 
 
 def _push_member_types(
-    aggregate: Any, CU: Any, base: int, stack: list[tuple[Any, int]]
+    aggregate: Any,
+    CU: Any,
+    base: int,
+    ancestors: frozenset[int],
+    stack: list[tuple[Any, int, frozenset[int]]],
 ) -> None:
     """Queue each addressable, non-bit-field member of *aggregate* at its absolute offset.
 
+    Every queued member carries *ancestors*, the chain that includes *aggregate*.
     A member whose type or location cannot be resolved is skipped: misalignment
     there is not provable, so it is never reported.
     """
@@ -151,7 +165,7 @@ def _push_member_types(
             continue
         rel = _decode_member_location(child)  # None: misalignment not provable
         if rel is not None:
-            stack.append((mt, base + rel))
+            stack.append((mt, base + rel, ancestors))
 
 
 def _aggregate_has_unaligned_member(die: Any, CU: Any, cache: Any = None) -> bool:

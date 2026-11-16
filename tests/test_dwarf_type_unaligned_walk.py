@@ -175,3 +175,51 @@ def test_the_qualifier_cache_is_consulted_and_filled() -> None:
     assert cache.unwrap[761] is leaf
     cache.unwrap[761] = "cached"  # a later call returns the cached answer
     assert adv._unwrap_qualifiers(typedef, None, cache=cache) == "cached"
+
+
+class _Bounded:
+    """Resolver that fails fast if the walk keeps going: an unbounded walk would hang."""
+
+    def __init__(self, limit: int = 500) -> None:
+        self.calls = 0
+        self.limit = limit
+
+    def __call__(self, die, cu):
+        self.calls += 1
+        if self.calls > self.limit:
+            raise AssertionError("type walk did not terminate")
+        return getattr(die, "target", None)
+
+
+def test_a_nonzero_offset_self_member_terminates_without_a_leaf(monkeypatch) -> None:
+    # struct A { int a @0; A self @4; } -- malformed (a type cannot hold itself by
+    # value), but the walk must still end. Every revisit lands at a new base, so
+    # only the ancestor chain stops it.
+    a = Die("DW_TAG_structure_type", 800)
+    a._members = [member(0, _int(801)), member(4, a)]
+    bounded = _Bounded()
+    monkeypatch.setattr(adv, "_resolve_type_die", bounded)
+    assert adv._type_unaligned_at(a, None, 0, None) is False
+    assert bounded.calls < 20
+
+
+def test_a_nonzero_offset_self_member_still_reports_a_misaligned_leaf(
+    monkeypatch,
+) -> None:
+    # struct A { int a @1; A self @4; } -- the int is misaligned at base 0 already,
+    # so the answer is True before the cycle is ever revisited.
+    a = Die("DW_TAG_structure_type", 810)
+    a._members = [member(1, _int(811)), member(4, a)]
+    bounded = _Bounded()
+    monkeypatch.setattr(adv, "_resolve_type_die", bounded)
+    assert adv._type_unaligned_at(a, None, 0, None) is True
+    assert bounded.calls < 20
+
+
+def test_sibling_members_of_one_type_at_different_offsets_are_each_checked() -> None:
+    # struct T { int i @0; }   struct S { T first @0; T second @2; }
+    # `first` is aligned at base 0; `second` puts T's int at 2 -- misaligned. A walk
+    # that skipped the second member because its type was already seen would say False.
+    t = Die("DW_TAG_structure_type", 820, members=[member(0, _int(821))])
+    s = Die("DW_TAG_structure_type", 822, members=[member(0, t), member(2, t)])
+    assert adv._type_unaligned_at(s, None, 0, None) is True

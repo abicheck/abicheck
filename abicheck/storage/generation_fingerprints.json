@@ -53,7 +53,7 @@
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
-      "abicheck/extract/dwarf_type_alignment.py": "06e211ce94fd0689dc7ba20f19314794c92ca3e5fab2f763e5ca47f040b68e22",
+      "abicheck/extract/dwarf_type_alignment.py": "f338fc168722b77183b6c3345bedca1b53c80c81d849d53fdbe6b5c7b7c45cd9",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
@@ -237,9 +237,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6ba5b80f0cfe54bde486a476fdd2bbc515fd9a04c14e22886b7ac01fdd192ad8",
+    "fingerprint": "b03e4316f946e6941c94fac7aeb7f5897f3988616828968dacc5810be10c9b1f",
     "generation": 77,
-    "reason": "split the nontrivial-child check into module-level helpers; no behaviour change"
+    "reason": "make the alignment walk track each branch's ancestor chain; no change for well-formed DWARF"
   },
   "resolver": {
     "files": {
