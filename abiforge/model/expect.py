@@ -58,7 +58,7 @@ MISMATCH_CLASSES = (
     "wrong-kind",
     "refused",
 )
-PASSING_CLASSES = ("agree", "non-observable", "unobservable")
+PASSING_CLASSES = ("agree", "non-observable", "unobservable", "evidence-limited")
 
 
 @dataclass(frozen=True)
@@ -196,6 +196,37 @@ def observability_floor(
     )
 
 
+def binary_depth_cap(exp: Expectation, config: Config) -> Expectation:
+    """ADR-084 at the expectation: an API_BREAK the edit's observed kinds back
+    only through binary-producible kinds is COMPATIBLE_WITH_RISK at binary or
+    DWARF depth, unless header or source evidence is present.
+
+    Mirrors ``policy.binary_gated_contract``: the verdict cap applies only when
+    every observed kind of the edit is ``BINARY_GATED`` and no ``H`` or ``S``
+    atom is in the configuration. A header-gated kind keeps its verdict.
+    """
+    from abiforge.checkers.abicheck import binary_gated_kind_names
+
+    if not exp.observable or exp.verdict_min != "API_BREAK":
+        return exp
+    if {"H", "S"} & set(config.evidence_set.atoms):
+        return exp
+    kinds = (exp.expected | frozenset().union(*exp.any_of)) - ADVISORY_KINDS
+    if not kinds or not kinds <= binary_gated_kind_names():
+        return exp
+    return replace(
+        exp,
+        # The ceiling stays API_BREAK: the source break is real, so the edit is
+        # not declared harmless (``benign``); the cap only lowers the floor.
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="API_BREAK",
+        note=(
+            f"{exp.note} [ADR-084: {config.evidence_label} evidence without headers "
+            "or sources cannot back an API_BREAK for binary-gated kinds]"
+        ).strip(),
+    )
+
+
 # A (build, consumer) pair's status. Only "ran" is a signal: "infeasible" is a
 # mix that cannot work whatever the edit (libstdc++ against libc++, the two
 # _GLIBCXX_USE_CXX11_ABI std::strings, a standard the header does not compile
@@ -263,8 +294,20 @@ class Reconciled:
 
 
 def reconcile(
-    exec_truth: ExecTruth, exp: Expectation, verdict: str, kinds: frozenset[str]
+    exec_truth: ExecTruth,
+    exp: Expectation,
+    verdict: str,
+    kinds: frozenset[str],
+    *,
+    disclosed: frozenset[str] = frozenset(),
+    evidence: frozenset[str] | None = None,
 ) -> Reconciled:
+    """Classify one cell against the execution oracle.
+
+    ``disclosed`` are the kinds whose downgrade ADR-084 disclosed in the run;
+    ``evidence`` the configuration's atoms (None: unknown, so the ADR-084 rule
+    does not apply).
+    """
     if verdict == "REFUSED":
         return Reconciled("refused", tuple(exp.problems(verdict, kinds)))
     problems = tuple(exp.problems(verdict, kinds))
@@ -272,6 +315,23 @@ def reconcile(
     broke = exec_truth.available and (
         exec_truth.binary_break or exec_truth.source_break
     )
+    if (
+        evidence is not None
+        and not ({"H", "S"} & evidence)
+        and exec_truth.available
+        and exec_truth.source_break
+        and not exec_truth.binary_break
+        and verdict == "COMPATIBLE_WITH_RISK"
+        and kinds & disclosed
+        and not problems
+    ):
+        # ADR-084 at reconcile: a source-only break that DWARF or binary input
+        # cannot back is judged correct only as a disclosed COMPATIBLE_WITH_RISK.
+        return Reconciled(
+            "evidence-limited",
+            problems,
+            "source-only break at binary depth: its downgrade is disclosed (ADR-084)",
+        )
     if exec_truth.available and (
         (exp.benign and exec_truth.binary_break)
         or (exp.source_compatible and exec_truth.source_break)

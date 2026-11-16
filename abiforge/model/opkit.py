@@ -22,7 +22,12 @@ from abiforge.model.config import (
     has_feature,
     in_standards,
 )
-from abiforge.model.expect import Expectation, Rule, observability_floor
+from abiforge.model.expect import (
+    Expectation,
+    Rule,
+    binary_depth_cap,
+    observability_floor,
+)
 from abiforge.model.seeds import RoleText, Seed
 from abiforge.model.space import feature_standards
 
@@ -160,7 +165,8 @@ class EditOp:
             if rule.when(config):
                 exp = rule.apply(exp)
                 break
-        return self.with_derived(observability_floor(exp, config), config.objfmt)
+        floored = observability_floor(exp, config)
+        return self.with_derived(binary_depth_cap(floored, config), config.objfmt)
 
     def with_derived(self, exp: Expectation, objfmt: str = "elf") -> Expectation:
         """*exp* plus the kinds that follow from it rather than from the edit.

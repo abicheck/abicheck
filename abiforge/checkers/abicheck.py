@@ -203,20 +203,38 @@ def _judge(old: AbiSnapshot, new: AbiSnapshot) -> DiffResult:
     return compare_snapshots(old, new, extra_changes=extra)
 
 
+def judged(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[str, frozenset[str], frozenset[str]]:
+    """(verdict name, ChangeKind names, kinds whose ADR-084 downgrade is disclosed).
+
+    ``REFUSED`` plus the error type on refusal, with nothing disclosed.
+    """
+    from abicheck.errors import AbicheckError
+    from abicheck.policy.binary_gate_marker import BINARY_GATE_RULE_ID
+
+    old, new = _projected(old, new)
+    try:
+        result = _judge(old, new)
+    except AbicheckError as exc:
+        return REFUSED, frozenset({type(exc).__name__}), frozenset()
+    kinds = frozenset(ch.kind.name for ch in result.changes)
+    disclosed = frozenset(
+        ch.kind.name
+        for ch in result.changes
+        if ch.modulation_rule == BINARY_GATE_RULE_ID
+    )
+    return result.verdict.name, kinds, disclosed
+
+
 def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     """(verdict name, ChangeKind names); ``REFUSED`` plus the error type on refusal.
 
     A refusal (``abicheck.errors.AbicheckError``, e.g. a profile mismatch) is
     abicheck's answer, not a harness failure: it is neither clean nor a break.
     """
-    from abicheck.errors import AbicheckError
-
-    old, new = _projected(old, new)
-    try:
-        result = _judge(old, new)
-    except AbicheckError as exc:
-        return REFUSED, frozenset({type(exc).__name__})
-    return result.verdict.name, frozenset(c.kind.name for c in result.changes)
+    verdict, kinds, _disclosed = judged(old, new)
+    return verdict, kinds
 
 
 def debug_evidence(snap: AbiSnapshot) -> str:
@@ -342,6 +360,17 @@ class ObservableSpec:
     alternatives: frozenset[frozenset[str]]
     platform: frozenset[str] | None = None
     language: frozenset[str] | None = None
+
+
+def binary_gated_kind_names() -> frozenset[str]:
+    """The kinds ADR-084 caps to COMPATIBLE_WITH_RISK at binary or DWARF depth.
+
+    The policy's own set (``BINARY_GATED``): a binary-producible kind whose
+    API_BREAK verdict needs header or source evidence to be backed.
+    """
+    from abicheck.policy.binary_gated_contract import BINARY_GATED
+
+    return frozenset(k.name for k in BINARY_GATED)
 
 
 def observable_at(kind_name: str) -> tuple[ObservableSpec, ...] | None:
