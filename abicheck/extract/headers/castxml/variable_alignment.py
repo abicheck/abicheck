@@ -21,7 +21,12 @@ on a record or a fundamental type, but nothing for an alignment specifier on a
 and ``extern int v`` produce the same element. The alignment this module reads
 for a variable is therefore its type's *natural* alignment, a lower bound.
 
-It is the declared alignment exactly when no alignment specifier can apply:
+The clang join (``castxml/clang_semantics_join``) reads each variable
+declaration's own specifier from the clang AST, so a specifier the header
+spells is the declared alignment (``PRESENT``) whatever castxml wrote. Where
+the join has no such declaration, the rule below applies.
+
+The natural alignment is the declared one exactly when no alignment specifier can apply:
 neither the variable's own file nor the file of a typedef its type names spells
 one in its preprocessed code (macros expanded, the castxml run's own ``-E -dD``
 sibling; ``preprocessed_text.alignment_files``). Then the value is recorded
@@ -90,6 +95,13 @@ def variable_alignment_fact(
     explicit = optional_int_attr(var_el, "align")
     if explicit is not None:
         return Fact.present(explicit)
+    # castxml writes no specifier on a Variable; the clang join reads the
+    # declaration's own AlignedAttr, which is the declared value.
+    spelled = ctx.clang_semantics.declared_variable_alignment(
+        (var_el.get("mangled") or "", var_el.get("name") or "")
+    )
+    if spelled is not None:
+        return Fact.present(spelled)
     if natural_bits is None:
         return Fact.present(None)
     table = ctx.preprocessed

@@ -24,7 +24,23 @@ from ...builtin_abi import BuiltinAbi, builtin_type_fact, natural_alignment_bits
 from .ast_inner import ast_inner
 from .context import qualtype, qualtype_desugared
 
-__all__ = ["clang_var_alignment_bits", "clang_var_type_abi_fact"]
+__all__ = [
+    "clang_var_alignment_bits",
+    "clang_var_type_abi_fact",
+    "clang_variable_alignment_map",
+]
+
+#: Nodes whose bodies cannot declare a namespace-scope variable: the walk does
+#: not descend into them (a ``static`` local is not part of the public surface).
+_BODY_KINDS = frozenset(
+    {
+        "FunctionDecl",
+        "CXXMethodDecl",
+        "CXXConstructorDecl",
+        "CXXDestructorDecl",
+        "CXXConversionDecl",
+    }
+)
 
 
 def _aligned_attrs(node: dict[str, Any]) -> list[dict[str, Any]]:
@@ -73,6 +89,42 @@ def clang_var_alignment_bits(
         if "desugaredQualType" in typ
         else natural_alignment_bits(qualtype(node), abi)
     )
+
+
+def clang_variable_alignment_map(clang_root: dict[str, Any]) -> dict[str, int]:
+    """Declared alignment (bits) of each variable whose declarations spell one.
+
+    castxml 0.7 writes no alignment specifier on a ``Variable``; the clang AST
+    of the same header records it on an ``AlignedAttr``. Keyed by the mangled
+    name (the name for C). A declaration with no specifier contributes nothing;
+    a bare ``aligned`` or two declarations that disagree leave the variable out,
+    so its alignment stays a lower bound rather than a guessed value.
+    """
+    # Per key, the value each declaration states (None: unresolved).
+    stated: dict[str, list[int | None]] = {}
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for child in node:
+                walk(child)
+            return
+        if not isinstance(node, dict) or node.get("kind") in _BODY_KINDS:
+            return
+        if node.get("kind") == "VarDecl" and not node.get("isImplicit"):
+            key = str(node.get("mangledName") or node.get("name") or "")
+            values = [_attr_alignment_bits(a) for a in _aligned_attrs(node)]
+            if key and values:
+                resolved = None if None in values else max(v for v in values if v)
+                stated.setdefault(key, []).append(resolved)
+        walk(ast_inner(node))
+
+    walk(ast_inner(clang_root))
+    out: dict[str, int] = {}
+    for key, values in stated.items():
+        first = values[0]
+        if first is not None and all(v == first for v in values):
+            out[key] = first
+    return out
 
 
 def clang_var_type_abi_fact(

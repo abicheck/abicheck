@@ -172,6 +172,11 @@ class PreprocessedText:
             return True
         return file_key(file_name) in self.alignment_files
 
+    def may_spell_alignment(self) -> bool:
+        """Whether any file of the table may spell an alignment specifier (an
+        unrecorded table counts: it cannot be ruled out)."""
+        return self.alignment_files is None or bool(self.alignment_files)
+
     def source_lines(self, file_name: str) -> list[str] | None:
         """*file_name*'s preprocessed lines (unrecorded lines empty), or
         ``None`` when the file spells no convention."""

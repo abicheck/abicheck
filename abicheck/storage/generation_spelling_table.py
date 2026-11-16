@@ -739,6 +739,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "(extract/headers/clang/qualifiers), so Param.is_va_list is set where it was not "
         "before. The recorded parameter fact changes; the spelling does not"
     ),
+    77: GenerationSpellingChange(
+        "WS-2 PR A2.1 (fix/ws2-a2-1-var-alignment-raised): no stored type spelling "
+        "changes. The castxml header path joins each variable's declared alignment "
+        "specifier from the clang AST (clang/var_alignment, castxml/clang_semantics_join): "
+        "a variable whose declaration spells aligned(N) or alignas(N) records that "
+        "value as PRESENT where it was a natural-alignment lower bound before. The "
+        "recorded alignment fact changes; the variable's name and type spelling do not"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
