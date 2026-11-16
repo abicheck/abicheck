@@ -731,6 +731,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "spelling changes and no load-time rewrite; a snapshot without the fact reads "
         "as not derived, and the layout gate declines the Mach-O side."
     ),
+    76: GenerationSpellingChange(
+        "fix/nightly-va-list-target (#2088): no stored type spelling changes. A clang "
+        "header parse on a pointer-valued va_list target (-m32: __builtin_va_list is "
+        "char *) keeps the typedef link on a decayed parameter and now recognises it as "
+        "a va_list parameter when the link reaches __builtin_va_list "
+        "(extract/headers/clang/qualifiers), so Param.is_va_list is set where it was not "
+        "before. The recorded parameter fact changes; the spelling does not"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

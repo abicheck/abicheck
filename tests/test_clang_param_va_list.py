@@ -49,16 +49,26 @@ import pytest
 
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.extract.headers.clang.qualifiers import _clang_param_is_va_list
+from abicheck.extract.headers.clang.qualifiers import (
+    _clang_param_is_va_list,
+    builtin_va_list_decl_ids,
+)
 from abicheck.model import AbiSnapshot, Fact, Function, Param, Visibility
 from tests._legacy_snapshot import as_legacy_baseline
 
 
-def _param_node(qual_type: str, desugared: str | None = None) -> dict:
-    """A ``ParmVarDecl``-shaped node carrying just the keys the predicate reads."""
+def _param_node(
+    qual_type: str, desugared: str | None = None, alias_id: str | None = None
+) -> dict:
+    """A ``ParmVarDecl``-shaped node carrying just the keys the predicate reads.
+
+    ``alias_id`` is the ``typeAliasDeclId`` clang gives a typedef-named
+    parameter: the id of the typedef declaration it names."""
     type_obj: dict[str, str] = {"qualType": qual_type}
     if desugared is not None:
         type_obj["desugaredQualType"] = desugared
+    if alias_id is not None:
+        type_obj["typeAliasDeclId"] = alias_id
     return {"kind": "ParmVarDecl", "name": "ap", "type": type_obj}
 
 
@@ -457,3 +467,214 @@ class TestCrossBackendFalsePositiveClosed:
         assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(result)
         assert ChangeKind.PARAM_LOST_VA_LIST not in _kinds(result)
         assert result.verdict == Verdict.NO_CHANGE
+
+
+class TestClangParamIsVaListPointerTarget:
+    """The i386-style spelling: the parse keeps the typedef name and links it
+    to its declaration, and desugars to a plain pointer (``__builtin_va_list``
+    is ``char *``). Recognition is structural: the link must reach
+    ``__builtin_va_list`` (:func:`builtin_va_list_decl_ids`), not just match a
+    name."""
+
+    BUILTIN, VA_LIST, MY_VA_LIST, USER_VA_LIST = "0xB", "0xV", "0xM", "0xU"
+    IDS = frozenset({BUILTIN, VA_LIST, MY_VA_LIST})
+
+    @pytest.mark.parametrize(
+        ("qual_type", "desugared", "alias_id", "expected"),
+        [
+            ("va_list", "char *", "0xV", True),
+            ("const va_list", "char *const", "0xV", True),
+            ("volatile va_list", "char *volatile", "0xV", True),
+            # A user alias of the libc va_list reaches __builtin_va_list too.
+            ("my_va_list", "char *", "0xM", True),
+            # A user typedef named va_list that does not reach __builtin_va_list.
+            ("va_list", "char *", "0xU", False),
+            # The same name over a non-pointer desugaring is not a pointer va_list.
+            ("va_list", "int", "0xV", False),
+            # A plain pointer with no typedef link is not one either.
+            ("char *", "char *", None, False),
+            # A name with no link in the set.
+            ("va_list", "char *", None, False),
+        ],
+    )
+    def test_name_path_spellings(
+        self, qual_type: str, desugared: str, alias_id: str | None, expected: bool
+    ) -> None:
+        node = _param_node(qual_type, desugared, alias_id)
+        assert _clang_param_is_va_list(node, self.IDS) is expected
+
+    def test_builtin_va_list_decl_ids_follows_the_chain(self) -> None:
+        def typedef(name: str, decl_id: str, under: str | None = None) -> dict:
+            type_obj: dict[str, str] = {"qualType": name}
+            if under is not None:
+                type_obj["typeAliasDeclId"] = under
+            return {
+                "kind": "TypedefDecl",
+                "name": name,
+                "id": decl_id,
+                "type": type_obj,
+            }
+
+        root = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                typedef("__builtin_va_list", "0xB"),
+                typedef("va_list", "0xV", "0xB"),
+                typedef("my_va_list", "0xM", "0xV"),
+                typedef("va_list", "0xU"),  # user `typedef char *va_list;`
+                typedef("my_fake", "0xF"),
+            ],
+        }
+        assert builtin_va_list_decl_ids(root) == frozenset({"0xB", "0xV", "0xM"})
+
+    def test_builtin_va_list_decl_ids_is_bounded_on_a_cycle(self) -> None:
+        root = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "TypedefDecl",
+                    "name": "a",
+                    "id": "0xA",
+                    "type": {"qualType": "a", "typeAliasDeclId": "0xA"},
+                }
+            ],
+        }
+        assert builtin_va_list_decl_ids(root) == frozenset()
+
+    def test_live_m32_parse_recognises_va_list(self, tmp_path: Path) -> None:
+        import json
+        import subprocess
+
+        if shutil.which("clang") is None:
+            pytest.skip("clang not installed")
+        probe = subprocess.run(
+            ["clang", "-m32", "-fsyntax-only", "-x", "c", "-"],
+            input="int x;\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            pytest.skip("clang cannot target -m32 on this host")
+
+        def ast_of(path: Path) -> dict:
+            out = subprocess.run(
+                [
+                    "clang",
+                    "-m32",
+                    "-x",
+                    "c",
+                    "-fsyntax-only",
+                    "-Xclang",
+                    "-ast-dump=json",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            return json.loads(out)
+
+        def params_of(root: dict) -> dict[str, list[dict]]:
+            params: dict[str, list[dict]] = {}
+
+            def walk(node: object, fn: str | None) -> None:
+                if isinstance(node, dict):
+                    if node.get("kind") == "FunctionDecl":
+                        fn = str(node.get("name", ""))
+                    if node.get("kind") == "ParmVarDecl" and fn is not None:
+                        params.setdefault(fn, []).append(node)
+                    for value in node.values():
+                        walk(value, fn)
+                elif isinstance(node, list):
+                    for item in node:
+                        walk(item, fn)
+
+            walk(root, None)
+            return params
+
+        header = tmp_path / "v.h"
+        header.write_text(
+            "#include <stdarg.h>\n"
+            "void plain(int n, va_list ap);\n"
+            "void qualified(int n, const va_list ap);\n"
+            "void not_va_list(int n, char *p);\n"
+        )
+        root = ast_of(header)
+        ids = builtin_va_list_decl_ids(root)
+        params = params_of(root)
+        expected = {"plain": True, "qualified": True, "not_va_list": False}
+        for fn, want in expected.items():
+            target = next(p for p in params[fn] if p.get("name") != "n")
+            assert _clang_param_is_va_list(target, ids) is want, fn
+
+        # A user typedef named va_list, with no libc header, is not recognised.
+        user = tmp_path / "user.h"
+        user.write_text("typedef char *va_list;\nvoid user_alias(int n, va_list ap);\n")
+        user_root = ast_of(user)
+        user_ids = builtin_va_list_decl_ids(user_root)
+        target = next(
+            p for p in params_of(user_root)["user_alias"] if p.get("name") != "n"
+        )
+        assert _clang_param_is_va_list(target, user_ids) is False
+
+
+def test_live_m32_cxx_namespace_and_using_alias_are_structural(tmp_path: Path) -> None:
+    """A typedef inside a namespace and a C++ ``using`` alias both link to the
+    builtin ``va_list`` and are recognised; a namespaced user typedef to a plain
+    pointer is not. Parsed live with ``clang++ -m32`` (clang 18 on this host)."""
+    if shutil.which("clang++") is None:
+        pytest.skip("clang++ not installed")
+    probe = subprocess.run(
+        ["clang++", "-m32", "-fsyntax-only", "-x", "c++", "-"],
+        input="int x;\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        pytest.skip("clang++ cannot target -m32 on this host")
+    header = tmp_path / "ns.h"
+    header.write_text(
+        "#include <stdarg.h>\n"
+        "namespace api { typedef __builtin_va_list Args; void log(Args ap); }\n"
+        "using Args2 = __builtin_va_list;\n"
+        "void log2(Args2 ap);\n"
+        "namespace api { typedef char *Fake; void f(Fake ap); }\n"
+    )
+    out = subprocess.run(
+        [
+            "clang++",
+            "-m32",
+            "-x",
+            "c++",
+            "-fsyntax-only",
+            "-Xclang",
+            "-ast-dump=json",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    root = json.loads(out)
+    ids = builtin_va_list_decl_ids(root)
+    params: dict[str, dict] = {}
+
+    def walk(node: object, fn: str | None) -> None:
+        if isinstance(node, dict):
+            if node.get("kind") == "FunctionDecl":
+                fn = str(node.get("name", ""))
+            if node.get("kind") == "ParmVarDecl" and fn is not None:
+                params[fn] = node
+            for value in node.values():
+                walk(value, fn)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, fn)
+
+    walk(root, None)
+    expected = {"log": True, "log2": True, "f": False}
+    for fn, want in expected.items():
+        assert fn in params, f"clang emitted no ParmVarDecl for {fn}"
+        assert _clang_param_is_va_list(params[fn], ids) is want, fn
