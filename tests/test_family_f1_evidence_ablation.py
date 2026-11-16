@@ -156,6 +156,13 @@ UNCOVERED: dict[str, str] = {
         "tests/test_base_class_access.py (unknown on either side declines the "
         "comparison) and tests/test_base_class_access_integration.py"
     ),
+    "AbiSnapshot.binary_purity": (
+        "binary purity claims of a header-built ELF snapshot, read from the emitted "
+        "vtable slots; the H1 corpus has no pure-virtual pair whose vtable is emitted "
+        "with an unambiguous slot order, so the ablation cannot reach it. Covered by "
+        "tests/test_header_binary_purity.py and "
+        "tests/test_depth_projection_matches_shallow_dump.py (case23, case38)"
+    ),
     "AbiSnapshot.wire_extensions": (
         "storage-only carrier of a stored document's D14/D15 extras, read by "
         "the writers and the evidence digest, never by a detector; covered by "

@@ -6500,7 +6500,7 @@ mixing a persisted baseline JSON with a live-binary operand.
 
 ### castxml headers read a variable's alignment specifier only as a lower bound (closed 2026-11-16)
 
-Closed by WS-2 A2.1 (`fix/ws2-a2-1-var-alignment-raised`, extractor generation 78). The clang join now reads each variable declaration's own `AlignedAttr` (`extract/headers/clang/var_alignment.clang_variable_alignment_map`) and carries it on the castxml root; `extract/headers/castxml/variable_alignment.py` takes that value as PRESENT. A raised `aligned(16) -> aligned(64)` now reads BREAKING at headers depth, and a dropped specifier is reported undemoted, as the clang header backend reports it. The residual 'castxml cannot say what the old side declared' is gone; a variable whose redeclarations disagree, or a bare `aligned`, stays a lower bound.
+Closed by WS-2 A2.1 (`fix/ws2-a2-1-var-alignment-raised`, extractor generation 79). The clang join now reads each variable declaration's own `AlignedAttr` (`extract/headers/clang/var_alignment.clang_variable_alignment_map`) and carries it on the castxml root; `extract/headers/castxml/variable_alignment.py` takes that value as PRESENT. A raised `aligned(16) -> aligned(64)` now reads BREAKING at headers depth, and a dropped specifier is reported undemoted, as the clang header backend reports it. The residual 'castxml cannot say what the old side declared' is gone; a variable whose redeclarations disagree, or a bare `aligned`, stays a lower bound.
 
 Original entry (2026-11-09):
 

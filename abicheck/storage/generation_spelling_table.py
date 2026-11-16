@@ -748,6 +748,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "previously had none."
     ),
     78: GenerationSpellingChange(
+        "no type or name spelling changes. A header-built ELF snapshot now keeps "
+        "the binary purity evidence of its header declarations (the "
+        "abicheck.binary_purity extension fact): the virtual function and the "
+        "record that the emitted vtable slots prove pure or abstract, read from "
+        "__cxa_pure_virtual relocations (WS-3 A6). An older snapshot carries no "
+        "such claim, which reads as no binary evidence (not as not pure), and "
+        "no rewrite applies: a new fact on existing records, not a respelling."
+    ),
+    79: GenerationSpellingChange(
         "WS-2 PR A2.1 (fix/ws2-a2-1-var-alignment-raised): no stored type spelling "
         "changes. The castxml header path joins each variable's declared alignment "
         "specifier from the clang AST (clang/var_alignment, castxml/clang_semantics_join): "

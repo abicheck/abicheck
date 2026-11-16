@@ -392,9 +392,15 @@
     },
     "77": {
       "castxml": "castxml version 0.7.0",
-      "commit": "79992dcf8d80",
+      "commit": "e229a48bf7cd",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen77/corpus.json.gz"
+    },
+    "78": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "8406ceaa1f9a",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen78/corpus.json.gz"
     },
     "9": {
       "castxml": "castxml version 0.7.0",
