@@ -73,7 +73,13 @@ def _calls_canary(lib: Path) -> bool:
     text = subprocess.run(
         ["objdump", "-d", str(lib)], check=True, capture_output=True, text=True
     ).stdout
-    return bool(re.search(r"\b(?:call|bl)\s+\S+\s+<__stack_chk_fail(?:@plt)?>", text))
+    # ELF: "<__stack_chk_fail@plt>". Mach-O: the C symbol has three underscores in
+    # the stub-free call target, and the stub name carries a "$stub" suffix.
+    return bool(
+        re.search(
+            r"\b(?:call\w*|bl)\s+\S+\s+<_*__stack_chk_fail(?:@plt|\$stub)?>", text
+        )
+    )
 
 
 def _supported(*libs: Path) -> None:
