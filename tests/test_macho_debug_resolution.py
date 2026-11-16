@@ -65,3 +65,24 @@ def test_an_unreadable_explicit_bundle_stays_fail_closed(monkeypatch) -> None:
     _patch(monkeypatch, raises=SnapshotError("present but unreadable"))
     with pytest.raises(SnapshotError, match="present but unreadable"):
         macho_debug.macho_dwarf_kwargs(LIB, None, {"debug_info_path": Path("x.dSYM")})
+
+
+def test_dwarf_only_warns_only_when_requested() -> None:
+    import warnings
+
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        macho_debug.warn_dwarf_only(False)
+        assert seen == []
+        macho_debug.warn_dwarf_only(True)
+    assert len(seen) == 1
+    assert "dwarf_only=True is not supported for Mach-O" in str(seen[0].message)
+
+
+def test_an_explicit_completed_bundle_supplies_its_dwarf(monkeypatch) -> None:
+    seen = _patch(monkeypatch)
+    kw = macho_debug.macho_dwarf_kwargs(
+        LIB, "dwarf", {"debug_info_path": Path("explicit.dSYM")}
+    )
+    assert set(kw) == {"dwarf", "dwarf_advanced"}
+    assert seen["dwarf_source"] == Path("explicit.dSYM")

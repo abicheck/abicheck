@@ -106,3 +106,72 @@ def test_a_typedef_cycle_with_no_leaf_terminates_as_no_misalignment() -> None:
     a.target = b
     assert adv._type_unaligned_at(a, None, 0, None) is False
     assert adv._type_unaligned_at(a, None, 1, None) is False
+
+
+def test_scalar_alignment_prefers_the_declared_alignment_then_the_size() -> None:
+    declared = Die("DW_TAG_base_type", 600)
+    declared.attributes["DW_AT_alignment"] = SimpleNamespace(value=16)
+    assert adv._scalar_leaf_align(declared) == 16
+    bad = Die("DW_TAG_base_type", 601, byte_size=8)
+    bad.attributes["DW_AT_alignment"] = SimpleNamespace(value="not-a-number")
+    assert adv._scalar_leaf_align(bad) == 8  # falls back to the byte size
+    unsized = Die("DW_TAG_base_type", 602)
+    assert adv._scalar_leaf_align(unsized) == 1
+
+
+def _refers_to(type_die):
+    """A variable-like DIE whose DW_AT_type reaches *type_die*."""
+    return Die("DW_TAG_variable", 9_999, target=type_die)
+
+
+def test_a_pointer_member_is_a_leaf_not_followed() -> None:
+    # A by-value struct whose only member is a pointer: the pointer is the leaf,
+    # its referent is never entered, so a pointee's layout cannot matter.
+    target = Die("DW_TAG_structure_type", 700, members=[member(3, _int(701))])
+    ptr = Die("DW_TAG_pointer_type", 702, byte_size=8, target=target)
+    outer = Die("DW_TAG_structure_type", 703, members=[member(0, ptr)])
+    assert adv._aggregate_has_unaligned_member(_refers_to(outer), None) is False
+
+
+def test_an_aggregate_with_an_unaligned_member_is_reported() -> None:
+    inner = Die("DW_TAG_structure_type", 710, members=[member(1, _int(711))])
+    outer = Die("DW_TAG_structure_type", 712, members=[member(0, inner)])
+    assert adv._aggregate_has_unaligned_member(_refers_to(outer), None) is True
+
+
+def test_unresolvable_and_non_aggregate_returns_are_not_unaligned() -> None:
+    unresolved = Die("DW_TAG_typedef", 720)  # no target: resolves to None
+    assert adv._aggregate_has_unaligned_member(unresolved, None) is False
+    assert adv._aggregate_has_unaligned_member(_int(721), None) is False
+
+
+def test_bit_fields_and_unlocatable_members_are_skipped() -> None:
+    bitfield = member(1, _int(730))
+    bitfield.attributes["DW_AT_bit_size"] = SimpleNamespace(value=3)
+    untyped = Die("DW_TAG_member", 731)  # resolves to no type
+    outer = Die("DW_TAG_structure_type", 732, members=[bitfield, untyped])
+    assert adv._type_unaligned_at(outer, None, 0, None) is False
+
+
+def test_an_array_member_shares_its_elements_alignment() -> None:
+    element = _int(740)
+    array = Die("DW_TAG_array_type", 741, target=element)
+    assert adv._type_unaligned_at(array, None, 0, None) is False
+    assert adv._type_unaligned_at(array, None, 2, None) is True
+    headless = Die("DW_TAG_array_type", 742)  # element type unresolved
+    assert adv._type_unaligned_at(headless, None, 2, None) is False
+
+
+def test_a_member_location_defaults_to_zero_when_absent() -> None:
+    plain = Die("DW_TAG_member", 750)
+    assert adv._decode_member_location(plain) == 0
+
+
+def test_the_qualifier_cache_is_consulted_and_filled() -> None:
+    leaf = _int(760)
+    typedef = Die("DW_TAG_typedef", 761, target=leaf)
+    cache = SimpleNamespace(unwrap={})
+    assert adv._unwrap_qualifiers(typedef, None, cache=cache) is leaf
+    assert cache.unwrap[761] is leaf
+    cache.unwrap[761] = "cached"  # a later call returns the cached answer
+    assert adv._unwrap_qualifiers(typedef, None, cache=cache) == "cached"
