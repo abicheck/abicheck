@@ -53,7 +53,7 @@
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
-      "abicheck/extract/dwarf_type_alignment.py": "cf9b43d35a2ed6a21938606da3dde1d161ac5bde6d7865c58fccd002ea93a98c",
+      "abicheck/extract/dwarf_type_alignment.py": "262be4fc89110ac8eef195bb6258e5d888c214606ce8a4d0c5ef5fe3c09b9a3c",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
@@ -237,9 +237,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "3af7cbda550228fc042ef5f30997d2a44da4e8dd8cbd63e3c8dfb332c46ae3f1",
+    "fingerprint": "7ccbc90cabe4507630e5a7a0b802e147134df19930778b3164cc1645eb80a62a",
     "generation": 77,
-    "reason": "Walker fix on the re-landed dSYM wiring: the alignment walkers are iterative and cycle-safe, and qualifier unwrapping is no longer capped at 12 steps; generation 77 is unreleased, so the fingerprint is re-recorded in place"
+    "reason": "Alignment walkers moved to extract/dwarf_type_alignment.py and the license header added; generation 77 is unreleased, so the fingerprint is re-recorded in place"
   },
   "resolver": {
     "files": {
