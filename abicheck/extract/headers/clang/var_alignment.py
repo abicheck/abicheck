@@ -114,8 +114,14 @@ def clang_variable_alignment_map(clang_root: dict[str, Any]) -> dict[str, int]:
             key = str(node.get("mangledName") or node.get("name") or "")
             values = [_attr_alignment_bits(a) for a in _aligned_attrs(node)]
             if key and values:
-                resolved = None if None in values else max(v for v in values if v)
-                stated.setdefault(key, []).append(resolved)
+                if None in values:
+                    stated.setdefault(key, []).append(None)
+                elif any(values):
+                    # An all-zero specifier (valid _Alignas(0)) has no effect:
+                    # it states nothing, so the declaration contributes nothing.
+                    stated.setdefault(key, []).append(
+                        max(v for v in values if v is not None)
+                    )
         walk(ast_inner(node))
 
     walk(ast_inner(clang_root))

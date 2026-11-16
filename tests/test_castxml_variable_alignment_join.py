@@ -87,6 +87,10 @@ def _var(
             ],
             {},
         ),
+        # A zero-only specifier (valid _Alignas(0)) has no alignment effect and
+        # states nothing; a zero beside a stated value does not change it.
+        ([_var("g_zero", 0, mangled="g_zero")], {}),
+        ([_var("g_mixed", 0, 16, mangled="g_mixed")], {"g_mixed": 128}),
         # A bare aligned states no value: the variable stays out.
         ([_var("g_bare", None, mangled="g_bare")], {}),
         # An implicit declaration is not part of the spelled surface.
@@ -131,6 +135,22 @@ def _castxml_ctx(joined: dict[str, int] | None) -> tuple[CastxmlParserContext, E
     ctx.build_id_map()
     ctx.clang_semantics = CastxmlClangSemantics(variable_alignment=joined)
     return ctx, var
+
+
+def test_castxml_never_reads_another_variables_value_by_plain_name() -> None:
+    """A namespace-scope n::g (mangled _ZN1n1gE) must not take the global g's
+    joined value through its plain name."""
+    root = Element("CastXML")
+    SubElement(root, "File", id="f1", name="/x/api.h")
+    SubElement(root, "FundamentalType", id="_1", name="int", size="32", align="32")
+    var = SubElement(root, "Variable", id="_2", name="g", mangled="_ZN1n1gE", type="_1")
+    var.set("file", "f1")
+    attach_preprocessed_text(root, PreprocessedText({}, "", frozenset({"/x/api.h"})))
+    ctx = CastxmlParserContext(root, set(), set())
+    ctx.build_id_map()
+    ctx.clang_semantics = CastxmlClangSemantics(variable_alignment={"g": 512})
+    fact = variable_alignment_fact(ctx, var, 32)
+    assert (fact.status, fact.value) == (FactStatus.PARTIAL, 32)
 
 
 @pytest.mark.parametrize(

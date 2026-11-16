@@ -97,8 +97,10 @@ def variable_alignment_fact(
         return Fact.present(explicit)
     # castxml writes no specifier on a Variable; the clang join reads the
     # declaration's own AlignedAttr, which is the declared value.
+    # The mangled name alone when castxml has one: a plain-name fallback could
+    # read a global's value for a namespace-scope variable of the same name.
     spelled = ctx.clang_semantics.declared_variable_alignment(
-        (var_el.get("mangled") or "", var_el.get("name") or "")
+        (var_el.get("mangled") or var_el.get("name") or "",)
     )
     if spelled is not None:
         return Fact.present(spelled)
