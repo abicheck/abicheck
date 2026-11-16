@@ -38,19 +38,23 @@ def _prefix(family: str) -> list[str] | None:
     return [path, *_CLANG_ELF_TARGET] if family == "clang" else [path]
 
 
-def _writes_elf(prefix: list[str], kind: str, lang: str) -> bool:
-    """Whether *prefix* compiles a trivial *lang* source to an ELF *kind* artifact."""
+#: The standard headers the ELF oracles compile against. The probe includes them
+#: too, so a target with no C++ standard library reads as a missing capability.
+_PROBE_HEADERS = "#include <cstdio>\n#include <type_traits>\n"
+
+
+def _writes_elf(prefix: list[str], kind: str) -> bool:
+    """Whether *prefix* compiles a C++ probe (with the oracle's headers) to ELF *kind*."""
     suffix = {"object": ".o", "shared": ".so", "executable": ""}[kind]
-    source = "c" if lang == "c" else "cpp"
     with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / f"probe.{source}"
+        src = Path(tmp) / "probe.cpp"
         out = Path(tmp) / f"probe{suffix}"
-        src.write_text(
-            "int probe() { return 0; }\n"
-            if kind != "executable"
-            else "int main() { return 0; }\n",
-            encoding="utf-8",
+        body = (
+            "int main() { return 0; }\n"
+            if kind == "executable"
+            else "int probe() { return 0; }\n"
         )
+        src.write_text(_PROBE_HEADERS + body, encoding="utf-8")
         cmd = [*prefix, *_KIND_FLAGS[kind], str(src), "-o", str(out)]
         done = subprocess.run(cmd, capture_output=True, text=True)
         if done.returncode != 0 or not out.exists():
@@ -67,9 +71,7 @@ def elf_capability(family: str, kind: str) -> list[str] | None:
     prefix = _prefix(family)
     if prefix is None:
         return None
-    return (
-        prefix if _writes_elf(prefix, kind, "cpp" if family == "gcc" else "c") else None
-    )
+    return prefix if _writes_elf(prefix, kind) else None
 
 
 def skip_reason(family: str, kind: str) -> str:

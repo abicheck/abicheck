@@ -53,7 +53,7 @@
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
-      "abicheck/extract/dwarf_standard_layout.py": "f4a53dd690e444bc9fe21def085bca7ce726ae8bd82d695f68b2d4905a48cc91",
+      "abicheck/extract/dwarf_standard_layout.py": "d59d6510be9b3be5463743e78ce139d4eb16900fff86af6b40bf5b2aa59b2d00",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
@@ -239,9 +239,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "35cb2186a60588429f3cb04425a3ff9863df070154914a4f80987caf78f4fae8",
+    "fingerprint": "c0e8d496fcf4952c310da5f837d88fa9f8cfced2dbdfc5fed4c3b00d6ded4af7",
     "generation": 80,
-    "reason": "Generation 80 has not shipped. dwarf_advanced.py: legacy unknown(0x..) calling-convention names are mapped to their names before comparing, so a generation-79 snapshot does not read as changed. dwarf_standard_layout.py: no further change in this commit."
+    "reason": "WS-6 standard-layout resolver: memoize base-subobject multiplicity and return False before base expansion; same results, bounded work per record"
   },
   "resolver": {
     "files": {

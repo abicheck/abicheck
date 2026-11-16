@@ -157,6 +157,7 @@ class _Resolver:
         self._trait: dict[Key, bool | None] = {}
         self._has_data: dict[Key, bool | None] = {}
         self._first: dict[Key, frozenset[Key] | None] = {}
+        self._mult: dict[Key, dict[Key, int] | None] = {}
 
     def trait(self, key: Key, depth: int = 0) -> bool | None:
         if key in self._trait:
@@ -177,6 +178,8 @@ class _Resolver:
             for base, virtual in s.base_edges
         ]
         traits += [self._ref_trait(ref, depth) for ref in s.members]
+        if False in traits:
+            return False  # decided before any base subobject is expanded
         traits.append(self._data_member_rules(key, s))
         if False in traits:
             return False
@@ -210,18 +213,28 @@ class _Resolver:
         self._has_data[key] = out
         return out
 
-    def _subobjects(self, key: Key, depth: int = 0) -> list[Key] | None:
-        """Every base subobject along every inheritance path, one per occurrence."""
+    def _base_multiplicity(self, key: Key, depth: int = 0) -> dict[Key, int] | None:
+        """How many base subobjects of each type *key* has, over every path.
+
+        Counts saturate at 2: [class.prop]/3.7 only asks whether a type occurs
+        more than once. Each record is computed once, so a diamond ladder costs
+        O(record types), not O(inheritance paths).
+        """
+        if key in self._mult:
+            return self._mult[key]
         s = self._s.get(key)
         if s is None or depth > _MAX_DEPTH:
             return None
-        ids: list[Key] = []
+        self._mult[key] = None  # provisional: an ill-formed cycle stays unknown
+        out: dict[Key, int] = {}
         for base, _ in s.base_edges:
-            inner = None if base is None else self._subobjects(base, depth + 1)
+            inner = None if base is None else self._base_multiplicity(base, depth + 1)
             if base is None or inner is None:
                 return None
-            ids += [base, *inner]
-        return ids
+            for k, n in ((base, 1), *inner.items()):
+                out[k] = min(2, out.get(k, 0) + n)
+        self._mult[key] = out
+        return out
 
     def _first_member_types(self, ref: Ref, depth: int = 0) -> frozenset[Key] | None:
         """Record keys in [class.prop]/3's set M(X) for a type reference."""
@@ -264,17 +277,17 @@ class _Resolver:
             hierarchy = None if with_data + unknown >= 2 else True
         if not s.base_edges:
             return hierarchy
-        subobjects = self._subobjects(key)
-        if subobjects is None:
+        mult = self._base_multiplicity(key)
+        if mult is None:
             return None
-        if len(subobjects) != len(set(subobjects)):
+        if any(n > 1 for n in mult.values()):
             return False
         if not s.members:
             return hierarchy
         first = self._first_member_types(s.members[0])
         if first is None:
             return None
-        if first & set(subobjects):
+        if first & set(mult):
             return False
         return hierarchy
 

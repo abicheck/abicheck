@@ -234,3 +234,21 @@ def test_a_record_without_a_child_list_stays_unknown_and_the_collector_is_reused
     collector.add(object(), None, holder)  # no DIE is read: nothing is collected
     collector.finalize()
     assert holder.is_standard_layout is None
+
+
+def test_a_diamond_ladder_with_a_shared_base_is_false_without_expanding_paths() -> None:
+    # L_n derives from X_n and Y_n, both of which derive from L_(n+1); the base
+    # L_(n+1) therefore occurs twice in L_n ([class.prop]/3.7). The paths double
+    # per level, so the answer must come from the per-record multiplicity, not
+    # from listing every subobject.
+    levels = 12
+    summaries: dict = {}
+    for n in range(1, levels + 1):
+        below = k(3 * (n + 1))
+        summaries[k(3 * n)] = summary(
+            bases=[(k(3 * n + 1), False), (k(3 * n + 2), False)]
+        )
+        summaries[k(3 * n + 1)] = summary(bases=[(below, False)])
+        summaries[k(3 * n + 2)] = summary(bases=[(below, False)])
+    summaries[k(3 * (levels + 1))] = summary()
+    assert trait(summaries, 3) is False
