@@ -12,6 +12,7 @@ from __future__ import annotations
 import shutil
 import struct
 import subprocess
+import sys
 import uuid as uuidlib
 from pathlib import Path
 
@@ -151,7 +152,10 @@ def test_a_matching_bundle_without_debug_info_is_absent(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    shutil.which("gcc") is None or not sys.platform.startswith("linux"),
+    reason="needs a Linux gcc that emits ELF (on macOS gcc is clang and emits Mach-O)",
+)
 def test_a_bundle_reads_back_the_dwarf_pyelftools_reads_from_the_elf(
     tmp_path: Path,
 ) -> None:
@@ -198,7 +202,10 @@ def _bundle_beside(lib: Path, dsym_bin: Path) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    shutil.which("gcc") is None or not sys.platform.startswith("linux"),
+    reason="needs a Linux gcc that emits ELF (on macOS gcc is clang and emits Mach-O)",
+)
 def test_discovered_bundle_beside_the_library_supplies_its_dwarf(
     tmp_path: Path,
 ) -> None:
@@ -267,7 +274,10 @@ def _explicit_fixture(tmp_path: Path, *, uuid: str) -> tuple[Path, Path]:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    shutil.which("gcc") is None or not sys.platform.startswith("linux"),
+    reason="needs a Linux gcc that emits ELF (on macOS gcc is clang and emits Mach-O)",
+)
 def test_an_explicit_bundle_for_the_library_is_read(tmp_path: Path) -> None:
     from abicheck.extract.debug_dump import _resolve_debug_metadata
 
