@@ -61,14 +61,16 @@ def test_windows_callback_environ_fields(
     lines.append(f"names old={sorted(ro)} new={sorted(rn)}")
     for side, snap in (("old", p_old), ("new", p_new)):
         types = _read(lambda snap=snap: list(snap.declarations.types)) or []
-        anon = [
-            getattr(r, "name", "?")
-            for r in types
-            if "unnamed" in str(getattr(r, "name", ""))
-            or "anon" in str(getattr(r, "name", "")).lower()
-            or "::" in str(getattr(r, "name", ""))
-        ]
-        lines.append(f"[{side}] anonymous-like record names: {anon[:20]}")
+        unnamed = [r for r in types if "unnamed" in str(getattr(r, "name", "")).lower()]
+        lines.append(
+            f"[{side}] {len(types)} records, {len(unnamed)} named like unnamed"
+        )
+        for r in unnamed[:8]:
+            flds = [
+                f"{f.name}:{f.type}@{f.offset_bits}"
+                for f in (getattr(r, "fields", []) or [])
+            ]
+            lines.append(f"[{side}] unnamed record {r.name!r} fields={flds[:12]}"[:360])
     for name in sorted(set(ro) & set(rn)):
         a, b = attrs(ro[name]), attrs(rn[name])
         for k in sorted(set(a) | set(b)):
