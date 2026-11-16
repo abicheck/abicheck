@@ -346,7 +346,10 @@ def test_cxx_signature_edits_are_visible_from_symbols_alone() -> None:
     cxx_bin = _cfg("c++", evidence="binary")
     c_bin = _cfg("c", evidence="binary")
     e = OP_BY_NAME["func_param_append"].expect(cxx_bin)
-    assert e.observable and e.any_of and "FUNC_REMOVED" in e.any_of[0]
+    # At binary evidence only the ELF-only twin is observable (FUNC_REMOVED needs
+    # headers or DWARF), so the floor is the twin, not the header kind.
+    assert e.observable and e.any_of and "FUNC_REMOVED_ELF_ONLY" in e.any_of[0]
+    assert "FUNC_REMOVED" not in e.any_of[0]
     assert not OP_BY_NAME["func_param_append"].expect(c_bin).observable
 
 
@@ -381,6 +384,10 @@ def test_rebuild_preconditions_reject_a_no_op_rebuild() -> None:
 
 def test_every_rule_fires_for_some_config() -> None:
     # Vacuity guard: a rule whose predicate never holds is dead ground truth.
+    # clang 16 is a nightly-tier producer (outside the PR-tier pair above), and
+    # some rules key on its DWARF (DW_AT_deleted is omitted by clang 16 only),
+    # so the probe universe includes it: a rule for it is live, not dead.
+    clang16 = Toolchain("clang", 16, "clang-16", "clang++-16")
     probes = [
         _cfg(lang, std=s, flags=f, evidence=e, platform=p, producer=tc)
         for lang in ("c", "c++")
@@ -396,7 +403,7 @@ def test_every_rule_fires_for_some_config() -> None:
         )
         for e in EVIDENCE
         for p in (("linux", "elf"), ("win32", "pe"), ("darwin", "macho"))
-        for tc in (GCC, CLANG)
+        for tc in (GCC, CLANG, clang16)
     ]
     # The L3 build-data axis (Config.build_data, headers only).
     headers = [c for c in probes if c.evidence == "headers"]

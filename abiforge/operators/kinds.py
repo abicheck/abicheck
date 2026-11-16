@@ -65,8 +65,8 @@ def _elf(c: Config) -> str | None:
 
 _COMPAT = {"verdict_min": "COMPATIBLE", "verdict_max": "COMPATIBLE"}
 _RISK = {"verdict_min": "COMPATIBLE_WITH_RISK", "verdict_max": "COMPATIBLE_WITH_RISK"}
-_BINARY = {"min_evidence": "binary"}
-_HEADERS = {"min_evidence": "headers"}
+_BINARY: dict[str, object] = {}
+_HEADERS: dict[str, object] = {}
 
 KIND_OPERATORS: tuple[EditOp, ...] = (
     _op(
@@ -117,7 +117,6 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"INLINE_NAMESPACE_VERSION_BUMPED"}),
         # A source-namespace fact: abicheck reads it from declarations (DWARF
         # or headers), never from a bare export table (in_source_declaration_index).
-        min_evidence="dwarf",
     ),
     _op(
         "experimental_api_graduated",
@@ -148,7 +147,6 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT"}),
         # A source-namespace fact: abicheck reads it from declarations (DWARF
         # or headers), never from a bare export table (in_source_declaration_index).
-        min_evidence="dwarf",
     ),
     _op(
         "function_became_customization_object",
@@ -273,6 +271,16 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
                 },
                 "without headers the surviving declaration is not observable: "
                 "the evidence shows the mangled export removed",
+            ),
+            Rule(
+                # Under -fvisibility=hidden the C-linkage replacement is not
+                # exported at all (nm -D: no kdl_gone), so no namesake
+                # answers to the bare name and the loss is a visibility move.
+                lambda c: c.evidence == "headers" and c.flags.visibility == "hidden",
+                {"expected": frozenset({"FUNC_VISIBILITY_CHANGED"}), "any_of": ()},
+                "under hidden visibility the replacement is not exported, so the "
+                "bare name is absent from the export table and the loss reads as "
+                "a visibility change",
             ),
         ),
         **_BINARY,
@@ -505,7 +513,6 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         # bit-field (which counts toward it), and DWARF cannot show a class is
         # POD for layout (a default member initializer leaves no trace, Clang
         # marks no `= default`). Only headers carry what decides it.
-        min_evidence="headers",
         precondition=_no_pack,
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max=None,
@@ -578,6 +585,5 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         new_evidence="dwarf",
         verdict_min="NO_CHANGE",
         verdict_max="COMPATIBLE",
-        min_evidence="binary",
     ),
 )

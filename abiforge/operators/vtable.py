@@ -101,7 +101,6 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"FUNC_ADDED"}),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="binary",
     ),
     _op(
         "override_removed",
@@ -117,7 +116,6 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         "no longer links",
         any_of=(frozenset({"FUNC_REMOVED", "FUNC_REMOVED_ELF_ONLY"}),),
         **_BREAKING,
-        min_evidence="binary",
     ),
     _op(
         "virtual_became_final",
@@ -132,7 +130,6 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"FUNC_BECAME_FINAL"}),
         verdict_min="API_BREAK",
         verdict_max="API_BREAK",
-        min_evidence="headers",
     ),
     _op(
         "virtual_lost_final",
@@ -148,7 +145,6 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"FUNC_LOST_FINAL"}),
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="headers",
     ),
     _op(
         "destructor_became_virtual",
@@ -215,7 +211,6 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         ),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="binary",
         rules=(
             Rule(
                 lambda c: c.objfmt == "macho",
@@ -249,7 +244,6 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"FUNC_RETURN_COVARIANT_NARROWED"}),
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="dwarf",
     ),
     _op(
         "last_virtual_removed",

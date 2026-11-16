@@ -210,3 +210,58 @@ The rename itself stays visible as its own finding (`TYPE_REMOVED` /
 `TAG_TYPE_RENAMED`), which carries the source break; the re-classification
 never lowers a verdict on missing evidence (an unknown offset or an
 unresolved pointee keeps `TYPE_FIELD_TYPE_CHANGED`).
+
+## Amendment (2026-11-16, accepted): a newly needed provider's version nodes are floors
+
+`SYMBOL_VERSION_REQUIRED_ADDED_COMPAT` was assigned to every version node of a
+library the old binary did not need at all (`lib_is_new`). That treated a
+provider addition as "covered by `NEEDED_ADDED`", so a deployment floor that
+rose from no requirement (a binary that needed no `libc` symbol versions, then
+requires `GLIBC_2.25`) was reported only as the new dependency, with no version
+floor named. The node is a new constraint on consumers on older runtimes, and
+the classification now says so.
+
+For a newly needed provider, the floor is the binary-wide maximum of the
+version prefix (glibc's `GLIBC_` nodes are one runtime whichever library names
+them):
+
+- a version node above that maximum is `SYMBOL_VERSION_REQUIRED_ADDED`
+  (BREAKING), and `RUNTIME_FLOOR_RAISED` fires with an empty old tag when the
+  floor rises from no requirement, or with the old maximum's tag when it rises
+  above an existing one;
+- a version node at or below it stays `SYMBOL_VERSION_REQUIRED_ADDED_COMPAT`
+  and raises no floor. This is the TBB 2021.13 shape: a new `libdl.so.2` with
+  `GLIBC_2.2.5` under a `libc.so.6` that already needs `GLIBC_2.34` is not a
+  raise, and must not be reported as one;
+- an unparseable marker (`GLIBC_PRIVATE`, `GLIBC_ABI_DT_RELR`) is not a floor
+  and stays `_COMPAT`.
+
+The floor is never below the architecture's `GLIBC_` baseline: the `DEFAULT`
+version of glibc's per-architecture `shlib-versions` (`model/glibc_baseline.py`,
+keyed on `e_machine`, ELF class and byte order, each row cited to its glibc
+source file). A node at or below the baseline raises nothing, so a newly linked
+`libc` baseline version such as `GLIBC_2.2.5` on x86-64 stays
+`SYMBOL_VERSION_REQUIRED_ADDED_COMPAT`. Above it, the floor is measured from the
+baseline and its tag names the baseline and the reason.
+
+An architecture with no measured baseline (or big-endian PowerPC64, whose baseline
+depends on the ELF ABI version the reader does not record) is evidence-limited: a
+newly needed `GLIBC_` node is reported as `SYMBOL_VERSION_REQUIRED_ADDED_COMPAT` at
+reduced assurance (`COMPATIBLE_WITH_RISK`) with the reason, and no
+`RUNTIME_FLOOR_RAISED` is claimed. A floor the binary already established (its own
+older `GLIBC_` node) is still raised, since that comparison does not need a
+baseline.
+
+An already-needed provider keeps its per-library rule: a node no newer than that
+provider's own old maximum is `_COMPAT`, and `RUNTIME_FLOOR_RAISED` fires only
+for a raise of an existing floor.
+
+**Migration**: a library that newly links a versioned provider above its
+architecture's baseline can now get
+`BREAKING` where it was `COMPATIBLE` before, whenever that provider's version
+node is above the binary's existing floor. The verdict changes only for that
+shape. Re-check the affected build with the new release, or add an explicit
+suppression for the floor if the raised requirement is acceptable.
+`diff_platform_elf_symbols._diff_elf_symbol_versioning` owns the rule; the
+pinned tests are `test_sprint2_elf`, `test_symbol_versioning_coexistence`,
+`test_diff_platform_deep` and `test_version_floor_new_provider`.

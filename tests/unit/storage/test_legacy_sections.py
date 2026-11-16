@@ -53,6 +53,7 @@ from abicheck.storage.package import SECTION_KINDS
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
     "semantic_ir_conflicts",
+    "binary_purity",
     "from_headers_inferred",
     "live_source_evidence",
     "live_preprocessor_clang_bin",

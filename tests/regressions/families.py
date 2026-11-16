@@ -170,6 +170,12 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_regressions_families.py",
                 "tests/test_family_f7_mutant_replay.py",
                 "tests/test_conftest_cache_isolation.py",
+                # A corpus expectation that depends on a producer's DWARF fact is
+                # checked against each installed producer, read with readelf.
+                "tests/test_producer_dw_at_deleted.py",
+                # A corpus expectation for a visibility-dependent export is read
+                # against the dynamic symbol table of each variant's build.
+                "tests/test_namesake_expectation.py",
             ),
         ),
         Family(
@@ -185,6 +191,9 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
+                # A per-architecture ABI baseline: a version node at the target's
+                # baseline raises no floor (test_version_floor_new_provider.py).
+                "tests/test_version_floor_new_provider.py",
                 "tests/test_family_f8_catalog_backend_parity.py",
                 # The Mach-O layout detectors against the ELF pair of the same
                 # logical change, in both fixup encodings, with seeded mutants.
@@ -608,6 +617,7 @@ _F5 = tuple(
     ]
 )
 _F8 = (
+    "platform.version_floor_judged_from_nothing_not_baseline",
     # The clang header backend left layout facts empty that castxml records
     # from the same headers (harness cells: test_clang_backend_layout_matches_castxml,
     # and catalog-wide test_clang_record_layout_matches_castxml_across_the_catalog).
@@ -634,6 +644,8 @@ _F8 = (
     "extraction.layout_derivation_ignores_the_targets_layout_rule",
 )
 _F7 = (
+    "tests.producer_fact_expectation_assumed_one_producer",
+    "tests.export_expectation_assumed_default_visibility",
     "harness.drives_a_configuration_no_front_end_produces",
     "scanner.position_counter_skips_a_line_kind",
     # Masked by suite-wide shared interpreter state: passed in a full run,

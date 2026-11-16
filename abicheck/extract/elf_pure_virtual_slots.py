@@ -31,7 +31,12 @@ PURE_VIRTUAL_SYMBOL = "__cxa_pure_virtual"
 #: Offset-to-top and typeinfo pointer precede the first virtual function.
 _HEADER_WORDS = 2
 
-__all__ = ["PURE_VIRTUAL_SYMBOL", "PureVirtualEvidence", "pure_virtual_slots"]
+__all__ = [
+    "PURE_VIRTUAL_SYMBOL",
+    "PureVirtualEvidence",
+    "pure_virtual_slots",
+    "read_pure_virtual_slots",
+]
 
 
 def pure_virtual_slots(
@@ -42,8 +47,18 @@ def pure_virtual_slots(
     Empty without opening the file when *imports* (the library's undefined
     dynamic symbols) does not name ``__cxa_pure_virtual``: no emitted vtable
     can then hold a pure slot. Any read failure yields an empty map -- no
-    evidence, never a claim that no member is pure.
+    evidence, never a claim that no member is pure. A caller that must tell
+    the two apart uses :func:`read_pure_virtual_slots`.
     """
+    return read_pure_virtual_slots(elf_path, imports) or {}
+
+
+def read_pure_virtual_slots(
+    elf_path: Path, imports: Iterable[str]
+) -> dict[str, frozenset[int]] | None:
+    """As :func:`pure_virtual_slots`, but ``None`` when the file could not be
+    read: an empty map then means "no pure slot is evidenced", and ``None``
+    means "the evidence could not be read at all"."""
     if PURE_VIRTUAL_SYMBOL not in set(imports):
         return {}
     try:
@@ -58,7 +73,7 @@ def pure_virtual_slots(
                 ".dynsym"
             )
             if not isinstance(symtab, SymbolTableSection):
-                return {}
+                return None
             vtables = [
                 (s.name, s["st_value"], s["st_size"])
                 for s in symtab.iter_symbols()
@@ -86,7 +101,7 @@ def pure_virtual_slots(
                             break
             return {k: frozenset(v) for k, v in slots.items()}
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
-        return {}
+        return None
 
 
 @dataclass(frozen=True)
