@@ -91,6 +91,10 @@ def min_level_cells(
     At-minimum cells: one per minimal set the corpus builds. Below-minimum
     cells: every other supported configuration that contains no minimal set.
     """
+    if unclassified_kinds(op):
+        # A reverse check needs a declared floor: with an UNCLASSIFIED expected
+        # kind the floor is unknown, so the operator gets no cells (reported).
+        return (), ()
     minimal = minimal_evidence_sets(op)
     cells: list[Cell] = []
     unsupported: list[frozenset[str]] = []
