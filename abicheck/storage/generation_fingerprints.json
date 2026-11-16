@@ -96,7 +96,7 @@
       "abicheck/extract/headers/castxml/backend.py": "9993674214e2ec171b7738df4cc5da22b0741a22b2c5352642ed9497bb64aea7",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "e363ac7d1407d679798c84459d376450207e20bfd2c67789052ab0c6ee48a9ca",
-      "abicheck/extract/headers/castxml/clang_semantics_join.py": "8be61742b46158cb97e4743b08f7e6fc62bd8c5a743c1bcae46f0cdf4f9dbde7",
+      "abicheck/extract/headers/castxml/clang_semantics_join.py": "b8bfa1d9fca1438b505d647c136a972ececf8daef6ed5ebac88b8506d5612a99",
       "abicheck/extract/headers/castxml/context.py": "9825e80628d568a0ed79a67046aba2b4ecc1ec79c27f32d63ba724c57249e9f2",
       "abicheck/extract/headers/castxml/cxx_header_evidence.py": "1480218726fc8db4dd5aa7bb925920f1427b6571f74dcc8b43a5657d87eedc9c",
       "abicheck/extract/headers/castxml/data_size.py": "f896227368519c1946f5b72b58164d6a6aaf5a7cde74df464ca5f56bc9e15226",
@@ -236,9 +236,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6660a3c3ab96cf70344ebd49a0ae46c37bc79ab66bab28c0a2f2a24df7633c3a",
+    "fingerprint": "e795496fd8da21c7c7fb3f461ae67d70f168436f1b6d42071343ed2306fdac15",
     "generation": 78,
-    "reason": "castxml variable alignment joined from the clang AlignedAttr (A2.1)"
+    "reason": "gate fix: C root joined only where a table spells alignment (generation 78 not yet shipped)"
   },
   "resolver": {
     "files": {
