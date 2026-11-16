@@ -22,7 +22,7 @@ from collections import Counter
 
 import pytest
 
-from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
+from abicheck.compare.finding_dedup import _sorted_kinds, deduplicate_ast_dwarf
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind as K
 
@@ -137,3 +137,12 @@ def test_reversed_and_rotated_inputs_agree() -> None:
     assert forward == _EXPECTED_KEPT
     assert _kept(list(reversed(_ALL_CHANGES))) == forward
     assert _kept(_ALL_CHANGES[3:] + _ALL_CHANGES[:3]) == forward
+
+
+def test_sorted_kinds_orders_by_value_whatever_the_input_order() -> None:
+    # Value order: "type_size_changed" < "typedef_removed" ('_' sorts before 'd').
+    # Name order is the reverse here, so a key on the name, a reversed sort, or
+    # no sort at all each give a different list and fail this check.
+    expected = [K.TYPE_SIZE_CHANGED, K.TYPEDEF_REMOVED]
+    assert _sorted_kinds([K.TYPEDEF_REMOVED, K.TYPE_SIZE_CHANGED]) == expected
+    assert _sorted_kinds([K.TYPE_SIZE_CHANGED, K.TYPEDEF_REMOVED]) == expected
