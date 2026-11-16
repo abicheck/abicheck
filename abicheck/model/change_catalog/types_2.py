@@ -259,6 +259,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "base_class_access_narrowed",

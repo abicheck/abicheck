@@ -130,7 +130,6 @@
     "template_param_type_changed",
     "template_return_type_changed",
     "toolchain_version_changed",
-    "type_added",
     "typedef_version_sentinel",
     "undocumented_export_ratio_increased",
     "unnamed_type_in_public_abi",
