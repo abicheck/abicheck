@@ -8,6 +8,7 @@ baselined module-level table.
 
 from __future__ import annotations
 
+import re
 import textwrap
 from pathlib import Path
 
@@ -57,7 +58,10 @@ def test_relation_table_is_flagged_at_every_nesting_level(
     )
     messages = _rules(tmp_path)
     assert len(messages) == 1
-    assert messages[0].startswith("abicheck/compare/somewhere.py:partners: ")
+    # A named module-level table is reported by name; any other form by line.
+    assert re.match(r"abicheck/compare/somewhere\.py:(partners|\d+): ", messages[0]), (
+        messages[0]
+    )
 
 
 def test_relation_table_inside_allowed_catalog_is_not_flagged(tmp_path: Path) -> None:
@@ -83,3 +87,43 @@ def test_non_kind_dict_is_not_flagged(tmp_path: Path) -> None:
         "def f():\n    return {'a': 'b'}\n",
     )
     assert _rules(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            f"def build():\n    return {_TABLE}\n",
+            id="returned_from_function",
+        ),
+        pytest.param(
+            f"class Holder:\n    def __init__(self):\n        self.partners = {_TABLE}\n",
+            id="attribute_target",
+        ),
+    ],
+)
+def test_relation_literal_without_a_name_is_flagged_by_line(
+    tmp_path: Path, source: str
+) -> None:
+    _write(
+        tmp_path, "abicheck/compare/unnamed.py", f"from x import ChangeKind\n{source}"
+    )
+    messages = _rules(tmp_path)
+    assert len(messages) == 1
+    assert re.match(r"abicheck/compare/unnamed\.py:\d+: ", messages[0]), messages[0]
+
+
+def test_nested_table_named_like_the_baseline_is_not_exempt(tmp_path: Path) -> None:
+    # The module-level table is the baselined one and stays exempt. A nested
+    # assignment that reuses the same name is a new relation and is reported.
+    baseline_key = next(iter(KIND_RELATION_TABLE_BASELINE))
+    relative, name = baseline_key.split(":", 1)
+    _write(
+        tmp_path,
+        relative,
+        f"from x import ChangeKind\n{name} = {_TABLE}\n"
+        f"def rebuild():\n    {name} = {_TABLE}\n    return {name}\n",
+    )
+    messages = _rules(tmp_path)
+    assert len(messages) == 1, messages
+    assert re.match(rf"{re.escape(relative)}:\d+: ", messages[0]), messages[0]
