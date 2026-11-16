@@ -311,8 +311,6 @@ def _pe_debug_sidecar(req: DumpCacheRequest) -> list[Path]:
     (:func:`_dump_is_cacheable`). Hashing it like a header means an edited or
     replaced PDB misses; a DLL with no PDB keeps the key it had.
     """
-    if req.binary_fmt != "pe":
-        return []
     from ....pdb_utils import locate_pdb
 
     found = locate_pdb(req.path, allow_network=False)
