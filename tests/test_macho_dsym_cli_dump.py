@@ -72,3 +72,40 @@ def test_cli_dump_records_the_adjacent_dsym_dwarf_with_or_without_headers(
     result = CliRunner().invoke(main, args)
     assert result.exit_code == 0, result.output
     assert '"has_dwarf": true' in out.read_text(encoding="utf-8")
+
+
+@_NO_GCC
+def test_cli_dump_through_a_symlinked_directory_reads_the_same_dsym(
+    tmp_path: Path,
+) -> None:
+    # macOS tmp paths live under /var, which is a symlink to /private/var. The
+    # bundle beside the library must be found whichever spelling the CLI is given.
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    src = real / "a.c"
+    src.write_text(
+        "struct P { int x; int y; };\nint area(struct P p) { return p.x * p.y; }\n"
+    )
+    elf = real / "libk.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", "-o", str(elf), str(src)], check=True
+    )
+    uid = "11111111-2222-3333-4444-555555555555"
+    lib = _exporting_dylib(real / "libk.dylib", uid)
+    _bundle_beside(
+        lib,
+        _macho(
+            real / "x.bin",
+            filetype=_MH_DSYM,
+            uuid=uid,
+            sections=_sections_from_elf(elf),
+        ),
+    )
+    out = tmp_path / "snap.json"
+    result = CliRunner().invoke(
+        main, ["dump", str(link / "libk.dylib"), "-o", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    assert '"has_dwarf": true' in out.read_text(encoding="utf-8")
