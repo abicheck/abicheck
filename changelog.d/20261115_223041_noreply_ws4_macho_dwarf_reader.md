@@ -1,6 +1,6 @@
 ### Added
 
-- **Mach-O `.dSYM` DWARF reaches `dump`** (ADR-021 step 5) — `dump` of a thin 64-bit little-endian Mach-O library now reads DWARF from its `<lib>.dSYM` bundle, through the pyelftools path, after checking that the bundle's UUID matches the library's. An explicit `debug_info_path` bundle that is missing, mismatched or unreadable fails the dump; an adjacent bundle that is refused is reported as a non-fatal limitation, and a library with no bundle carries no DWARF, as before. Not supported: fat (universal) libraries, which have no slice selection, and 32-bit Mach-O. Verification status: covered by Linux `dump()` tests; the macOS `dwarf` abiforge cells (`pure_virtual_added-dwarf`, `primary_base_grew-dwarf`) are verified by macOS CI on this change.
+- **Mach-O `.dSYM` bundle DWARF reader (ADR-021 step 5)** — a thin 64-bit little-endian Mach-O library's `<lib>.dSYM` DWARF can be read through the pyelftools path, after its UUID is checked against the library's. A missing, fat, 32-bit, malformed or UUID-mismatched bundle is absent evidence, never an empty DWARF surface. Not yet attached to `dump`: the Mach-O dump path does not use the bundle until the follow-up re-lands the wiring, so macOS `dwarf` evidence is still reported as unavailable. Not supported: fat (universal) libraries, which have no slice selection, and 32-bit Mach-O.
 
 <!--
 ### Documentation
