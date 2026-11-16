@@ -74,6 +74,7 @@ See ADR-020b's sibling discussion of evidence tiers; these are L0 signals.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 
 from .demangle import demangle
 from .detector_registry import registry
@@ -124,13 +125,65 @@ def _class_name(mangled: str) -> str:
     return mangled
 
 
+def _layout_family(snap: AbiSnapshot) -> str | None:
+    """The binary format whose symbol metadata this snapshot carries."""
+    if snap.elf is not None:
+        return "elf"
+    if snap.macho is not None:
+        return "macho"
+    return None
+
+
+def _symbol_entries(snap: AbiSnapshot) -> list[tuple[str, int | None]]:
+    """``(name, size)`` for every symbol the layout detectors read.
+
+    ELF: every ``.dynsym`` entry with its ``st_size``. Mach-O: every export,
+    sized only where :mod:`abicheck.extract.macho_object_sizes` derived a size
+    (``None`` otherwise, which the callers treat as "no size fact").
+    """
+    if snap.elf is not None:
+        return [(sym.name, sym.size) for sym in snap.elf.symbols]
+    if snap.macho is not None:
+        return [(exp.name, exp.size) for exp in snap.macho.exports]
+    return []
+
+
+def _defined_names(snap: AbiSnapshot) -> Collection[str]:
+    """Names the binary defines and exports, for "method symbol still present"."""
+    if snap.elf is not None:
+        return snap.elf.symbol_aliases
+    if snap.macho is not None:
+        return snap.macho.export_map
+    return ()
+
+
+def _pointer_size(snap: AbiSnapshot) -> int | None:
+    """Pointer width of the snapshot's slice, or ``None`` when unknown."""
+    if snap.elf is not None:
+        return snap.elf.pointer_size or None
+    if snap.macho is not None:
+        return _MACHO_POINTER_SIZE_4 if _macho_is_ilp32(snap.macho.cpu_type) else 8
+    return None
+
+
+#: Mach-O slices whose pointers are 4 bytes. macholib names i386, ARM and
+#: PowerPC. ARM64_32 (ILP32) is absent from macholib's table, so it reads back
+#: as the hex cpu type ``0x200000c``.
+_MACHO_POINTER_SIZE_4 = 4
+_MACHO_ILP32_CPU = frozenset({"i386", "ARM", "PowerPC", "0x200000c"})
+
+
+def _macho_is_ilp32(cpu_type: str) -> bool:
+    return cpu_type in _MACHO_ILP32_CPU
+
+
 def _sized_rtti(
     snap: AbiSnapshot,
     prefix: str,
     *,
     skip_runtime: bool,
 ) -> dict[str, int]:
-    """Map ``type_key → st_size`` for every ``prefix`` symbol with a size.
+    """Map ``type_key → size`` for every ``prefix`` symbol with a size.
 
     ``skip_runtime`` mirrors :func:`abicheck.model.stdlib_namespaces_excluded`:
     when comparing the C++ runtime *itself* (libstdc++ / libc++) it is False, so
@@ -138,17 +191,13 @@ def _sized_rtti(
     surface and their size changes are reported; otherwise those symbols are
     transitive runtime noise leaked into an ordinary library and are skipped.
     """
-    elf = snap.elf
-    if elf is None:
-        return {}
     out: dict[str, int] = {}
-    for sym in elf.symbols:
-        name = sym.name
+    for name, size in _symbol_entries(snap):
         if not name.startswith(prefix):
             continue
         if skip_runtime and _is_runtime(name):
             continue
-        if sym.size <= 0:
+        if size is None or size <= 0:
             continue
         key = _type_key(name, prefix)
         # Only decode RTTI that actually names a class/struct/union/enum.
@@ -157,7 +206,7 @@ def _sized_rtti(
         if not _is_class_type_rtti(key):
             continue
         # First definition wins (weak vtables can appear once); ignore dupes.
-        out.setdefault(key, sym.size)
+        out.setdefault(key, size)
     return out
 
 
@@ -258,12 +307,9 @@ def _base_is_runtime(base: str) -> bool:
 
 def _thunks_by_base(snap: AbiSnapshot, *, skip_runtime: bool) -> dict[str, set[str]]:
     """Map ``base_encoding → {offset_signatures}`` for every thunk symbol."""
-    elf = snap.elf
-    if elf is None:
-        return {}
     out: dict[str, set[str]] = {}
-    for sym in elf.symbols:
-        parsed = _parse_thunk(sym.name)
+    for name, _size in _symbol_entries(snap):
+        parsed = _parse_thunk(name)
         if parsed is None:
             continue
         base, off_sig = parsed
@@ -284,8 +330,8 @@ def _diff_thunks(
     """Detect thunk offset / set drift (B1)."""
     old_t = _thunks_by_base(old, skip_runtime=skip_runtime)
     new_t = _thunks_by_base(new, skip_runtime=skip_runtime)
-    old_syms = old.elf.symbol_aliases if old.elf else {}
-    new_syms = new.elf.symbol_aliases if new.elf else {}
+    old_syms = _defined_names(old)
+    new_syms = _defined_names(new)
     changes: list[Change] = []
 
     # Offset change: the target method has a thunk on both sides but the encoded
@@ -333,17 +379,55 @@ def _diff_thunks(
     return changes
 
 
-@registry.detector(
-    "elf_layout",
-    requires_support=lambda o, n: (
-        o.elf is not None and n.elf is not None,
-        "missing ELF metadata on one side",
-    ),
-)
+def _layout_support(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str]:
+    """Both sides must carry the same format's symbol metadata.
+
+    Mixing ELF and Mach-O would compare st_size with a derived size, so a
+    cross-format pair is unsupported rather than matched. A Mach-O side whose
+    size derivation never ran (``sizes_derived`` is not True) is unsupported
+    too: its missing sizes mean "not derived", and reporting them as a clean
+    layout check would be a zero-finding result the detector never earned.
+    """
+    family = _layout_family(old)
+    if family is None or family != _layout_family(new):
+        return False, "missing ELF or Mach-O symbol metadata on one side"
+    if family == "macho":
+        for side in (old, new):
+            assert side.macho is not None  # guaranteed by _layout_family
+            if side.macho.sizes_derived is not True:
+                return False, (
+                    "Mach-O layout sizes were not derived for this snapshot "
+                    "(written before size derivation, or derivation did not run)"
+                )
+    return True, ""
+
+
+def _span_uncorroborated(old: AbiSnapshot, new: AbiSnapshot, sym: str) -> bool:
+    """True when a Mach-O derived size cannot be compared across the two sides.
+
+    A derived span is the distance to the label that closes it. When the two
+    sides name different closers (a local was stripped, or another label was
+    inserted between object and closer), the two spans measure different
+    things, so comparing them would report a change no object made. ELF sizes
+    are exact and never uncorroborated.
+    """
+    if old.macho is None or new.macho is None:
+        return False
+    o = old.macho.export_map.get(sym)
+    n = new.macho.export_map.get(sym)
+    if o is None or n is None:
+        return True
+    return o.size_bound_by is None or o.size_bound_by != n.size_bound_by
+
+
+@registry.detector("elf_layout", requires_support=_layout_support)
 def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Binary-only vtable / RTTI layout change detector (no DWARF needed)."""
-    assert old.elf is not None and new.elf is not None  # guaranteed by requires_support
-    pointer_size = new.elf.pointer_size or old.elf.pointer_size or 8
+    """Binary-only vtable / RTTI layout change detector (no DWARF needed).
+
+    Runs on ELF ``st_size`` and on the Mach-O sizes derived in
+    :mod:`abicheck.extract.macho_object_sizes`; both are symbol-table facts.
+    """
+    pointer_size = _pointer_size(new) or _pointer_size(old) or 8
 
     # When either side IS the C++ runtime (libstdc++/libc++), its own std:: RTTI
     # is the surface under test — keep it. Otherwise std:: RTTI is leaked
@@ -358,7 +442,7 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_vt = _sized_rtti(new, "_ZTV", skip_runtime=skip_runtime)
     for key in sorted(old_vt.keys() & new_vt.keys()):
         o_size, n_size = old_vt[key], new_vt[key]
-        if o_size == n_size:
+        if o_size == n_size or _span_uncorroborated(old, new, "_ZTV" + key):
             continue
         sym = "_ZTV" + key
         cls = _class_name(sym)
@@ -375,6 +459,7 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 name=cls,
                 qualified_name=cls,
                 review_evidence={
+                    # One label for both formats: report/review_groups.py keys on it.
                     "kind": "elf_vtable_group_size",
                     "old_bytes": o_size,
                     "new_bytes": n_size,
@@ -393,7 +478,7 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_ti = _sized_rtti(new, "_ZTI", skip_runtime=skip_runtime)
     for key in sorted(old_ti.keys() & new_ti.keys()):
         o_size, n_size = old_ti[key], new_ti[key]
-        if o_size == n_size:
+        if o_size == n_size or _span_uncorroborated(old, new, "_ZTI" + key):
             continue
         sym = "_ZTI" + key
         cls = _class_name(sym)
@@ -419,7 +504,7 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_vtt = _sized_rtti(new, "_ZTT", skip_runtime=skip_runtime)
     for key in sorted(old_vtt.keys() & new_vtt.keys()):
         o_size, n_size = old_vtt[key], new_vtt[key]
-        if o_size == n_size:
+        if o_size == n_size or _span_uncorroborated(old, new, "_ZTT" + key):
             continue
         sym = "_ZTT" + key
         changes.append(

@@ -41,7 +41,7 @@ version this build cannot reach is refused rather than silently accepted.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Protocol, TypeVar
 
@@ -426,9 +426,8 @@ def migrate_section_dto(dto: SectionDTO) -> SectionDTO:
             )
         payload = step(payload)
         version += 1
-    return SectionDTO(
-        section_kind=dto.section_kind, section_schema_version=current, payload=payload
-    )
+    # replace() keeps every header field (must_understand, extensions) of *dto*.
+    return replace(dto, section_schema_version=current, payload=payload)
 
 
 def semantic_ir_to_dto(

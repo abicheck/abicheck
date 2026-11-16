@@ -328,15 +328,15 @@ _MEMBERS = (
         expected=frozenset({"TYPE_BECAME_ABSTRACT", "VTABLE_SLOT_COUNT_CHANGED"}),
         rules=(
             Rule(
-                lambda c: c.objfmt != "elf" and c.evidence != "binary",
+                lambda c: c.objfmt == "pe" and c.evidence != "binary",
                 {
                     "expected": frozenset(
                         {"TYPE_BECAME_ABSTRACT", "TYPE_VTABLE_CHANGED"}
                     )
                 },
-                "VTABLE_SLOT_COUNT_CHANGED reads the _ZTV symbol size from the "
-                "ELF symbol table (diff_elf_layout requires an ELF snapshot); "
-                "off ELF the debug/header vtable comparison names the growth",
+                "PE gets no _ZTV size from the Mach-O layout facts (WS-4 PR 1); "
+                "the PE header pass that would carry them is WS-4 PR 2, so the "
+                "vtable growth is named by the debug/header comparison until then",
             ),
             Rule(
                 lambda c: c.evidence == "binary",
@@ -425,13 +425,6 @@ _LINKAGE = (
             frozenset({"BASE_CLASS_OFFSET_CHANGED"}),
         ),
         rules=(
-            Rule(
-                lambda c: c.objfmt == "macho" and c.evidence != "binary",
-                {"any_of": (frozenset({"BASE_CLASS_OFFSET_CHANGED"}),)},
-                "Mach-O: VTABLE_THUNK_OFFSET_CHANGED reads thunk names from the "
-                "ELF symbol table (diff_elf_layout requires an ELF snapshot); "
-                "the debug/header lane still records B2's new offset",
-            ),
             Rule(
                 lambda c: c.evidence == "binary",
                 {"any_of": (frozenset({"VTABLE_THUNK_OFFSET_CHANGED"}),)},

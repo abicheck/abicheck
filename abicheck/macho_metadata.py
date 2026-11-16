@@ -47,6 +47,8 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
     MH_MAGIC_64,
     N_EXT,
     N_PEXT,
+    N_SECT,
+    N_STAB,
     N_TYPE,
     N_UNDF,
     N_WEAK_DEF,
@@ -54,6 +56,8 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
 from macholib.MachO import MachO  # type: ignore[import-untyped]
 from macholib.SymbolTable import SymbolTable  # type: ignore[import-untyped]
 
+from .extract.macho_fixups import decode_chained_fixup_addresses, fixup_addresses
+from .extract.macho_object_sizes import corroborate_object_sizes, derive_object_sizes
 from .extract.parse_failures import note_export_read_failure
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -444,6 +448,39 @@ def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
     sync_present_facts(meta, "weak_dependent_libs")
 
 
+def _section_extents(header: Any) -> dict[int, tuple[int, int]]:
+    """1-based section ordinal → ``(address, size)`` from the segment commands."""
+    extents: dict[int, tuple[int, int]] = {}
+    ordinal = 1
+    for lc, _cmd, data in header.commands:
+        if lc.cmd in (LC_SEGMENT, LC_SEGMENT_64) and isinstance(data, list):
+            for sect in data:
+                extents[ordinal] = (int(sect.addr), int(sect.size))
+                ordinal += 1
+    return extents
+
+
+def _defined_section_symbols(nlists: Any) -> list[tuple[int, int, str]]:
+    """``(n_sect, n_value, name)`` for every defined symbol of an nlist table.
+
+    Only ``N_SECT`` entries are symbols with an address; stab (debug) entries
+    and undefined or absolute ones are skipped. The leading underscore is
+    stripped as it is for exports, so names match across both reads.
+    """
+    out: list[tuple[int, int, str]] = []
+    for nlist_entry, name_bytes in nlists:
+        n_type = int(nlist_entry.n_type)
+        # A stab (debugging) entry can carry N_TYPE bits equal to N_SECT
+        # (N_BNSYM 0x2e, N_ENSYM 0x4e), so the stab bits are tested first.
+        if n_type & N_STAB or (n_type & N_TYPE) != N_SECT:
+            continue
+        raw = name_bytes.decode("utf-8", errors="replace") if name_bytes else ""
+        out.append(
+            (int(nlist_entry.n_sect), int(nlist_entry.n_value), raw.removeprefix("_"))
+        )
+    return out
+
+
 def _build_section_segment_map(header: Any) -> dict[int, str]:
     """Build the 1-based section ordinal → segment name mapping from segment commands."""
     # Build section ordinal → segment name mapping so we can distinguish
@@ -538,6 +575,70 @@ def _note_tables_past_end(dylib_path: Path, header: Any) -> None:
             )
 
 
+_LC_DYLD_CHAINED_FIXUPS = 0x80000034
+
+
+def _pointer_fixup_addresses(dylib_path: Path, header: Any) -> frozenset[int] | None:
+    """Every rebased, bound or chained pointer slot of the slice, or ``None``.
+
+    ``None`` means the fixups could not be decoded (an unknown pointer format,
+    a truncated table). It is never "no fixups", so the caller must not treat
+    it as one. An image with neither encoding has no pointer fixups at all.
+    """
+    start = int(getattr(header, "offset", 0))
+    size = int(getattr(header, "size", 0)) or (os.path.getsize(dylib_path) - start)
+    image = dylib_path.read_bytes()[start : start + size]
+    segments: list[tuple[int, int, int]] = []  # (vmaddr, fileoff, filesize)
+    extents: list[tuple[int, int]] = []  # (vmaddr, vmsize), for classic fixups
+    in_memory = 0  # total vmsize: every fixup lies inside some segment
+    text_base: int | None = None
+    for lc, cmd, _data in header.commands:
+        if lc.cmd not in (LC_SEGMENT, LC_SEGMENT_64):
+            continue
+        segments.append((int(cmd.vmaddr), int(cmd.fileoff), int(cmd.filesize)))
+        extents.append((int(cmd.vmaddr), int(cmd.vmsize)))
+        in_memory += int(cmd.vmsize)
+        if text_base is None and bytes(cmd.segname).rstrip(b"\0") == b"__TEXT":
+            text_base = int(cmd.vmaddr)
+    chained = [
+        cmd for lc, cmd, _data in header.commands if lc.cmd == _LC_DYLD_CHAINED_FIXUPS
+    ]
+    if chained:
+        if not segments:
+            return None
+        base = text_base if text_base is not None else segments[0][0]
+        cmd = chained[0]
+        return decode_chained_fixup_addresses(
+            image,
+            int(cmd.dataoff),
+            int(cmd.datasize),
+            segments,
+            base,
+            limit=in_memory // 8,
+        )
+    dyld = [
+        cmd
+        for lc, cmd, _data in header.commands
+        if lc.cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY)
+    ]
+    if not dyld:
+        return frozenset()
+    magic = getattr(header, "MH_MAGIC", MH_MAGIC_64)
+    pointer_size = 8 if magic in (MH_MAGIC_64, MH_CIGAM_64) else 4
+    cmd = dyld[0]
+    return fixup_addresses(
+        image,
+        extents,
+        pointer_size,
+        rebase=(int(cmd.rebase_off), int(cmd.rebase_size)),
+        binds=[
+            (int(cmd.bind_off), int(cmd.bind_size)),
+            (int(cmd.weak_bind_off), int(cmd.weak_bind_size)),
+        ],
+        limit=in_memory // pointer_size,
+    )
+
+
 def _parse_macho_symbols(
     macho: MachO,
     header: Any,
@@ -548,6 +649,25 @@ def _parse_macho_symbols(
     """Parse Mach-O symbol table and populate *meta.exports*."""
     try:
         symtab = SymbolTable(macho, header=header)
+        # Object sizes need every defined symbol, locals included, because a
+        # local label bounds the object before it (extract/macho_object_sizes).
+        defined = _defined_section_symbols(symtab.nlists)
+        fixups = _pointer_fixup_addresses(dylib_path, header)
+        pointer_size = (
+            8
+            if getattr(header, "MH_MAGIC", MH_MAGIC_64)
+            in (
+                MH_MAGIC_64,
+                MH_CIGAM_64,
+            )
+            else 4
+        )
+        sizes = corroborate_object_sizes(
+            derive_object_sizes(defined, _section_extents(header)),
+            {name: value for _sect, value, name in defined},
+            fixups,
+            pointer_size,
+        )
         # Prefer the split external tables (available when LC_DYSYMTAB is
         # present): extdefsyms = external *defined* (exports), undefsyms =
         # external *undefined* (imports). Concatenate both so the import surface
@@ -596,8 +716,16 @@ def _parse_macho_symbols(
                     sym_type=sym_type,
                     is_weak=is_weak,
                     is_data=is_data,
+                    size=sizes[name][0] if name in sizes else None,
+                    size_bound_by=sizes[name][1] if name in sizes else None,
                 )
             )
+        # Set after the whole export loop: a failure part-way leaves the flag
+        # unset, so the layout gate refuses the snapshot (MachoMetadata.sizes_derived).
+        # Only with decoded fixups: undecodable fixups keep no sizes, so the
+        # derivation must not read as having run, and the layout gate refuses.
+        if fixups is not None:
+            meta.sizes_derived = True
     except Exception as exc:  # noqa: BLE001
         # SymbolTable may fail on binaries without LC_SYMTAB (stripped, .tbd stubs, etc.)
         log.debug(

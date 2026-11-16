@@ -258,16 +258,20 @@ def test_a_proven_snapshot_round_trips_its_canonical_sequence(tmp_path):
     """The proof is written with the snapshot and read back; absent means unproven."""
     from abicheck.dumper import dump
     from abicheck.serialization import snapshot_from_dict
-    from abicheck.storage.snapshot_encode import snapshot_to_dict
+    from abicheck.storage.snapshot_encode import flat_document_and_carriers
+
+    def _flat(snap):
+        # The flat document, without the Mach-O size fact (ADR-062 D19).
+        return flat_document_and_carriers(snap)[0]
 
     so, headers = _self_contained_pair(tmp_path)
     snap = dump(so, list(reversed(headers)), version="1", compiler="cc", lang="C")
     proven = snap.contract.header_canonical
     assert proven is not None
-    loaded = snapshot_from_dict(snapshot_to_dict(snap))
+    loaded = snapshot_from_dict(_flat(snap))
     assert loaded.contract.header_canonical == proven
 
-    raw = snapshot_to_dict(snap)
+    raw = _flat(snap)
     raw["contract"].pop("header_canonical", None)
     assert snapshot_from_dict(raw).contract.header_canonical is None
 
