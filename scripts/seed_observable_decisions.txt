@@ -4,9 +4,9 @@ func_added_elf_only  B  # export-table-only kind: emitted for binary-only snapsh
 func_export_added  U  # export_transition.py:221: emission depends on declaration state (_export_was_gained); not established from B alone
 func_language_linkage_changed  BH  # compare/function_signature.py:487: declaration linkage needs headers; B alone shows only the mangled name
 func_likely_renamed  B  # diff_symbols_renames.py:535-542: name-fingerprint candidates
-func_removed  DH  # diff_symbols.py:249: binary-only snapshots (ELF, PE, Mach-O: dumper.py:966, 1115) emit FUNC_REMOVED_ELF_ONLY for export-table-only records; FUNC_REMOVED needs DWARF or headers
+func_removed  DH:ELFPE+B:MACHO  # diff_symbols.py:249: binary-only snapshots (ELF, PE, Mach-O: dumper.py:966, 1115) emit FUNC_REMOVED_ELF_ONLY for export-table-only records; FUNC_REMOVED needs DWARF or headers
 func_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols.py:249)
-func_visibility_changed  BH  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
+func_visibility_changed  BH:ELFPE+B:MACHO  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
 var_added  B  # diff_symbols_variables.py:210: a binary-only NEW reports an added variable export from the export table alone (VAR_ADDED); the ELF-only variant is undeclared_exports.py:141-197
 var_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (undeclared_exports.py:197)
 var_export_added  U  # export_transition.py:250: same path as func_export_added; not established from B alone
@@ -20,7 +20,7 @@ symbol_size_changed_internal     B:ELF
 # -- symbols: layout / type facts in DWARF and the header (DH) -------------
 anon_field_changed               DH
 calling_convention_changed       DH
-func_params_changed              DH
+func_params_changed              DH:C+B:CXX
 func_return_changed              DH
 func_return_covariant_narrowed   DH
 func_variadic_added              DH
@@ -160,10 +160,10 @@ unspecified_return_now_named     H
 rtti_inheritance_changed  B:ELF  # diff_elf_layout.py:391-404: shape inferred from _ZTI symbol sizes alone (export-table fact); Mach-O left to #2068
 type_visibility_changed  DH  # compare/type_visibility.py:112-142: class-own-symbol visibility maps through typed class records
 type_vtable_changed  DH  # diff_types_vtable.py:350,579: vtable content from the typed vtable_fact (DWARF/header), not raw symbols
-vtable_slot_count_changed        B:ELF+MACHO
-vtable_thunk_offset_changed      B:ELF+MACHO
-vtable_thunk_set_changed         B:ELF+MACHO
-vtt_slot_count_changed           B:ELF+MACHO
+vtable_slot_count_changed        B:ELF_MACHO
+vtable_thunk_offset_changed      B:ELF_MACHO
+vtable_thunk_set_changed         B:ELF_MACHO
+vtt_slot_count_changed           B:ELF_MACHO
 # -- platform: ELF / Mach-O / PE header and dynamic facts (B) --------------
 abi_tag_changed                  B:ELF
 allocator_replacement_added      B:ELF
@@ -215,7 +215,7 @@ relro_weakened                   B:ELF
 rpath_changed                    B:ELF
 rpath_type_changed               B:ELF
 runpath_changed                  B:ELF
-soname_changed                   B:ELF+MACHO
+soname_changed                   B:ELF_MACHO
 soname_missing                   B:ELF
 stack_canary_removed             B:ELF
 static_tls_introduced            B:ELF
@@ -243,7 +243,7 @@ unversioned_exported_symbol      B:ELF
 runtime_floor_raised             B:ELF
 version_script_missing           B:ELF
 versioned_symbol_scheme_detected B:ELF
-vtable_symbol_identity_changed   B:ELF+MACHO
+vtable_symbol_identity_changed   B:ELF_MACHO
 writable_executable_segment      B:ELF
 x86_isa_baseline_raised          B:ELF
 # -- platform: compiler-flag facts (DBD) and layout (DH / D1) -------------
