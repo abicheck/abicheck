@@ -170,6 +170,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_regressions_families.py",
                 "tests/test_family_f7_mutant_replay.py",
                 "tests/test_conftest_cache_isolation.py",
+                # A corpus expectation for a visibility-dependent export is read
+                # against the dynamic symbol table of each variant's build.
+                "tests/test_namesake_expectation.py",
             ),
         ),
         Family(
@@ -634,6 +637,7 @@ _F8 = (
     "extraction.layout_derivation_ignores_the_targets_layout_rule",
 )
 _F7 = (
+    "tests.export_expectation_assumed_default_visibility",
     "harness.drives_a_configuration_no_front_end_produces",
     "scanner.position_counter_skips_a_line_kind",
     # Masked by suite-wide shared interpreter state: passed in a full run,
