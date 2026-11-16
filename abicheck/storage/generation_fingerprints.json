@@ -53,7 +53,7 @@
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
-      "abicheck/extract/dwarf_type_alignment.py": "262be4fc89110ac8eef195bb6258e5d888c214606ce8a4d0c5ef5fe3c09b9a3c",
+      "abicheck/extract/dwarf_type_alignment.py": "06e211ce94fd0689dc7ba20f19314794c92ca3e5fab2f763e5ca47f040b68e22",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
@@ -237,9 +237,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7ccbc90cabe4507630e5a7a0b802e147134df19930778b3164cc1645eb80a62a",
+    "fingerprint": "b0991b9b1754fd5b72e5b0d85ac47d8eda96d466daf92577d59c696f03b59a38",
     "generation": 77,
-    "reason": "Alignment walkers moved to extract/dwarf_type_alignment.py and the license header added; generation 77 is unreleased, so the fingerprint is re-recorded in place"
+    "reason": "split the member-queue loop out of the alignment walk; no behaviour change"
   },
   "resolver": {
     "files": {

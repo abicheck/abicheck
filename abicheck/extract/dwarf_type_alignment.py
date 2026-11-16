@@ -126,23 +126,32 @@ def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: Any) -> 
         if t.tag in _SCALAR_LEAF_TAGS:
             if base % _scalar_leaf_align(t) != 0:
                 return True
-            continue
-        if t.tag == "DW_TAG_array_type":
+        elif t.tag == "DW_TAG_array_type":
             elem = _resolve_type_die(t, CU)
             if elem is not None:
                 stack.append((elem, base))
-            continue
-        if t.tag in _AGGREGATE_TAGS:
-            for child in t.iter_children():
-                if child.tag != "DW_TAG_member" or _attr_int(child, "DW_AT_bit_size"):
-                    continue
-                mt = _resolve_type_die(child, CU)
-                if mt is None:
-                    continue
-                rel = _decode_member_location(child)  # None: misalignment not provable
-                if rel is not None:
-                    stack.append((mt, base + rel))
+        elif t.tag in _AGGREGATE_TAGS:
+            _push_member_types(t, CU, base, stack)
     return False
+
+
+def _push_member_types(
+    aggregate: Any, CU: Any, base: int, stack: list[tuple[Any, int]]
+) -> None:
+    """Queue each addressable, non-bit-field member of *aggregate* at its absolute offset.
+
+    A member whose type or location cannot be resolved is skipped: misalignment
+    there is not provable, so it is never reported.
+    """
+    for child in aggregate.iter_children():
+        if child.tag != "DW_TAG_member" or _attr_int(child, "DW_AT_bit_size"):
+            continue
+        mt = _resolve_type_die(child, CU)
+        if mt is None:
+            continue
+        rel = _decode_member_location(child)  # None: misalignment not provable
+        if rel is not None:
+            stack.append((mt, base + rel))
 
 
 def _aggregate_has_unaligned_member(die: Any, CU: Any, cache: Any = None) -> bool:
