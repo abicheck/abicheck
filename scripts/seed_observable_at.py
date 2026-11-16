@@ -45,6 +45,7 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "abicheck" / "model" / "change_catalog"
@@ -59,7 +60,7 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
     "B:ELF": ((("B",),), "", ("elf",), "_OBS_B_ELF"),
     "B:MACHO": ((("B",),), "", ("macho",), "_OBS_B_MACHO"),
     "B:PE": ((("B",),), "", ("pe",), "_OBS_B_PE"),
-    "B:ELF+MACHO": ((("B",),), "", ("elf", "macho"), "_OBS_B_ELF_MACHO"),
+    "B:ELF_MACHO": ((("B",),), "", ("elf", "macho"), "_OBS_B_ELF_MACHO"),
     "BH": (
         (("B", "H"),),
         "declared in the public header and present in the export table",
@@ -120,6 +121,30 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_BH_ALIGN",
     ),
+    "DH:ELFPE": (
+        (("B", "D"), ("B", "H")),
+        "layout or type fact: DWARF and the public header both carry it",
+        ("elf", "pe"),
+        "_OBS_DH_ELFPE",
+    ),
+    "BH:ELFPE": (
+        (("B", "H"),),
+        "declared in the public header and present in the export table",
+        ("elf", "pe"),
+        "_OBS_BH_ELFPE",
+    ),
+    "DH:C": (
+        (("B", "D"), ("B", "H")),
+        "a C parameter change keeps the symbol: DWARF or the header carries it",
+        (),
+        "_OBS_DH_C",
+    ),
+    "B:CXX": (
+        (("B",),),
+        "",
+        (),
+        "_OBS_B_CXX",
+    ),
     "L4": (
         (("B", "H", "BD", "S"),),
         "needs the source translation unit (S)",
@@ -157,12 +182,69 @@ UNCLASSIFIED_REASONS: dict[str, str] = {
 
 FORM_CODES = frozenset(FORMS)
 
+#: The language a form's condition is scoped to (``DH:C``, ``B:CXX``). Forms
+#: absent here are language-free.
+FORM_LANGUAGES: dict[str, tuple[str, ...]] = {"DH:C": ("c",), "B:CXX": ("cxx",)}
+
 
 @dataclass(frozen=True, slots=True)
 class Decision:
+    """One kind's row. ``code`` is one form code, or several joined by ``+``:
+    one (form, condition) pair per entry of the catalog's observable_at tuple."""
+
     kind: str
     code: str
     note: str
+
+    @property
+    def codes(self) -> tuple[str, ...]:
+        return tuple(self.code.split("+"))
+
+
+def form_observability(code: str) -> tuple[Any, ...]:
+    """The catalog value one form code stands for: one ``Observability`` entry.
+
+    Built with the same ``observable`` call the taxonomy uses, so the ledger and
+    the catalog compare by value. Imported lazily: this module stays stdlib-only
+    for the gates that import it without the package installed.
+    """
+    from abicheck.model.change_catalog.observability import (
+        Language,
+        ObservabilityCondition,
+        Platform,
+        observable,
+    )
+
+    alts, rationale, platforms, _const = FORMS[code]
+    languages = FORM_LANGUAGES.get(code, ())
+    condition = None
+    if platforms or languages:
+        condition = ObservabilityCondition(
+            platform=frozenset(Platform(p) for p in platforms) if platforms else None,
+            language=frozenset(Language(lang) for lang in languages)
+            if languages
+            else None,
+        )
+    return (observable(*alts, rationale=rationale, condition=condition),)
+
+
+def decision_observability(code: str) -> tuple[Any, ...]:
+    """The catalog value a (possibly multi-condition) ledger code stands for."""
+    out: tuple[Any, ...] = ()
+    for part in code.split("+"):
+        out += form_observability(part)
+    return out
+
+
+def codes_of(value: tuple[Any, ...]) -> str:
+    """The inverse: the ledger code whose conditions reproduce a catalog value."""
+    codes: list[str] = []
+    for obs in value:
+        match = [c for c in FORMS if form_observability(c)[0] == obs]
+        if len(match) != 1:
+            raise ValueError(f"no single form for {obs!r}: {match}")
+        codes.append(match[0])
+    return "+".join(codes)
 
 
 def parse_decisions(text: str = DECISIONS_TEXT) -> dict[str, Decision]:
@@ -178,8 +260,9 @@ def parse_decisions(text: str = DECISIONS_TEXT) -> dict[str, Decision]:
         kind, code = parts
         if code == "U":
             continue
-        if code not in FORM_CODES:
-            raise ValueError(f"{kind}: unknown form code {code!r}")
+        for part in code.split("+"):
+            if part not in FORM_CODES:
+                raise ValueError(f"{kind}: unknown form code {part!r}")
         if kind in out:
             raise ValueError(f"{kind}: decided twice")
         out[kind] = Decision(kind, code, note.strip())
@@ -252,6 +335,19 @@ def _spell(alts: tuple[tuple[str, ...], ...]) -> str:
     return ", ".join("{" + ",".join(a) + "}" for a in alts)
 
 
+def _shape(dec: Decision) -> str:
+    """The shape text of a decision: each condition's alternatives, with its scope."""
+    parts = []
+    for code in dec.codes:
+        alts, _rat, platforms, _const = FORMS[code]
+        text = _spell(alts)
+        scope = [*platforms, *FORM_LANGUAGES.get(code, ())]
+        if scope:
+            text += " on " + ",".join(scope)
+        parts.append(text)
+    return " ; ".join(parts)
+
+
 def markdown_table() -> str:
     """Kind | taxonomy | verdict | decision | rationale | evidence."""
     from abicheck.model.change_catalog.assembled import REGISTRY
@@ -272,14 +368,11 @@ def markdown_table() -> str:
             decision, rationale = "UNCLASSIFIED", ""
         elif entry.observable_at is UNCLASSIFIED:
             # Decided, but the module would pass the line cap: not applied.
-            alts, rationale, _platforms, _const = FORMS[dec.code]
-            decision, rationale = f"held (cap): {_spell(alts)}", dec.note or rationale
+            decision = f"held (cap): {_shape(dec)}"
+            rationale = dec.note or FORMS[dec.codes[0]][1]
         else:
-            alts, rationale, _platforms, _const = FORMS[dec.code]
-            decision = _spell(alts)
-            if dec.code.startswith("B:"):
-                decision += " on " + dec.code[2:]
-            rationale = dec.note or rationale
+            decision = _shape(dec)
+            rationale = dec.note or FORMS[dec.codes[0]][1]
         mins = Counter(m for _, m in ops.get(kind, []))
         op_txt = ", ".join(f"{m}:{n}" for m, n in sorted(mins.items())) if mins else "-"
         det = ", ".join(sorted(dets.get(kind, set()))[:2]) or "-"
@@ -469,13 +562,16 @@ def _split_owner(
         s, e = spans[dec.kind]
         block = lines[s : e + 1]
         block.insert(
-            len(block) - 1, f"        observable_at=({FORMS[dec.code][3]},),\n"
+            len(block) - 1,
+            f"        observable_at=({', '.join(FORMS[c][3] for c in dec.codes)},),\n",
         )
         body += block
-    codes = {d.code for d in decs}
+    codes = {c for d in decs for c in d.codes}
     used = {"observable"}
     if any(FORMS[c][2] for c in codes):
         used |= {"ObservabilityCondition", "Platform"}
+    if any(FORM_LANGUAGES.get(c) for c in codes):
+        used |= {"Language", "ObservabilityCondition"}
     header = _header_for_sibling(lines, head, family, path.stem, number)
     obs_line = f"from .observability import {', '.join(sorted(used))}\n"
     # The observability import belongs with the other imports, before the aliases.
@@ -539,20 +635,23 @@ def apply_decisions(dry_run: bool) -> dict[str, int]:
         lines = list(original)
         for dec in sorted(decs, key=lambda d: -spans[d.kind][1]):
             _, end = spans[dec.kind]
-            lines.insert(end, f"        observable_at=({FORMS[dec.code][3]},),\n")
+            lines.insert(
+                end,
+                f"        observable_at=({', '.join(FORMS[c][3] for c in dec.codes)},),\n",
+            )
         head = next(
             i
             for i, ln in enumerate(lines)
             if re.match(r"[A-Z_0-9]+: list\[ChangeKindMeta\] = \[", ln)
         )
         lines[head:head] = [
-            ln + "\n" for ln in _constants_block({d.code for d in decs})
+            ln + "\n" for ln in _constants_block({c for d in decs for c in d.codes})
         ] + ["\n"]
         imp = next(
             i for i, ln in enumerate(lines) if ln.startswith("from .registry import")
         )
         used = {"observable"}
-        if any(FORMS[c][2] for c in {d.code for d in decs}):
+        if any(FORMS[c][2] for d in decs for c in d.codes):
             used |= {"ObservabilityCondition", "Platform"}
         lines.insert(imp, f"from .observability import {', '.join(sorted(used))}\n")
         text = _ruff_format(path, "".join(lines))
@@ -580,13 +679,10 @@ def pr_table() -> str:
     for kind, dec in DECISIONS.items():
         if REGISTRY.entries[kind].observable_at is UNCLASSIFIED:
             continue
-        rationale = dec.note or FORMS[dec.code][1] or "exported-symbol fact"
+        rationale = dec.note or FORMS[dec.codes[0]][1] or "exported-symbol fact"
         op_names = ", ".join(sorted({n for n, _ in ops.get(kind, [])})[:2]) or "-"
         det = ", ".join(sorted(dets.get(kind, set()))[:1]) or "-"
-        form = FORMS[dec.code]
-        shape = " , ".join("{" + ",".join(a) + "}" for a in form[0])
-        if dec.code.startswith("B:"):
-            shape += " on " + dec.code[2:]
+        shape = _shape(dec)
         rows.append(
             f"| `{kind}` | {owner[kind]} | {shape} | {rationale} | {op_names} "
             f"| {tiers.get(kind, '-')} | {det} |"
