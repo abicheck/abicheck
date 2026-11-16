@@ -72,7 +72,7 @@ from ..clang.template_default_entries import (
 from ..clang.var_alignment import clang_variable_alignment_map
 from ..concept_scan import concept_header_scan
 from .clang_semantics import SEMANTICS_ATTR, valid_template_default_entries
-from .preprocessed_text import read_preprocessed_text
+from .preprocessed_text import PreprocessedText, read_preprocessed_text
 
 log = logging.getLogger(__name__)
 
@@ -153,6 +153,25 @@ def _mention_files(root: Element, headers: Iterable[Path]) -> frozenset[str]:
         if local and mentions_exception_spec(real):
             out.add(name)
     return frozenset(out)
+
+
+def _spells_alignment_locally(
+    root: Element, headers: Iterable[Path], table: PreprocessedText
+) -> bool:
+    """Whether a file local to *headers* spells an alignment specifier in its
+    preprocessed code. A system header a dependency pulls in (its own
+    ``alignas``/``aligned``) is not the library's surface and never triggers the
+    clang parse, which would otherwise run on every castxml dump."""
+    files, dirs = _local_roots(headers)
+    for el in root.iter("File"):
+        name = el.get("name") or ""
+        if not name or name.startswith("<"):
+            continue
+        real = os.path.realpath(name)
+        local = real in files or any(real.startswith(d) for d in dirs)
+        if local and table.spells_alignment(name):
+            return True
+    return False
 
 
 def special_member_key(tag: str, class_name: str, params: Iterable[object]) -> str:
@@ -393,7 +412,9 @@ def join_clang_semantics(
     # A variable's alignment specifier is C's too: the parse runs for any root
     # whose preprocessed code spells one (an absent table cannot be ruled out).
     spelled = read_preprocessed_text(root)
-    wants_alignment = spelled is not None and spelled.may_spell_alignment()
+    wants_alignment = spelled is not None and _spells_alignment_locally(
+        root, headers, spelled
+    )
     mention_files = _mention_files(root, headers) if cxx else frozenset()
     # A template with no constraint is recorded too (the empty set), so the
     # baseline of a requires-clause added later is modelled: any template

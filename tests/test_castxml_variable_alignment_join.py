@@ -257,3 +257,37 @@ def test_stripped_header_alignment_change_is_not_a_clean_pass(
     )
     # Exit 4: an ABI break, the verdict the stripped header cell must reach.
     assert result.returncode == 4, result.stdout
+
+
+# ---------------------------------------------------------------------------
+# The join runs only for the library's own surface (perf regression, WS-2 A2.1).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("spelled_in", "expected"),
+    [
+        ("system", False),  # a dependency header spells alignas: not the library's
+        ("api", True),  # the given header spells aligned(N)
+        ("detail", True),  # a header under the given header's directory does
+        ("none", False),  # no file spells a specifier at all
+    ],
+)
+def test_only_the_library_surface_triggers_the_clang_join(
+    tmp_path: Path, spelled_in: str, expected: bool
+) -> None:
+    from abicheck.extract.headers.castxml.clang_semantics_join import (
+        _spells_alignment_locally,
+    )
+
+    api_dir = tmp_path / "api"
+    header = api_dir / "api.h"
+    detail = api_dir / "detail" / "impl.h"
+    system = "/usr/include/c++/v1/vector"
+    by_key = {"system": system, "api": str(header), "detail": str(detail)}
+    root = Element("CastXML")
+    for name in (str(header), str(detail), system):
+        SubElement(root, "File", id=f"f{len(root)}", name=name)
+    spelled = frozenset({by_key[spelled_in]}) if spelled_in in by_key else frozenset()
+    table = PreprocessedText({}, "", spelled)
+    assert _spells_alignment_locally(root, [header], table) is expected
