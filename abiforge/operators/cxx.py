@@ -66,8 +66,8 @@ _RISK: dict[str, Any] = {
     "verdict_max": "COMPATIBLE_WITH_RISK",
 }
 _SOURCE_BREAK: dict[str, Any] = {"verdict_min": "API_BREAK", "verdict_max": "API_BREAK"}
-_BINARY = {"min_evidence": "binary"}
-_HEADERS = {"min_evidence": "headers"}
+_BINARY: dict[str, object] = {}
+_HEADERS: dict[str, object] = {}
 
 _SPECIFIERS = (
     _op(

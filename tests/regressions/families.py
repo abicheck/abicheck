@@ -173,6 +173,9 @@ FAMILIES: dict[str, Family] = {
                 # A corpus expectation that depends on a producer's DWARF fact is
                 # checked against each installed producer, read with readelf.
                 "tests/test_producer_dw_at_deleted.py",
+                # A corpus expectation for a visibility-dependent export is read
+                # against the dynamic symbol table of each variant's build.
+                "tests/test_namesake_expectation.py",
             ),
         ),
         Family(
@@ -638,6 +641,7 @@ _F8 = (
 )
 _F7 = (
     "tests.producer_fact_expectation_assumed_one_producer",
+    "tests.export_expectation_assumed_default_visibility",
     "harness.drives_a_configuration_no_front_end_produces",
     "scanner.position_counter_skips_a_line_kind",
     # Masked by suite-wide shared interpreter state: passed in a full run,

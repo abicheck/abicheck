@@ -537,4 +537,19 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             )
         },
     ),
+    BugClass(
+        id="tests.export_expectation_assumed_default_visibility",
+        invariant=(
+            "A corpus expectation for a symbol whose export depends on the "
+            "build's default visibility is selected from the export table that "
+            "build produces, for default and hidden visibility alike. A bare "
+            "C-linkage replacement is exported only without -fvisibility=hidden, "
+            "so one expectation for both wrongly named FUNC_DELETED_ELF_FALLBACK "
+            "for hidden builds, where the bare name is absent and the loss is a "
+            "visibility change."
+        ),
+        fixed_by=(2093,),
+        seed_tests=("tests/test_namesake_expectation.py",),
+        axes={"visibility": ("default", "hidden")},
+    ),
 )

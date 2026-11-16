@@ -65,8 +65,8 @@ _RISK: dict[str, Any] = {
     "verdict_max": "COMPATIBLE_WITH_RISK",
 }
 _SOURCE_BREAK: dict[str, Any] = {"verdict_min": "API_BREAK", "verdict_max": "API_BREAK"}
-_BINARY = {"min_evidence": "binary"}
-_HEADERS = {"min_evidence": "headers"}
+_BINARY: dict[str, object] = {}
+_HEADERS: dict[str, object] = {}
 
 
 # --- symbol versions -----------------------------------------------------------
@@ -305,7 +305,6 @@ _DYNAMIC = (
         # a recorded strict xfail (abiforge.known), not an unobservable
         # edit: it fails loudly once abicheck reads the flip.
         **_RISK,
-        min_evidence="dwarf",
     ),
     _op(
         "relr_packed_relocs",
@@ -391,7 +390,6 @@ _DYNAMIC = (
         ),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE",
-        min_evidence="dwarf",
     ),
 )
 
@@ -885,7 +883,6 @@ _FUNCTIONS = (
         ),
         "a variadic callee follows the variadic calling convention (%al on x86-64)",
         expected=frozenset({"FUNC_VARIADIC_ADDED"}),
-        min_evidence="dwarf",  # DW_TAG_unspecified_parameters
     ),
     _op(
         "func_lost_variadic",
@@ -893,7 +890,6 @@ _FUNCTIONS = (
         _decl("elf.vfmt", "int vfmt(int n);", "int vfmt(int n) { return n * 4; }"),
         "callers passing extra arguments no longer compile; the convention changes",
         expected=frozenset({"FUNC_VARIADIC_REMOVED"}),
-        min_evidence="dwarf",  # DW_TAG_unspecified_parameters
     ),
     _op(
         "param_restrict_added",
