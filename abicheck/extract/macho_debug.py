@@ -87,6 +87,12 @@ def macho_dwarf_kwargs(
         _log.debug("adjacent dSYM of %s is unreadable: %s", dylib_path, exc)
         record_extraction_limitation(ADJACENT_DSYM_UNREADABLE_LIMITATION)
         return {}
+    if explicit is None and dwarf_adv.extraction is AdvancedExtractionStatus.FAILED:
+        # The adjacent bundle exists but its DWARF could not be read: the same
+        # transient, non-fatal gap as an unreadable dSYM, and recorded the same
+        # way so the snapshot is not cached as if the bundle were absent.
+        record_extraction_limitation(ADJACENT_DSYM_UNREADABLE_LIMITATION)
+        return {}
     if presence_only:
         # ELF's contract: presence is recorded, type expansion is not run.
         if not dwarf_meta.has_dwarf:

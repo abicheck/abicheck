@@ -72,6 +72,9 @@ def _corpus(function_cls: type = Function) -> AbiSnapshot:
     return AbiSnapshot(
         library="libwire.so.1",
         version="1.0",
+        # Fixed generations (extractor, resolver, source) as the pin was recorded,
+        # so the pin does not move on every generation bump. Source 0 is unstated.
+        fact_generations=(79, 4, 0),
         functions=[
             function_cls(
                 name="wire_open",

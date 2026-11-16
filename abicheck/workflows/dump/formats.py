@@ -144,7 +144,7 @@ class MachoAdapter:
         from .macho import extract_macho
 
         r = request
-        return extract_macho(
+        snap: AbiSnapshot = extract_macho(
             r.path,
             r.version,
             headers=r.headers,
@@ -160,6 +160,7 @@ class MachoAdapter:
             symbols_only=r.symbols_only,
             debug_presence_only=r.debug_presence_only,
         )
+        return snap
 
 
 #: PE and Mach-O. The ELF adapter lives with its extractor in

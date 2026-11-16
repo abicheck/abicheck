@@ -765,7 +765,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "recorded alignment fact changes; the variable's name and type spelling do not"
     ),
     80: GenerationSpellingChange(
-        "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable adjacent dSYM stores a fixed limitation and is not cached."
+        "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable or unparseable adjacent dSYM stores a fixed limitation, is not cached, and the header-free Mach-O extractor collects it."
     ),
 }
 
