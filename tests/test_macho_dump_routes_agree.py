@@ -78,6 +78,7 @@ def _binary_facts(snapshot) -> tuple[bool, frozenset[str]]:
     return has_dwarf, exports
 
 
+@pytest.mark.integration  # the header route needs castxml
 @_NO_GCC
 def test_cli_routes_agree_on_dwarf_and_exports(
     tmp_path: Path, library: tuple[Path, Path]
@@ -120,6 +121,7 @@ _PE_TOOLS = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration  # the header route needs castxml
 @_LINUX_GCC
 def test_elf_cli_routes_agree_on_dwarf(tmp_path: Path) -> None:
     src = tmp_path / "a.c"
