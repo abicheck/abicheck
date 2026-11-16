@@ -339,6 +339,8 @@ _BUILTIN_VA_LIST_NAME = "__builtin_va_list"
 #: Bound on a typedef chain (``va_list`` -> ``__builtin_va_list``, a user
 #: alias of it, and so on); a longer chain is not followed.
 _TYPEDEF_CHAIN_LIMIT = 8
+#: The declaration kinds that name a type: a C typedef, and the C++ ``using X = T;``.
+_ALIAS_DECL_KINDS = frozenset({"TypedefDecl", "TypeAliasDecl"})
 
 
 def builtin_va_list_decl_ids(root: dict[str, Any]) -> frozenset[str]:
@@ -354,17 +356,23 @@ def builtin_va_list_decl_ids(root: dict[str, Any]) -> frozenset[str]:
     excluded.
     """
     decls: dict[str, tuple[str, str | None]] = {}
-    for node in ast_inner(root):
-        if not isinstance(node, dict) or node.get("kind") != "TypedefDecl":
+    # Every declaration container (a namespace, an extern block) can hold a
+    # typedef or a C++ ``using`` alias, so walk the whole tree, not only the
+    # translation unit's top level. Iterative, so deep nesting cannot overflow.
+    stack: list[Any] = [root]
+    while stack:
+        current = stack.pop()
+        if not isinstance(current, dict):
             continue
-        node_id = node.get("id")
-        if not isinstance(node_id, str):
-            continue
-        under = (node.get("type") or {}).get("typeAliasDeclId")
-        decls[node_id] = (
-            str(node.get("name", "")),
-            under if isinstance(under, str) else None,
-        )
+        if current.get("kind") in _ALIAS_DECL_KINDS:
+            node_id = current.get("id")
+            if isinstance(node_id, str):
+                under = (current.get("type") or {}).get("typeAliasDeclId")
+                decls[node_id] = (
+                    str(current.get("name", "")),
+                    under if isinstance(under, str) else None,
+                )
+        stack.extend(ast_inner(current))
 
     def reaches_builtin(decl_id: str) -> bool:
         current: str | None = decl_id

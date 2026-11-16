@@ -149,7 +149,7 @@
       "abicheck/extract/headers/clang/owned_tag.py": "61b5cd585abf22d1a2ad78e38d67c4dc32be54001001cb2a7bfe9adb5390a60c",
       "abicheck/extract/headers/clang/param_kind.py": "5f23882fce9965286398d2cf89d02e845051179dd5774a448c700d0498373fca",
       "abicheck/extract/headers/clang/pointer_depth.py": "88afcca3b65a1a95f6cea563085af926b45e5ed2d8e1bdd74b9332a129b07441",
-      "abicheck/extract/headers/clang/qualifiers.py": "75f1f42f3d77e4c92dd98733100522e6ffe23017074e602d8c359d4539e9657d",
+      "abicheck/extract/headers/clang/qualifiers.py": "8fe5b0760eec5c2c83842d147a9734275693a5ab6167bcbf2b30a73a30f39c40",
       "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
       "abicheck/extract/headers/clang/records.py": "214671b358860f0fa02318f91701ba079de8a8e4fcef601d68f0613911ca36cf",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
@@ -233,9 +233,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4f4ca907be38f88a91f8b31660f2dad179c42a1f37e9b24054c5bb7d9f248862",
+    "fingerprint": "3f62ff6ff7fad808aa28c94b032f85ac7a6cef3b81bc1f358ec339121e808794",
     "generation": 76,
-    "reason": "a clang header parse on a pointer-valued va_list target recognises a va_list parameter by its typedef chain to __builtin_va_list; generation 75 (#2068) is merged, so this PR takes 76"
+    "reason": "generation 76 is unmerged: re-recorded in place for the namespace-aware and C++ using-alias typedef index"
   },
   "resolver": {
     "files": {

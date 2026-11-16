@@ -617,3 +617,64 @@ class TestClangParamIsVaListPointerTarget:
             p for p in params_of(user_root)["user_alias"] if p.get("name") != "n"
         )
         assert _clang_param_is_va_list(target, user_ids) is False
+
+
+def test_live_m32_cxx_namespace_and_using_alias_are_structural(tmp_path: Path) -> None:
+    """A typedef inside a namespace and a C++ ``using`` alias both link to the
+    builtin ``va_list`` and are recognised; a namespaced user typedef to a plain
+    pointer is not. Parsed live with ``clang++ -m32`` (clang 18 on this host)."""
+    if shutil.which("clang++") is None:
+        pytest.skip("clang++ not installed")
+    probe = subprocess.run(
+        ["clang++", "-m32", "-fsyntax-only", "-x", "c++", "-"],
+        input="int x;\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        pytest.skip("clang++ cannot target -m32 on this host")
+    header = tmp_path / "ns.h"
+    header.write_text(
+        "#include <stdarg.h>\n"
+        "namespace api { typedef __builtin_va_list Args; void log(Args ap); }\n"
+        "using Args2 = __builtin_va_list;\n"
+        "void log2(Args2 ap);\n"
+        "namespace api { typedef char *Fake; void f(Fake ap); }\n"
+    )
+    out = subprocess.run(
+        [
+            "clang++",
+            "-m32",
+            "-x",
+            "c++",
+            "-fsyntax-only",
+            "-Xclang",
+            "-ast-dump=json",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    root = json.loads(out)
+    ids = builtin_va_list_decl_ids(root)
+    params: dict[str, dict] = {}
+
+    def walk(node: object, fn: str | None) -> None:
+        if isinstance(node, dict):
+            if node.get("kind") == "FunctionDecl":
+                fn = str(node.get("name", ""))
+            if node.get("kind") == "ParmVarDecl" and fn is not None:
+                params[fn] = node
+            for value in node.values():
+                walk(value, fn)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, fn)
+
+    walk(root, None)
+    expected = {"log": True, "log2": True, "f": False}
+    for fn, want in expected.items():
+        assert fn in params, f"clang emitted no ParmVarDecl for {fn}"
+        assert _clang_param_is_va_list(params[fn], ids) is want, fn
