@@ -203,9 +203,9 @@ def _parse_dwarf_source(
     result: tuple[DwarfMetadata, AdvancedDwarfMetadata] = parse_dwarf(
         dwarf_path, _session_out=session_out
     )
-    if (
-        dwarf_path != so_path
-        and result[1].extraction is AdvancedExtractionStatus.FAILED
+    if dwarf_path != so_path and result[1].extraction in (
+        AdvancedExtractionStatus.FAILED,
+        AdvancedExtractionStatus.NOT_RUN,
     ):
         note_debug_info_read_failure(f"detached debug file {dwarf_path} is unreadable")
     return result  # the reader's own result, unrepacked
