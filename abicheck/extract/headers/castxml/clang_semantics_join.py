@@ -393,7 +393,7 @@ def join_clang_semantics(
     # A variable's alignment specifier is C's too: the parse runs for any root
     # whose preprocessed code spells one (an absent table cannot be ruled out).
     spelled = read_preprocessed_text(root)
-    wants_alignment = spelled is None or spelled.may_spell_alignment()
+    wants_alignment = spelled is not None and spelled.may_spell_alignment()
     mention_files = _mention_files(root, headers) if cxx else frozenset()
     # A template with no constraint is recorded too (the empty set), so the
     # baseline of a requires-clause added later is modelled: any template
