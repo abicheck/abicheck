@@ -189,8 +189,8 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_debug.py": "3d73896a3e8b16c342842676a6ce055b21a258c929420195a8e46d09c8cddc40",
-      "abicheck/extract/macho_dsym.py": "50d9107d628f7439e430ff84a643c8689d24ea47437c8b2e9e54db19d7955c87",
+      "abicheck/extract/macho_debug.py": "b0dd120827d3a8f7e4b4add6a197a06df8efcecfa3b92d482c892954cd0b6256",
+      "abicheck/extract/macho_dsym.py": "56c2ca93a16bdad453a524122078931b80b629ff5a2a835de6ff21139c78ac7f",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
@@ -243,9 +243,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "2d56483a485fcfc4acf1dac2c1d7e40fb09b4d61659ed75f8f1a232c3d15ad8e",
+    "fingerprint": "a699ac74d43202340dea647be6e65e1e2455b6fe959cc112e004bda2f0f3bfc2",
     "generation": 80,
-    "reason": "pe.py: extract the PDB failure recording into _record_pdb_failure (same call, same section); reduces extract_pe complexity for CodeFactor. No recorded output changes; generation 80 provisional."
+    "reason": "Presence-only Mach-O reads the dSYM section headers instead of parsing CUs (ELF's contract). The recorded facts are unchanged: same presence fact, same NOT_RUN advanced status, same fixed limitation and same explicit-bundle refusal. macho_dsym's validation is shared with the full read, unchanged in behaviour."
   },
   "resolver": {
     "files": {

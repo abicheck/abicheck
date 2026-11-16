@@ -31,7 +31,7 @@ from typing import Any
 
 from ..dwarf_advanced import AdvancedDwarfMetadata
 from ..errors import SnapshotError
-from ..model.dwarf_facts import AdvancedExtractionStatus
+from ..model.dwarf_facts import AdvancedExtractionStatus, DwarfMetadata
 from .debug_dump import _resolve_debug_metadata
 from .extraction_limitations import record_extraction_limitation
 
@@ -76,6 +76,8 @@ def macho_dwarf_kwargs(
         debug_kwargs.get("symbols_only") or debug_kwargs.get("debug_presence_only")
     )
     explicit = debug_kwargs.get("debug_info_path")
+    if presence_only and debug_format in (None, "dwarf"):
+        return _presence_kwargs(dylib_path, explicit)
     try:
         dwarf_meta, dwarf_adv = _resolve_debug_metadata(
             dylib_path, debug_format, dwarf_source=explicit
@@ -106,6 +108,40 @@ def macho_dwarf_kwargs(
     if dwarf_adv.extraction is not AdvancedExtractionStatus.COMPLETED:
         return {}
     return {"dwarf": dwarf_meta, "dwarf_advanced": dwarf_adv}
+
+
+def _presence_kwargs(dylib_path: Path, explicit: Path | None) -> dict[str, Any]:
+    """Presence-only DWARF of a Mach-O library, with no compile unit parsed.
+
+    ELF's contract: presence is recorded and the advanced type pass does not run.
+    The bundle's ``__DWARF`` section headers answer presence (the same validation
+    as a full read), so no ``DWARFInfo`` is built and no CU is walked. An explicit
+    bundle that is refused stays fail-closed; an adjacent one that is present but
+    refused is absent evidence with a recorded note.
+    """
+    from ..dwarf_unified import _adjacent_dsym_binary
+    from .macho_dsym import DsymAbsent, dsym_debug_info_presence, macho_uuid
+
+    dsym = explicit if explicit is not None else _adjacent_dsym_binary(dylib_path)
+    if dsym is None:
+        return {}
+    present = dsym_debug_info_presence(dsym, dylib_uuid=macho_uuid(dylib_path))
+    if isinstance(present, DsymAbsent):
+        if explicit is not None:
+            raise SnapshotError(
+                f"explicit dSYM {dsym} for {dylib_path} is not used: {present.reason}"
+            )
+        if dsym.is_file():
+            record_extraction_limitation(ADJACENT_DSYM_UNREADABLE_LIMITATION)
+        return {}
+    if not present:
+        return {}
+    return {
+        "dwarf": DwarfMetadata(has_dwarf=True),
+        "dwarf_advanced": AdvancedDwarfMetadata(
+            has_dwarf=True, extraction=AdvancedExtractionStatus.NOT_RUN
+        ),
+    }
 
 
 def warn_dwarf_only(dwarf_only: bool) -> None:
