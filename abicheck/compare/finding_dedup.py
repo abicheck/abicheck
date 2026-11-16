@@ -31,7 +31,7 @@ it. Moved out of the legacy ``diff_filtering.py`` (ADR-061).
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 from ..diff_helpers import (
     canonicalize_record_symbol,
@@ -42,23 +42,20 @@ from ..diff_helpers import (
 from ..model import AbiSnapshot
 from ..model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.subsumption import SUBSUMED_BY
 from ..model.identity import EntityId
 from .dedup_key import hashable_value
 from .finding_identity import resolve_change_identity
 from .source_replay_twins import drop_replay_twins
 from .variable_names import qualified_variable_name
 
-# Mapping from DWARF change kinds to their AST equivalents for deduplication.
-_DWARF_TO_AST_EQUIV: dict[ChangeKind, set[ChangeKind]] = {
-    ChangeKind.STRUCT_SIZE_CHANGED: {ChangeKind.TYPE_SIZE_CHANGED},
-    ChangeKind.STRUCT_ALIGNMENT_CHANGED: {ChangeKind.TYPE_ALIGNMENT_CHANGED},
-    ChangeKind.STRUCT_FIELD_OFFSET_CHANGED: {ChangeKind.TYPE_FIELD_OFFSET_CHANGED},
-    ChangeKind.STRUCT_FIELD_REMOVED: {ChangeKind.TYPE_FIELD_REMOVED},
-    # A union member's retype is reported by the AST lane as its own kind.
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED: {
-        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-        ChangeKind.UNION_FIELD_TYPE_CHANGED,
-    },
+# The AST-lane kinds each DWARF-lane kind is subsumed by, read from the
+# registry's declared ``subsumed_by`` (ADR-093 D4) rather than a hand-written
+# table. The matching engine below is unchanged; only the lookup comes from
+# the catalog.
+_SUBSUMED_AST_KINDS: dict[ChangeKind, frozenset[ChangeKind]] = {
+    ChangeKind(kind): frozenset(ChangeKind(s.kind) for s in subsumptions)
+    for kind, subsumptions in SUBSUMED_BY.items()
 }
 
 # Enum change kinds eligible for same-kind symbol-based dedup (FIX-C).
@@ -321,10 +318,16 @@ def _ast_qualified_hint(c: Change, ambiguous: Mapping[EntityId, str]) -> str | N
     return None
 
 
+def _sorted_kinds(kinds: Iterable[ChangeKind]) -> list[ChangeKind]:
+    """Kinds in a fixed (value) order, so a tie between partners is reproducible."""
+    return sorted(kinds, key=lambda k: k.value)
+
+
 def _dedup_cross_kind(
     changes: list[Change],
     record_names: dict[str, str] | None = None,
     ambiguous: Mapping[EntityId, str] | None = None,
+    on_subsumed: Callable[[Change, ChangeKind], None] | None = None,
 ) -> list[Change]:
     """Pass 3: drop a DWARF finding when an equivalent AST finding exists.
 
@@ -338,7 +341,7 @@ def _dedup_cross_kind(
     requires the two findings' own old/new transitions to agree (see
     :func:`cross_tier_transition`) -- a mere kind+symbol match is not
     enough when the header and DWARF evidence disagree on the transition
-    itself, e.g. a stale header vs. inconsistent extractor evidence. Only indexes the AST-tier kinds this dedup ever looks up (``_DWARF_TO_AST_EQUIV``'s values) -- indexing every kind unconditionally crashed on a kind (e.g. ``PYTHON_STABLE_ABI_VIOLATION``) whose ``old_value``/``new_value`` is a list, unhashable for the transition-agreement set below (Codex review).
+    itself, e.g. a stale header vs. inconsistent extractor evidence. Only indexes the AST-tier kinds this dedup ever looks up (``_SUBSUMED_AST_KINDS``'s values) -- indexing every kind unconditionally crashed on a kind (e.g. ``PYTHON_STABLE_ABI_VIOLATION``) whose ``old_value``/``new_value`` is a list, unhashable for the transition-agreement set below (Codex review).
     """
     names = record_names or {}
     known_ambiguous = ambiguous or {}
@@ -352,7 +355,7 @@ def _dedup_cross_kind(
     _Transition = tuple[object, object] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
-    _relevant_ast = {ak for aks in _DWARF_TO_AST_EQUIV.values() for ak in aks}
+    _relevant_ast = {ak for aks in _SUBSUMED_AST_KINDS.values() for ak in aks}
     for c in (c for c in changes if c.kind in _relevant_ast):
         hint = _ast_qualified_hint(c, known_ambiguous)
         key = (c.symbol, hint, c.field_name)
@@ -391,7 +394,7 @@ def _dedup_cross_kind(
 
     result: list[Change] = []
     for c in changes:
-        equiv_ast_kinds = _DWARF_TO_AST_EQUIV.get(c.kind)
+        equiv_ast_kinds = _SUBSUMED_AST_KINDS.get(c.kind)
         if equiv_ast_kinds:
             dwarf_key = (c.symbol, None, c.field_name)
             canon_symbol = canonical.get(dwarf_key) or canonical.setdefault(
@@ -400,11 +403,21 @@ def _dedup_cross_kind(
             )
             dwarf_transition = cross_tier_transition(c)
 
-            # Exact symbol match
-            if any(
-                _matches(ast_findings.get((ak.value, canon_symbol)), dwarf_transition)
-                for ak in equiv_ast_kinds
-            ):
+            # Exact symbol match. The partner is the first declared AST kind (in
+            # sorted order, so the recorded reason is deterministic) that matches.
+            partner = next(
+                (
+                    ak
+                    for ak in _sorted_kinds(equiv_ast_kinds)
+                    if _matches(
+                        ast_findings.get((ak.value, canon_symbol)), dwarf_transition
+                    )
+                ),
+                None,
+            )
+            if partner is not None:
+                if on_subsumed is not None:
+                    on_subsumed(c, partner)
                 continue
 
             # Parent-type match (FIX-F): "Point::x" → check "Point". Only for
@@ -413,18 +426,33 @@ def _dedup_cross_kind(
             if c.kind in _DWARF_FIELD_LEVEL_KINDS and "::" in canon_symbol:
                 parent = canon_symbol.rsplit("::", 1)[0]
                 if c.field_name is not None:
-                    if any(
-                        _matches(
-                            ast_field_findings.get((ak.value, parent, c.field_name)),
-                            dwarf_transition,
-                        )
-                        for ak in equiv_ast_kinds
-                    ):
-                        continue
-                elif any(
-                    _matches(ast_findings.get((ak.value, parent)), dwarf_transition)
-                    for ak in equiv_ast_kinds
-                ):
+                    partner = next(
+                        (
+                            ak
+                            for ak in _sorted_kinds(equiv_ast_kinds)
+                            if _matches(
+                                ast_field_findings.get(
+                                    (ak.value, parent, c.field_name)
+                                ),
+                                dwarf_transition,
+                            )
+                        ),
+                        None,
+                    )
+                else:
+                    partner = next(
+                        (
+                            ak
+                            for ak in _sorted_kinds(equiv_ast_kinds)
+                            if _matches(
+                                ast_findings.get((ak.value, parent)), dwarf_transition
+                            )
+                        ),
+                        None,
+                    )
+                if partner is not None:
+                    if on_subsumed is not None:
+                        on_subsumed(c, partner)
                     continue
 
         result.append(c)
@@ -435,6 +463,7 @@ def deduplicate_ast_dwarf(
     changes: list[Change],
     old: AbiSnapshot | None = None,
     new: AbiSnapshot | None = None,
+    on_subsumed: Callable[[Change, ChangeKind], None] | None = None,
 ) -> list[Change]:
     """Remove DWARF findings that duplicate an AST finding for the same symbol.
 
@@ -449,7 +478,7 @@ def deduplicate_ast_dwarf(
     stage1 = _dedup_exact(changes, ambiguous)
     stage2 = _dedup_enum_same_kind(stage1, ambiguous)
     record_names = {**record_canonical_names(old), **record_canonical_names(new)}
-    return _dedup_cross_kind(stage2, record_names, ambiguous)
+    return _dedup_cross_kind(stage2, record_names, ambiguous, on_subsumed)
 
 
 #: An ELF-only removal and a header-aware visibility finding name one export

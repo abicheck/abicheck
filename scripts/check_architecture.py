@@ -26,12 +26,9 @@ from typing import Any
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-from architecture_graph import find_cycle  # noqa: E402 -- sibling leaf, see that module
-from architecture_names import (  # noqa: E402 -- sibling leaf, see that module
-    GENERIC_NAMES,
-    GENERIC_SUFFIXES,
-    generic_owner_messages,
-)
+from architecture_graph import find_cycle  # noqa: E402, I001 -- sibling leaf, see that module
+from architecture_kind_relations import kind_relation_table_messages  # noqa: E402
+from architecture_names import GENERIC_NAMES, GENERIC_SUFFIXES, generic_owner_messages  # noqa: E402
 
 SCHEMA_VERSION = 1
 DEBT_FIELDS = frozenset(
@@ -1622,6 +1619,8 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         root, modules, layers, dependency_direction_exceptions, findings
     )
     _check_facades(root, modules, findings)
+    for message in kind_relation_table_messages(root):
+        findings.append(Finding("kind-relation-table", message))
     return findings
 
 

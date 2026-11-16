@@ -20,7 +20,14 @@ Whole entries moved unchanged from ``types_1.py`` (each gains only its
 
 from __future__ import annotations
 
-from .observability import ObservabilityCondition, Platform, observable
+from .observability import (
+    KindRelations,
+    ObservabilityCondition,
+    Platform,
+    Subsumption,
+    SubsumptionKey,
+    observable,
+)
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -660,5 +667,77 @@ TYPES_ENTRIES_3: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
         observable_at=(_OBS_DH,),
+    ),
+    _E(
+        "struct_alignment_changed",
+        _B,
+        impact="Struct alignment changed; may cause misaligned access in embedded structs.",
+        description_template="Struct alignment changed: {name} ({old} → {new})",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
+        relations=KindRelations(
+            subsumed_by=(Subsumption("type_alignment_changed", SubsumptionKey.ENTITY),)
+        ),
+    ),
+    _E(
+        "struct_field_offset_changed",
+        _B,
+        impact="Field moved to different offset; old code accesses wrong memory.",
+        description_template="Field offset changed: {name}::{detail} (+{old} → +{new})",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
+        relations=KindRelations(
+            subsumed_by=(
+                Subsumption("type_field_offset_changed", SubsumptionKey.ENTITY_FIELD),
+            )
+        ),
+    ),
+    _E(
+        "struct_field_removed",
+        _B,
+        impact="Field removed from struct; old code accessing it reads/writes garbage.",
+        description_template="Struct field removed: {name}::{detail}",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.REMOVED,
+        observable_at=(_OBS_DH,),
+        relations=KindRelations(
+            subsumed_by=(
+                Subsumption("type_field_removed", SubsumptionKey.ENTITY_FIELD),
+            )
+        ),
+    ),
+    _E(
+        "struct_field_type_changed",
+        _B,
+        impact="Field type changed in binary; old code misinterprets the field data.",
+        description_template="Field type changed: {name}::{detail} {old} → {new}",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
+        relations=KindRelations(
+            subsumed_by=(
+                Subsumption("type_field_type_changed", SubsumptionKey.ENTITY_FIELD),
+                Subsumption("union_field_type_changed", SubsumptionKey.ENTITY_FIELD),
+            )
+        ),
+    ),
+    _E(
+        "struct_size_changed",
+        _B,
+        impact="sizeof(T) changed in debug info; confirms layout break visible at binary level.",
+        description_template="Struct size changed: {name} ({old} → {new} bytes)",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+        observable_at=(_OBS_DH,),
+        relations=KindRelations(
+            subsumed_by=(Subsumption("type_size_changed", SubsumptionKey.ENTITY),)
+        ),
     ),
 ]

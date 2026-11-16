@@ -352,7 +352,7 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     ``finding_dedup.deduplicate_cross_detector``'s ``resolve_change_identity``-keyed
     dedup can recognize them as the same finding — exactly the class of
     duplicate the enum bridge above was built to close, left open for
-    every other kind pair ``_DWARF_TO_AST_EQUIV`` maps (struct size/
+    every other kind pair ``_SUBSUMED_AST_KINDS`` maps (struct size/
     alignment AND the three field-level kinds, since a field-qualified
     symbol's own type-name prefix carries the identical mismatch).
 
@@ -413,7 +413,7 @@ def canonicalize_record_symbol(
 
     Handles both a whole-type symbol (``"Widget"``) and a field-qualified
     one (``"Widget::x"``, for the three field-level kinds in
-    ``finding_dedup._DWARF_TO_AST_EQUIV``) — only the type-name portion
+    ``finding_dedup._SUBSUMED_AST_KINDS``) — only the type-name portion
     is ever rewritten, never the field name itself.
 
     *field_name* (``Change.field_name``) is the ONLY signal used to decide
@@ -503,7 +503,7 @@ def _normalize_type_spelling(name: str, *, strip_indirection: bool) -> str:
 
 # DWARF-tier kinds whose old_value/new_value are byte-based (DW_AT_byte_size/
 # DW_AT_alignment/byte_offset), unlike their AST-tier equivalent (diff_
-# filtering._DWARF_TO_AST_EQUIV), which is always bit-based (RecordType.
+# filtering._SUBSUMED_AST_KINDS), which is always bit-based (RecordType.
 # size_bits/alignment_bits, TypeField.offset_bits) -- see diff_platform.py's/
 # diff_types.py's own construction sites. A transition comparison across
 # tiers must convert one side before comparing, or a genuinely identical
