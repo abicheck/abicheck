@@ -1385,5 +1385,5 @@ class TestFormatHandlerRegistry:
 
         h = dumper._HANDLERS_BY_NAME
         assert h["elf"].accepts_dwarf_only and h["elf"].accepts_debug_format
-        assert h["macho"].accepts_dwarf_only and h["macho"].accepts_debug_format
+        assert h["macho"].accepts_dwarf_only and not h["macho"].accepts_debug_format
         assert not h["pe"].accepts_dwarf_only and not h["pe"].accepts_debug_format
