@@ -941,7 +941,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
                         or (c.flags.pack is not None and c.flags.pack <= 4)
                     )
                 ),
-                {"any_of": ()},
+                {"any_of": (_ALIGN,)},
                 "alignof drop is visible only in the header dump; DWARF shows no size or offset change here",
             ),
             Rule(
