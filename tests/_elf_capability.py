@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 _ELF_MAGIC = b"\x7fELF"
-_CLANG_ELF_TARGET = "--target=x86_64-linux-gnu"
+_CLANG_ELF_TARGET = ["--target=x86_64-linux-gnu", "-fuse-ld=lld"]
 
 #: What each kind of ELF artifact the oracles need, as compiler flags.
 _KIND_FLAGS: dict[str, list[str]] = {
@@ -35,7 +35,7 @@ def _prefix(family: str) -> list[str] | None:
     path = shutil.which(compiler)
     if path is None:
         return None
-    return [path, _CLANG_ELF_TARGET] if family == "clang" else [path]
+    return [path, *_CLANG_ELF_TARGET] if family == "clang" else [path]
 
 
 def _writes_elf(prefix: list[str], kind: str, lang: str) -> bool:
@@ -77,3 +77,28 @@ def skip_reason(family: str, kind: str) -> str:
     return (
         f"no {family} on this host can write an ELF {kind} (the ELF-DWARF capability)"
     )
+
+
+def subprogram_conventions(obj: Path) -> list[tuple[str | None, int | None]]:
+    """(name, DW_AT_calling_convention code or None) of each subprogram in *obj*.
+
+    Read with pyelftools, so the same oracle runs on every host (no readelf).
+    """
+    from elftools.elf.elffile import ELFFile
+
+    found: list[tuple[str | None, int | None]] = []
+    with obj.open("rb") as fh:
+        dwarf = ELFFile(fh).get_dwarf_info()
+        for cu in dwarf.iter_CUs():
+            for die in cu.iter_DIEs():
+                if die.tag != "DW_TAG_subprogram":
+                    continue
+                name = die.attributes.get("DW_AT_name")
+                cc = die.attributes.get("DW_AT_calling_convention")
+                found.append(
+                    (
+                        name.value.decode() if name is not None else None,
+                        int(cc.value) if cc is not None else None,
+                    )
+                )
+    return found

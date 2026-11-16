@@ -8,6 +8,7 @@ several shapes per rule, so a rule cannot pass by matching one cell.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -126,11 +127,28 @@ _VIRTUAL = (
 )
 
 
+def _host_cxx() -> list[str] | None:
+    """The host's C++ compiler, which runs the shapes to give the oracle answers."""
+    for exe in ("g++", "clang++"):
+        path = shutil.which(exe)
+        if path is not None:
+            return [path]
+    return None
+
+
 def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
-    """Build the shapes into one ELF executable and return the compiler's answers."""
-    prefix = elf_capability("gcc", "executable")
-    if prefix is None:
-        pytest.skip(skip_reason("gcc", "executable"))
+    """The DWARF object of the shapes (ELF, explicit target) and the host's answers.
+
+    ``std::is_standard_layout`` is a language fact, so the host compiler runs the
+    shapes to give the expected value, while the DWARF is read from an ELF object
+    the clang ELF target writes on any host.
+    """
+    host = _host_cxx()
+    if host is None:
+        pytest.skip("no host C++ compiler runs the shapes (the run-time oracle)")
+    elf = elf_capability("clang", "object")
+    if elf is None:
+        pytest.skip(skip_reason("clang", "object"))
     body = "\n".join(decl for _, decl in _SHAPES)
     # A class with an inline virtual function gets a full DWARF definition only
     # once its constructor (and so its vtable) is emitted, so construct each one.
@@ -147,38 +165,47 @@ def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
         f"{body}\nint main() {{\n{constructs}\n{prints}\n  return 0;\n}}\n",
         encoding="utf-8",
     )
-    exe = tmp / "shapes"
-    cmd = [
-        *prefix,
-        "-std=c++17",
-        "-g",
-        f"-gdwarf-{dwarf}",
-        "-O0",
-        # GCC drops the DWARF of a type nothing uses; the shapes are only
-        # queried by the oracle, so keep every definition.
-        "-fno-eliminate-unused-debug-types",
-        str(src),
-        "-o",
-        str(exe),
-    ]
-    compile_proc = subprocess.run(cmd, capture_output=True, text=True)
-    if compile_proc.returncode != 0:
-        pytest.fail(f"{cmd} failed for {src}:\n{compile_proc.stderr}")
+    exe = tmp / "shapes_host"
+    run_build = subprocess.run(
+        [*host, "-std=c++17", "-O0", str(src), "-o", str(exe)],
+        capture_output=True,
+        text=True,
+    )
+    if run_build.returncode != 0:
+        pytest.fail(f"host build failed for {src}:\n{run_build.stderr}")
     run = subprocess.run([str(exe)], check=True, capture_output=True, text=True)
     oracle = {}
     for line in run.stdout.splitlines():
         name, value = line.split()
         oracle[name] = value == "1"
-    return exe, oracle
+    obj = tmp / "shapes.o"
+    cmd = [
+        *elf,
+        "-std=c++17",
+        "-g",
+        f"-gdwarf-{dwarf}",
+        "-O0",
+        # Clang, like GCC, drops the DWARF of a type nothing uses; the shapes are
+        # only queried by the oracle, so keep every definition.
+        "-fno-eliminate-unused-debug-types",
+        "-c",
+        str(src),
+        "-o",
+        str(obj),
+    ]
+    compile_proc = subprocess.run(cmd, capture_output=True, text=True)
+    if compile_proc.returncode != 0:
+        pytest.fail(f"{cmd} failed for {src}:\n{compile_proc.stderr}")
+    return obj, oracle
 
 
 @pytest.mark.parametrize("dwarf", [4, 5])
 def test_dwarf_standard_layout_matches_the_compiler(tmp_path: Path, dwarf: int) -> None:
-    exe, oracle = _compile_and_oracle(tmp_path, dwarf)
+    obj, oracle = _compile_and_oracle(tmp_path, dwarf)
     shapes = dict(_SHAPES)
     collector = StandardLayoutCollector()
     holders: dict[str, SimpleNamespace] = {}
-    with exe.open("rb") as fh:
+    with obj.open("rb") as fh:
         dwarf = ELFFile(fh).get_dwarf_info()
         # Every complete record of the unit goes in: a shape's member or base is
         # resolved through its own summary, as the snapshot builder does.

@@ -25,7 +25,7 @@ from abiforge.model.producer_capabilities import (
 from abiforge.model.seeds import SEEDS
 from abiforge.operators import OPERATORS
 from abiforge.run.toolchains import toolchain
-from tests._elf_capability import elf_capability, skip_reason
+from tests._elf_capability import elf_capability, skip_reason, subprogram_conventions
 
 pytestmark = pytest.mark.integration
 
@@ -66,32 +66,8 @@ def _cc_written_by(prefix: list[str], family: str, tmp: Path) -> dict[str, bool]
         capture_output=True,
         text=True,
     )
-    dump = subprocess.run(
-        ["readelf", "--debug-dump=info", str(obj)],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    # Split the dump into DIEs: each DIE header line starts a block of attributes.
-    blocks: list[tuple[str, list[str]]] = []
-    for line in dump.splitlines():
-        m = _DIE_START.match(line)
-        if m:
-            blocks.append((m.group(1), [line]))
-        elif blocks:
-            blocks[-1][1].append(line)
-    written: dict[str, bool] = {}
-    for name in _CONVENTIONS:
-        for tag, lines in blocks:
-            if tag != "DW_TAG_subprogram":
-                continue
-            text = "\n".join(lines)
-            if re.search(rf"DW_AT_name\s*:.*\bcc_{name}\b", text):
-                written[name] = "DW_AT_calling_convention" in text
-                break
-        else:
-            written[name] = False
-    return written
+    by_name = dict(subprogram_conventions(obj))
+    return {name: by_name.get(f"cc_{name}") is not None for name in _CONVENTIONS}
 
 
 def _producers() -> list[tuple[str, str]]:
@@ -108,8 +84,6 @@ def test_capability_row_matches_the_compiler(family: str, tmp_path: Path) -> Non
     prefix = elf_capability(family, "object")
     if prefix is None:
         pytest.skip(skip_reason(family, "object"))
-    if shutil.which("readelf") is None:
-        pytest.skip("readelf is the DWARF oracle here and is not on this host")
     written = _cc_written_by(prefix, family, tmp_path)
     oracle_writes_non_default = any(written[name] for name in _NON_DEFAULT)
     assert (
@@ -141,9 +115,9 @@ def test_minimal_evidence_follows_the_producer(family: str, expected_sets: set) 
 def test_llvm_convention_codes_name_what_clang_writes(tmp_path: Path) -> None:
     """Each code abicheck names for a clang x86-64 convention is the one clang writes.
 
-    Oracle: ``readelf`` prints the numeric ``DW_AT_calling_convention`` and
-    ``llvm-dwarfdump`` the symbolic name, both in DIE order, so the two lists
-    pair up one to one.
+    Oracle: pyelftools reads the numeric ``DW_AT_calling_convention`` and
+    ``llvm-dwarfdump`` prints the symbolic name, both in DIE order, so the two
+    lists pair up one to one.
     """
     from abicheck.extract.dwarf_calling_conventions import CC_NAMES as _CC_NAMES
 
@@ -163,13 +137,7 @@ def test_llvm_convention_codes_name_what_clang_writes(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
-    numbers = [
-        int(m.group(1))
-        for m in re.finditer(
-            r"DW_AT_calling_convention:\s+(\d+)",
-            _dump(["readelf", "--debug-dump=info"], obj),
-        )
-    ]
+    numbers = [cc for _, cc in subprogram_conventions(obj) if cc is not None]
     names = re.findall(
         r"DW_AT_calling_convention\s+\(DW_CC_(\w+)\)",
         _dump(["llvm-dwarfdump", "--debug-info"], obj),

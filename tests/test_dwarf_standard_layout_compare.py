@@ -123,9 +123,9 @@ def _compare(old: Path, new: Path, report: Path) -> dict:
 
 @pytest.mark.parametrize("name", list(_CASES))
 def test_record_edit_is_reported_from_dwarf(name: str, tmp_path: Path) -> None:
-    prefix = elf_capability("gcc", "shared")
+    prefix = elf_capability("clang", "shared")
     if prefix is None:
-        pytest.skip(skip_reason("gcc", "shared"))
+        pytest.skip(skip_reason("clang", "shared"))
     old_decls, new_decls, extra, expected, absent, verdict = _CASES[name]
     old = _build(prefix, tmp_path, name, "old", old_decls, extra)
     new = _build(prefix, tmp_path, name, "new", new_decls, extra)
