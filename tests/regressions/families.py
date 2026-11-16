@@ -188,6 +188,9 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
+                # A per-architecture ABI baseline: a version node at the target's
+                # baseline raises no floor (test_version_floor_new_provider.py).
+                "tests/test_version_floor_new_provider.py",
                 "tests/test_family_f8_catalog_backend_parity.py",
                 # The Mach-O layout detectors against the ELF pair of the same
                 # logical change, in both fixup encodings, with seeded mutants.
@@ -611,6 +614,7 @@ _F5 = tuple(
     ]
 )
 _F8 = (
+    "platform.version_floor_judged_from_nothing_not_baseline",
     # The clang header backend left layout facts empty that castxml records
     # from the same headers (harness cells: test_clang_backend_layout_matches_castxml,
     # and catalog-wide test_clang_record_layout_matches_castxml_across_the_catalog).
