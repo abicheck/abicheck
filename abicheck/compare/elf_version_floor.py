@@ -29,6 +29,7 @@ from ..diff_helpers import make_change
 from ..diff_versioning import _UNPARSEABLE_VERSION, _parse_abi_version_tag
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.registry import Verdict
 from ..model.glibc_baseline import arch_baseline
 
 __all__ = [
@@ -97,20 +98,28 @@ def _binary_wide_max(elf: Any, prefix: str) -> tuple[tuple[int, ...], str]:
 
 def _effective_old_floor(
     old_elf: Any, new_elf: Any, prefix: str
-) -> tuple[tuple[int, ...], str]:
+) -> tuple[tuple[int, ...], str, bool]:
     """The floor a newly needed provider is measured against.
 
-    The binary-wide maximum of *prefix*, but never below the architecture's
-    ``GLIBC_`` baseline (model/glibc_baseline.py): every glibc on that
-    architecture provides the baseline node, so it is no floor. When the
-    baseline is the higher value, its tag names the baseline and why.
+    Returns ``(floor, tag, limited)``. The floor is the binary-wide maximum of
+    *prefix*, never below the architecture's ``GLIBC_`` baseline
+    (model/glibc_baseline.py). ``limited`` is True when the architecture has no
+    measured baseline and the binary established no floor of its own: whether a
+    node is a floor is then not established, so nothing may claim one.
     """
     floor, tag = _binary_wide_max(old_elf, prefix)
-    if prefix == "GLIBC":
-        baseline = arch_baseline(getattr(new_elf, "machine", None))
-        if baseline is not None and baseline[0] > floor:
-            return baseline[0], f"{baseline[1]} (architecture baseline)"
-    return floor, tag
+    if prefix != "GLIBC":
+        return floor, tag, False
+    baseline = arch_baseline(
+        getattr(new_elf, "machine", None),
+        getattr(new_elf, "elf_class", None),
+        getattr(new_elf, "ei_data", None),
+    )
+    if baseline is None:
+        return floor, tag, floor == (0,)
+    if baseline.version > floor:
+        return baseline.version, f"{baseline.tag} (architecture baseline)", False
+    return floor, tag, False
 
 
 def _new_provider_floor_changes(
@@ -127,9 +136,9 @@ def _new_provider_floor_changes(
     changes: list[Change] = []
     prefixes = {v.rsplit("_", 1)[0] for v in new_vers if "_" in v}
     for prefix in sorted(prefixes):
-        old_floor, old_tag = _effective_old_floor(old_elf, new_elf, prefix)
+        old_floor, old_tag, limited = _effective_old_floor(old_elf, new_elf, prefix)
         new_floor, new_tag = _binary_wide_max(new_elf, prefix)
-        if new_floor <= old_floor:
+        if limited or new_floor <= old_floor:
             continue
         evidence = _floor_evidence_symbols(new_elf, lib, prefix, old_floor)
         sample = ", ".join(evidence[:5])
@@ -187,3 +196,30 @@ def _runtime_floor_changes(
             )
         )
     return changes
+
+
+def evidence_limited_node_change(ver: str, lib: str, new_elf: Any) -> Change:
+    """A newly needed ``GLIBC_`` node on an architecture with no measured baseline.
+
+    It is reported, not dropped: the requirement is a fact, but whether it raises
+    the floor is not established, so it stays ``SYMBOL_VERSION_REQUIRED_ADDED_COMPAT``
+    at reduced assurance (``COMPATIBLE_WITH_RISK``) with the reason spelled out.
+    """
+    machine = getattr(new_elf, "machine", None) or "unknown machine"
+    width = getattr(new_elf, "elf_class", None)
+    order = getattr(new_elf, "ei_data", None) or "unknown byte order"
+    change = make_change(
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
+        symbol=ver,
+        name=ver,
+        detail=lib,
+        new_value=f"{lib}:{ver}",
+    )
+    change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+    change.modulation_rule = "glibc_baseline_unknown"
+    change.modulation_reason = (
+        f"glibc baseline for {machine} ({width}-bit, {order}) is unknown: no "
+        f"measured shlib-versions entry, so whether {ver} raises the runtime floor "
+        "is not established. Reduced assurance; re-check with a measured baseline."
+    )
+    return change

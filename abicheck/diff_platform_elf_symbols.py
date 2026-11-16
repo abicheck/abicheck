@@ -35,6 +35,7 @@ from .compare.elf_version_floor import (
     _effective_old_floor,
     _new_provider_floor_changes,
     _runtime_floor_changes,
+    evidence_limited_node_change,
 )
 from .compare.elf_visibility_change import elf_visibility_change
 from .compare.unbound_version_node import unbound_node_grade
@@ -166,7 +167,10 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
                 # provider names them). A new provider's node raises it only
                 # when it exceeds that maximum; an unparseable marker
                 # (GLIBC_PRIVATE) is never a floor.
-                old_floor, _ = _effective_old_floor(old_elf, new_elf, prefix)
+                old_floor, _, limited = _effective_old_floor(old_elf, new_elf, prefix)
+                if limited and ver_tuple != _UNPARSEABLE_VERSION:
+                    changes.append(evidence_limited_node_change(ver, lib, new_elf))
+                    continue
                 new_floor = ver_tuple != _UNPARSEABLE_VERSION and ver_tuple > old_floor
                 kind = (
                     ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED

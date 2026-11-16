@@ -236,15 +236,21 @@ them):
 - an unparseable marker (`GLIBC_PRIVATE`, `GLIBC_ABI_DT_RELR`) is not a floor
   and stays `_COMPAT`.
 
-The floor is never below the architecture's `GLIBC_` baseline: the oldest node
-every glibc on that architecture provides (`model/glibc_baseline.py`). A node at
-or below it raises nothing, so a newly linked `libc` symbol version of
-`GLIBC_2.2.5` on x86-64 (or `GLIBC_2.0` on i386) stays
+The floor is never below the architecture's `GLIBC_` baseline: the `DEFAULT`
+version of glibc's per-architecture `shlib-versions` (`model/glibc_baseline.py`,
+keyed on `e_machine`, ELF class and byte order, each row cited to its glibc
+source file). A node at or below the baseline raises nothing, so a newly linked
+`libc` baseline version such as `GLIBC_2.2.5` on x86-64 stays
 `SYMBOL_VERSION_REQUIRED_ADDED_COMPAT`. Above it, the floor is measured from the
-baseline and its tag names the baseline and the reason. The table covers the
-architectures whose baseline was measured on a host libc (x86-64, i386); any other
-architecture has no exemption, which errs toward a possible floor finding rather
-than a suppressed one.
+baseline and its tag names the baseline and the reason.
+
+An architecture with no measured baseline (or big-endian PowerPC64, whose baseline
+depends on the ELF ABI version the reader does not record) is evidence-limited: a
+newly needed `GLIBC_` node is reported as `SYMBOL_VERSION_REQUIRED_ADDED_COMPAT` at
+reduced assurance (`COMPATIBLE_WITH_RISK`) with the reason, and no
+`RUNTIME_FLOOR_RAISED` is claimed. A floor the binary already established (its own
+older `GLIBC_` node) is still raised, since that comparison does not need a
+baseline.
 
 An already-needed provider keeps its per-library rule: a node no newer than that
 provider's own old maximum is `_COMPAT`, and `RUNTIME_FLOOR_RAISED` fires only

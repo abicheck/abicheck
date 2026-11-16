@@ -544,8 +544,10 @@ class TestSymbolVersionChanges:
 
     def test_version_required_added_is_a_new_floor(self):
         """A new provider's node above the binary floor is a floor (ADR-011, 2026-11-16)."""
-        old_elf = ElfMetadata(versions_required={})
-        new_elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.34"]})
+        old_elf = ElfMetadata(machine="EM_X86_64", versions_required={})
+        new_elf = ElfMetadata(
+            machine="EM_X86_64", versions_required={"libc.so.6": ["GLIBC_2.34"]}
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED in _kinds(r)
         assert ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT not in _kinds(r)
