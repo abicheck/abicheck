@@ -39,9 +39,11 @@ the model later from leaking the same way.
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from ..compare.debug_layout_view import debug_layout_view
+from ..compare.debug_layout_view import debug_layout_declarations, debug_layout_view
 from ..compare.edge_query import export_table_covered
 from ..compare.public_surface import should_filter_transitive_runtime_symbols
 from ..elf_symbol_filter import (
@@ -50,11 +52,14 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
     is_abi_relevant_elf_symbol,
 )
-from ..model import ElfVisibility, Function, Variable, Visibility
+from ..model import ElfVisibility, Function, RecordType, Variable, Visibility
 from ..model.export_index import build_raw_export_index
 from ..model.fact import Fact
 from ..model.owner_recovery import is_mangled_identity
-from ..model.surface_facts import headers_discarded_surface_facts
+from ..model.surface_facts import (
+    headers_discarded_surface_facts,
+    is_export_confirmed_absent,
+)
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -139,7 +144,9 @@ def binary_level_declarations(
     binary-only dump). ELF and Mach-O record the split (symbol type,
     section), so a variable stays a variable there.
     """
-    projected_functions = [binary_level_function(f) for f in functions]
+    projected_functions = binary_purity_functions(
+        snap, [binary_level_function(f) for f in functions]
+    )
     index = build_raw_export_index(snap)
     if index is not None and index.platform == "pe":
         return projected_functions + [
@@ -155,6 +162,104 @@ def _as_function(var: Variable) -> Function:
         return_type="?",
         binary_exported_fact=var.binary_exported_fact,
     )
+
+
+def declared_functions_kept(snap: AbiSnapshot) -> list[Function]:
+    """The header functions a binary view keeps: those not confirmed absent
+    from the export table, and a vtable-proven pure virtual, which has no
+    symbol but whose debug declaration a binary-only dump keeps."""
+    pure = exported_or_pure_claimed(snap, frozenset())
+    return [
+        f
+        for f in snap.declarations.functions
+        if not is_export_confirmed_absent(f) or f.mangled in pure
+    ]
+
+
+def exported_or_pure_claimed(snap: AbiSnapshot, exported: AbstractSet[str]) -> set[str]:
+    """*exported* plus every virtual the emitted vtable proves pure.
+
+    A pure virtual has no symbol, so it is not an export, but a binary-only
+    dump keeps its debug declaration (``DW_AT_declaration``, pure). The
+    projection keeps the same declaration when the vtable proves it, so the
+    removal of a now-pure virtual reads as the same change.
+    """
+    claims: dict[str, bool] = (snap.binary_purity or {}).get("functions", {})
+    return {*exported, *(m for m, pure in claims.items() if pure)}
+
+
+def binary_purity_functions(
+    snap: AbiSnapshot, functions: list[Function]
+) -> list[Function]:
+    """*functions* (binary-level, from :func:`binary_level_declarations`)
+    with the purity the emitted vtable slots prove
+    (``AbiSnapshot.binary_purity``) set on the virtual ones.
+
+    A claim sets ``is_virtual`` and ``is_pure_virtual`` on a fresh object; a
+    virtual with no claim keeps the binary-level default (not pure), and the
+    header's own attribute is never copied (the reason a header dump's
+    purity was dropped before this evidence was kept).
+    """
+    purity = snap.binary_purity or {}
+    claims: dict[str, bool] = purity.get("functions", {})
+    for func in functions:
+        claim = claims.get(func.mangled)
+        if claim is not None:
+            func.is_virtual = True
+            func.is_pure_virtual = claim
+    return functions
+
+
+def binary_purity_layout(
+    snap: AbiSnapshot,
+) -> tuple[list[RecordType], list[Any]]:
+    """The debug-layout types and enums of a header-derived projection, with
+    the abstractness the emitted vtables prove merged in
+    (:func:`with_binary_purity_records`)."""
+    types, enums = debug_layout_declarations(snap)
+    return with_binary_purity_records(snap, types), enums
+
+
+def with_binary_purity_records(
+    snap: AbiSnapshot, types: list[RecordType]
+) -> list[RecordType]:
+    """*types* with each record the emitted vtables prove abstract or not
+    (``AbiSnapshot.binary_purity``) carrying that claim as ``is_abstract``.
+
+    A binary-only dump reads these classes from debug info; a header-built
+    projection may carry no record for one, so a minimal record is added.
+    A record is copied, never edited, since *types* can share objects with
+    the original snapshot. A class with no claim keeps what *types* says:
+    absent is not "instantiable".
+    """
+    claims: dict[str, bool] = (snap.binary_purity or {}).get("records", {})
+    if not claims:
+        return types
+    out: list[RecordType] = []
+    seen: set[str] = set()
+    for record in types:
+        claim = claims.get(record.name)
+        seen.add(record.name)
+        if claim is None:
+            out.append(record)
+        else:
+            out.append(
+                replace(
+                    record,
+                    is_abstract=claim,
+                    is_abstract_fact=Fact.present(claim),
+                )
+            )
+    for name in sorted(claims.keys() - seen):
+        out.append(
+            RecordType(
+                name=name,
+                kind="class",
+                is_abstract=claims[name],
+                is_abstract_fact=Fact.present(claims[name]),
+            )
+        )
+    return out
 
 
 def export_only_declarations(
