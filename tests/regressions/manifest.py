@@ -46,6 +46,7 @@ entry is checked, not just written" discipline `check_ai_readiness.py`'s
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_abiforge import ABIFORGE_BUG_CLASSES
 from .manifest_analysis_1 import ANALYSIS_1_BUG_CLASSES
 from .manifest_analysis_2 import ANALYSIS_2_BUG_CLASSES
 from .manifest_caching import CACHING_BUG_CLASSES
@@ -91,6 +92,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + TOOL_SURFACE_BUG_CLASSES
     + MEASUREMENT_BUG_CLASSES
     + LIFECYCLE_BUG_CLASSES
+    + ABIFORGE_BUG_CLASSES
 )
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}
