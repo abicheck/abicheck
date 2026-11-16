@@ -419,6 +419,20 @@ FAMILIES: dict[str, Family] = {
             harness_tests=("tests/test_observable_at_matches_emission.py",),
         ),
         Family(
+            key="F22",
+            title="A source-only break at binary depth is disclosed, never clean",
+            invariant=(
+                "When the evidence carries no header or source fact, a break "
+                "that only the source contract makes (a consumer that no longer "
+                "compiles, with the binary still loading) is judged correct only "
+                "as a COMPATIBLE_WITH_RISK whose downgrade ADR-084 discloses for "
+                "that kind and subject. Any other verdict for it is a false clean, "
+                "and a disclosed downgrade is never a clean verdict against an "
+                "observed source break."
+            ),
+            harness_tests=("tests/test_abiforge_binary_gate.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -682,6 +696,7 @@ _F10 = (
     "lifecycle.counter_or_handle_used_past_its_release",
 )
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
+_F22 = ("abiforge.expectation.source_break_disclosed_at_binary_depth",)
 _F21 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
     "comparability.runtime_abi_selector_refused_instead_of_reported",
@@ -771,6 +786,7 @@ for _key, _ids in (
     ("F10", _F10),
     ("F11", _F11),
     ("F21", _F21),
+    ("F22", _F22),
     ("F12", _F12),
     ("F13", _F13),
     ("F14", _F14),
