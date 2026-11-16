@@ -162,7 +162,7 @@ def test_semantics_round_trip_through_the_root_attribute() -> None:
     assert load_clang_semantics(Element("CastXML")).noexcept is None
 
 
-def test_a_c_parse_is_never_joined(tmp_path: Path) -> None:
+def test_a_c_parse_that_spells_no_alignment_is_never_joined(tmp_path: Path) -> None:
     header = tmp_path / "api.h"
     header.write_text("int f(void) __THROW;\n")
     root = Element("CastXML")

@@ -46,6 +46,7 @@ entry is checked, not just written" discipline `check_ai_readiness.py`'s
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_abiforge import ABIFORGE_BUG_CLASSES
 from .manifest_analysis_1 import ANALYSIS_1_BUG_CLASSES
 from .manifest_analysis_2 import ANALYSIS_2_BUG_CLASSES
 from .manifest_caching import CACHING_BUG_CLASSES
@@ -73,7 +74,8 @@ __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 #: model/change_catalog/assembled.py` already uses -- adding a class to a sibling needs no
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
-    ANALYSIS_1_BUG_CLASSES
+    ABIFORGE_BUG_CLASSES
+    + ANALYSIS_1_BUG_CLASSES
     + ANALYSIS_2_BUG_CLASSES
     + CACHING_BUG_CLASSES
     + CLASSIFICATION_BUG_CLASSES

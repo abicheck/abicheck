@@ -33,6 +33,7 @@ from abiforge.model.config import (
 )
 from abiforge.model.seeds import BuildArgs, RoleText, Seed
 from abiforge.operators import EditOp
+from abiforge.run.binfacts import binary_facts
 from abiforge.run.toolchains import std_flag
 
 # compiler label -> (C driver, C++ driver): the base PR's two fixed lanes.
@@ -453,6 +454,13 @@ def build_new(
 REFUSED = "REFUSED"
 
 
+def abicheck_judgement(
+    old: Built, new: Built
+) -> tuple[str, frozenset[str], frozenset[str]]:
+    """(verdict, kinds, disclosed kinds) from the checker adapter."""
+    return checker.judged(old.snapshot, new.snapshot)
+
+
 def abicheck_answer(old: Built, new: Built) -> tuple[str, frozenset[str]]:
     """(verdict name, ChangeKind names) from the checker adapter; ``REFUSED``
     plus the error type when the checker refuses to compare."""
@@ -467,7 +475,9 @@ def run_operator(
     old = cache.get(seed, cfg)
     new = build_new(op, seed, cfg, root)
     verdict, kinds = abicheck_answer(old, new)
-    failures = tuple(op.expect(cfg).problems(verdict, kinds))
+    # The same binary facts run_cell reads: a licensed edit is judged alike on both paths.
+    facts = binary_facts(old.so, new.so) if op.licences else {}
+    failures = tuple(op.expect(cfg, facts).problems(verdict, kinds))
     if not failures:
         return Outcome(verdict=verdict, kinds=kinds, failures=failures)
     return Outcome(

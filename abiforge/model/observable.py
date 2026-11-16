@@ -76,6 +76,10 @@ def minimal_evidence_sets(op: EditOp, base: Config) -> frozenset[frozenset[str]]
                 if "D" in alt and not dwarf_witness_present(kind, base.producer):
                     continue
                 alts.add(frozenset(alt))
+    if op.carrier:
+        # A build-flag edit is seen only through the atoms that record the flag
+        # (``EditOp.carrier``): an alternative without one cannot observe it.
+        alts = {a for a in alts if a & op.carrier}
     return frozenset(a for a in alts if not any(b < a for b in alts))
 
 

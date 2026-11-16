@@ -170,6 +170,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_regressions_families.py",
                 "tests/test_family_f7_mutant_replay.py",
                 "tests/test_conftest_cache_isolation.py",
+                # A corpus expectation that depends on a producer's DWARF fact is
+                # checked against each installed producer, read with readelf.
+                "tests/test_producer_dw_at_deleted.py",
                 # A corpus expectation for a visibility-dependent export is read
                 # against the dynamic symbol table of each variant's build.
                 "tests/test_namesake_expectation.py",
@@ -188,6 +191,9 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
+                # A per-architecture ABI baseline: a version node at the target's
+                # baseline raises no floor (test_version_floor_new_provider.py).
+                "tests/test_version_floor_new_provider.py",
                 "tests/test_family_f8_catalog_backend_parity.py",
                 # The Mach-O layout detectors against the ELF pair of the same
                 # logical change, in both fixup encodings, with seeded mutants.
@@ -419,6 +425,20 @@ FAMILIES: dict[str, Family] = {
             harness_tests=("tests/test_observable_at_matches_emission.py",),
         ),
         Family(
+            key="F22",
+            title="A source-only break at binary depth is disclosed, never clean",
+            invariant=(
+                "When the evidence carries no header or source fact, a break "
+                "that only the source contract makes (a consumer that no longer "
+                "compiles, with the binary still loading) is judged correct only "
+                "as a COMPATIBLE_WITH_RISK whose downgrade ADR-084 discloses for "
+                "that kind and subject. Any other verdict for it is a false clean, "
+                "and a disclosed downgrade is never a clean verdict against an "
+                "observed source break."
+            ),
+            harness_tests=("tests/test_abiforge_binary_gate.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -611,6 +631,7 @@ _F5 = tuple(
     ]
 )
 _F8 = (
+    "platform.version_floor_judged_from_nothing_not_baseline",
     # The clang header backend left layout facts empty that castxml records
     # from the same headers (harness cells: test_clang_backend_layout_matches_castxml,
     # and catalog-wide test_clang_record_layout_matches_castxml_across_the_catalog).
@@ -637,6 +658,7 @@ _F8 = (
     "extraction.layout_derivation_ignores_the_targets_layout_rule",
 )
 _F7 = (
+    "tests.producer_fact_expectation_assumed_one_producer",
     "tests.export_expectation_assumed_default_visibility",
     "harness.drives_a_configuration_no_front_end_produces",
     "scanner.position_counter_skips_a_line_kind",
@@ -682,6 +704,7 @@ _F10 = (
     "lifecycle.counter_or_handle_used_past_its_release",
 )
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
+_F22 = ("abiforge.expectation.source_break_disclosed_at_binary_depth",)
 _F21 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
     "comparability.runtime_abi_selector_refused_instead_of_reported",
@@ -771,6 +794,7 @@ for _key, _ids in (
     ("F10", _F10),
     ("F11", _F11),
     ("F21", _F21),
+    ("F22", _F22),
     ("F12", _F12),
     ("F13", _F13),
     ("F14", _F14),
@@ -795,7 +819,12 @@ for _key, _ids in (
     ),
     (
         "F20",
-        ("observability.declared_value_misses_observed_emission",),
+        (
+            "observability.declared_value_misses_observed_emission",
+            # A declared observability (a carrier, an unlicensed ceiling) must
+            # cover the configuration the edit is observed in.
+            "abiforge.expectation.observed_only_where_recorded",
+        ),
     ),
     ("OTHER", tuple(OTHER_REASONS)),
 ):

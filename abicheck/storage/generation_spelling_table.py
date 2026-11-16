@@ -747,6 +747,33 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "changes: the change is new DWARF evidence for Mach-O libraries that "
         "previously had none."
     ),
+    78: GenerationSpellingChange(
+        "no type or name spelling changes. A header-built ELF snapshot now keeps "
+        "the binary purity evidence of its header declarations (the "
+        "abicheck.binary_purity extension fact): the virtual function and the "
+        "record that the emitted vtable slots prove pure or abstract, read from "
+        "__cxa_pure_virtual relocations (WS-3 A6). An older snapshot carries no "
+        "such claim, which reads as no binary evidence (not as not pure), and "
+        "no rewrite applies: a new fact on existing records, not a respelling."
+    ),
+    79: GenerationSpellingChange(
+        "WS-2 PR A2.1 (fix/ws2-a2-1-var-alignment-raised): no stored type spelling "
+        "changes. The castxml header path joins each variable's declared alignment "
+        "specifier from the clang AST (clang/var_alignment, castxml/clang_semantics_join): "
+        "a variable whose declaration spells aligned(N) or alignas(N) records that "
+        "value as PRESENT where it was a natural-alignment lower bound before. The "
+        "recorded alignment fact changes; the variable's name and type spelling do not"
+    ),
+    80: GenerationSpellingChange(
+        "WS-6 A2.7/A2.9 (fix/ws6-dwarf-cc-stdlayout): no stored type or name spelling "
+        "changes. A DWARF record's is_standard_layout is now derived from its debug "
+        "facts (access uniformity, virtual members and bases, reference members, base "
+        "and first-member placement) instead of left unknown, so a standard-layout loss "
+        "is a new recorded fact on existing records. The clang DW_AT_calling_convention "
+        "names for ms_abi, vectorcall and regcall are now LLVM_Win64, LLVM_vectorcall and "
+        "LLVM_X86RegCall rather than unknown codes. Older snapshots carry no such fact, "
+        "which reads as unknown, and no rewrite applies."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

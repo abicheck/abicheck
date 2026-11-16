@@ -17,7 +17,15 @@ from __future__ import annotations
 from typing import Any
 
 from abiforge.model.expect import Rule
-from abiforge.model.opkit import _REMOVED, Edit, EditOp, Roles, _merge, _set
+from abiforge.model.opkit import (
+    _REMOVED,
+    BUILD_RECORD,
+    Edit,
+    EditOp,
+    Roles,
+    _merge,
+    _set,
+)
 from abiforge.model.seeds import RoleText
 
 __all__ = ["ELF_OPERATORS"]
@@ -300,6 +308,7 @@ _DYNAMIC = (
         _cflags("-fstack-protector-strong -funsigned-char"),
         "plain char becomes unsigned: a char value above 127 the library reads from "
         "a caller built signed changes meaning (x86-64 and i386 default to signed)",
+        carrier=BUILD_RECORD,
         expected=frozenset({"CHAR_SIGNEDNESS_CHANGED"}),
         # clang records no -f switches in DW_AT_producer, so the clang cell is
         # a recorded strict xfail (abiforge.known), not an unobservable

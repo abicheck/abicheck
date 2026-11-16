@@ -233,11 +233,11 @@ def test_the_verdict_is_computed_from_the_build_alone(
     monkeypatch.setattr(cells, "unavailable", lambda c: None)
     monkeypatch.setattr(cells, "capability_gap", lambda op, c: None)
 
-    def answer(old: Built, new: Built) -> tuple[str, frozenset[str]]:
+    def answer(old: Built, new: Built) -> tuple[str, frozenset[str], frozenset[str]]:
         seen.append((old.dir, new.dir))
-        return "BREAKING", frozenset({"TYPE_SIZE_CHANGED"})
+        return "BREAKING", frozenset({"TYPE_SIZE_CHANGED"}), frozenset()
 
-    monkeypatch.setattr(cells, "abicheck_answer", answer)
+    monkeypatch.setattr(cells, "abicheck_judgement", answer)
     ctx = CellContext.at(tmp_path, execute=False)
     op = OP_BY_NAME["struct_append_field"]
     a = run_cell(op, C_SEED, _cfg(), ctx)
@@ -418,7 +418,7 @@ def test_a_cell_whose_every_consumer_is_blocked_never_runs_or_passes(
     def boom(*a: object) -> None:
         raise AssertionError("a blocked cell must not build or compare")
 
-    monkeypatch.setattr(cells, "abicheck_answer", boom)
+    monkeypatch.setattr(cells, "abicheck_judgement", boom)
     cfg = _cfg(consumers=(Consumer(), Consumer(toolchain=CLANG18)))
     got = run_cell(OP_BY_NAME["func_add"], C_SEED, cfg, CellContext.at(tmp_path))
     assert got.status == want and got.reconciled is None

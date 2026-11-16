@@ -35,7 +35,7 @@ given evidence cannot show it, abicheck stayed clean).
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
 from abiforge.checkers.abicheck import observable_at
@@ -59,7 +59,7 @@ MISMATCH_CLASSES = (
     "wrong-kind",
     "refused",
 )
-PASSING_CLASSES = ("agree", "non-observable", "unobservable")
+PASSING_CLASSES = ("agree", "non-observable", "unobservable", "evidence-limited")
 
 
 @dataclass(frozen=True)
@@ -154,13 +154,41 @@ def kind_observable(kind: str, config: Config) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class BinaryLicence:
+    """A verdict ceiling an edit may take only when a binary fact is confirmed.
+
+    The fact is one ``abiforge.run.binfacts`` reads from the two built
+    libraries (nm/readelf), never from abicheck's answer. While the fact holds,
+    the expectation's ``verdict_max`` rises to ``verdict_max`` (the RISK-level
+    finding the fact entails is honest); while it does not, the strict
+    expectation stands and a finding of that level is a false positive.
+    """
+
+    fact: str
+    verdict_max: str
+
+    def apply(self, exp: Expectation, facts: Mapping[str, bool]) -> Expectation:
+        if not facts.get(self.fact) or not exp.observable:
+            return exp
+        if exp.verdict_max is not None and (
+            VERDICT_RANK[exp.verdict_max] >= VERDICT_RANK[self.verdict_max]
+        ):
+            return exp
+        return replace(
+            exp,
+            verdict_max=self.verdict_max,
+            note=f"{exp.note} [licensed: {self.fact} confirmed by nm]".strip(),
+        )
+
+
 #: A kind that follows from the edit's verdict rather than from its own
 #: evidence (``with_derived``): it never decides whether the edit is observable.
 ADVISORY_KINDS: frozenset[str] = frozenset({"SONAME_BUMP_RECOMMENDED"})
 
 
 def observability_floor(
-    exp: Expectation, config: Config, observed: frozenset[str] | None = None
+    exp: Expectation, config: Config, carrier: frozenset[str] = frozenset()
 ) -> Expectation:
     """The expectation the evidence can show, kind by kind.
 
@@ -170,9 +198,13 @@ def observability_floor(
     still holds). An advisory kind (``ADVISORY_KINDS``) follows the edit and is
     never the reason an edit is observable. The note says what was dropped.
     """
-    del observed  # reserved: callers pass nothing; kinds are decided here
     edit = (exp.expected | frozenset().union(*exp.any_of)) - ADVISORY_KINDS
     seen = frozenset(k for k in edit if kind_observable(k, config))
+    if carrier and not (config.evidence_set.atoms & carrier):
+        # A build-flag edit: the flag is recorded only by a carrier atom, so a
+        # configuration without one cannot see any of the edit's kinds, even
+        # where a header-level kind would otherwise be observable.
+        seen = frozenset()
     hidden = edit - seen
     if edit and not seen:
         return replace(
@@ -197,6 +229,37 @@ def observability_floor(
         note=(
             f"{exp.note} "
             f"[reduced: {sorted(hidden)} not observable at {config.evidence_label}]"
+        ).strip(),
+    )
+
+
+def binary_depth_cap(exp: Expectation, config: Config) -> Expectation:
+    """ADR-084 at the expectation: an API_BREAK the edit's observed kinds back
+    only through binary-producible kinds is COMPATIBLE_WITH_RISK at binary or
+    DWARF depth, unless header or source evidence is present.
+
+    Mirrors ``policy.binary_gated_contract``: the verdict cap applies only when
+    every observed kind of the edit is ``BINARY_GATED`` and no ``H`` or ``S``
+    atom is in the configuration. A header-gated kind keeps its verdict.
+    """
+    from abiforge.checkers.abicheck import binary_gated_kind_names
+
+    if not exp.observable or exp.verdict_min != "API_BREAK":
+        return exp
+    if {"H", "S"} & set(config.evidence_set.atoms):
+        return exp
+    kinds = (exp.expected | frozenset().union(*exp.any_of)) - ADVISORY_KINDS
+    if not kinds or not kinds <= binary_gated_kind_names():
+        return exp
+    return replace(
+        exp,
+        # The ceiling stays API_BREAK: the source break is real, so the edit is
+        # not declared harmless (``benign``); the cap only lowers the floor.
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="API_BREAK",
+        note=(
+            f"{exp.note} [ADR-084: {config.evidence_label} evidence without headers "
+            "or sources cannot back an API_BREAK for binary-gated kinds]"
         ).strip(),
     )
 
@@ -268,8 +331,20 @@ class Reconciled:
 
 
 def reconcile(
-    exec_truth: ExecTruth, exp: Expectation, verdict: str, kinds: frozenset[str]
+    exec_truth: ExecTruth,
+    exp: Expectation,
+    verdict: str,
+    kinds: frozenset[str],
+    *,
+    disclosed: frozenset[str] = frozenset(),
+    evidence: frozenset[str] | None = None,
 ) -> Reconciled:
+    """Classify one cell against the execution oracle.
+
+    ``disclosed`` are the kinds whose downgrade ADR-084 disclosed in the run;
+    ``evidence`` the configuration's atoms (None: unknown, so the ADR-084 rule
+    does not apply).
+    """
     if verdict == "REFUSED":
         return Reconciled("refused", tuple(exp.problems(verdict, kinds)))
     problems = tuple(exp.problems(verdict, kinds))
@@ -277,6 +352,23 @@ def reconcile(
     broke = exec_truth.available and (
         exec_truth.binary_break or exec_truth.source_break
     )
+    if (
+        evidence is not None
+        and not ({"H", "S"} & evidence)
+        and exec_truth.available
+        and exec_truth.source_break
+        and not exec_truth.binary_break
+        and verdict == "COMPATIBLE_WITH_RISK"
+        and kinds & disclosed
+        and not problems
+    ):
+        # ADR-084 at reconcile: a source-only break that DWARF or binary input
+        # cannot back is judged correct only as a disclosed COMPATIBLE_WITH_RISK.
+        return Reconciled(
+            "evidence-limited",
+            problems,
+            "source-only break at binary depth: its downgrade is disclosed (ADR-084)",
+        )
     if exec_truth.available and (
         (exp.benign and exec_truth.binary_break)
         or (exp.source_compatible and exec_truth.source_break)

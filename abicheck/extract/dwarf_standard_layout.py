@@ -9,9 +9,9 @@ Two steps, so no DIE's children are walked twice:
 
 1. While a record is processed, :meth:`StandardLayoutCollector.add` reads its
    already-materialized children once and keeps a small summary: the answers
-   that need only this record (virtual functions and bases, reference members,
+   that need only this record (virtual functions and base_edges, reference members,
    access uniformity), plus references to the record types its by-value members
-   and bases name.
+   and base_edges name.
 2. :meth:`StandardLayoutCollector.finalize` resolves those references across
    every collected record (memoized, cycle-safe) and writes the tri-state trait
    onto each ``RecordType``. ``None`` is "DWARF does not settle it" (an
@@ -44,7 +44,7 @@ _SCALAR_TAGS = frozenset(
 _REFERENCE_TAGS = frozenset({"DW_TAG_reference_type", "DW_TAG_rvalue_reference_type"})
 #: C++98/03 compile units, where [class.prop]/3.7 (CWG 1813) is not part of the rule.
 _CXX98_03_LANGS = frozenset({0x04, 0x19})  # DW_LANG_C_plus_plus, DW_LANG_C_plus_plus_03
-#: How deep a chain of by-value members/bases is followed before giving up.
+#: How deep a chain of by-value members/base_edges is followed before giving up.
 _MAX_DEPTH = 32
 
 Key = tuple[int, int]
@@ -66,7 +66,7 @@ class _Summary:
     #: Its non-artificial data members in declaration order, as type references.
     members: tuple[Ref, ...]
     #: Its direct base classes in order: ``(base key or None, is virtual)``.
-    bases: tuple[tuple[Key | None, bool], ...]
+    base_edges: tuple[tuple[Key | None, bool], ...]
     union: bool
     cxx98: bool
 
@@ -124,10 +124,10 @@ def _summarize(die: Any, children: list[Any]) -> _Summary:
         for c in children
         if c.tag == "DW_TAG_member" and not _flag(c, "DW_AT_artificial")
     ]
-    bases = [c for c in children if c.tag == "DW_TAG_inheritance"]
+    base_edges = [c for c in children if c.tag == "DW_TAG_inheritance"]
     # [class.prop]/3.2: no virtual function declared here, no virtual base.
     virtual = any(c.tag == "DW_TAG_subprogram" and _is_virtual(c) for c in children)
-    virtual = virtual or any(_is_virtual(b) for b in bases)
+    virtual = virtual or any(_is_virtual(b) for b in base_edges)
     # [class.prop]/3.1: no reference data member.
     reference = any(_is_reference(resolve_type_die(m, m.cu)) for m in members)
     # [class.prop]/3.3: one access control for every non-static data member.
@@ -149,7 +149,7 @@ def _summarize(die: Any, children: list[Any]) -> _Summary:
         local_false=virtual or reference or len(accesses) > 1,
         incomplete=_flag(die, "DW_AT_declaration"),
         members=tuple(_ref_of(resolve_type_die(m, m.cu)) for m in members),
-        bases=tuple((_base_key(b), _is_virtual(b)) for b in bases),
+        base_edges=tuple((_base_key(b), _is_virtual(b)) for b in base_edges),
         union=die.tag == "DW_TAG_union_type",
         cxx98=cxx98,
     )
@@ -180,7 +180,7 @@ class _Resolver:
             return False
         traits: list[bool | None] = [
             None if base is None or virtual else self.trait(base, depth + 1)
-            for base, virtual in s.bases
+            for base, virtual in s.base_edges
         ]
         traits += [self._ref_trait(ref, depth) for ref in s.members]
         traits.append(self._data_member_rules(key, s))
@@ -199,7 +199,7 @@ class _Resolver:
         return None
 
     def _has_data_members(self, key: Key, depth: int = 0) -> bool | None:
-        """Whether record *key* or any of its bases has a non-static data member."""
+        """Whether record *key* or any of its base_edges has a non-static data member."""
         if key in self._has_data:
             return self._has_data[key]
         s = self._s.get(key)
@@ -210,7 +210,7 @@ class _Resolver:
             return True
         flags = [
             None if base is None else self._has_data_members(base, depth + 1)
-            for base, _ in s.bases
+            for base, _ in s.base_edges
         ]
         out: bool | None = True if True in flags else (None if None in flags else False)
         self._has_data[key] = out
@@ -222,7 +222,7 @@ class _Resolver:
         if s is None or depth > _MAX_DEPTH:
             return None
         ids: list[Key] = []
-        for base, _ in s.bases:
+        for base, _ in s.base_edges:
             inner = None if base is None else self._subobjects(base, depth + 1)
             if base is None or inner is None:
                 return None
@@ -255,7 +255,9 @@ class _Resolver:
         """[class.prop]/3.5 (data members in at most one class of the hierarchy,
         and none in the most derived one when a base has some), /3.7 (one base
         subobject per type, C++03 only), /3.8 (no base in M(D))."""
-        flags = [None if b is None else self._has_data_members(b) for b, _ in s.bases]
+        flags = [
+            None if b is None else self._has_data_members(b) for b, _ in s.base_edges
+        ]
         with_data = flags.count(True)
         unknown = flags.count(None)
         if s.members:
@@ -266,7 +268,7 @@ class _Resolver:
             if with_data >= 2:
                 return False
             hierarchy = None if with_data + unknown >= 2 else True
-        if not s.bases:
+        if not s.base_edges:
             return hierarchy
         subobjects = self._subobjects(key)
         if subobjects is None:
