@@ -299,3 +299,16 @@ def test_no_machine_means_no_baseline_answer() -> None:
 
     assert arch_baseline(None, 64, "LSB") is None
     assert arch_baseline("EM_X86_64", None, "LSB") is None
+
+
+def test_a_new_provider_floor_summarises_more_than_five_evidence_symbols() -> None:
+    from abicheck.elf_metadata import ElfImport
+
+    imports = [
+        ElfImport(name=f"g{i}", version="GLIBC_2.34", version_soname="libc.so.6")
+        for i in range(7)
+    ]
+    floors = _floor_changes({}, {"libc.so.6": ["GLIBC_2.34"]}, imports)
+    assert len(floors) == 1
+    assert "(+2 more)" in floors[0].description
+    assert floors[0].old_value.endswith("(architecture baseline)")
