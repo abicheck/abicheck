@@ -23,8 +23,10 @@ from abicheck.macho_metadata import parse_macho_metadata
 from abiforge.operators import OP_BY_NAME, matrix
 from abiforge.run.harness import BaselineCache, _as_config, run_operator
 from abiforge.run.toolchains import (
+    MACHO_DWARF_GAP,
     capability_gap,
     header_backend_unavailable,
+    unavailable,
 )
 
 pytestmark = [
@@ -36,9 +38,10 @@ pytestmark = [
 ]
 
 _OPERATORS = ("pure_virtual_added", "primary_base_grew")
-#: The evidence levels this PR's macOS expectations hold at: ``dwarf`` reads the
-#: adjacent ``.dSYM`` (ADR-021), and ``headers`` reads castxml.
-_EVIDENCE = ("dwarf", "headers")
+#: The evidence levels this PR's macOS expectations hold at. ``dwarf`` is not
+#: one of them yet: abicheck reads no Mach-O DWARF, so the corpus reports that
+#: cell unavailable (``test_macho_dwarf_cells_are_unavailable_not_judged``).
+_EVIDENCE = ("headers",)
 
 
 def _seed_for(op_name: str):
@@ -106,3 +109,15 @@ def test_macho_cell_meets_its_strict_expectation(
         f"thunk exports, old: {_thunk_exports(tmp_path / 'old')}\n"
         f"thunk exports, new: {_thunk_exports(tmp_path / 'new')}"
     )
+
+
+@pytest.mark.parametrize("op_name", _OPERATORS)
+def test_macho_dwarf_cells_are_unavailable_not_judged(op_name: str) -> None:
+    """A Mach-O DWARF cell is reported unavailable with the reader gap, never
+    judged on binary evidence and never a pass. When the Mach-O DWARF reader
+    lands, this fails and ``dwarf`` moves back into ``_EVIDENCE``."""
+    seed = _seed_for(op_name)
+    cfg = _as_config(seed, "clang").with_(
+        platform=("darwin", "macho"), evidence="dwarf", header_backend="castxml"
+    )
+    assert unavailable(cfg) == MACHO_DWARF_GAP
