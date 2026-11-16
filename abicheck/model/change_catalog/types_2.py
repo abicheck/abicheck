@@ -259,16 +259,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.ADDED,
-    ),
-    _E(
-        "type_alignment_changed",
-        _B,
-        impact="Misaligned access can cause bus errors on strict architectures or silent data corruption with SIMD.",
-        description_template="Alignment changed: {name} ({old} → {new} bits)",
-        entity=_ENT.TYPE,
-        contract_subject=_CS.DECLARATION,
-        operation=_OP.MODIFIED,
-        observable_at=(_OBS_DH,),
+        observable_at=(_OBS_H,),
     ),
     _E(
         "base_class_access_narrowed",

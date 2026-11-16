@@ -83,7 +83,6 @@ def _elf(name: str, flags: str, kind: str, why: str, **kw: Any) -> EditOp:
         why,
         expected=kw.pop("expected", frozenset({kind})),
         touches=("build.cflags",),
-        min_evidence="headers",
         **{**_RISK, **kw},
     )
 
@@ -98,7 +97,6 @@ def _cxx(name: str, flags: str, kind: str, why: str, **kw: Any) -> EditOp:
         why,
         expected=kw.pop("expected", frozenset({kind})),
         touches=("build.cflags",),
-        min_evidence="headers",
         **{**_RISK, **kw},
     )
 

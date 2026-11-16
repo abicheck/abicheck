@@ -1,0 +1,3807 @@
+{
+ "abi_tag_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ABI_TAG_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "allocator_replacement_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ALLOCATOR_REPLACEMENT_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "allocator_replacement_removed|cxx_alt": {
+  "any_of": [],
+  "expected": [
+   "ALLOCATOR_REPLACEMENT_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "api_deprecated|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ENUM_DEPRECATED_ADDED",
+   "FIELD_DEPRECATED_ADDED",
+   "FUNC_DEPRECATED_ADDED",
+   "TYPE_DEPRECATED_ADDED",
+   "VAR_DEPRECATED_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "api_undeprecated|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ENUM_DEPRECATED_REMOVED",
+   "FUNC_DEPRECATED_REMOVED",
+   "TYPE_DEPRECATED_REMOVED",
+   "VAR_DEPRECATED_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "api_version_suffix_bumped|c_elf_alt": {
+  "any_of": [
+   [
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "VERSIONED_SYMBOL_SCHEME_DETECTED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "array_grown_into_padding|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "array_shrunk_shifting|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "base_access_narrowed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "BASE_CLASS_ACCESS_NARROWED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "base_added_nonvirtual|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_BASE_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "base_became_nonvirtual|cxx_more": {
+  "any_of": [
+   [
+    "BASE_CLASS_VIRTUAL_CHANGED",
+    "TYPE_BASE_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "base_became_virtual|cxx_more": {
+  "any_of": [
+   [
+    "RTTI_INHERITANCE_CHANGED"
+   ],
+   [
+    "VTABLE_THUNK_SET_CHANGED"
+   ]
+  ],
+  "expected": [
+   "BASE_CLASS_VIRTUAL_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "base_class_add|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_BASE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "base_removed|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_BASE_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bases_reordered|cxx_more": {
+  "any_of": [
+   [
+    "BASE_CLASS_OFFSET_CHANGED"
+   ]
+  ],
+  "expected": [
+   "BASE_CLASS_POSITION_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bind_now_dropped_without_relro|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "BIND_NOW_DISABLED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "bind_now_dropped|c_elf": {
+  "any_of": [
+   [
+    "BIND_NOW_DISABLED",
+    "RELRO_WEAKENED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "bitfield_became_field|cxx_more": {
+  "any_of": [
+   [
+    "FIELD_BITFIELD_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_crosses_unit|cxx_more": {
+  "any_of": [
+   [
+    "FIELD_BITFIELD_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_within_unit|cxx_more": {
+  "any_of": [
+   [
+    "FIELD_BITFIELD_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "by_value_struct_became_nontrivial|cxx_alt": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VALUE_ABI_TRAIT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "cet_disabled|c_elf": {
+  "any_of": [],
+  "expected": [
+   "CET_PROTECTION_WEAKENED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "cet_enabled|c_elf": {
+  "any_of": [],
+  "expected": [
+   "CET_PROTECTION_IMPROVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "char_made_unsigned|c_elf": {
+  "any_of": [],
+  "expected": [
+   "CHAR_SIGNEDNESS_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "class_became_final|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_BECAME_FINAL"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "class_lost_final|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_LOST_FINAL"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "class_rtti_became_protected|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "VTABLE_SYMBOL_IDENTITY_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "class_visibility_hidden|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_VISIBILITY_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "comment_only|c_core": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "comment_only|cxx_classes": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "const_object_value_changed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "VAR_VALUE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "const_overload_removed|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "REMOVED_CONST_OVERLOAD",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "const_string_object_grew|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_SIZE_CHANGED_CONST_OBJECT"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "converting_ctor_overload_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "CTOR_OVERLOAD_AMBIGUITY_RISK",
+   "OVERLOAD_AMBIGUITY_INTRODUCED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "cpu_dispatch_variants_dropped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "CPU_DISPATCH_ISA_DROPPED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "ctor_explicit_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "CTOR_EXPLICIT_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "ctor_explicit_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "CTOR_EXPLICIT_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "cxx_record_added|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_ADDED"
+   ]
+  ],
+  "expected": [
+   "FUNC_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "debug_info_dropped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "DWARF_INFO_MISSING"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "declared_but_not_exported|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PUBLIC_NOT_EXPORTED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "declared_exports_defined|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_EXPORT_ADDED",
+   "VAR_EXPORT_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "declared_function_export_became_c_namesake|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_DELETED_ELF_FALLBACK",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "declared_function_lost_definition|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_VISIBILITY_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "deduced_lambda_return_named|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_RETURN_CHANGED",
+   "UNSPECIFIED_RETURN_NOW_NAMED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE"
+ },
+ "default_argument_added|cxx_more": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "destructor_became_nonvirtual|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_VIRTUAL_REMOVED",
+    "POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR"
+   ],
+   [
+    "SYMBOL_SIZE_CHANGED",
+    "TYPE_VTABLE_CHANGED",
+    "VTABLE_SLOT_COUNT_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "destructor_became_virtual|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_VIRTUAL_ADDED",
+    "VIRTUAL_METHOD_ADDED"
+   ],
+   [
+    "SYMBOL_SIZE_CHANGED",
+    "TYPE_VTABLE_CHANGED",
+    "VTABLE_SLOT_COUNT_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "empty_version_node_dropped|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_VERSION_DEFINED_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_append_member|c_core": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_append_member|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_append_wide_value|c_core": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_append_wide_value|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_became_scoped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_BECAME_SCOPED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "enum_change_value|c_core": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_VALUE_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_change_value|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_VALUE_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_class_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_class_append|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_class_became_opaque|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_class_change_value|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_VALUE_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_class_enumerator_alias_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_class_enumerator_inserted|cxx_more": {
+  "any_of": [
+   [
+    "ENUM_LAST_MEMBER_VALUE_CHANGED",
+    "ENUM_MEMBER_VALUE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_class_enumerator_renamed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "enum_class_enumerator_values_swapped|cxx_more": {
+  "any_of": [
+   [
+    "ENUM_LAST_MEMBER_VALUE_CHANGED",
+    "ENUM_MEMBER_VALUE_CHANGED",
+    "SERIALIZATION_TAG_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_class_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "enum_class_remove|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_class_underlying_narrow|cxx_classes": {
+  "any_of": [
+   [
+    "ENUM_UNDERLYING_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_enumerator_alias_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "enum_lost_scoped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_LOST_SCOPED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "enum_member_renamed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "enum_remove_member|c_core": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_remove_member|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "enum_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "enum_sentinel_moved|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ENUM_LAST_MEMBER_VALUE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "enum_underlying_narrow|cxx_classes": {
+  "any_of": [
+   [
+    "ENUM_UNDERLYING_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "executable_stack_removed|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "EXECUTABLE_STACK_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "executable_stack|c_elf": {
+  "any_of": [],
+  "expected": [
+   "EXECUTABLE_STACK"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "experimental_api_graduated|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "EXPERIMENTAL_GRADUATED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "experimental_api_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "explicit_instantiation_dropped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "INSTANTIATION_MISSING_FROM_BINARY",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "export_localized_header_kept|c_elf": {
+  "any_of": [
+   [
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "FUNC_VISIBILITY_CHANGED"
+   ]
+  ],
+  "expected": [
+   "PUBLIC_NOT_EXPORTED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "export_surface_exploded|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ABI_SURFACE_EXPLOSION",
+   "FUNC_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "exported_but_undeclared|c_elf": {
+  "any_of": [],
+  "expected": [
+   "EXPORTED_NOT_PUBLIC"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "exported_instantiation_default_changed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "DEFAULT_TEMPLATE_ARG_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "extern_c_linkage_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_LANGUAGE_LINKAGE_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_access_narrowed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_ACCESS_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "field_added_in_tail_padding|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_FIELD_ADDED_COMPATIBLE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "field_became_atomic|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ATOMIC_QUALIFIER_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "field_became_bitfield|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_became_const|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BECAME_CONST"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "field_became_mutable|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BECAME_MUTABLE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "field_became_volatile|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BECAME_VOLATILE"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "field_default_initializer_changed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_DEFAULT_INITIALIZER_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "field_default_initializer_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_DEFAULT_INITIALIZER_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "field_deprecated_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_DEPRECATED_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "field_inserted_at_head|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_inserted_in_middle|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_inserted_in_padding|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_FIELD_ADDED_COMPATIBLE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "field_lost_const|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_LOST_CONST"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "field_lost_mutable|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_LOST_MUTABLE"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "field_lost_volatile|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FIELD_LOST_VOLATILE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "field_removed_at_head|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_REMOVED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_removed_in_middle|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_REMOVED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_removed_into_tail_padding|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_REMOVED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_removed_without_shrink|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_REMOVED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_renamed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FIELD_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "field_retyped_abi_equivalent|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ABI_EQUIVALENT_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "field_retyped_alignment_only|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_retyped_same_layout|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "field_retyped_smaller|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "fixed_enum_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "fixed_enum_became_opaque|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "fixed_enum_became_scoped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_BECAME_SCOPED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "fixed_enum_enumerator_alias_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "fixed_enum_enumerator_appended|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "fixed_enum_enumerator_inserted|cxx_more": {
+  "any_of": [
+   [
+    "ENUM_LAST_MEMBER_VALUE_CHANGED",
+    "ENUM_MEMBER_VALUE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "fixed_enum_enumerator_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "fixed_enum_enumerator_renamed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "fixed_enum_enumerator_value_changed|cxx_more": {
+  "any_of": [
+   [
+    "ENUM_LAST_MEMBER_VALUE_CHANGED",
+    "ENUM_MEMBER_VALUE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "fixed_enum_enumerator_values_swapped|cxx_more": {
+  "any_of": [
+   [
+    "ENUM_LAST_MEMBER_VALUE_CHANGED",
+    "ENUM_MEMBER_VALUE_CHANGED",
+    "SERIALIZATION_TAG_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "fixed_enum_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "flexible_array_member|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FLEXIBLE_ARRAY_MEMBER_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "fortified_call_dropped|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "FORTIFY_SOURCE_WEAKENED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "func_add|c_core": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "func_add|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "func_became_extern_c|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_LANGUAGE_LINKAGE_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_became_ifunc|c_elf": {
+  "any_of": [],
+  "expected": [
+   "IFUNC_INTRODUCED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "func_became_ms_abi|c_elf": {
+  "any_of": [],
+  "expected": [
+   "CALLING_CONVENTION_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_became_protected|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_VISIBILITY_PROTECTED_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "func_became_variadic|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_VARIADIC_ADDED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_became_weak|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_BINDING_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "func_contract_attribute_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_CONTRACT_ATTRIBUTE_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "func_contract_attribute_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_CONTRACT_ATTRIBUTE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "func_lose_default_visibility|c_core": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "func_lose_default_visibility|cxx_classes": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "func_lost_variadic|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_VARIADIC_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_out_of_line_to_inline|cxx_classes": {
+  "any_of": [
+   [
+    "FUNC_BECAME_INLINE",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "FUNC_VISIBILITY_CHANGED"
+   ]
+  ],
+  "expected": [
+   "FUNC_BECAME_INLINE",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_append|c_core": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_append|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_append|cxx_stdlib": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_remove|c_core": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_remove|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_remove|cxx_stdlib": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_type_change|c_core": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_type_change|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_param_type_change|cxx_stdlib": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_remove|c_core": {
+  "any_of": [],
+  "expected": [
+   "FUNC_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_remove|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_return_type_change|c_core": {
+  "any_of": [],
+  "expected": [
+   "FUNC_RETURN_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "func_return_type_change|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_RETURN_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "function_became_customization_object|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "CPO_KIND_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "glibc_floor_raised|c_elf": {
+  "any_of": [],
+  "expected": [
+   "IMPORTED_SYMBOL_ADDED",
+   "RUNTIME_FLOOR_RAISED",
+   "SYMBOL_VERSION_REQUIRED_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "glibc_older_version_required|c_elf": {
+  "any_of": [],
+  "expected": [
+   "IMPORTED_SYMBOL_ADDED",
+   "SYMBOL_VERSION_REQUIRED_ADDED_COMPAT"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "glibc_version_required_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "IMPORTED_SYMBOL_ADDED",
+   "SYMBOL_VERSION_REQUIRED_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "glibc_version_requirement_dropped|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "IMPORTED_SYMBOL_REMOVED",
+   "SYMBOL_VERSION_REQUIRED_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "gnu_hash_dropped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "HASH_STYLE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "gnu_unique_disabled|cxx_alt": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_BINDING_LOST_UNIQUE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "gnu_unique_static_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_BINDING_BECAME_UNIQUE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "handle_typedef_retargeted|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "HANDLE_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "header_constant_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "CONSTANT_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "header_constant_changed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "CONSTANT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "header_constant_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "CONSTANT_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "header_inline_removed|cxx_alt": {
+  "any_of": [],
+  "expected": [
+   "INLINE_FUNCTION_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "header_only_function_params_changed|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "HEADER_ONLY_FUNCTION_PARAMS_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "hidden_friend_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "HIDDEN_FRIEND_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "hidden_friend_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "HIDDEN_FRIEND_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "ifunc_removed|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "IFUNC_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "imported_symbol_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "IMPORTED_SYMBOL_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "imported_symbol_removed|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "IMPORTED_SYMBOL_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "init_fini_dropped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ELF_INIT_FINI_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "inline_function_outlined|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_LOST_INLINE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "inline_namespace_bumped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "INLINE_NAMESPACE_MOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "inline_namespace_version_bumped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "INLINE_NAMESPACE_VERSION_BUMPED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "integer_typedef_widened|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "INTEGER_MODEL_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "internal_helper_hidden|c_elf_alt": {
+  "any_of": [
+   [
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "FUNC_VISIBILITY_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "internal_table_grown|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_SIZE_CHANGED_INTERNAL"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "internal_template_instance_dropped|cxx_alt": {
+  "any_of": [],
+  "expected": [
+   "INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "internal_type_grew|cxx_alt": {
+  "any_of": [],
+  "expected": [
+   "INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "key_function_inlined|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_BECAME_INLINE",
+    "SYMBOL_BINDING_CHANGED",
+    "VTABLE_SYMBOL_IDENTITY_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "last_virtual_removed|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_VIRTUAL_REMOVED",
+    "TYPE_VTABLE_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_OFFSET_CHANGED",
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "long_double_made_64bit|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "LONG_DOUBLE_ABI_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "mandatory_template_param_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "MANDATORY_TEMPLATE_PARAM_ADDED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "member_noexcept_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_NOEXCEPT_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "method_access_narrowed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "METHOD_ACCESS_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "method_became_nonvirtual|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_VIRTUAL_REMOVED",
+    "TYPE_VTABLE_CHANGED"
+   ],
+   [
+    "SYMBOL_SIZE_CHANGED",
+    "TYPE_VTABLE_CHANGED",
+    "VTABLE_SLOT_COUNT_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "method_became_pure_virtual|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PURE_VIRTUAL_ADDED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "method_became_static|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_STATIC_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "method_became_virtual|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_VIRTUAL_ADDED",
+    "VIRTUAL_METHOD_ADDED"
+   ],
+   [
+    "SYMBOL_SIZE_CHANGED",
+    "TYPE_VTABLE_CHANGED",
+    "VTABLE_SLOT_COUNT_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "method_const_drop|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_CV_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "method_deleted|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_DELETED",
+    "FUNC_DELETED_DWARF",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "method_noexcept_add|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_NOEXCEPT_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "method_ref_qualified|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_REF_QUAL_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "needed_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "NEEDED_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "needed_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "NEEDED_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "needed_reordered|c_elf": {
+  "any_of": [],
+  "expected": [
+   "NEEDED_ORDER_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "new_side_dumped_without_headers|cxx_more": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "no_common_spelled|c_elf": {
+  "any_of": [],
+  "expected": [
+   "TOOLCHAIN_FLAG_DRIFT"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "nodelete_flag|c_elf": {
+  "any_of": [],
+  "expected": [
+   "DYNAMIC_LOADING_FLAGS_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "nonpod_field_added_in_tail_padding|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TAIL_PADDING_REUSE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "object_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "VAR_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "object_alignment_reduced|c_elf": {
+  "any_of": [
+   [
+    "EXPORTED_OBJECT_ALIGNMENT_REDUCED"
+   ],
+   [
+    "VAR_ALIGNMENT_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "object_array_grew|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_SIZE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "object_became_const|c_elf": {
+  "any_of": [],
+  "expected": [
+   "VAR_BECAME_CONST"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "object_became_inline_variable|cxx_more": {
+  "any_of": [
+   [
+    "SYMBOL_BINDING_BECAME_UNIQUE",
+    "SYMBOL_BINDING_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "object_became_protected|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PROTECTED_VISIBILITY_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "object_became_tls|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "object_became_weak|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_BINDING_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "object_hidden|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VAR_VISIBILITY_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "object_lost_const|c_elf": {
+  "any_of": [],
+  "expected": [
+   "VAR_LOST_CONST"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "object_moved_version_node|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_MOVED_VERSION_NODE"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "object_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VAR_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "object_renamed|cxx_more": {
+  "any_of": [
+   [
+    "VAR_REMOVED",
+    "VAR_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "object_retyped_same_size|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VAR_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "object_shrank|cxx_more": {
+  "any_of": [
+   [
+    "SYMBOL_SIZE_CHANGED",
+    "VAR_TYPE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "opaque_record_defined|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "OPAQUE_INVARIANT_BROKEN"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE"
+ },
+ "overload_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "OVERLOAD_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "overload_retyped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "OVERLOAD_SET_REROUTED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "override_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "override_removed|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "override_return_became_covariant|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_RETURN_COVARIANT_NARROWED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "override_specifier_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_OVERRIDE_SPECIFIER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "override_specifier_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_OVERRIDE_SPECIFIER_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "param_became_va_list|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PARAM_BECAME_VA_LIST",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "param_default_value_changed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "PARAM_DEFAULT_VALUE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "param_default_value_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "PARAM_DEFAULT_VALUE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "param_lost_va_list|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PARAM_LOST_VA_LIST",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "param_pointee_const_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PARAM_POINTEE_QUALIFIER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "param_pointee_const_to_volatile|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PARAM_POINTEE_QUALIFIER_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "param_pointer_level_changed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PARAM_POINTER_LEVEL_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "param_rename_header_only|c_core": {
+  "any_of": [],
+  "expected": [
+   "PARAM_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "NO_CHANGE"
+ },
+ "param_rename_header_only|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "PARAM_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "NO_CHANGE"
+ },
+ "param_rename_header_only|cxx_stdlib": {
+  "any_of": [],
+  "expected": [
+   "PARAM_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "NO_CHANGE"
+ },
+ "param_restrict_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "PARAM_RESTRICT_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "param_restrict_removed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "PARAM_RESTRICT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "params_reordered|c_core": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "params_reordered|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_PARAMS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "pimpl_member_renamed_under_inline_body|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "INLINE_BODY_REFERENCES_RENAMED_MEMBER"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE"
+ },
+ "polymorphic_type_added_without_virtual_dtor|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "primary_base_grew|cxx_more": {
+  "any_of": [
+   [
+    "BASE_CLASS_OFFSET_CHANGED"
+   ],
+   [
+    "VTABLE_THUNK_OFFSET_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "pure_virtual_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_BECAME_ABSTRACT",
+   "VTABLE_SLOT_COUNT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rebuild_cxx11_abi_off|cxx_stdlib": {
+  "any_of": [
+   [
+    "FUNC_PARAMS_CHANGED",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "FUNC_RETURN_CHANGED"
+   ]
+  ],
+  "expected": [
+   "GLIBCXX_DUAL_ABI_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rebuild_hidden_visibility|c_core": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "rebuild_hidden_visibility|cxx_classes": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "rebuild_hidden_visibility|cxx_stdlib": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "rebuild_m32|c_elf": {
+  "any_of": [
+   [
+    "ELF_MACHINE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rebuild_optimized|c_core": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "rebuild_optimized|cxx_classes": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "rebuild_optimized|cxx_stdlib": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "rebuild_pack_struct|c_core": {
+  "any_of": [
+   [
+    "TYPE_ALIGNMENT_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_OFFSET_CHANGED",
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rebuild_pack_struct|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_ALIGNMENT_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_OFFSET_CHANGED",
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rebuild_short_enums|c_core": {
+  "any_of": [
+   [
+    "ENUM_UNDERLYING_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rebuild_short_enums|cxx_classes": {
+  "any_of": [
+   [
+    "ENUM_UNDERLYING_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rebuild_x32|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ELF_CLASS_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "record_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED",
+   "TYPE_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "record_alignment_raised|cxx_more": {
+  "any_of": [
+   [
+    "TYPE_ALIGNMENT_CHANGED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "record_became_opaque|c_elf": {
+  "any_of": [],
+  "expected": [
+   "TYPE_BECAME_OPAQUE"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "record_became_packed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "STRUCT_PACKING_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "record_lost_standard_layout|cxx_more": {
+  "any_of": [
+   [
+    "FIELD_ACCESS_CHANGED"
+   ],
+   [
+    "STANDARD_LAYOUT_LOST"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "record_lost_trivially_copyable|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TRIVIALLY_COPYABLE_LOST",
+   "VALUE_ABI_TRAIT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "record_removed|c_elf": {
+  "any_of": [
+   [
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "relr_packed_relocs|c_elf": {
+  "any_of": [],
+  "expected": [
+   "DT_RELR_INTRODUCED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "relr_relocs_unpacked|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "DT_RELR_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "relro_disabled|c_elf": {
+  "any_of": [],
+  "expected": [
+   "RELRO_WEAKENED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "reorder_declarations|c_core": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "reorder_declarations|cxx_classes": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "reserved_field_used|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "USED_RESERVED_FIELD"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "return_deep_pointee_const_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_RETURN_POINTEE_QUALIFIER_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "return_pointee_const_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_RETURN_POINTEE_QUALIFIER_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "return_pointee_const_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_RETURN_POINTEE_QUALIFIER_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "return_pointer_level_changed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "RETURN_POINTER_LEVEL_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "returned_struct_grew_past_registers|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "STRUCT_RETURN_CONVENTION_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "rpath_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "RPATH_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "rpath_became_runpath|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "RPATH_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "runpath_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "RUNPATH_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "secondary_base_became_polymorphic|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SECONDARY_VTABLE_GROUP_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "serialization_tag_swapped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "ENUM_MEMBER_VALUE_CHANGED",
+   "SERIALIZATION_TAG_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "short_wchar|c_elf": {
+  "any_of": [],
+  "expected": [
+   "WCHAR_MODEL_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "soname_added|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "SONAME_MISSING"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "soname_changed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_UNNECESSARY",
+   "SONAME_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "soname_dropped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "source_only_export_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED_ELF_ONLY"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "source_only_var_export_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "VAR_ADDED_ELF_ONLY"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "stack_protector_dropped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "STACK_CANARY_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "static_inline_helper_added|c_core": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "static_inline_helper_added|cxx_classes": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "static_member_access_narrowed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "VAR_ACCESS_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "static_member_access_widened|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "VAR_ACCESS_WIDENED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "static_tls_removed|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "STATIC_TLS_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "std_reexport_dropped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "STD_REEXPORT_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "std_string_abi_flipped|cxx_alt": {
+  "any_of": [],
+  "expected": [
+   "GLIBCXX_DUAL_ABI_CHANGED",
+   "GLIBCXX_DUAL_ABI_FLIP_DETECTED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "std_template_instance_exported|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED",
+   "SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "stl_by_value_api_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "PUBLIC_API_EXPOSES_STL_BY_VALUE"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "struct_append_field|c_core": {
+  "any_of": [
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_append_field|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_array_grow|c_core": {
+  "any_of": [
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_array_grow|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_array_shrink_in_padding|c_core": {
+  "any_of": [
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "struct_array_shrink_in_padding|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "struct_became_class|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SOURCE_LEVEL_KIND_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "struct_became_union|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_KIND_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_field_widen|c_core": {
+  "any_of": [
+   [
+    "TYPE_ALIGNMENT_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_field_widen|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_ALIGNMENT_CHANGED"
+   ],
+   [
+    "TYPE_FIELD_TYPE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_remove_trailing_field|c_core": {
+  "any_of": [
+   [
+    "TYPE_FIELD_REMOVED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_remove_trailing_field|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_FIELD_REMOVED"
+   ],
+   [
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_swap_fields|c_core": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "struct_swap_fields|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "symbol_moved_version_node_keeping_alias|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_VERSION_ALIAS_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "symbol_moved_version_node|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_MOVED_VERSION_NODE"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "symbolic_binding|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SYMBOLIC_BINDING_MODE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "symbols_prefixed_batch|c_elf": {
+  "any_of": [
+   [
+    "FUNC_LIKELY_RENAMED",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_RENAMED_BATCH"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "tag_type_renamed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TAG_TYPE_RENAMED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "target_isa_raised|c_elf": {
+  "any_of": [],
+  "expected": [
+   "TARGET_ISA_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "template_added|cxx_more": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "template_default_arg_change|cxx_classes": {
+  "any_of": [
+   [
+    "TEMPLATE_PARAM_DEFAULT_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "template_instantiation_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "template_nontype_param_retyped|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_PARAMS_CHANGED",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "TEMPLATE_PARAM_TYPE_CHANGED",
+    "TYPEDEF_BASE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "template_param_added_defaulted|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_PARAMS_CHANGED",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "TEMPLATE_PARAM_TYPE_CHANGED",
+    "TYPEDEF_BASE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "template_param_argument_changed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TEMPLATE_PARAM_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "template_param_removed|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_PARAMS_CHANGED",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "TEMPLATE_PARAM_TYPE_CHANGED",
+    "TYPEDEF_BASE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "template_return_argument_changed|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TEMPLATE_RETURN_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "template_specialization_added|cxx_more": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "template_specialization_removed|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "text_relocation_introduced|c_elf": {
+  "any_of": [],
+  "expected": [
+   "TEXT_RELOCATION_INTRODUCED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "text_relocation_removed|c_elf_alt": {
+  "any_of": [],
+  "expected": [
+   "TEXT_RELOCATION_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "tls_initial_exec|c_elf": {
+  "any_of": [],
+  "expected": [
+   "STATIC_TLS_INTRODUCED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "tls_object_grew|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TLS_VAR_SIZE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "type_lost_abstract|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPE_LOST_ABSTRACT"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "typedef_added|cxx_more": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "typedef_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "TYPEDEF_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "typedef_respelled_as_alias|cxx_more": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "NO_CHANGE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "typedef_retargeted_same_size|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_PARAMS_CHANGED",
+    "FUNC_REMOVED",
+    "FUNC_REMOVED_ELF_ONLY",
+    "TEMPLATE_PARAM_TYPE_CHANGED",
+    "TYPEDEF_BASE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "typedef_retarget|c_core": {
+  "any_of": [
+   [
+    "TYPEDEF_BASE_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "typedef_retarget|cxx_classes": {
+  "any_of": [
+   [
+    "TYPEDEF_BASE_CHANGED"
+   ]
+  ],
+  "expected": [],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "union_member_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_member_removed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "UNION_FIELD_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "API_BREAK"
+ },
+ "union_member_retyped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "unnamed_type_api_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "UNNAMED_TYPE_IN_PUBLIC_ABI"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "unversioned_export_added|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED",
+   "UNVERSIONED_EXPORTED_SYMBOL"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "var_alignment_raised|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VAR_ALIGNMENT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "var_type_change|c_core": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VAR_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "var_type_change|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VAR_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "vector_math_abi_changed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "VECTOR_ABI_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "version_node_added_for_new_symbol|c_elf": {
+  "any_of": [],
+  "expected": [
+   "FUNC_ADDED",
+   "SYMBOL_VERSION_DEFINED_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "COMPATIBLE"
+ },
+ "version_node_renamed|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_VERSION_NODE_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "version_script_dropped|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "SYMBOL_VERSION_NODE_REMOVED",
+   "VERSION_SCRIPT_MISSING"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "version_sentinel_typedef_bumped|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "TYPEDEF_VERSION_SENTINEL"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "virtual_appended_after_last_slot|cxx_more": {
+  "any_of": [
+   [
+    "FUNC_ADDED",
+    "FUNC_VIRTUAL_ADDED",
+    "VIRTUAL_METHOD_ADDED"
+   ],
+   [
+    "SYMBOL_SIZE_CHANGED",
+    "TYPE_VTABLE_CHANGED",
+    "VTABLE_SLOT_COUNT_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "virtual_bases_reordered|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VIRTUAL_BASE_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "virtual_became_final|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_BECAME_FINAL"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "virtual_become_pure|cxx_classes": {
+  "any_of": [
+   [
+    "FUNC_VIRTUAL_BECAME_PURE"
+   ],
+   [
+    "TYPE_BECAME_ABSTRACT"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "virtual_lost_final|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_LOST_FINAL"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "virtual_method_add|cxx_classes": {
+  "any_of": [
+   [
+    "TYPE_VTABLE_CHANGED"
+   ]
+  ],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "virtual_noexcept_added|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_NOEXCEPT_ADDED",
+   "FUNC_VIRTUAL_NOEXCEPT_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "API_BREAK",
+  "verdict_min": "API_BREAK"
+ },
+ "virtual_remove|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "FUNC_VIRTUAL_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "virtual_reorder|cxx_classes": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_VTABLE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "vptr_introduced|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "FUNC_VIRTUAL_ADDED",
+   "SONAME_BUMP_RECOMMENDED",
+   "VPTR_INTRODUCED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "vtt_grew|cxx_more": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "VTT_SLOT_COUNT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "weak_became_global|c_elf": {
+  "any_of": [],
+  "expected": [
+   "SYMBOL_BINDING_STRENGTHENED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "writable_executable_segment|c_elf": {
+  "any_of": [],
+  "expected": [
+   "WRITABLE_EXECUTABLE_SEGMENT"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "x86_isa_level_raised|c_elf": {
+  "any_of": [],
+  "expected": [
+   "X86_ISA_BASELINE_RAISED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE_WITH_RISK"
+ }
+}

@@ -35,7 +35,7 @@ _FIELD_REMOVED = frozenset({"TYPE_FIELD_REMOVED"})
 _FIELD_ADDED = frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"})
 _BITFIELD = frozenset({"FIELD_BITFIELD_CHANGED"})
 _BREAKING: dict[str, Any] = {"verdict_min": "BREAKING"}
-_DWARF = {"min_evidence": "dwarf"}
+_DWARF: dict[str, object] = {}
 
 
 def _replace(
@@ -59,7 +59,6 @@ def _replace(
 
 def _op(name: str, role: str, edit: Edit, why: str, **kw: Any) -> EditOp:
     kw.setdefault("touches", (role,))
-    kw.setdefault("min_evidence", "dwarf")
     return EditOp(name, (role,), edit, why, **kw)
 
 
@@ -295,7 +294,6 @@ _RECORDS = (
         any_of=(frozenset({"TYPE_ADDED"}),),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE",
-        min_evidence="headers",
     ),
 )
 
@@ -343,7 +341,6 @@ _BASES = (
         "converting LD3* to LB3* or naming k through LD3 no longer compiles",
         expected=frozenset({"BASE_CLASS_ACCESS_NARROWED"}),
         verdict_min="API_BREAK",
-        min_evidence="headers",
     ),
 )
 
@@ -375,7 +372,6 @@ _TRAITS = (
         verdict_min="BREAKING",
         precondition=_x86_64,
         host_arch=_X86_HOSTS,
-        min_evidence="dwarf",
     ),
     _op(
         "record_lost_standard_layout",
@@ -392,7 +388,6 @@ _TRAITS = (
             frozenset({"FIELD_ACCESS_CHANGED"}),
         ),
         verdict_min="API_BREAK",
-        min_evidence="headers",
     ),
 )
 
