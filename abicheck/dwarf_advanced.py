@@ -334,52 +334,62 @@ def _check_children_nontrivial(
     CU: Any,
 ) -> bool:
     """Iterate children of a struct/class DIE to detect non-trivial properties."""
+    return any(
+        _child_is_nontrivial(ch, type_die, class_name, cache, CU)
+        for ch in type_die.iter_children()
+    )
 
-    def _member_type_is_nontrivial(ch: Any) -> bool:
-        if CU is None:
-            return False
-        member_type_die = _resolve_type_die(ch, CU)
-        if member_type_die is None:
-            return False
-        member_tag = getattr(member_type_die, "tag", "")
-        if member_tag not in (
-            "DW_TAG_structure_type",
-            "DW_TAG_class_type",
-            "DW_TAG_union_type",
-        ):
-            return False
-        return _is_nontrivial_aggregate(member_type_die, cache=cache, CU=CU)
 
-    def _is_user_defined_special_member(ch: Any) -> bool:
-        name = _attr_str(ch, "DW_AT_name") or ""
-        linkage = _attr_str(ch, "DW_AT_linkage_name") or ""
-        defaulted = ch.attributes.get("DW_AT_defaulted")
-        artificial = ch.attributes.get("DW_AT_artificial")
-        if (defaulted is not None and int(defaulted.value) != 0) or (
-            artificial is not None and int(artificial.value) != 0
-        ):
-            return False
-        if name.startswith("~") or any(p in linkage for p in ("D0Ev", "D1Ev", "D2Ev")):
-            return True
-        return bool(class_name) and is_copy_or_move_ctor(ch, type_die, class_name, CU)
-
-    for ch in type_die.iter_children():
-        if ch.tag == "DW_TAG_inheritance":
-            # Any base class -> conservatively non-trivial
-            return True
-
-        if ch.tag == "DW_TAG_member":
-            if _member_type_is_nontrivial(ch):
-                return True
-            continue
-
-        if ch.tag != "DW_TAG_subprogram":
-            continue
-
-        if _is_user_defined_special_member(ch):
-            return True
-
+def _child_is_nontrivial(
+    ch: Any,
+    type_die: Any,
+    class_name: str,
+    cache: dict[int, bool] | None,
+    CU: Any,
+) -> bool:
+    """Whether one child DIE of a struct/class makes that type non-trivial."""
+    if ch.tag == "DW_TAG_inheritance":
+        # Any base class -> conservatively non-trivial
+        return True
+    if ch.tag == "DW_TAG_member":
+        return _member_type_is_nontrivial(ch, cache, CU)
+    if ch.tag == "DW_TAG_subprogram":
+        return _is_user_defined_special_member(ch, type_die, class_name, CU)
     return False
+
+
+def _member_type_is_nontrivial(ch: Any, cache: dict[int, bool] | None, CU: Any) -> bool:
+    """Whether a data member's aggregate type is itself non-trivial."""
+    if CU is None:
+        return False
+    member_type_die = _resolve_type_die(ch, CU)
+    if member_type_die is None:
+        return False
+    member_tag = getattr(member_type_die, "tag", "")
+    if member_tag not in (
+        "DW_TAG_structure_type",
+        "DW_TAG_class_type",
+        "DW_TAG_union_type",
+    ):
+        return False
+    return _is_nontrivial_aggregate(member_type_die, cache=cache, CU=CU)
+
+
+def _is_user_defined_special_member(
+    ch: Any, type_die: Any, class_name: str, CU: Any
+) -> bool:
+    """Whether a subprogram DIE is a user-declared destructor, copy or move ctor."""
+    name = _attr_str(ch, "DW_AT_name") or ""
+    linkage = _attr_str(ch, "DW_AT_linkage_name") or ""
+    defaulted = ch.attributes.get("DW_AT_defaulted")
+    artificial = ch.attributes.get("DW_AT_artificial")
+    if (defaulted is not None and int(defaulted.value) != 0) or (
+        artificial is not None and int(artificial.value) != 0
+    ):
+        return False
+    if name.startswith("~") or any(p in linkage for p in ("D0Ev", "D1Ev", "D2Ev")):
+        return True
+    return bool(class_name) and is_copy_or_move_ctor(ch, type_die, class_name, CU)
 
 
 def _value_abi_trait_for_typed_die(
