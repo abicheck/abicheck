@@ -12,7 +12,8 @@ from __future__ import annotations
 import pytest
 
 from abiforge.model.config import default_config
-from abiforge.model.observable import min_level_cells
+from abiforge.model.observable import min_level_cells, unclassified_kinds
+from abiforge.model.opkit import BUILD_RECORD
 from abiforge.model.seeds import SEEDS, Seed
 from abiforge.operators import OPERATORS, matrix
 from abiforge.run.toolchains import toolchain
@@ -81,7 +82,9 @@ def test_every_matrix_pair_of_a_carrier_operator_has_a_floor_cell() -> None:
         if op.requires(base) is not None or not op.applies_to(seed):
             continue
         cells, unsupported = min_level_cells(op, base)
-        assert cells or unsupported, (op.name, seed.name)
+        # An UNCLASSIFIED kind gets no floor cell: reported, never dropped.
+        reported = bool(unsupported) or bool(unclassified_kinds(op))
+        assert cells or reported, (op.name, seed.name)
 
 
 # --- the compiler is the oracle for the layout a build flag moves ----------
@@ -133,3 +136,109 @@ def test_the_same_header_has_a_different_layout_under_the_build_flag(
     # alignof falls to 1 under -fpack-struct=1 for every shape: the header carries
     # the same declaration, so only the flag tells the two layouts apart.
     assert packed.split()[1] == "1", shape
+
+
+# --- the operator enumeration: every build-flag edit is classified ---------
+
+#: Build flags the header text and the binary both lack: a configuration sees
+#: the edit only through a recorded build (DWARF or build data). Hand-written
+#: from the flag's meaning, never from a checker.
+CARRIED_FLAG_EDITS = frozenset(
+    {
+        "rebuild_pack_struct",  # -fpack-struct: layout only
+        "rebuild_short_enums",  # -fshort-enums: enum size only
+        "char_made_unsigned",  # -funsigned-char: signedness, no symbol
+        "short_wchar",  # -fshort-wchar: wchar_t width
+        "target_isa_raised",  # -mavx2: code, not exported symbols
+        "vector_math_abi_changed",  # -mveclibabi: the call target is in the IR
+        "debug_info_dropped",  # -g0: removes the DWARF record itself
+        "long_double_made_64bit",  # -mlong-double-64: x87 format, in the DWARF type
+        "l3_exceptions_enabled",  # -fexceptions: unwind tables, build-recorded
+        "l3_tls_model_local_dynamic",  # -ftls-model: build-recorded TLS model
+        "l3_lto_enabled",  # -flto: build-recorded
+        "l3_struct_packing_8",  # -fpack-struct=8 (build data)
+        "l3_language_standard_raised",  # -std: build-recorded
+        "l3_threadsafe_statics_disabled",  # -fno-threadsafe-statics (build data)
+        "l3_stdlib_assertions",  # _GLIBCXX_ASSERTIONS (build data)
+        "l3_whole_program_vtables",  # -fwhole-program-vtables (build data)
+    }
+)
+
+#: Build flags the binary (symbols, relocations, imports, notes) shows: the
+#: edit is observable at {B}, so it must NOT declare a carrier. Declaring one
+#: would hide a real binary break at the cheapest evidence level.
+BINARY_VISIBLE_FLAG_EDITS = frozenset(
+    {
+        "rebuild_m32",  # ELF machine and class
+        "rebuild_x32",  # ELF class with EM_X86_64
+        "rebuild_cxx11_abi_off",  # mangled names
+        "rebuild_against_libcxx",  # mangled names and imports
+        "rebuild_optimized",  # imports and the canary call
+        "rebuild_hidden_visibility",  # export visibility
+        "std_string_abi_flipped",  # mangled names
+        "stack_protector_dropped",  # the canary call
+        "tls_initial_exec",  # TLS relocations
+        "cet_disabled",  # ELF property notes
+        "cet_enabled",  # ELF property notes
+        "no_common_spelled",  # symbol binding
+        "static_tls_removed",  # TLS segment flag
+        "gnu_unique_disabled",  # STB_GNU_UNIQUE binding
+        "l3_sanitizer_enabled",  # sanitizer runtime imports
+        "l3_asan_enabled",  # __asan_* imports
+        "l3_rtti_disabled",  # typeinfo symbols
+    }
+)
+
+#: Build flags whose macros reach the stripped header dump (the harness passes
+#: a build role's -D/-U to castxml), so the header records the change. Their
+#: declared floor says {B,D}; whether that floor is right is an open question
+#: this table records, not a carrier to declare (a carrier would hide a header
+#: change the dump can see).
+HEADER_VISIBLE_FLAG_EDITS = frozenset(
+    {
+        "time_bits_64",  # -D_TIME_BITS=64 widens time_t in the header
+    }
+)
+
+
+def _is_build_flag_edit(op) -> bool:
+    return op.rebuild is not None or "build.cflags" in op.roles
+
+
+def test_every_build_flag_edit_is_classified_by_hand() -> None:
+    """A new flag operator must be placed in one of the two tables above."""
+    names = {op.name for op in OPERATORS}
+    for listed in (
+        CARRIED_FLAG_EDITS | BINARY_VISIBLE_FLAG_EDITS | HEADER_VISIBLE_FLAG_EDITS
+    ):
+        assert listed in names, f"{listed} is listed but no operator has that name"
+    derived = {op.name for op in OPERATORS if _is_build_flag_edit(op)}
+    unclassified = derived - (
+        CARRIED_FLAG_EDITS | BINARY_VISIBLE_FLAG_EDITS | HEADER_VISIBLE_FLAG_EDITS
+    )
+    assert not unclassified, (
+        f"build-flag edits with no hand classification: {sorted(unclassified)}"
+    )
+
+
+def test_carrier_is_declared_exactly_on_the_carried_flag_edits() -> None:
+    """No source or header edit declares a carrier; no binary-visible flag does."""
+    for op in OPERATORS:
+        if op.name in CARRIED_FLAG_EDITS:
+            assert op.carrier == BUILD_RECORD, op.name
+        else:
+            assert not op.carrier, f"{op.name} declares a carrier it should not"
+
+
+def test_stripped_headers_cannot_show_each_carried_edit() -> None:
+    """The carried edits are unobservable at {B,H}; binary-visible ones are not gated."""
+    for op in OPERATORS:
+        if (
+            op.name not in CARRIED_FLAG_EDITS
+            or op.requires(default_config("c", PRODUCER)) is not None
+        ):
+            continue
+        for seed in _seeds(op)[:1]:
+            base = default_config(seed.lang, PRODUCER)
+            stripped = base.with_(evidence="headers", stripped=True)
+            assert op.expect(stripped).observable is False, op.name

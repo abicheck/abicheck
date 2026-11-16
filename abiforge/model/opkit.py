@@ -39,6 +39,10 @@ def _no_edit(_: Roles) -> dict[str, RoleText]:
     return {}
 
 
+#: The evidence atoms that record a build's flags: DWARF (producer switches) and build data.
+BUILD_RECORD: frozenset[str] = frozenset({"D", "BD"})
+
+
 @dataclass(frozen=True)
 class EditOp:
     name: str

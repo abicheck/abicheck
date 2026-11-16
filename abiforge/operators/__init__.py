@@ -31,6 +31,7 @@ from abiforge.model.opkit import (
     _OFFSET,
     _REMOVED,
     _SIZE,
+    BUILD_RECORD,
     EditOp,
     Roles,
     _binary,
@@ -923,6 +924,9 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ),
         precondition=_all(_gnu, _not_already("short_enums", True)),
         rebuild=_with(short_enums=True),
+        # -fshort-enums changes no header text in a stripped dump: DWARF or
+        # build data records the flag (as for -fpack-struct).
+        carrier=BUILD_RECORD,
     ),
     EditOp(
         "rebuild_pack_struct",
