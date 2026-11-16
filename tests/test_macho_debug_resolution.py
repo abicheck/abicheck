@@ -89,3 +89,18 @@ def test_an_explicit_completed_bundle_supplies_its_dwarf(monkeypatch) -> None:
     )
     assert set(kw) == {"dwarf", "dwarf_advanced"}
     assert seen["dwarf_source"] == Path("explicit.dSYM")
+
+
+def test_presence_only_with_no_dwarf_supplies_nothing(monkeypatch) -> None:
+    # Presence-only on a binary with no DWARF records no presence fact at all.
+    monkeypatch.setattr(
+        macho_debug,
+        "_resolve_debug_metadata",
+        lambda dylib, debug_format, *, dwarf_source=None: (
+            SimpleNamespace(has_dwarf=False),
+            SimpleNamespace(extraction=AdvancedExtractionStatus.NOT_RUN),
+        ),
+    )
+    assert (
+        macho_debug.macho_dwarf_kwargs(LIB, None, {"debug_presence_only": True}) == {}
+    )
