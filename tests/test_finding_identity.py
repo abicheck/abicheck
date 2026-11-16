@@ -1468,7 +1468,7 @@ class TestResolveChangeIdentity:
         assert rich.primary_id == l0.primary_id
 
     def test_dwarf_ast_equivalent_type_size_kinds_collide(self) -> None:
-        # Codex review: finding_dedup._DWARF_TO_AST_EQUIV already treats
+        # Codex review: finding_dedup._SUBSUMED_AST_KINDS already treats
         # STRUCT_SIZE_CHANGED (DWARF) and TYPE_SIZE_CHANGED (AST) as one
         # logical event for the same type -- this identity must collide too.
         dwarf = resolve_change_identity(

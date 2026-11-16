@@ -72,6 +72,7 @@ from .disposition_types import (
     CONSUMER_ONLY_APPLICATION_POINTS as _CONSUMER_ONLY,
     Disposition as Disposition,
     DispositionRecord as DispositionRecord,
+    verdict_class_of,
 )
 from .rule_inventory import RuleRef
 from .rule_provenance import (
@@ -153,6 +154,7 @@ class DispositionLedger:
         reclassify_rule: RuleRef | None = None,
         reclassify_hits: tuple[RuleRef, ...] = (),
         acknowledgment_rule: RuleRef | None = None,
+        reason_code: str | None = None,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
@@ -221,10 +223,11 @@ class DispositionLedger:
                 symbol=getattr(change, "symbol", None),
                 disposition=disposition,
                 application_point=application_point,
-                verdict_class=_verdict_class_of(change),
+                verdict_class=verdict_class_of(change),
                 rule=rule,
                 reclassified_by=getattr(change, "reclassified_by", None),
-                reason_code=getattr(change, "contract_reason_code", None),
+                reason_code=reason_code
+                or getattr(change, "contract_reason_code", None),
                 gate_excluded=gate_excluded,
                 scope_decided=scope_decided,
                 policy_overlay=policy_overlay,
@@ -474,7 +477,7 @@ class DispositionLedger:
             _excluded = not is_evaluated(change) or is_cross_source_resolved(change)
             if record.verdict_class is not None:
                 # A record can arrive here already carrying a class:
-                # `_verdict_class_of` reads whatever verdict was *stamped on
+                # `verdict_class_of` reads whatever verdict was *stamped on
                 # the finding* at recording time, and a detector-produced or
                 # runtime-modulated finding is stamped before
                 # `ApplySuppression` runs. If contract evaluation later ruled
@@ -804,17 +807,3 @@ def _suppression_position(
         if i != winner and other.matches(change)
     )
     return (*rule_origin(suppression, winner), shadowed)
-
-
-def _verdict_class_of(change: object) -> str | None:
-    """*change*'s already-decided verdict class, as a wire string.
-
-    Prefers the per-finding compatibility decision the contract pipeline
-    stamped (ADR-049 D1), then the pattern/frozen-namespace override, and
-    finally nothing — this reads decisions, it never makes one.
-    """
-    for attribute in ("compatibility_decision", "effective_verdict"):
-        value = getattr(change, attribute, None)
-        if isinstance(value, Verdict):
-            return value.value
-    return None

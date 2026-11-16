@@ -26,7 +26,6 @@ from ...post_processing import (
     AnnotateLayoutUnverifiableCoveredByVtableChanged,
     AttributeStdlibEmbedding,
     ClearOrphanedVtableGapCorrelation,
-    DeduplicateAstDwarf,
     DeduplicateCrossDetector,
     DemoteOffPythonSurface,
     DemoteUnreachableInternalChurn,
@@ -50,6 +49,7 @@ from ...post_processing import (
 from ...post_processing_reachability import MarkReachability
 from ..export_existence_fold import FoldExportHygieneIntoExistence
 from .binary_gate import DemoteUnprovenBinaryApiBreaks
+from .dedup_ast_dwarf_step import DeduplicateAstDwarf
 from .pipeline import DispositionPipeline
 from .suppression import ApplySuppression
 from .target_isa import AttributeTargetIsaConsequences

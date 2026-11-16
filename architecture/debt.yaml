@@ -685,7 +685,7 @@
     },
     {
       "path": "abicheck/policy/disposition_ledger.py",
-      "baseline_lines": 820,
+      "baseline_lines": 809,
       "target": "policy",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -707,7 +707,7 @@
     },
     {
       "path": "abicheck/post_processing.py",
-      "baseline_lines": 1350,
+      "baseline_lines": 1334,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
