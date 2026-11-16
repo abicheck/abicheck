@@ -252,6 +252,16 @@ def test_a_repeated_type_at_one_base_is_checked_once_and_keeps_its_answer() -> N
     # S at base 2 is still reported via its own pair.
     s = Die("DW_TAG_structure_type", 840, members=[member(0, _int(841))])
     aligned = Die("DW_TAG_structure_type", 842, members=[member(0, s), member(0, s)])
+    # Traversal, not just the answer: S's members are listed once for the pair.
+    calls = []
+    real_children = s.iter_children
+
+    def counting_children():
+        calls.append(1)
+        return real_children()
+
+    s.iter_children = counting_children
     assert adv._type_unaligned_at(aligned, None, 0, None) is False
+    assert len(calls) == 1, "the repeated (type, base) pair must be walked once"
     shifted = Die("DW_TAG_structure_type", 843, members=[member(0, s), member(2, s)])
     assert adv._type_unaligned_at(shifted, None, 0, None) is True
