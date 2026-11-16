@@ -252,7 +252,7 @@ def _pe_library(tmp_path: Path) -> Path:
     ("fmt", "build", "reader"),
     [
         pytest.param("elf", None, _elf_presence, marks=_LINUX_GCC, id="elf"),
-        pytest.param("macho", None, _macho_presence, id="macho"),
+        pytest.param("macho", None, _macho_presence, marks=_NO_GCC, id="macho"),
         pytest.param("pe", None, _pe_presence, marks=_PE_TOOLS, id="pe"),
     ],
 )

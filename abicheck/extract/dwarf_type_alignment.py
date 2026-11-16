@@ -124,12 +124,18 @@ def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: Any) -> 
     seen: set[tuple[int, int]] = set()
     while stack:
         die, base, ancestors = stack.pop()
-        die_offset = getattr(die, "offset", id(die))
-        key = (die_offset, base)
+        t = _unwrap_qualifiers(die, CU, cache=cache)
+        t_offset = getattr(t, "offset", getattr(die, "offset", id(die)))
+        if t.tag in _AGGREGATE_TAGS and t_offset in ancestors:
+            # By-value cycle: this branch is already on its own chain. The cut is
+            # a property of the ancestor chain, not of the work done, so it is
+            # not recorded as completed: an independent visit of the same
+            # (type, base) reached under a different chain must still be walked.
+            continue
+        key = (t_offset, base)
         if key in seen:
             continue
         seen.add(key)
-        t = _unwrap_qualifiers(die, CU, cache=cache)
         if t.tag in _SCALAR_LEAF_TAGS:
             if base % _scalar_leaf_align(t) != 0:
                 return True
@@ -138,9 +144,7 @@ def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: Any) -> 
             if elem is not None:
                 stack.append((elem, base, ancestors))
         elif t.tag in _AGGREGATE_TAGS:
-            if die_offset in ancestors:
-                continue  # by-value cycle: this branch is already on its own chain
-            _push_member_types(t, CU, base, ancestors | {die_offset}, stack)
+            _push_member_types(t, CU, base, ancestors | {t_offset}, stack)
     return False
 
 

@@ -40,7 +40,13 @@ from tests.test_macho_dsym_reader import (
 
 
 @_NO_GCC
-@pytest.mark.parametrize("with_headers", [False, True], ids=["no-headers", "headers"])
+@pytest.mark.parametrize(
+    "with_headers",
+    [
+        pytest.param(False, id="no-headers"),
+        pytest.param(True, id="headers", marks=pytest.mark.integration),
+    ],
+)
 def test_cli_dump_records_the_adjacent_dsym_dwarf_with_or_without_headers(
     tmp_path: Path, with_headers: bool
 ) -> None:

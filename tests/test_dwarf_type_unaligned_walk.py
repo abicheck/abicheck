@@ -223,3 +223,23 @@ def test_sibling_members_of_one_type_at_different_offsets_are_each_checked() -> 
     t = Die("DW_TAG_structure_type", 820, members=[member(0, _int(821))])
     s = Die("DW_TAG_structure_type", 822, members=[member(0, t), member(2, t)])
     assert adv._type_unaligned_at(s, None, 0, None) is True
+
+
+@pytest.mark.parametrize(
+    "cycle_first", [True, False], ids=["cycle-first", "sibling-first"]
+)
+def test_a_cycle_cut_does_not_hide_an_independent_misaligned_sibling(
+    cycle_first: bool,
+) -> None:
+    # struct A { int i @0; A self @2; }   -- a by-value cycle; A at base 2 is cut
+    # when reached from inside A's own chain.
+    # struct O { A x @2; A y @0; }  -- O's two members visit A at base 2 and base 0.
+    # Oracle: A at base 2 puts its int at 2, which is not 4-aligned, so the answer
+    # is True whichever order O's members are walked in.
+    a = Die("DW_TAG_structure_type", 830)
+    a._members = [member(0, _int(831)), member(2, a)]
+    members = [member(2, a), member(0, a)]
+    if cycle_first:
+        members.reverse()
+    o = Die("DW_TAG_structure_type", 832, members=members)
+    assert adv._type_unaligned_at(o, None, 0, None) is True

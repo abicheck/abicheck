@@ -24,6 +24,7 @@ same snapshot it did before.
 
 from __future__ import annotations
 
+import logging
 import warnings
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,19 @@ from ..model.dwarf_facts import AdvancedExtractionStatus
 from .debug_dump import _resolve_debug_metadata
 from .extraction_limitations import record_extraction_limitation
 
-__all__ = ["MACHO_MAGICS", "macho_dwarf_kwargs"]
+_log = logging.getLogger(__name__)
+
+__all__ = [
+    "ADJACENT_DSYM_UNREADABLE_LIMITATION",
+    "MACHO_MAGICS",
+    "macho_dwarf_kwargs",
+]
+
+#: The fixed limitation recorded when an adjacent dSYM exists but cannot be read.
+#: Fixed text (no path, no exception) so the stored bytes are deterministic, and
+#: so the dump cache can recognise the transient-failure case (it must not store
+#: a snapshot that a retry with a readable dSYM would have answered differently).
+ADJACENT_DSYM_UNREADABLE_LIMITATION = "adjacent dSYM is unreadable and not used"
 
 #: Mach-O and universal (fat) container magics, both byte orders.
 MACHO_MAGICS: tuple[bytes, ...] = (
@@ -71,9 +84,8 @@ def macho_dwarf_kwargs(
         if explicit is not None:
             raise  # an explicit bundle stays fail-closed
         # An adjacent dSYM that cannot be read is absent evidence with a note.
-        record_extraction_limitation(
-            f"adjacent dSYM of {dylib_path} is unreadable and not used: {exc}"
-        )
+        _log.debug("adjacent dSYM of %s is unreadable: %s", dylib_path, exc)
+        record_extraction_limitation(ADJACENT_DSYM_UNREADABLE_LIMITATION)
         return {}
     if presence_only:
         # ELF's contract: presence is recorded, type expansion is not run.

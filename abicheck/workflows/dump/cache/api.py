@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING
 from ....buildsource.source_inputs import extraction_read_source_inputs
 from ....extract import cache_dep_manifest
 from ....extract.binary_identity import stamp_binary_identity
+from ....extract.extraction_limitations import EXTRACTION_LIMITATIONS_KEY
+from ....extract.macho_debug import ADJACENT_DSYM_UNREADABLE_LIMITATION
 from ...cache_probe import refuse_dump_while_probing, take_probed_miss
 from .finished import FINISHED_SUBDIR, take_pending
 from .key import (
@@ -484,6 +486,14 @@ def cached_run_dump(
     # ran or was served (ADR-062 D11): the entry's validity beyond its key.
     with cache_dep_manifest.recording() as parses:
         snap = _dump_uncached()
+    # An adjacent dSYM that could not be read is a transient, non-fatal gap: the
+    # snapshot is still returned, but a retry against a readable dSYM must be
+    # able to answer differently, so this dump is never stored (the same rule
+    # the optional-TU path applies).
+    recorded = (snap.dump_provenance or {}).get(EXTRACTION_LIMITATIONS_KEY)
+    unreadable_debug = isinstance(recorded, list) and (
+        ADJACENT_DSYM_UNREADABLE_LIMITATION in recorded
+    )
     deps = parses.manifest() if initial_key else None
     # Re-derive after the dump: a tool that appeared or changed mid-run must
     # miss, not store under the key it was looked up with. Likewise a system
@@ -491,7 +501,12 @@ def cached_run_dump(
     final_key = _cache_key_for(req) if initial_key else ""
     if not cache_dep_manifest.verify(deps):
         deps = None
-    if initial_key and initial_key == final_key and _write_enabled():
+    if (
+        initial_key
+        and initial_key == final_key
+        and not unreadable_debug
+        and _write_enabled()
+    ):
         # Finished requests never read the raw tier: persisting it too
         # serializes an entire snapshot no warm execution of this request uses.
         if finisher is None:

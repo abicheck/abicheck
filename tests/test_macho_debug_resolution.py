@@ -59,9 +59,10 @@ def test_an_unreadable_adjacent_dsym_is_a_non_fatal_note(monkeypatch) -> None:
     with collecting_extraction_limitations() as limits:
         kw = macho_debug.macho_dwarf_kwargs(LIB, None, {})
     assert kw == {}
-    assert len(limits) == 1
-    assert limits[0].startswith(f"adjacent dSYM of {LIB} is unreadable and not used")
-    assert "present but unreadable" in limits[0]
+    # The reason is a fixed sentence: no path, no exception text, so the stored
+    # provenance is the same whichever way the dSYM failed.
+    assert limits == [macho_debug.ADJACENT_DSYM_UNREADABLE_LIMITATION]
+    assert limits == ["adjacent dSYM is unreadable and not used"]
 
 
 def test_an_unreadable_explicit_bundle_stays_fail_closed(monkeypatch) -> None:
