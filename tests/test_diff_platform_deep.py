@@ -543,13 +543,7 @@ class TestSymbolVersionChanges:
         assert ChangeKind.SYMBOL_VERSION_DEFINED_ADDED in _kinds(r)
 
     def test_version_required_added_is_a_new_floor(self):
-        """A newly needed provider whose node exceeds the binary-wide floor.
-
-        Nothing was required before, so GLIBC_2.34 raises the floor from no
-        requirement: SYMBOL_VERSION_REQUIRED_ADDED, and RUNTIME_FLOOR_RAISED with
-        an empty old tag. This replaces the earlier COMPAT expectation, which
-        treated a provider the old binary never needed as no new constraint.
-        """
+        """A new provider's node above the binary floor is a floor (ADR-011, 2026-11-16)."""
         old_elf = ElfMetadata(versions_required={})
         new_elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.34"]})
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))

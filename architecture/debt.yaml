@@ -1422,7 +1422,7 @@
     },
     {
       "path": "tests/test_environment_drift.py",
-      "baseline_lines": 1847,
+      "baseline_lines": 1836,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

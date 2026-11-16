@@ -146,3 +146,18 @@ def test_an_unmeasured_arch_gets_no_exemption() -> None:
     kinds = _kinds_on("EM_AARCH64", {}, {"libc.so.6": ["GLIBC_2.2.5"]})
     assert ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED in kinds
     assert ChangeKind.RUNTIME_FLOOR_RAISED in kinds
+
+
+def test_a_new_lib_above_the_binary_floor_raises_it() -> None:
+    # Moved from test_environment_drift.py: libm needing GLIBC_2.35 above libc's
+    # GLIBC_2.28 raises the binary floor (2.28 -> 2.35).
+    old = {"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28"]}
+    new = {"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28"], "libm.so.6": ["GLIBC_2.35"]}
+    r = compare(
+        _snap(elf=ElfMetadata(versions_required=old)),
+        _snap(elf=ElfMetadata(versions_required=new)),
+    )
+    floors = [c for c in r.changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED]
+    assert len(floors) == 1
+    assert floors[0].old_value == "GLIBC_2.28"
+    assert floors[0].new_value == "GLIBC_2.35"
