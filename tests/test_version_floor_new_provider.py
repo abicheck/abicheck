@@ -237,3 +237,65 @@ def test_ppc64_big_endian_is_unmeasured_and_evidence_limited() -> None:
     assert kinds[ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT].effective_verdict is (
         Verdict.COMPATIBLE_WITH_RISK
     )
+
+
+def _floor_changes(
+    old: dict[str, list[str]],
+    new: dict[str, list[str]],
+    imports: list[object] | None = None,
+) -> list[Change]:
+    meta = {"machine": "EM_X86_64", "elf_class": 64, "ei_data": "LSB"}
+    r = compare(
+        _snap(elf=ElfMetadata(versions_required=old, **meta)),
+        _snap(elf=ElfMetadata(versions_required=new, imports=imports or [], **meta)),
+    )
+    return [c for c in r.changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED]
+
+
+def test_a_new_libstdcxx_prefix_raises_from_nothing_without_a_baseline() -> None:
+    # Only GLIBC_ prefixes take the architecture baseline: a new GLIBCXX node
+    # is judged against the binary-wide GLIBCXX floor (nothing here).
+    floors = _floor_changes({}, {"libstdc++.so.6": ["GLIBCXX_3.4.30"]})
+    assert len(floors) == 1
+    assert floors[0].old_value == ""
+    assert floors[0].new_value == "GLIBCXX_3.4.30"
+
+
+def test_imports_from_another_provider_or_unversioned_are_not_floor_evidence() -> None:
+    from abicheck.elf_metadata import ElfImport
+
+    imports = [
+        ElfImport(name="cxa", version="GLIBC_2.30", version_soname="libm.so.6"),
+        ElfImport(name="plain"),
+        ElfImport(name="memcpy", version="GLIBC_2.34", version_soname="libc.so.6"),
+    ]
+    floors = _floor_changes(
+        {"libc.so.6": ["GLIBC_2.2.5"]},
+        {"libc.so.6": ["GLIBC_2.2.5", "GLIBC_2.34"]},
+        imports,
+    )
+    assert len(floors) == 1
+    assert "memcpy@GLIBC_2.34" in floors[0].description
+    assert "cxa" not in floors[0].description
+
+
+def test_more_than_five_floor_evidence_symbols_are_summarised() -> None:
+    from abicheck.elf_metadata import ElfImport
+
+    imports = [
+        ElfImport(name=f"f{i}", version="GLIBC_2.34", version_soname="libc.so.6")
+        for i in range(7)
+    ]
+    floors = _floor_changes(
+        {"libc.so.6": ["GLIBC_2.2.5"]},
+        {"libc.so.6": ["GLIBC_2.2.5", "GLIBC_2.34"]},
+        imports,
+    )
+    assert "(+2 more)" in floors[0].description
+
+
+def test_no_machine_means_no_baseline_answer() -> None:
+    from abicheck.model.glibc_baseline import arch_baseline
+
+    assert arch_baseline(None, 64, "LSB") is None
+    assert arch_baseline("EM_X86_64", None, "LSB") is None
