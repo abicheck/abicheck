@@ -32,7 +32,6 @@ def test_macho_dsym_diagnostic(tmp_path: Path) -> None:
     from abicheck.extract.debug_dump import _is_macho64
     from abicheck.extract.macho_dsym import macho_uuid, read_dsym_dwarf
 
-    raw = bundle_raw = None
     dsym_file = dsym / "Contents" / "Resources" / "DWARF" / lib.name
     raw = dsym_file.read_bytes()
     ncmds = struct.unpack_from("<I", raw, 16)[0]
@@ -51,8 +50,11 @@ def test_macho_dsym_diagnostic(tmp_path: Path) -> None:
                         raw[s0 + 16 : s0 + 32].rstrip(b"\0").decode("ascii", "replace"),
                     )
                 )
-            lines.append(f"RAW segment {seg!r} nsects={nsects} sections(sect,seg)={secs}")
-        lines.append(f"RAW lc cmd=0x{cmd:x} size={cmdsize}") if cmd != 0x19 else None
+            lines.append(
+                f"RAW segment {seg!r} nsects={nsects} sections(sect,seg)={secs}"
+            )
+        if cmd != 0x19:
+            lines.append(f"RAW lc cmd=0x{cmd:x} size={cmdsize}")
         off += cmdsize
     lines.append(f"magic={lib.read_bytes()[:4].hex()} is_macho64={_is_macho64(lib)}")
     uuid = macho_uuid(lib)
