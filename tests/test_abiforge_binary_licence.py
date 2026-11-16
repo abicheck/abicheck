@@ -65,21 +65,31 @@ def _build(tmp: Path, name: str, opt: str, protector: str) -> Path:
     return lib
 
 
-def _calls_canary(lib: Path) -> bool:
-    """Oracle: does any function's disassembly call the protector's check?
+#: One disassembly line's call to the protector's check. Accepts the spellings
+#: the disassemblers in use print for it: a named target (ELF ``<...@plt>``,
+#: a Mach-O ``$stub`` or the bare C symbol) or the Mach-O stub annotation
+#: ``; symbol stub for: ___stack_chk_fail``. x86 spells the call ``call``,
+#: AArch64 ``bl``. A line with no call, or a call to another symbol, never matches.
+_CANARY_CALL = re.compile(
+    r"\b(?:call\w*|bl)\b.*?"
+    r"(?:<_*__stack_chk_fail(?:@plt|\$stub)?>|symbol stub for:\s+_*__stack_chk_fail\b)"
+)
 
-    x86 spells the call ``call``; AArch64 spells it ``bl``.
-    """
-    text = subprocess.run(
+
+def canary_call_lines(disassembly: str) -> list[str]:
+    """The disassembly lines that call the protector's check (pure; tested on Linux)."""
+    return [line for line in disassembly.splitlines() if _CANARY_CALL.search(line)]
+
+
+def _disassembly(lib: Path) -> str:
+    return subprocess.run(
         ["objdump", "-d", str(lib)], check=True, capture_output=True, text=True
     ).stdout
-    # ELF: "<__stack_chk_fail@plt>". Mach-O: the C symbol has three underscores in
-    # the stub-free call target, and the stub name carries a "$stub" suffix.
-    return bool(
-        re.search(
-            r"\b(?:call\w*|bl)\s+\S+\s+<_*__stack_chk_fail(?:@plt|\$stub)?>", text
-        )
-    )
+
+
+def _calls_canary(lib: Path) -> bool:
+    """Oracle: does any function's disassembly call the protector's check?"""
+    return bool(canary_call_lines(_disassembly(lib)))
 
 
 def _supported(*libs: Path) -> None:
@@ -96,7 +106,12 @@ def test_nm_fact_agrees_with_the_disassembly_oracle(tmp_path, opt, protector) ->
     """Each shape's imported-canary bit is the one the disassembly shows."""
     lib = _build(tmp_path, "a", opt, protector)
     _supported(lib)
-    assert (STACK_CHK_FAIL in undefined_symbols(lib)) is _calls_canary(lib)
+    imported = STACK_CHK_FAIL in undefined_symbols(lib)
+    calls = canary_call_lines(_disassembly(lib))
+    # On a mismatch, show the disassembly lines that mention the check, so a
+    # disassembler spelling we have not seen is visible in the failure itself.
+    mentions = [ln for ln in _disassembly(lib).splitlines() if "stack_chk" in ln][:10]
+    assert imported is bool(calls), (imported, calls, mentions)
 
 
 @pytest.mark.integration
