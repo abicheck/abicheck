@@ -555,23 +555,6 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         precondition=_no_pack,
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max=None,
-        rules=(
-            Rule(
-                # ``dwarf_snapshot`` leaves ``data_size_bits`` None by design
-                # ("DWARF can't tell a defaulted special member from a
-                # user-provided one"), so the DWARF operand cannot show the
-                # reused tail padding. What it does show is the field added:
-                # the edit reads as the compatible addition abicheck reports.
-                lambda c: c.evidence == "dwarf",
-                {
-                    "expected": frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}),
-                    "verdict_min": "COMPATIBLE",
-                    "verdict_max": "COMPATIBLE",
-                },
-                "dwarf evidence has no data size: the tail-padding reuse is "
-                "unobservable, the added field is the observable fact",
-            ),
-        ),
     ),
     _op(
         "polymorphic_type_added_without_virtual_dtor",

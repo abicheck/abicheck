@@ -8,10 +8,10 @@ answer:
   "reported by the removal findings ... (func_removed /
   instantiation_missing_from_binary), not by this one". Headers still expect
   the tag rename itself.
-- ``nonpod_field_added_in_tail_padding`` at DWARF depth:
-  ``dwarf_snapshot`` leaves ``data_size_bits`` None by design, so the reused
-  tail padding is not observable there; the added field is. Headers still
-  expect ``TAIL_PADDING_REUSE_CHANGED``.
+- ``nonpod_field_added_in_tail_padding``: headers expect
+  ``TAIL_PADDING_REUSE_CHANGED``. DWARF has no data size, so its expectation
+  stays the tail-padding kind; the DWARF cells stay red until the WS-1
+  ``observable_at`` batch makes that kind unobservable there. No DWARF rule.
 - ``secondary_base_became_polymorphic`` at binary depth: a stripped binary has
   no inheritance graph, so the secondary group shows as the vtable growing a
   slot (``VTABLE_SLOT_COUNT_CHANGED``). DWARF and headers still expect
@@ -65,13 +65,6 @@ def test_tag_type_renamed_binary_expects_the_removal_not_the_tag(std: str) -> No
 def test_tag_type_renamed_headers_still_expects_the_tag_rename(std: str) -> None:
     exp = OP_BY_NAME["tag_type_renamed"].expect(_cfg(std, "headers"))
     assert _edit_kinds(exp) == frozenset({"TAG_TYPE_RENAMED"}), (std, exp)
-
-
-@pytest.mark.parametrize("std", ("c++17", "c++23"))
-def test_nonpod_tail_padding_dwarf_expects_the_added_field(std: str) -> None:
-    exp = OP_BY_NAME["nonpod_field_added_in_tail_padding"].expect(_cfg(std, "dwarf"))
-    assert _edit_kinds(exp) == frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}), exp
-    assert exp.verdict_min == "COMPATIBLE" and exp.verdict_max == "COMPATIBLE"
 
 
 @pytest.mark.parametrize("std", ("c++17", "c++23"))
