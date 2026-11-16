@@ -82,9 +82,17 @@ def canary_call_lines(disassembly: str) -> list[str]:
 
 
 def _disassembly(lib: Path) -> str:
-    return subprocess.run(
-        ["objdump", "-d", str(lib)], check=True, capture_output=True, text=True
-    ).stdout
+    """The library's code, from the disassembler that names stub calls for its format.
+
+    Mach-O: ``otool -tV`` annotates each stub call with ``; symbol stub for:``;
+    plain ``objdump -d`` prints the bare address. ELF: GNU ``objdump -d`` names
+    the ``@plt`` target.
+    """
+    if library_format(lib) == "macho":
+        argv = ["otool", "-tV", str(lib)]
+    else:
+        argv = ["objdump", "-d", str(lib)]
+    return subprocess.run(argv, check=True, capture_output=True, text=True).stdout
 
 
 def _calls_canary(lib: Path) -> bool:
