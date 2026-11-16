@@ -17,6 +17,9 @@ dropped.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from abiforge.known import known_mismatch
@@ -28,7 +31,12 @@ from abiforge.operators import OPERATORS, matrix
 from abiforge.run.cells import CellContext, run_cell
 from abiforge.run.toolchains import toolchain
 
-pytestmark = pytest.mark.integration
+# Nightly, non-gating (plan B2): the PR tier never runs these. Their red set is the
+# committed baseline in tests/data/min_level_red_cells.json (a ratchet).
+pytestmark = pytest.mark.edit_corpus_nightly
+
+_BASELINE = Path(__file__).resolve().parent / "data" / "min_level_red_cells.json"
+_RED = json.loads(_BASELINE.read_text(encoding="utf-8"))["cells"]
 
 PRODUCER = toolchain("gcc", 13)
 
@@ -85,7 +93,7 @@ _PARAMS = _params()
 
 
 @pytest.mark.parametrize("op,seed,cell,role", _PARAMS)
-def test_min_level_cell(op, seed, cell, role, tmp_path) -> None:
+def test_min_level_cell(op, seed, cell, role, tmp_path, request) -> None:
     if role == "unsupported":
         pytest.skip(
             f"{op.name}: a minimal evidence set the corpus does not build (reported)"
@@ -106,7 +114,17 @@ def test_min_level_cell(op, seed, cell, role, tmp_path) -> None:
             f"recorded {known.cls} no longer reproduces: got {result.cls}"
         )
         pytest.xfail(f"{known.cls}: {known.reason}")
-    assert result.cls in PASSING_CLASSES, result.describe()
+    cell_id = request.node.callspec.id
+    if result.cls in PASSING_CLASSES:
+        assert cell_id not in _RED, (
+            f"{cell_id} passes now: remove it from tests/data/min_level_red_cells.json"
+        )
+        return
+    assert cell_id in _RED, (
+        f"new red cell {cell_id}: {result.cls}. Triage it (E or D) and record it in "
+        "tests/data/min_level_red_cells.json\n" + result.describe()
+    )
+    # A recorded red cell: the ratchet holds, the cell stays in the baseline.
 
 
 def test_every_operator_has_a_minimal_cell_or_a_reported_reason() -> None:

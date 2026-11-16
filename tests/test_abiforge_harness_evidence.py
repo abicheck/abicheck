@@ -121,8 +121,7 @@ def test_an_enum_value_is_observable_in_stripped_headers_by_its_declared_observa
 def test_a_kind_observed_only_through_dwarf_drops_out_of_stripped_headers() -> None:
     """A kind whose only declared configuration needs DWARF is unobservable at
     stripped headers: nothing is required, and the note says why."""
-    from abiforge.model.expect import observability_floor
-    from abiforge.model.expect import Expectation
+    from abiforge.model.expect import Expectation, observability_floor
 
     stripped = default_config("c", GCC).with_(stripped=True)
     exp = observability_floor(

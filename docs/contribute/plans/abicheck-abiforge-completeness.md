@@ -779,7 +779,7 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-3 | Pure virtual, key function, vtable home | A6 | not started | — |
 | WS-4 | Platform facts | A7 | in progress (PR 3, PE variables) | #2068 (PR 1, Mach-O); #2073 (PR 2, PE, merged); `fix/ws4-pe-variable-linkage` (PR 3: plain C++ globals bound to MSVC data exports by decoded type, own generation bump) |
 | WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | in review (PR 1: `variant_of` pass) | this PR this PR. First relation candidate (confirmed on macOS, #2068): an exported thunk renamed by its offset (`_ZThn`/`_ZTv`) is reported as FUNC_REMOVED_ELF_ONLY/FUNC_ADDED, duplicating VTABLE_THUNK_OFFSET_CHANGED (`test_macho_cell_meets_its_strict_expectation[primary_base_grew-dwarf]`). |
-| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | B0 merged | #2069 (PR 1, B0) |
+| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | PR 2 in review (per-kind floor, min-level nightly baseline, triage pending) | #2069 (PR 1, B0); this PR (PR 2, B1+B2) |
 | WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | in review (PR 2 of 3) | this PR (PR 1: #2070, merged); nightly corpus fix `fix/nightly-builtin-probe-target` (clang -m32 builtin probe; time64 typedef chain landed in #2085) |
 | WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | PR 1 (standards axis) in review | this PR |
 
@@ -909,6 +909,14 @@ Every brief assumes the house rules in §11.5. Paste one into a new session.
 > test over current cells. Done when: new cells are red exactly on the known
 > A2/A3 defects (each tracked by a WS-2 PR, not an xfail), and §11.2 is
 > updated.
+
+**WS-6 minimum-level red set (`tests/data/min_level_red_cells.json`).** A ratchet, not a gate: a new red cell fails the nightly lane, a fixed one must leave the file in the same PR.
+
+| Category | Cells | Owner |
+|---|---|---|
+| unclassified-triage-pending | 56 | this PR (triage E or D before merge) |
+| E: expectation wrong | 0 | fixed in the PR that triages it |
+| D: detector gap, A-numbered | 0 | the WS-2 PR named by the A-number |
 
 **WS-7 — abiforge self-testing**
 > Read the plan's §6 and §7.2. PR 1 (no prerequisite): Hypothesis properties
