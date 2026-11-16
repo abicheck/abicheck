@@ -125,6 +125,16 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
 
 
 _MACHO64_LE_MAGIC = b"\xcf\xfa\xed\xfe"  # MH_MAGIC_64, little-endian
+# Fat (universal) headers and the other Mach-O forms: not read by this reader.
+_MACHO_OTHER_MAGICS = frozenset(
+    {
+        b"\xca\xfe\xba\xbe",  # FAT_MAGIC (big-endian)
+        b"\xbe\xba\xfe\xca",  # FAT_CIGAM
+        b"\xce\xfa\xed\xfe",  # MH_MAGIC (32-bit, little-endian)
+        b"\xfe\xed\xfa\xce",  # MH_CIGAM (32-bit, big-endian)
+        b"\xfe\xed\xfa\xcf",  # MH_CIGAM_64 (64-bit, big-endian)
+    }
+)
 _CPU_X86_64 = 0x01000007
 _CPU_ARM64 = 0x0100000C
 
@@ -166,6 +176,12 @@ def _macho_session_from_bundle(
     """
     from .extract.macho_dsym import DsymDwarf, macho_uuid, read_dsym_dwarf
 
+    if f.seek(0) or f.read(4) != _MACHO64_LE_MAGIC:
+        return (
+            None,
+            "library is not a thin little-endian 64-bit Mach-O (fat and 32-bit slices are not read)",
+        )
+    f.seek(0)
     got = read_dsym_dwarf(bundle, dylib_uuid=macho_uuid(so_path))
     if not isinstance(got, DsymDwarf):
         return None, got.reason
@@ -194,7 +210,11 @@ def _macho_dsym_session(
         return None, AdvancedExtractionStatus.NOT_RUN
     session, reason = _macho_session_from_bundle(so_path, bundle, f)
     if session is None:
-        log.warning("parse_dwarf: dSYM for %s not used: %s", so_path, reason)
+        # A bundle beside the library that does not belong to it is a stale or
+        # wrong dSYM the user may believe is in use: say so in the dump instead
+        # of ignoring it. Nothing was read, so the status stays NOT_RUN.
+        log.warning("parse_dwarf: adjacent dSYM %s not used: %s", bundle, reason)
+        note_debug_info_read_failure(f"adjacent dSYM {bundle} ignored: {reason}")
         return None, AdvancedExtractionStatus.NOT_RUN
     return session, AdvancedExtractionStatus.COMPLETED
 
@@ -269,10 +289,20 @@ def _open_dwarf_session_with_status(
             return None, AdvancedExtractionStatus.NOT_RUN
 
         f.seek(0)
-        if f.read(4) == _MACHO64_LE_MAGIC:
-            f.seek(0)
-            return _macho_dsym_session(so_path, f)
+        magic = f.read(4)
         f.seek(0)
+        if magic == _MACHO64_LE_MAGIC:
+            return _macho_dsym_session(so_path, f)
+        if magic in _MACHO_OTHER_MAGICS:
+            # Fat (universal) or 32-bit / big-endian Mach-O: not read yet. Absent
+            # with a reason, never an ELF parse error.
+            log.warning(
+                "parse_dwarf: %s is a fat or non-64-bit little-endian Mach-O; "
+                "its DWARF is not read (no slice selection yet)",
+                so_path,
+            )
+            f.close()
+            return None, AdvancedExtractionStatus.NOT_RUN
 
         elf = ELFFile(f)  # type: ignore[no-untyped-call]
 

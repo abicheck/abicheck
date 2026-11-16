@@ -326,3 +326,62 @@ def test_a_missing_explicit_bundle_is_a_reported_failure(tmp_path: Path) -> None
     lib = _dylib(tmp_path / "libq.dylib", "11111111-2222-3333-4444-555555555555")
     with pytest.raises(SnapshotError):
         _resolve_debug_metadata(lib, None, dwarf_source=tmp_path / "gone.dSYM")
+
+
+def test_a_refused_adjacent_bundle_is_reported_in_the_dump(tmp_path: Path) -> None:
+    """A stale dSYM beside the library is a visible failure, not silently ignored."""
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.debug_dump import _resolve_debug_metadata
+
+    lib = _dylib(tmp_path / "libp.dylib", "11111111-2222-3333-4444-555555555555")
+    other = _macho(
+        tmp_path / "other.bin",
+        filetype=_MH_DSYM,
+        uuid="99999999-2222-3333-4444-555555555555",
+        sections=[("__debug_info", b"\x00" * 16)],
+    )
+    _bundle_beside(lib, other)
+    with pytest.raises(SnapshotError, match="adjacent dSYM .* ignored"):
+        _resolve_debug_metadata(lib, None)
+
+
+@pytest.mark.parametrize(
+    "magic",
+    [
+        b"\xca\xfe\xba\xbe",  # fat (universal), big-endian header
+        b"\xce\xfa\xed\xfe",  # 32-bit Mach-O, little-endian
+        b"\xfe\xed\xfa\xcf",  # 64-bit Mach-O, big-endian
+    ],
+)
+def test_fat_and_non_64_bit_mach_o_are_absent_not_an_elf_failure(
+    tmp_path: Path, magic: bytes
+) -> None:
+    from abicheck.dwarf_unified import _open_dwarf_session_with_status
+    from abicheck.extract.debug_dump import _resolve_debug_metadata
+    from abicheck.model.dwarf_facts import AdvancedExtractionStatus
+
+    lib = tmp_path / "libfat.dylib"
+    lib.write_bytes(magic + b"\x00" * 60)
+    session, status = _open_dwarf_session_with_status(lib)
+    assert session is None
+    assert status is AdvancedExtractionStatus.NOT_RUN
+    meta, _adv = _resolve_debug_metadata(lib, None)
+    assert meta.has_dwarf is False
+
+
+def test_an_explicit_bundle_for_a_fat_library_is_a_reported_failure(
+    tmp_path: Path,
+) -> None:
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.debug_dump import _resolve_debug_metadata
+
+    lib = tmp_path / "libfat.dylib"
+    lib.write_bytes(b"\xca\xfe\xba\xbe" + b"\x00" * 60)
+    bundle = _macho(
+        tmp_path / "explicit.bin",
+        filetype=_MH_DSYM,
+        uuid="11111111-2222-3333-4444-555555555555",
+        sections=[("__debug_info", b"\x00" * 16)],
+    )
+    with pytest.raises(SnapshotError, match="not a thin"):
+        _resolve_debug_metadata(lib, None, dwarf_source=bundle)

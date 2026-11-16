@@ -191,7 +191,7 @@ def _parse_dwarf_source(
     """
     from ..model.dwarf_facts import AdvancedExtractionStatus
 
-    if dwarf_path != so_path and _is_macho64(dwarf_path) and _is_macho64(so_path):
+    if dwarf_path != so_path and _is_macho64(dwarf_path):
         # A Mach-O library's explicit bundle (ADR-021): its UUID must match the
         # library, and a refused bundle is a reported read failure, not a drop.
         from ..dwarf_unified import parse_dwarf_from_macho_dsym
