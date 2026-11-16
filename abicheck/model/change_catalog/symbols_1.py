@@ -643,6 +643,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         "func_export_added",
         _C,
         is_addition=True,
+        observable_at=(_OBS_DH,),
         impact="An already-declared function gained a binary export -- a "
         "version script, visibility attribute or link-map change now "
         "emits a dynamic symbol for a declaration that was already "
@@ -661,6 +662,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         "var_export_added",
         _C,
         is_addition=True,
+        observable_at=(_OBS_DH,),
         impact="Data symbol gained a binary export while its declaration was "
         "already present; the `func_export_added` counterpart for data "
         "symbols. Pure addition, and reported for the same reason: a "
