@@ -38,6 +38,26 @@ def _beside(directory: Path) -> str:
     return ", ".join(sorted(p.name for p in directory.iterdir()))
 
 
+def _binary_only_probe(directory: Path) -> str:
+    """Per fixture library: the bundle that resolves beside it, and what a header-free dump reads.
+
+    Evaluated only inside a failing assertion's message, so it costs nothing on a passing run.
+    """
+    from abicheck.dumper import dump
+    from abicheck.dwarf_unified import _adjacent_dsym_binary
+    from abicheck.model.debug_evidence import debug_info_evidence
+
+    rows = []
+    for so in sorted(directory.glob("libv*.so")):
+        bundle = _adjacent_dsym_binary(so)
+        try:
+            basic = debug_info_evidence(dump(so, [], version="1")).basic
+        except Exception as exc:  # the probe must not hide the real failure
+            basic = f"raised {type(exc).__name__}: {exc}"
+        rows.append(f"{so.name}: bundle={bundle}, binary-only basic={basic}")
+    return "; ".join(rows)
+
+
 def _dwarf_flags(directory: Path) -> dict[str, bool]:
     """Per dumped snapshot, whether its JSON records real DWARF (``has_dwarf``)."""
     return {
@@ -213,6 +233,7 @@ def test_binary_depth_on_header_snapshots_matches_binary_only(tmp_path: Path) ->
     assert exit_depth == exit_oracle, (
         _beside(tmp_path),
         _dwarf_flags(tmp_path),
+        _binary_only_probe(tmp_path),
     )
     projection_gap = any(
         n.startswith("not assessed at depth binary:")
