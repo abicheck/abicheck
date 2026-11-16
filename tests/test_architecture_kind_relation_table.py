@@ -13,10 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.check_architecture import (
+from scripts.architecture_kind_relations import (
     KIND_RELATION_TABLE_BASELINE,
-    Finding,
-    _check_kind_relation_tables,
+    kind_relation_table_messages,
 )
 
 _TABLE = "{ChangeKind.STRUCT_SIZE_CHANGED: ChangeKind.TYPE_SIZE_CHANGED}"
@@ -28,10 +27,8 @@ def _write(root: Path, relative: str, source: str) -> None:
     path.write_text(textwrap.dedent(source), encoding="utf-8")
 
 
-def _rules(root: Path) -> list[Finding]:
-    findings: list[Finding] = []
-    _check_kind_relation_tables(root, findings)
-    return findings
+def _rules(root: Path) -> list[str]:
+    return kind_relation_table_messages(root)
 
 
 @pytest.mark.parametrize(
@@ -58,9 +55,9 @@ def test_relation_table_is_flagged_at_every_nesting_level(
     _write(
         tmp_path, "abicheck/compare/somewhere.py", f"from x import ChangeKind\n{source}"
     )
-    findings = _rules(tmp_path)
-    assert [f.rule for f in findings] == ["kind-relation-table"]
-    assert "abicheck/compare/somewhere.py:partners:" in findings[0].message
+    messages = _rules(tmp_path)
+    assert len(messages) == 1
+    assert messages[0].startswith("abicheck/compare/somewhere.py:partners: ")
 
 
 def test_relation_table_inside_allowed_catalog_is_not_flagged(tmp_path: Path) -> None:

@@ -26,12 +26,9 @@ from typing import Any
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-from architecture_graph import find_cycle  # noqa: E402 -- sibling leaf, see that module
-from architecture_names import (  # noqa: E402 -- sibling leaf, see that module
-    GENERIC_NAMES,
-    GENERIC_SUFFIXES,
-    generic_owner_messages,
-)
+from architecture_graph import find_cycle  # noqa: E402, I001 -- sibling leaf, see that module
+from architecture_kind_relations import kind_relation_table_messages  # noqa: E402
+from architecture_names import GENERIC_NAMES, GENERIC_SUFFIXES, generic_owner_messages  # noqa: E402
 
 SCHEMA_VERSION = 1
 DEBT_FIELDS = frozenset(
@@ -1581,87 +1578,6 @@ def _check_facades(
             _check_facade(path, facade, facade_limit, findings)
 
 
-#: ADR-093 D5: a kind-to-kind relation is declared on the catalog and resolved
-#: by ``policy/kind_relations.py``, never hand-written as a dict literal
-#: elsewhere. ``file:name`` entries here are the existing violations, recorded
-#: as a no-growth baseline: this list may only shrink (a removed table must be
-#: deleted from it too), and a new one fails the gate.
-KIND_RELATION_TABLE_ALLOWED_PREFIXES = (
-    "abicheck/model/change_catalog/",
-    "abicheck/policy/kind_relations.py",
-)
-KIND_RELATION_TABLE_BASELINE: frozenset[str] = frozenset(
-    {"abicheck/compare/finding_dedup.py:_EXPORT_LOSS_ELF_ONLY_PARTNER"}
-)
-
-
-def _is_change_kind_member(node: ast.expr) -> bool:
-    return (
-        isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "ChangeKind"
-    )
-
-
-def _check_kind_relation_tables(root: Path, findings: list[Finding]) -> None:
-    """Flag a dict literal mapping ChangeKind members to ChangeKind members.
-
-    Such a literal is a hand-written kind relation (ADR-093 D5). The catalog
-    and ``policy/kind_relations.py`` are the only owners.
-    """
-    seen: set[str] = set()
-    for path in sorted((root / "abicheck").rglob("*.py")):
-        relative = path.relative_to(root).as_posix()
-        if relative.startswith(KIND_RELATION_TABLE_ALLOWED_PREFIXES):
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-        # Walk every node: a relation table is still a relation when it sits
-        # inside a function or a conditional block.
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-                continue
-            value = node.value
-            if not isinstance(value, ast.Dict):
-                continue
-            keys = [k for k in value.keys if k is not None]
-            if not any(_is_change_kind_member(k) for k in keys):
-                continue
-            if not any(
-                _is_change_kind_member(x) for val in value.values for x in ast.walk(val)
-            ):
-                continue
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if not isinstance(target, ast.Name):
-                    continue
-                key = f"{relative}:{target.id}"
-                seen.add(key)
-                if key not in KIND_RELATION_TABLE_BASELINE:
-                    findings.append(
-                        Finding(
-                            "kind-relation-table",
-                            f"{key}: a hand-written ChangeKind-to-ChangeKind table "
-                            "is a relation; declare it on the registry "
-                            "(ADR-093 D4) and resolve it in policy/kind_relations.py",
-                        )
-                    )
-    for stale in sorted(KIND_RELATION_TABLE_BASELINE - seen):
-        # An entry whose file is absent from this tree is not stale; only a
-        # file that is present but no longer holds the table is.
-        if not (root / stale.split(":", 1)[0]).is_file():
-            continue
-        findings.append(
-            Finding(
-                "kind-relation-table",
-                f"{stale}: listed in the baseline but no longer present; remove it "
-                "from KIND_RELATION_TABLE_BASELINE",
-            )
-        )
-
-
 def check_repository(root: Path, *, base_revision: str | None = None) -> list[Finding]:
     """Return all ADR-061 violations below ``root``."""
     findings: list[Finding] = []
@@ -1703,7 +1619,8 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         root, modules, layers, dependency_direction_exceptions, findings
     )
     _check_facades(root, modules, findings)
-    _check_kind_relation_tables(root, findings)
+    for message in kind_relation_table_messages(root):
+        findings.append(Finding("kind-relation-table", message))
     return findings
 
 
