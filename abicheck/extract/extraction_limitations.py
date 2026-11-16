@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 from xml.etree.ElementTree import Element
 
@@ -37,6 +39,8 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function, RecordType, Variable
 
 __all__ = [
+    "collecting_extraction_limitations",
+    "record_extraction_limitation",
     "EXTRACTION_LIMITATIONS_KEY",
     "JOIN_GAPS_ATTR",
     "PARSER_LIMITATIONS_ATTR",
@@ -180,3 +184,27 @@ def merged_extraction_provenance(
 def add_snapshot_limitation(snap: AbiSnapshot, reason: str) -> None:
     """Record *reason* in *snap*'s dump provenance."""
     snap.dump_provenance = provenance_with_limitations(snap.dump_provenance, [reason])
+
+
+#: Reasons recorded during one debug-resolution call, applied to the snapshot.
+_LIMITATION_SINK: ContextVar[list[str] | None] = ContextVar(
+    "extraction_limitation_sink", default=None
+)
+
+
+@contextmanager
+def collecting_extraction_limitations() -> Iterator[list[str]]:
+    """Collect the non-fatal limitations recorded while the block runs."""
+    sink: list[str] = []
+    token = _LIMITATION_SINK.set(sink)
+    try:
+        yield sink
+    finally:
+        _LIMITATION_SINK.reset(token)
+
+
+def record_extraction_limitation(reason: str) -> None:
+    """Record *reason* for the snapshot being built, without failing the dump."""
+    sink = _LIMITATION_SINK.get()
+    if sink is not None and reason not in sink:
+        sink.append(reason)

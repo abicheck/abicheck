@@ -165,6 +165,15 @@ def _resolve_debug_metadata(
     return dwarf_meta, dwarf_adv
 
 
+def _is_macho64(path: Path) -> bool:
+    """True iff *path* is a little-endian 64-bit Mach-O (MH_MAGIC_64)."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"\xcf\xfa\xed\xfe"
+    except OSError:
+        return False
+
+
 def _parse_dwarf_source(
     parse_dwarf: Any,
     dwarf_path: Path,
@@ -182,12 +191,21 @@ def _parse_dwarf_source(
     """
     from ..model.dwarf_facts import AdvancedExtractionStatus
 
+    if dwarf_path != so_path and _is_macho64(dwarf_path):
+        # A Mach-O library's explicit bundle (ADR-021): its UUID must match the
+        # library, and a refused bundle is a reported read failure, not a drop.
+        from ..dwarf_unified import parse_dwarf_from_macho_dsym
+
+        return parse_dwarf_from_macho_dsym(
+            so_path, dwarf_path, _session_out=session_out
+        )
+
     result: tuple[DwarfMetadata, AdvancedDwarfMetadata] = parse_dwarf(
         dwarf_path, _session_out=session_out
     )
-    if (
-        dwarf_path != so_path
-        and result[1].extraction is AdvancedExtractionStatus.FAILED
+    if dwarf_path != so_path and result[1].extraction in (
+        AdvancedExtractionStatus.FAILED,
+        AdvancedExtractionStatus.NOT_RUN,
     ):
         note_debug_info_read_failure(f"detached debug file {dwarf_path} is unreadable")
     return result  # the reader's own result, unrepacked
