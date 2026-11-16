@@ -52,7 +52,8 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
     is_abi_relevant_elf_symbol,
 )
-from ..model import ElfVisibility, Function, RecordType, Variable, Visibility
+from ..model import ElfVisibility, Function, Variable, Visibility
+from ..model.entities import RecordType
 from ..model.export_index import build_raw_export_index
 from ..model.fact import Fact
 from ..model.owner_recovery import is_mangled_identity
@@ -144,9 +145,15 @@ def binary_level_declarations(
     binary-only dump). ELF and Mach-O record the split (symbol type,
     section), so a variable stays a variable there.
     """
-    projected_functions = binary_purity_functions(
-        snap, [binary_level_function(f) for f in functions]
-    )
+    projected = [binary_level_function(f) for f in functions]
+    if not snap.from_headers:
+        # A binary-derived side keeps its debug declaration's purity, so a
+        # mixed pair reads the same whichever side is the header-derived one.
+        for orig, proj in zip(functions, projected, strict=True):
+            if orig.is_pure_virtual:
+                proj.is_virtual = True
+                proj.is_pure_virtual = True
+    projected_functions = binary_purity_functions(snap, projected)
     index = build_raw_export_index(snap)
     if index is not None and index.platform == "pe":
         return projected_functions + [
@@ -169,10 +176,14 @@ def declared_functions_kept(snap: AbiSnapshot) -> list[Function]:
     from the export table, and a vtable-proven pure virtual, which has no
     symbol but whose debug declaration a binary-only dump keeps."""
     pure = exported_or_pure_claimed(snap, frozenset())
+    binary = not snap.from_headers
     return [
         f
         for f in snap.declarations.functions
-        if not is_export_confirmed_absent(f) or f.mangled in pure
+        if not is_export_confirmed_absent(f)
+        or f.mangled in pure
+        # A binary-derived side's own pure declaration is binary evidence too.
+        or (binary and f.is_pure_virtual)
     ]
 
 
@@ -185,7 +196,11 @@ def exported_or_pure_claimed(snap: AbiSnapshot, exported: AbstractSet[str]) -> s
     removal of a now-pure virtual reads as the same change.
     """
     claims: dict[str, bool] = (snap.binary_purity or {}).get("functions", {})
-    return {*exported, *(m for m, pure in claims.items() if pure)}
+    pure = {m for m, is_pure in claims.items() if is_pure}
+    if not snap.from_headers:
+        # A binary-derived side's pure declarations are binary evidence already.
+        pure |= {f.mangled for f in snap.declarations.functions if f.is_pure_virtual}
+    return {*exported, *pure}
 
 
 def binary_purity_functions(
@@ -238,8 +253,9 @@ def with_binary_purity_records(
     out: list[RecordType] = []
     seen: set[str] = set()
     for record in types:
-        claim = claims.get(record.name)
-        seen.add(record.name)
+        key = record.qualified_name or record.name
+        claim = claims.get(key)
+        seen.add(key)
         if claim is None:
             out.append(record)
         else:

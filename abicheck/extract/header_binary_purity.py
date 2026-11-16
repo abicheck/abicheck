@@ -28,6 +28,7 @@ no purity is inferred. A claim is a bool; "unknown" is never recorded as
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,8 +42,8 @@ if TYPE_CHECKING:
 
 __all__ = ["BinaryPurityClaims", "binary_purity_claims", "binary_purity_extension"]
 
-#: Bytes per vtable slot (a pointer) on the ELF targets this claim covers.
-_WORD = 8
+#: ``e_ident[EI_CLASS]`` of a 32-bit ELF file.
+_ELFCLASS32 = 1
 #: Offset-to-top and typeinfo pointer precede the first virtual slot.
 _HEADER_WORDS = 2
 _VTABLE_PREFIX = "vtable for "
@@ -81,6 +82,24 @@ def _vtable_symbols(elf_meta: ElfMetadata) -> dict[str, tuple[str, int]]:
         if text.startswith(_VTABLE_PREFIX):
             out.setdefault(text[len(_VTABLE_PREFIX) :], (sym.name, sym.size))
     return out
+
+
+def _word_size(elf_path: Path) -> int:
+    """Bytes per vtable slot (a pointer) of *elf_path*: 4 for ELF32, 8 for ELF64."""
+    with open(elf_path, "rb") as f:
+        ident = f.read(5)
+    return 4 if len(ident) == 5 and ident[4] == _ELFCLASS32 else 8
+
+
+#: An Itanium destructor's name ends in its complete (``D1``), base (``D2``) or
+#: deleting (``D0``) form; a digit before ``D`` makes it a method named ``D…``.
+_DESTRUCTOR_SPELLING = re.compile(r"(?<![0-9])D[012]Ev$")
+
+
+def _claim_key(record: RecordType) -> str:
+    """The key a record's claim is stored under: its qualified name, so two
+    same-named classes in different namespaces never share one claim."""
+    return record.qualified_name or record.name
 
 
 def _known_list(fact: Any) -> list[str] | None:
@@ -127,7 +146,9 @@ def _slot_entries(vtable: list[str]) -> list[str | None]:
     complete-object and deleting destructors), so it expands to two."""
     entries: list[str | None] = []
     for name in vtable:
-        if name.startswith("~"):
+        if name.startswith("~") or (
+            name.startswith("_Z") and _DESTRUCTOR_SPELLING.search(name)
+        ):
             entries.extend((None, None))
         else:
             entries.append(name)
@@ -147,6 +168,7 @@ def binary_purity_claims(
     claims nothing: every record is then unobserved.
     """
     claims = BinaryPurityClaims()
+    word = _word_size(elf_path)
     all_records = list(records)
     by_name = {r.name: r for r in all_records}
     emitted = _vtable_symbols(elf_meta)
@@ -159,21 +181,23 @@ def binary_purity_claims(
         if not slots:
             continue
         if pure_slots is None:
-            claims.unobserved[record.name] = "the vtable slots could not be read"
+            claims.unobserved[_claim_key(record)] = "the vtable slots could not be read"
             continue
         reason = _single_primary_chain(record, by_name)
         if reason is not None:
-            claims.unobserved[record.name] = reason
+            claims.unobserved[_claim_key(record)] = reason
             continue
-        symbol = emitted.get(record.name)
+        symbol = emitted.get(_claim_key(record))
         if symbol is None:
-            claims.unobserved[record.name] = "the library does not emit its vtable"
+            claims.unobserved[_claim_key(record)] = (
+                "the library does not emit its vtable"
+            )
             continue
         vtable_symbol, size = symbol
         entries = _slot_entries(slots)
-        slot_count = size // _WORD - _HEADER_WORDS
-        if size % _WORD or slot_count != len(entries):
-            claims.unobserved[record.name] = (
+        slot_count = size // word - _HEADER_WORDS
+        if size % word or slot_count != len(entries):
+            claims.unobserved[_claim_key(record)] = (
                 f"emitted vtable has {slot_count} slots, the header model "
                 f"{len(entries)}"
             )
@@ -182,7 +206,7 @@ def binary_purity_claims(
         for index, mangled in enumerate(entries):
             if mangled is not None:
                 claims.functions[mangled] = index in pure
-        claims.records[record.name] = bool(pure)
+        claims.records[_claim_key(record)] = bool(pure)
     return claims
 
 

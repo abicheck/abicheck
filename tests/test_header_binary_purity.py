@@ -241,3 +241,132 @@ def test_claims_survive_a_save_and_load(tmp_path: Path) -> None:
     assert reloaded.binary_purity == snap.binary_purity
     assert reloaded.binary_purity is not None
     assert reloaded.binary_purity["records"]["Shape"] is True
+
+
+_NAMESPACED_HEADER = """\
+#pragma once
+namespace a {
+struct Pure {
+    virtual void f() = 0;
+    virtual int g() const;
+};
+}
+namespace b {
+struct Pure {
+    virtual int g() const;
+};
+}
+"""
+
+_NAMESPACED_SOURCE = """\
+#include "ns.h"
+namespace a { int Pure::g() const { return 1; } }
+namespace b { int Pure::g() const { return 2; } }
+"""
+
+
+def test_same_named_classes_in_two_namespaces_keep_their_own_claims(
+    tmp_path: Path,
+) -> None:
+    """Two classes both spelled ``Pure``: each is claimed from its own vtable,
+    keyed by its qualified name, so neither overwrites the other's claim."""
+    if shutil.which("g++") is None:
+        pytest.skip("needs g++")
+    header = tmp_path / "ns.h"
+    source = tmp_path / "ns.cpp"
+    header.write_text(_NAMESPACED_HEADER)
+    source.write_text(_NAMESPACED_SOURCE)
+    lib = tmp_path / "libns.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-g", "-O0", "-o", str(lib), str(source)],
+        check=True,
+        capture_output=True,
+    )
+    snap = dump(lib, headers=[header], version="v1")
+    claims = snap.binary_purity
+    assert claims is not None
+    assert claims["records"]["a::Pure"] is True
+    assert claims["records"]["b::Pure"] is False
+    assert _mangled_for(snap, "a::Pure::f") in claims["functions"]
+    assert claims["functions"][_mangled_for(snap, "a::Pure::f")] is True
+
+
+@pytest.mark.parametrize(
+    ("vtable", "slots"),
+    [
+        (["~Shape", "_ZN5Shape4drawEv"], 3),
+        (["_ZN5ShapeD1Ev", "_ZN5Shape4drawEv"], 3),
+        (["_ZN5ShapeD0Ev", "_ZN5Shape4drawEv"], 3),
+        (["_ZN1A2D1Ev"], 1),
+        (["_ZN1A2D1Ev", "_ZN1A2D2Ev"], 2),
+    ],
+)
+def test_destructor_spellings_expand_to_two_slots_only_for_destructors(
+    vtable: list[str], slots: int
+) -> None:
+    """A destructor takes two Itanium slots whichever form the header backend
+    spells it in; a method whose name starts with ``D`` (``A::D1``) takes one."""
+    from abicheck.extract.header_binary_purity import _slot_entries
+
+    assert len(_slot_entries(vtable)) == slots
+
+
+def test_a_32_bit_library_reads_its_slots_at_four_bytes(tmp_path: Path) -> None:
+    """ELF32 pointers are four bytes, so a two-slot vtable is 16 bytes, not 32."""
+    if shutil.which("g++") is None:
+        pytest.skip("needs g++")
+    header = tmp_path / "shapes.h"
+    source = tmp_path / "shapes.cpp"
+    header.write_text(_HEADER)
+    source.write_text(_SOURCE)
+    lib = tmp_path / "libshapes32.so"
+    try:
+        subprocess.run(
+            # -nostdlib: this host has no 32-bit C++ runtime to link against; a
+            # shared object may leave the runtime symbols undefined.
+            [
+                "g++",
+                "-m32",
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-O0",
+                "-nostdlib",
+                "-o",
+                str(lib),
+                str(source),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        pytest.skip("this toolchain cannot build 32-bit code (g++ -m32)")
+    from abicheck.extract.header_binary_purity import _word_size
+
+    assert _word_size(lib) == 4
+    snap = dump(lib, headers=[header], version="v1")
+    claims = snap.binary_purity
+    assert claims is not None
+    assert claims["records"].get("Shape") is True
+
+
+def test_a_mixed_pair_reads_the_same_purity_in_either_operand_order(
+    tmp_path: Path,
+) -> None:
+    """A header-built side and a binary-only side of the same library agree on
+    the pure virtual at binary depth, whichever one is OLD: the purity a
+    binary-only side reads from its debug declaration is evidence the header
+    side's vtable claim matches, so neither side drops the function."""
+    if shutil.which("g++") is None:
+        pytest.skip("needs g++")
+    from abicheck.policy.depth_projection import project_pair_to_depth
+
+    lib, header = _build(tmp_path)
+    header_snap = dump(lib, headers=[header], version="v1")
+    binary_snap = dump(lib, headers=[], version="v1")
+    mangled = _mangled_for(header_snap, "Shape::draw")
+    for old, new in ((header_snap, binary_snap), (binary_snap, header_snap)):
+        p_old, p_new = project_pair_to_depth(old, new, "binary")
+        for side in (p_old, p_new):
+            pure = {f.mangled: f.is_pure_virtual for f in side.declarations.functions}
+            assert pure.get(mangled) is True

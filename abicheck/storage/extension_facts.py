@@ -298,6 +298,7 @@ def sync_model_extension_facts(snap: Any) -> None:
     # blocked one must not leave a stale or missing typedef_origins fact.
     _sync_typedef_origins(snap)
     _sync_std_reexports(snap)
+    _sync_binary_purity(snap)
     scan = getattr(snap, "cxx_concept_header_scan", None)
     if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
         return
@@ -323,7 +324,6 @@ def sync_model_extension_facts(snap: Any) -> None:
         _drop_extension_fact(snap, CU_STACK_PROTECTOR)
     encode_noexcept_unobserved(snap)
     _sync_final_member_functions(snap)
-    _sync_binary_purity(snap)
 
 
 def _sync_typedef_origins(snap: Any) -> None:
