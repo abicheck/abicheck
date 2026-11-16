@@ -756,6 +756,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "such claim, which reads as no binary evidence (not as not pure), and "
         "no rewrite applies: a new fact on existing records, not a respelling."
     ),
+    79: GenerationSpellingChange(
+        "WS-2 PR A2.1 (fix/ws2-a2-1-var-alignment-raised): no stored type spelling "
+        "changes. The castxml header path joins each variable's declared alignment "
+        "specifier from the clang AST (clang/var_alignment, castxml/clang_semantics_join): "
+        "a variable whose declaration spells aligned(N) or alignas(N) records that "
+        "value as PRESENT where it was a natural-alignment lower bound before. The "
+        "recorded alignment fact changes; the variable's name and type spelling do not"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

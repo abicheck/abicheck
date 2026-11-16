@@ -393,30 +393,20 @@ def test_a_real_alignment_loss_still_reports(tmp_path, cc, bits, evidence):
 
 @pytest.mark.parametrize("cc", ["gcc", "clang"])
 def test_castxml_headers_report_a_dropped_alignas(tmp_path, cc):
-    """castxml 0.7 emits no ``align`` on a ``Variable``. The header that spells
-    ``_Alignas`` makes the type's natural alignment a lower bound (PARTIAL),
-    so it no longer vetoes the reduction the binary shows: the finding is
-    reported, never dropped (it was, before extractor generation 51)."""
+    """castxml 0.7 emits no ``align`` on a ``Variable``; the clang join reads
+    the header's ``_Alignas(16)`` as the old side's declared alignment, so the
+    reduction is reported undemoted, as the clang header backend reports it
+    (WS-2 A2.1; the castxml gap of extractor generation 51 is closed)."""
     _driver(cc)
     snaps, found = _alignas_drop(tmp_path, cc, 64, "headers", "castxml")
     old_var = snaps[0].var_by_mangled("g_data")
     assert old_var is not None
-    assert old_var.alignment_bits_fact.status is FactStatus.PARTIAL
-    assert [c.kind.value for c in found] == ["exported_object_alignment_reduced"]
-
-
-@pytest.mark.known_gap_canary
-def test_castxml_headers_demote_a_dropped_alignas(tmp_path):
-    """Residual gap: castxml cannot say the old side declared 16, so the
-    reported reduction is demoted with the unknown-requirement rule, where
-    DWARF and the clang header backend keep its RISK
-    (``docs/contribute/known-gaps.md``)."""
-    _driver("gcc")
-    _snaps, found = _alignas_drop(tmp_path, "gcc", 64, "headers", "castxml")
-    assert [c.effective_verdict for c in found] == [Verdict.COMPATIBLE]
-    assert found[0].modulation_rule == (
-        "address-alignment-with-unknown-declared-requirement"
+    assert (old_var.alignment_bits_fact.status, old_var.alignment_bits) == (
+        FactStatus.PRESENT,
+        128,
     )
+    assert [c.kind.value for c in found] == ["exported_object_alignment_reduced"]
+    assert found[0].effective_verdict is None, found[0].modulation_rule
 
 
 @pytest.mark.known_gap_canary
