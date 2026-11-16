@@ -72,7 +72,7 @@ from ..clang.template_default_entries import (
 from ..clang.var_alignment import clang_variable_alignment_map
 from ..concept_scan import concept_header_scan
 from .clang_semantics import SEMANTICS_ATTR, valid_template_default_entries
-from .preprocessed_text import PreprocessedText, read_preprocessed_text
+from .preprocessed_text import PreprocessedText, file_key, read_preprocessed_text
 
 log = logging.getLogger(__name__)
 
@@ -155,6 +155,22 @@ def _mention_files(root: Element, headers: Iterable[Path]) -> frozenset[str]:
     return frozenset(out)
 
 
+def _table_spells_alignment(table: PreprocessedText, name: str, real: str) -> bool:
+    """Whether the preprocessed table spells an alignment in castxml's file *name*.
+
+    The table keys the path as the preprocessing run named it; castxml reports
+    the resolved path (macOS /var -> /private/var, any symlinked directory). An
+    entry matches when it is *name* or resolves to *real*. An unrecorded table
+    counts as spelling one (``spells_alignment``).
+    """
+    if table.spells_alignment(name):
+        return True
+    if table.alignment_files is None:
+        return False
+    target = file_key(real)
+    return any(file_key(os.path.realpath(f)) == target for f in table.alignment_files)
+
+
 def _spells_alignment_locally(
     root: Element, headers: Iterable[Path], table: PreprocessedText
 ) -> bool:
@@ -169,7 +185,7 @@ def _spells_alignment_locally(
             continue
         real = os.path.realpath(name)
         local = real in files or any(real.startswith(d) for d in dirs)
-        if local and table.spells_alignment(name):
+        if local and _table_spells_alignment(table, name, real):
             return True
     return False
 

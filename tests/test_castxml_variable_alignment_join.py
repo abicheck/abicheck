@@ -17,6 +17,7 @@ import ctypes
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from xml.etree.ElementTree import Element, SubElement
@@ -311,3 +312,31 @@ def test_only_the_library_surface_triggers_the_clang_join(
     spelled = frozenset({by_key[spelled_in]}) if spelled_in in by_key else frozenset()
     table = PreprocessedText({}, "", spelled)
     assert _spells_alignment_locally(root, [header], table) is expected
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="creating a directory symlink needs a privilege the Windows runners lack",
+)
+@pytest.mark.parametrize("recorded", ["given", "resolved"])
+def test_a_symlinked_header_directory_is_matched_by_either_spelling(
+    tmp_path: Path, recorded: str
+) -> None:
+    """macOS temp dirs are /var -> /private/var: the preprocessing run may record a
+    header by the path it was given while castxml reports the resolved one."""
+    from abicheck.extract.headers.castxml.clang_semantics_join import (
+        _spells_alignment_locally,
+    )
+
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    header = real_dir / "api.h"
+    header.write_text("extern int g_v __attribute__((aligned(16)));\n")
+    link = tmp_path / "link"
+    link.symlink_to(real_dir, target_is_directory=True)
+    given = link / "api.h"
+    root = Element("CastXML")
+    SubElement(root, "File", id="f1", name=str(header.resolve()))
+    name = str(given) if recorded == "given" else str(header.resolve())
+    table = PreprocessedText({}, "", frozenset({name}))
+    assert _spells_alignment_locally(root, [given], table) is True
