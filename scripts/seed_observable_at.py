@@ -102,6 +102,24 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_BHSG",
     ),
+    "BHS": (
+        (("B", "H", "S"),),
+        "single-TU source fact: carried by the translation unit's sources",
+        (),
+        "_OBS_BHS",
+    ),
+    "BHS_TREE": (
+        (("B", "H", "S"),),
+        "source-tree fact: carried by the source replay of the tree",
+        (),
+        "_OBS_BHS_TREE",
+    ),
+    "BH_ALIGN": (
+        (("B", "H"),),
+        "record alignment is a header layout fact; DWARF records it only when explicit",
+        (),
+        "_OBS_BH_ALIGN",
+    ),
     "L4": (
         (("B", "H", "BD", "S"),),
         "needs the source translation unit (S)",

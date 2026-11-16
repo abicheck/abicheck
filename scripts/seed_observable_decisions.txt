@@ -104,7 +104,7 @@ struct_field_type_changed        DH
 struct_packing_changed           DH   # plan A2.2: {B,D},{B,H}
 struct_size_changed              DH
 trivially_copyable_lost          DH   # plan A2.4: VALUE_ABI_TRAIT duplicate
-type_alignment_changed           DH
+type_alignment_changed           BH_ALIGN
 type_base_changed                DH
 type_field_added                 DH
 type_field_added_compatible      DH
@@ -298,12 +298,12 @@ consumer_required_symbol_removed  U  # needs a consumer artifact (workflows/cons
 runtime_symbol_provider_changed  B
 runtime_weak_resolution_changed  B
 # -- build / source: needs sources or the graph (L4, L5, BHSG) -----------
-call_graph_public_entry_reachability_changed BHSG
-public_api_internal_dependency_added L5
-public_api_internal_type_renamed L5
+call_graph_public_entry_reachability_changed BHS
+public_api_internal_dependency_added BHS
+public_api_internal_type_renamed BHS_TREE
 public_dependency_role_changed   L5
 public_dependency_role_unknown   L5
-public_to_internal_dependency    L5
-public_virtual_dispatch_set_changed L5
+public_to_internal_dependency    BHS
+public_virtual_dispatch_set_changed BHS
 source_surface_dso_mismatch      L4
 target_dependency_added          L5
