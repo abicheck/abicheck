@@ -51,11 +51,16 @@ from .dwarf_utils import (
     attr_bool as _attr_bool,
     attr_int as _attr_int,
     attr_str as _attr_str,
-    decode_member_location as _shared_decode_member_location,
     resolve_die_ref as _resolve_die_ref,
     resolve_type_die as _resolve_type_die,
 )
 from .extract import dwarf_subtree_index as _dsi
+from .extract.dwarf_type_alignment import (
+    _NATURAL_ALIGN,
+    _aggregate_has_unaligned_member,
+    _decode_member_location,
+    _unwrap_qualifiers,
+)
 from .extract.dwarf_value_abi_trait import (
     comparable_traits,
     declared_triviality,
@@ -131,7 +136,6 @@ _VECTOR_ABI_FLAGS_RE = re.compile(r"-mveclibabi=\S+|-fveclib=\S+|-vecabi=\S+")
 _WCHAR_ABI_FLAGS_RE = re.compile(r"-fshort-wchar|-fno-short-wchar")
 
 # Natural alignment (bytes) by type size on most LP64 platforms
-_NATURAL_ALIGN: dict[int, int] = {1: 1, 2: 2, 4: 4, 8: 8, 16: 16}
 
 # Tags to prune: don't descend into function bodies or inlined frames
 _PRUNE_TAGS: frozenset[str] = BASE_PRUNE_TAGS
@@ -378,41 +382,6 @@ def _check_children_nontrivial(
     return False
 
 
-def _unwrap_qualifiers(
-    type_die: Any, CU: Any, cache: _DwarfTypeCache | None = None
-) -> Any:
-    """Unwrap transparent qualifier/typedef layers."""
-    key = getattr(type_die, "offset", None)
-    if cache is not None and key is not None and key in cache.unwrap:
-        return cache.unwrap[key]
-
-    cur = type_die
-    for _ in range(12):
-        tag = getattr(cur, "tag", "")
-        if tag in (
-            "DW_TAG_typedef",
-            "DW_TAG_const_type",
-            "DW_TAG_volatile_type",
-            "DW_TAG_restrict_type",
-        ):
-            nxt = _resolve_type_die(cur, CU)
-            if nxt is None:
-                break
-            cur = nxt
-        else:
-            break
-    else:
-        # for-else: exhausted depth without finding a non-qualifier tag
-        log.debug(
-            "_unwrap_qualifiers: depth limit reached at tag=%s",
-            getattr(cur, "tag", "?"),
-        )
-
-    if cache is not None and key is not None:
-        cache.unwrap[key] = cur
-    return cur
-
-
 def _value_abi_trait_for_typed_die(
     die: Any, CU: Any, cache: _DwarfTypeCache | None = None
 ) -> str | None:
@@ -485,86 +454,6 @@ def _aggregate_byte_size_for_typed_die(
 
 
 #: Scalar (leaf) type tags whose alignment is byte-size-derived (or DW_AT_alignment).
-_SCALAR_LEAF_TAGS: tuple[str, ...] = (
-    "DW_TAG_base_type",
-    "DW_TAG_pointer_type",
-    "DW_TAG_reference_type",
-    "DW_TAG_rvalue_reference_type",
-    "DW_TAG_enumeration_type",
-    "DW_TAG_ptr_to_member_type",
-)
-_AGGREGATE_TAGS: tuple[str, ...] = (
-    "DW_TAG_structure_type",
-    "DW_TAG_class_type",
-    "DW_TAG_union_type",
-)
-
-
-def _scalar_leaf_align(t: Any) -> int:
-    """Natural alignment of an already-unwrapped scalar/enum/pointer type DIE."""
-    if "DW_AT_alignment" in t.attributes:
-        try:
-            return int(t.attributes["DW_AT_alignment"].value)
-        except (TypeError, ValueError):
-            pass
-    sz = _attr_int(t, "DW_AT_byte_size")
-    return _NATURAL_ALIGN.get(min(sz, 16), 1) if sz > 0 else 1
-
-
-def _type_unaligned_at(
-    type_die: Any, CU: Any, base_offset: int, cache: _DwarfTypeCache | None
-) -> bool:
-    """Whether any scalar leaf of *type_die* lands at a misaligned absolute offset.
-
-    *base_offset* is the absolute offset at which this type starts within the
-    outermost aggregate. Recurses through nested aggregates (carrying member
-    offsets) and array members (an array shares its element's alignment, so the
-    array's own offset determines element alignment). A scalar/enum/pointer leaf
-    is misaligned when ``base_offset`` is not a multiple of its natural alignment.
-    By-value nesting is a DAG, so this terminates.
-    """
-    t = _unwrap_qualifiers(type_die, CU, cache=cache)
-    if t.tag in _SCALAR_LEAF_TAGS:
-        return base_offset % _scalar_leaf_align(t) != 0
-    if t.tag == "DW_TAG_array_type":
-        elem = _resolve_type_die(t, CU)
-        return elem is not None and _type_unaligned_at(elem, CU, base_offset, cache)
-    if t.tag in _AGGREGATE_TAGS:
-        for child in t.iter_children():
-            if child.tag != "DW_TAG_member" or _attr_int(child, "DW_AT_bit_size"):
-                continue
-            mt = _resolve_type_die(child, CU)
-            if mt is None:
-                continue
-            rel = _decode_member_location(child)  # None: misalignment not provable
-            if rel is not None and _type_unaligned_at(mt, CU, base_offset + rel, cache):
-                return True
-    return False
-
-
-def _aggregate_has_unaligned_member(
-    die: Any, CU: Any, cache: _DwarfTypeCache | None = None
-) -> bool:
-    """Whether a by-value aggregate return type has an unaligned member (recursively).
-
-    A struct/class/union with a leaf at a misaligned offset (e.g. a packed
-    aggregate) is MEMORY-classified by the SysV AMD64 ABI regardless of size, so
-    it is returned via a hidden sret pointer either way. Walks the full type tree
-    — nested aggregates and array members included — accumulating absolute
-    offsets, so e.g. ``packed R{char c; int a[1];}`` (``a[0]`` at offset 1) and
-    ``packed Outer{char c; Inner{double d};}`` (``i.d`` at offset 1) are caught.
-    """
-    t0 = _resolve_type_die(die, CU)
-    if t0 is None or t0.tag in (
-        "DW_TAG_pointer_type",
-        "DW_TAG_reference_type",
-        "DW_TAG_rvalue_reference_type",
-    ):
-        return False
-    t = _unwrap_qualifiers(t0, CU, cache=cache)
-    if t.tag not in _AGGREGATE_TAGS:
-        return False
-    return _type_unaligned_at(t, CU, 0, cache)
 
 
 def _type_ref_offset(die: Any, CU: Any) -> int | None:
@@ -786,18 +675,6 @@ def _check_packed(
             )
             meta.packed_structs.add(name)
             return  # one misaligned field is sufficient
-
-
-def _decode_member_location(member_die: Any) -> int | None:
-    """Decode DW_AT_data_member_location to a byte offset, or ``None`` if unevaluable.
-
-    Delegates to the shared implementation in dwarf_utils.
-    """
-    if "DW_AT_data_member_location" not in member_die.attributes:
-        return 0
-    return _shared_decode_member_location(
-        member_die.attributes["DW_AT_data_member_location"].value
-    )
 
 
 # ---------------------------------------------------------------------------
