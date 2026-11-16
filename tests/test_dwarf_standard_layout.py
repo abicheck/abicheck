@@ -97,6 +97,18 @@ _SHAPES: list[tuple[str, str]] = [
         "struct GBase { int e; };\nstruct FirstMemberUnrelated : GBase { int other; };",
     ),
     ("UnionPlain", "union UnionPlain { int a; float b; };"),
+    # [class.prop]/3.7: a base subobject occurs twice along two paths (g++ rejects).
+    (
+        "RepeatedBase",
+        "struct RA { int a; };\nstruct RB : RA { int b; };\nstruct RC : RA { int c; };\n"
+        "struct RepeatedBase : RB, RC {};",
+    ),
+    # A static data member is not a non-static member: DWARF 4 writes it as a
+    # DW_TAG_member with DW_AT_external and DW_AT_declaration.
+    (
+        "StaticMemberClass",
+        "class StaticMemberClass { int a; public: static int s; };",
+    ),
 ]
 
 
@@ -112,7 +124,7 @@ _VIRTUAL = (
 )
 
 
-def _compile_and_oracle(tmp: Path) -> tuple[Path, dict[str, bool]]:
+def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
     """Build the shapes into one executable and return the compiler's answers."""
     gxx = shutil.which("g++")
     if gxx is None:
@@ -139,6 +151,7 @@ def _compile_and_oracle(tmp: Path) -> tuple[Path, dict[str, bool]]:
             gxx,
             "-std=c++17",
             "-g",
+            f"-gdwarf-{dwarf}",
             "-O0",
             # GCC drops the DWARF of a type nothing uses; the shapes are only
             # queried by the oracle, so keep every definition.
@@ -159,8 +172,9 @@ def _compile_and_oracle(tmp: Path) -> tuple[Path, dict[str, bool]]:
     return exe, oracle
 
 
-def test_dwarf_standard_layout_matches_the_compiler(tmp_path: Path) -> None:
-    exe, oracle = _compile_and_oracle(tmp_path)
+@pytest.mark.parametrize("dwarf", [4, 5])
+def test_dwarf_standard_layout_matches_the_compiler(tmp_path: Path, dwarf: int) -> None:
+    exe, oracle = _compile_and_oracle(tmp_path, dwarf)
     shapes = dict(_SHAPES)
     collector = StandardLayoutCollector()
     holders: dict[str, SimpleNamespace] = {}

@@ -53,7 +53,7 @@
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
-      "abicheck/extract/dwarf_standard_layout.py": "05d8141d0faa3aee37059694c7024f8e04a87aae91f7eb0428c1e1b4232a7ef8",
+      "abicheck/extract/dwarf_standard_layout.py": "f4a53dd690e444bc9fe21def085bca7ce726ae8bd82d695f68b2d4905a48cc91",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
@@ -239,9 +239,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "f26cea7ac7eec1ba8bf3b633bede2dd5288c0ecd5639caac37f0437485d478df",
+    "fingerprint": "f5c3a2651ae5ec22cde80eeca3b461c30e9ca2172401e8a7c2e931574d45a0ca",
     "generation": 80,
-    "reason": "dwarf_standard_layout.py: field rename (bases -> base_edges) to satisfy the fact-reader gate, and the collector kept on the builder instead of a module registry; no fact recorded or derived changes"
+    "reason": "Generation 80 has not shipped. dwarf_standard_layout.py changed in place: static members excluded from the member list, and the repeated-base check made unconditional (g++ agrees). The fingerprint is refreshed at the unshipped generation 80 without a bump."
   },
   "resolver": {
     "files": {

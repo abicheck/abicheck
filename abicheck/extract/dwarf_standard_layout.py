@@ -41,9 +41,7 @@ _SCALAR_TAGS = frozenset(
     }
 )
 _REFERENCE_TAGS = frozenset({"DW_TAG_reference_type", "DW_TAG_rvalue_reference_type"})
-#: C++98/03 compile units, where [class.prop]/3.7 (CWG 1813) is not part of the rule.
-_CXX98_03_LANGS = frozenset({0x04, 0x19})  # DW_LANG_C_plus_plus, DW_LANG_C_plus_plus_03
-#: How deep a chain of by-value members/base_edges is followed before giving up.
+#: How deep a chain of by-value members/bases is followed before giving up.
 _MAX_DEPTH = 32
 
 Key = tuple[int, int]
@@ -67,7 +65,6 @@ class _Summary:
     #: Its direct base classes in order: ``(base key or None, is virtual)``.
     base_edges: tuple[tuple[Key | None, bool], ...]
     union: bool
-    cxx98: bool
 
 
 def _die_key(die: Any) -> Key:
@@ -121,7 +118,10 @@ def _summarize(die: Any, children: list[Any]) -> _Summary:
     members = [
         c
         for c in children
-        if c.tag == "DW_TAG_member" and not _flag(c, "DW_AT_artificial")
+        if c.tag == "DW_TAG_member"
+        and not _flag(c, "DW_AT_artificial")
+        and not _flag(c, "DW_AT_external")
+        and not _flag(c, "DW_AT_declaration")
     ]
     base_edges = [c for c in children if c.tag == "DW_TAG_inheritance"]
     # [class.prop]/3.2: no virtual function declared here, no virtual base.
@@ -140,17 +140,12 @@ def _summarize(die: Any, children: list[Any]) -> _Summary:
         ).value
         for m in members
     }
-    cxx98 = False
-    top = die.cu.get_top_DIE()
-    if "DW_AT_language" in top.attributes:
-        cxx98 = int(top.attributes["DW_AT_language"].value) in _CXX98_03_LANGS
     return _Summary(
         local_false=virtual or reference or len(accesses) > 1,
         incomplete=_flag(die, "DW_AT_declaration"),
         members=tuple(_ref_of(resolve_type_die(m, m.cu)) for m in members),
         base_edges=tuple((_base_key(b), _is_virtual(b)) for b in base_edges),
         union=die.tag == "DW_TAG_union_type",
-        cxx98=cxx98,
     )
 
 
@@ -253,7 +248,7 @@ class _Resolver:
     def _data_member_rules(self, key: Key, s: _Summary) -> bool | None:
         """[class.prop]/3.5 (data members in at most one class of the hierarchy,
         and none in the most derived one when a base has some), /3.7 (one base
-        subobject per type, C++03 only), /3.8 (no base in M(D))."""
+        subobject per type), /3.8 (no base in M(D))."""
         flags = [
             None if b is None else self._has_data_members(b) for b, _ in s.base_edges
         ]
@@ -272,7 +267,7 @@ class _Resolver:
         subobjects = self._subobjects(key)
         if subobjects is None:
             return None
-        if s.cxx98 and len(subobjects) != len(set(subobjects)):
+        if len(subobjects) != len(set(subobjects)):
             return False
         if not s.members:
             return hierarchy
