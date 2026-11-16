@@ -4,4 +4,4 @@
 
 ### Added
 
-- **Dropped duplicates are recorded as subsumed** — a finding collapsed as a duplicate of a declared subsumer is still recorded in the disposition ledger as `deduplicated` (as before), and the relation is now declared on the registry rather than in code. Consumers can join the dropped DWARF finding to the AST finding it duplicates through the registry's `subsumed_by` declaration.
+- **Dropped duplicates are recorded as subsumed** — a finding collapsed as a duplicate of a declared subsumer is still recorded in the disposition ledger as `deduplicated` (as before), and the relation is now declared on the registry rather than in code. The ledger record's `reason_code` (`subsumed_by:<kind>:<key>`) names the retained finding's kind and the declared key, so a consumer can join a dropped finding to retained findings of that kind. It does not identify which retained finding survived, so the join cannot be resolved when several retained findings of that kind match; recording the retained finding's identity is a follow-up.

@@ -1618,7 +1618,9 @@ def _check_kind_relation_tables(root: Path, findings: list[Finding]) -> None:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
-        for node in tree.body:
+        # Walk every node: a relation table is still a relation when it sits
+        # inside a function or a conditional block.
+        for node in ast.walk(tree):
             if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                 continue
             value = node.value
