@@ -245,8 +245,6 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     # (extract/elf_pure_virtual_slots.py); abstractness follows from it. A
     # header-built snapshot persists neither, so its projection keeps only
     # the export entry.
-    "func_virtual_became_pure": _DEBUG_DECLARATIONS,
-    "type_became_abstract": _DEBUG_DECLARATIONS,
     "virtual_method_added": _DEBUG_DECLARATIONS,
     "method_access_changed": _DEBUG_DECLARATIONS,
     "experimental_graduated": _DEBUG_DECLARATIONS,
