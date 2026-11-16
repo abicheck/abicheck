@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from .compare.debug_type_scope import debug_layout_scope
@@ -1090,42 +1091,116 @@ def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Cha
     return changes
 
 
+_CXX11_TAG = "[abi:cxx11]"
+_CXX11_INLINE_NS = "__cxx11::"
+_STD_STRING_SPELLING = re.compile(
+    r"std::basic_string<char,std::char_traits<char>,std::allocator<char>>"
+)
+
+
+def _has_cxx11_tag(demangled: str) -> bool:
+    return _CXX11_INLINE_NS in demangled or _CXX11_TAG in demangled
+
+
+def _cxx11_identity(demangled: str) -> str:
+    """The demangled name with the libstdc++ dual-ABI spellings removed, so the
+    old and new spellings of one function compare equal: ``std::string`` (the
+    legacy ``Ss``) and ``std::__cxx11::basic_string<char, ...>``, and the
+    ``[abi:cxx11]`` return-type tag, all reduce to one identity."""
+    compact = re.sub(
+        r"\s+", "", demangled.replace(_CXX11_TAG, "").replace(_CXX11_INLINE_NS, "")
+    )
+    return _STD_STRING_SPELLING.sub("std::string", compact)
+
+
 @registry.detector("glibcxx_dual_abi")
 def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect mass symbol churn caused by libstdc++ dual ABI toggles.
+    """Detect a libstdc++ dual-ABI flip (``_GLIBCXX_USE_CXX11_ABI`` 0 <-> 1).
 
-    When _GLIBCXX_USE_CXX11_ABI is flipped, symbols containing std::string
-    and std::list change their mangling (e.g. std::__cxx11::basic_string vs
-    std::basic_string). This detector identifies this pattern and emits a
-    single diagnostic instead of hundreds of individual add/remove reports.
+    A flip re-mangles every exported function that takes or returns
+    ``std::string`` or ``std::list``: the same function is removed under one
+    spelling and added under the other. Those are paired per symbol: a removed
+    and an added export whose demangled identities agree once the dual-ABI
+    spellings are removed, and whose ``__cxx11`` tags differ, is one flip. One
+    flipped function is a flip; a library without ``std::string`` has no pair.
+
+    The demangler is the only source of identity, so a symbol it cannot read is
+    not paired. For those alone the older raw-marker mass heuristic remains (at
+    least five removed and five added, marker churn of at least 30%): with no
+    demangled identity it is the only evidence of a flip.
     """
     changes: list[Change] = []
-    # Confirmed exports only (see compare/exported_by_mangled.py).
     old_map = exported_functions_by_mangled(old)
     new_map = exported_functions_by_mangled(new)
-
-    removed = set(old_map.keys()) - set(new_map.keys())
-    added = set(new_map.keys()) - set(old_map.keys())
-
-    if len(removed) < 5 or len(added) < 5:
+    removed = sorted(set(old_map.keys()) - set(new_map.keys()))
+    added = sorted(set(new_map.keys()) - set(old_map.keys()))
+    if not removed or not added:
         return changes
 
-    # Detect dual ABI markers in removed/added symbols
-    _CXX11_ABI_MARKERS = ("__cxx11", "cxx11")
-    removed_with_marker = sum(
-        1 for s in removed if any(m in s for m in _CXX11_ABI_MARKERS)
+    from .demangle import demangle_batch
+
+    rem_dm = demangle_batch(removed)
+    add_dm = demangle_batch(added)
+
+    # Per identity: how many removed/added exports carry the cxx11 tag.
+    counts: dict[
+        str, list[int]
+    ] = {}  # identity -> [rem_tagged, rem_plain, add_tagged, add_plain]
+    for name in removed:
+        dm = rem_dm.get(name)
+        if dm:
+            slot = counts.setdefault(_cxx11_identity(dm), [0, 0, 0, 0])
+            slot[0 if _has_cxx11_tag(dm) else 1] += 1
+    for name in added:
+        dm = add_dm.get(name)
+        if dm:
+            slot = counts.setdefault(_cxx11_identity(dm), [0, 0, 0, 0])
+            slot[2 if _has_cxx11_tag(dm) else 3] += 1
+
+    rem_tagged_paired = add_tagged_paired = 0
+    for rem_t, rem_p, add_t, add_p in counts.values():
+        rem_tagged_paired += min(
+            rem_t, add_p
+        )  # legacy-spelled add pairs a tagged remove
+        add_tagged_paired += min(rem_p, add_t)  # tagged add pairs a legacy remove
+    paired = rem_tagged_paired + add_tagged_paired
+
+    # Symbols the demangler could not read: no identity, so only the raw marker
+    # heuristic can see them. Kept for that case alone.
+    un_removed = [n for n in removed if not rem_dm.get(n)]
+    un_added = [n for n in added if not add_dm.get(n)]
+    un_rem_tag = sum(1 for n in un_removed if _CXX11_INLINE_NS in n or "cxx11" in n)
+    un_add_tag = sum(1 for n in un_added if _CXX11_INLINE_NS in n or "cxx11" in n)
+    mass = (
+        len(un_removed) >= 5
+        and len(un_added) >= 5
+        and (un_rem_tag + un_add_tag) > 0
+        and (un_rem_tag + un_add_tag) >= (len(un_removed) + len(un_added)) * 0.3
     )
-    added_with_marker = sum(1 for s in added if any(m in s for m in _CXX11_ABI_MARKERS))
 
-    # Pattern 1: Old has __cxx11 symbols, new doesn't (ABI=1 → ABI=0)
-    # Pattern 2: Old lacks __cxx11, new has them (ABI=0 → ABI=1)
-    total_churn = len(removed) + len(added)
-    marker_churn = removed_with_marker + added_with_marker
-
-    if marker_churn > 0 and marker_churn >= total_churn * 0.3:
+    if paired:
+        total = len(removed) + len(added)
         direction = (
             "CXX11 ABI → legacy ABI"
-            if removed_with_marker > added_with_marker
+            if rem_tagged_paired >= add_tagged_paired
+            else "legacy ABI → CXX11 ABI"
+        )
+        changes.append(
+            make_change(
+                ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED,
+                symbol="__glibcxx_dual_abi",
+                name=f"{paired} of {total}",
+                detail=direction,
+                old_value=f"{rem_tagged_paired} removed with marker",
+                new_value=f"{add_tagged_paired} added with marker",
+            )
+        )
+    elif mass:
+        total_churn = len(un_removed) + len(un_added)
+        marker_churn = un_rem_tag + un_add_tag
+        direction = (
+            "CXX11 ABI → legacy ABI"
+            if un_rem_tag > un_add_tag
             else "legacy ABI → CXX11 ABI"
         )
         changes.append(
@@ -1134,11 +1209,10 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 symbol="__glibcxx_dual_abi",
                 name=f"{marker_churn} of {total_churn}",
                 detail=direction,
-                old_value=f"{removed_with_marker} removed with marker",
-                new_value=f"{added_with_marker} added with marker",
+                old_value=f"{un_rem_tag} removed with marker",
+                new_value=f"{un_add_tag} added with marker",
             )
         )
-
     return changes
 
 
