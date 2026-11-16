@@ -28,10 +28,8 @@ from abiforge.run.binfacts import (
 )
 from abiforge.run.toolchains import toolchain
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("gcc") is None or shutil.which("objdump") is None,
-    reason="needs gcc and objdump",
-)
+_TOOLS_MISSING = shutil.which("gcc") is None or shutil.which("objdump") is None
+requires_compiler = pytest.mark.skipif(_TOOLS_MISSING, reason="needs gcc and objdump")
 
 # A local array the optimiser deletes at -O1 and above: the frame needs no
 # canary there, and keeps one at -O0.
@@ -108,6 +106,7 @@ def _supported(*libs: Path) -> None:
 
 
 @pytest.mark.integration
+@requires_compiler
 @pytest.mark.parametrize("opt", OPT_LEVELS)
 @pytest.mark.parametrize("protector", PROTECTORS)
 def test_nm_fact_agrees_with_the_disassembly_oracle(tmp_path, opt, protector) -> None:
@@ -123,6 +122,7 @@ def test_nm_fact_agrees_with_the_disassembly_oracle(tmp_path, opt, protector) ->
 
 
 @pytest.mark.integration
+@requires_compiler
 @pytest.mark.parametrize("opt", OPT_LEVELS)
 @pytest.mark.parametrize("protector", PROTECTORS)
 def test_dropped_fact_follows_from_the_flags(tmp_path, opt, protector) -> None:

@@ -140,16 +140,20 @@ def test_nonzero_nm_exit_is_unavailable_not_an_empty_import_set(
 ) -> None:
     old = _lib(tmp_path, "old.so", ELF)
     new = _lib(tmp_path, "new.so", ELF)
-    _patch(monkeypatch, FakeNm(exit_status=1))
+    fake = FakeNm(exit_status=1)
+    _patch(monkeypatch, fake)
     assert binfacts.undefined_symbols(old) is None
     assert binfacts.binary_facts(old, new) == {}
+    assert fake.calls, "nm must run before its failure is read as unavailable"
 
 
 def test_missing_nm_is_unavailable(tmp_path, monkeypatch) -> None:
     old = _lib(tmp_path, "old.dylib", MACHO)
     new = _lib(tmp_path, "new.dylib", MACHO)
-    _patch(monkeypatch, FakeNm(missing=True))
+    fake = FakeNm(missing=True)
+    _patch(monkeypatch, fake)
     assert binfacts.binary_facts(old, new) == {}
+    assert fake.calls, "the reader must try nm before reading it as missing"
 
 
 def test_one_unreadable_side_gives_no_fact(tmp_path, monkeypatch) -> None:
