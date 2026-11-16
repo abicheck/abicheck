@@ -38,6 +38,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -46,9 +47,17 @@ from abicheck.dumper import dump
 from abicheck.serialization import load_snapshot
 from abicheck.storage.snapshot_codec import save_snapshot
 
+#: The same ELF gate ``test_comdat_groups.py`` uses. The purity claim is an
+#: ELF fact: a Windows runner's MinGW build is a PE, whose snapshot carries no
+#: ``binary_purity`` (``elf=None``), so these tests run on Linux only.
+requires_elf_toolchain = pytest.mark.skipif(
+    shutil.which("g++") is None or not sys.platform.startswith("linux"),
+    reason="needs g++ on an ELF platform (the purity claim is ELF-only)",
+)
+
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(shutil.which("g++") is None, reason="needs g++"),
+    requires_elf_toolchain,
     pytest.mark.skipif(shutil.which("readelf") is None, reason="needs readelf"),
     pytest.mark.skipif(shutil.which("nm") is None, reason="needs nm"),
     pytest.mark.skipif(shutil.which("c++filt") is None, reason="needs c++filt"),
