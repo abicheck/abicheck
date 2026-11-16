@@ -108,7 +108,12 @@ def extract_macho(
         for exp in macho_meta.exports
         if exp.name
     ]
+    from ...extract.macho_debug import macho_dwarf_kwargs
+
+    # The DWARF decision is the one the header-built dump makes (dumper's
+    # _dump_macho): the adjacent dSYM, never the presence of headers.
     snapshot = new_snapshot(
+        **macho_dwarf_kwargs(path, None, {}),
         library=path.name,
         version=version,
         functions=funcs,
