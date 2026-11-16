@@ -238,13 +238,25 @@ def _dedup_exact(
     seen: set[tuple[object, ...]] = set()
     ambiguous = ambiguous or {}
     for c in changes:
+        # The canonical finding identity (ADR-049 Phase 2) is the authority on
+        # which facts distinguish two findings of one kind: it folds in the
+        # qualified name and, for a finding with no resolvable name, the
+        # source location -- facts a hand-picked field tuple silently drops,
+        # which merged two distinct findings into one (lost break). Its
+        # `primary_id` is deliberately entity-free, so an AST finding and its
+        # DWARF twin (one carrying `entity_id`, the other not) still share a key.
         key: tuple[object, ...] = (
             c.kind.value,
             c.description,
             c.symbol,
             hashable_value(c.old_value),
             hashable_value(c.new_value),
+            resolve_change_identity(c).primary_id,
         )
+        if c.disambiguator is not None:
+            # ODR/multi-TU occurrence discriminator: `primary_id` does not
+            # fold it in, so two occurrences would otherwise collapse.
+            key = key + (c.disambiguator,)
         if c.kind in _OCCURRENCE_AWARE_KINDS:
             key = key + (
                 c.entity_id.key if c.entity_id is not None else None,
