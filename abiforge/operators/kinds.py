@@ -274,6 +274,16 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
                 "without headers the surviving declaration is not observable: "
                 "the evidence shows the mangled export removed",
             ),
+            Rule(
+                # Under -fvisibility=hidden the C-linkage replacement is not
+                # exported at all (nm -D: no kdl_gone), so no namesake
+                # answers to the bare name and the loss is a visibility move.
+                lambda c: c.evidence == "headers" and c.flags.visibility == "hidden",
+                {"expected": frozenset({"FUNC_VISIBILITY_CHANGED"}), "any_of": ()},
+                "under hidden visibility the replacement is not exported, so the "
+                "bare name is absent from the export table and the loss reads as "
+                "a visibility change",
+            ),
         ),
         **_BINARY,
     ),
