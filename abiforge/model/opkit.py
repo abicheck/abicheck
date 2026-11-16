@@ -235,11 +235,16 @@ def _binary(c: Config) -> bool:
     return c.evidence == "binary"
 
 
+def _cxx_binary(c: Config) -> bool:
+    return c.evidence == "binary" and c.std.lang == "c++"
+
+
 def _binary_mangled(*kinds: str) -> Rule:
     # From symbols alone the change shows as the old mangled name gone; a tool
-    # that demangles and pairs may name the specific change instead.
+    # that demangles and pairs may name the specific change instead. A mangled
+    # name exists only in C++: a C library's same change is not a symbol removal.
     return Rule(
-        _binary,
+        _cxx_binary,
         {"expected": frozenset(), "any_of": (_REMOVED | frozenset(kinds),)},
         "binary evidence sees the old mangled symbol disappear (or pairs it by demangled name)",
     )
