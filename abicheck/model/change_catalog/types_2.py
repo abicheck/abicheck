@@ -261,16 +261,6 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         operation=_OP.ADDED,
     ),
     _E(
-        "type_alignment_changed",
-        _B,
-        impact="Misaligned access can cause bus errors on strict architectures or silent data corruption with SIMD.",
-        description_template="Alignment changed: {name} ({old} → {new} bits)",
-        entity=_ENT.TYPE,
-        contract_subject=_CS.DECLARATION,
-        operation=_OP.MODIFIED,
-        observable_at=(_OBS_DH,),
-    ),
-    _E(
         "base_class_access_narrowed",
         _A,
         impact="A base-class specifier became more restrictive (public -> protected/private or protected -> private). Code that converts a derived pointer or reference to the base, or uses the base's members through the derived type, no longer compiles. Layout and mangled names are unchanged; detected from header (castxml/clang) evidence only.",

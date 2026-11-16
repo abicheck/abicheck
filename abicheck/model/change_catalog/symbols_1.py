@@ -34,7 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .observability import observable
+from .observability import Language, ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -60,6 +60,17 @@ _OBS_BH = observable(
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
+#: Mach-O has no ``*_elf_only`` variant at binary evidence: the export trie
+#: alone names the removed or hidden function, so the base kind is observed
+#: at {B} there (recorded by the macOS integration lane, _OBSERVED_ON_MACHO).
+_MACHO = ObservabilityCondition(platform=frozenset({Platform.MACHO}))
+_ELF_PE = ObservabilityCondition(platform=frozenset({Platform.ELF, Platform.PE}))
+_OBS_B_MACHO = observable(("B",), condition=_MACHO)
+#: A C++ parameter change alters the mangled name, so the export table alone
+#: carries it; a C parameter change leaves the symbol unchanged and needs
+#: DWARF or the header (test_pr_tier_cell[func_param_type_change-*]).
+_LANG_CXX = ObservabilityCondition(language=frozenset({Language.CXX}))
+_LANG_C = ObservabilityCondition(language=frozenset({Language.C}))
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
@@ -508,7 +519,15 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_DH,),
+        observable_at=(
+            observable(
+                ("B", "D"),
+                ("B", "H"),
+                rationale="a C parameter change keeps the symbol: DWARF or the header carries it",
+                condition=_LANG_C,
+            ),
+            observable(("B",), condition=_LANG_CXX),
+        ),
     ),
     _E(
         "func_removed",
@@ -517,7 +536,15 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
-        observable_at=(_OBS_DH,),
+        observable_at=(
+            observable(
+                ("B", "D"),
+                ("B", "H"),
+                rationale="layout or type fact: DWARF and the public header both carry it",
+                condition=_ELF_PE,
+            ),
+            _OBS_B_MACHO,
+        ),
     ),
     _E(
         "func_return_changed",
@@ -582,7 +609,14 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_BH,),
+        observable_at=(
+            observable(
+                ("B", "H"),
+                rationale="declared in the public header and present in the export table",
+                condition=_ELF_PE,
+            ),
+            _OBS_B_MACHO,
+        ),
     ),
     _E(
         "var_visibility_changed",
