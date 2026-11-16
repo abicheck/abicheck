@@ -58,4 +58,18 @@ MEASUREMENT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="measurement.process_wide_peak_read_as_one_write",
+        invariant=(
+            "A peak measured with a process-wide counter (tracemalloc) is the "
+            "peak of the code measured only when nothing else in the process "
+            "allocates during the window. A worker's other threads read as the "
+            "measured write's peak, so a budget that compares two such peaks "
+            "flips on scheduling, not on the write."
+        ),
+        fixed_by=(1896,),
+        seed_tests=("tests/test_bundle_facts_out_spool.py",),
+        public_surfaces=(),
+        axes={"threads": ("none", "background allocator")},
+    ),
 )

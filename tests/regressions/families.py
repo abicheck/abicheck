@@ -703,7 +703,10 @@ _F10 = (
     "concurrency.abandoned_child_outlives_failed_owner",
     "lifecycle.counter_or_handle_used_past_its_release",
 )
-_F11 = ("measurement.forked_tree_rss_overstates_memory",)
+_F11 = (
+    "measurement.forked_tree_rss_overstates_memory",
+    "measurement.process_wide_peak_read_as_one_write",
+)
 _F22 = ("abiforge.expectation.source_break_disclosed_at_binary_depth",)
 _F21 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
