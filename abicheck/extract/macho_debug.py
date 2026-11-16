@@ -12,25 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mach-O debug information for ``dump``: DWARF from a library's dSYM (ADR-021).
+"""Mach-O container magics shared by the format handler.
 
-The Mach-O snapshot builder asks :func:`macho_dwarf_kwargs` for the snapshot's
-``dwarf``/``dwarf_advanced`` inputs. Resolution is the ELF path's: an explicit
-``debug_info_path`` first (a refused bundle fails the dump), then the adjacent
-``<lib>.dSYM`` bundle (a refused bundle is a non-fatal limitation), else absent.
-Absent evidence yields no keyword at all, so a library without DWARF builds the
-same snapshot it did before.
+The Mach-O DWARF resolver (dSYM attachment to ``dump``) is not wired yet; it is
+re-landed in a follow-up with its own tests. Only the magic table lives here.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
-from typing import Any
-
-from ..model.dwarf_facts import AdvancedExtractionStatus
-from .debug_dump import _resolve_debug_metadata
-
-__all__ = ["MACHO_MAGICS", "macho_dwarf_kwargs"]
 
 #: Mach-O and universal (fat) container magics, both byte orders.
 MACHO_MAGICS: tuple[bytes, ...] = (
@@ -43,25 +31,3 @@ MACHO_MAGICS: tuple[bytes, ...] = (
     b"\xca\xfe\xba\xbf",
     b"\xbf\xba\xfe\xca",
 )
-
-
-def macho_dwarf_kwargs(
-    dylib_path: Path, debug_format: str | None, debug_kwargs: dict[str, Any]
-) -> dict[str, Any]:
-    """The ``dwarf``/``dwarf_advanced`` snapshot inputs for a Mach-O library.
-
-    ``debug_kwargs`` carries the other debug options the format handler passes
-    (``debug_info_path``, ``symbols_only``, ``debug_presence_only``). Returns
-    ``{}`` when no DWARF was read, so the snapshot is built exactly as it was
-    without this path.
-    """
-    if debug_kwargs.get("symbols_only") or debug_kwargs.get("debug_presence_only"):
-        return {}
-    dwarf_meta, dwarf_adv = _resolve_debug_metadata(
-        dylib_path,
-        debug_format,
-        dwarf_source=debug_kwargs.get("debug_info_path"),
-    )
-    if dwarf_adv.extraction is not AdvancedExtractionStatus.COMPLETED:
-        return {}
-    return {"dwarf": dwarf_meta, "dwarf_advanced": dwarf_adv}

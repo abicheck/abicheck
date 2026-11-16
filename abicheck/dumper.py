@@ -139,7 +139,7 @@ from .extract.headers.toolchain import (
     _tool_identity as _tool_identity,
     _tool_identity_metadata as _tool_identity_metadata,
 )
-from .extract.macho_debug import MACHO_MAGICS, macho_dwarf_kwargs
+from .extract.macho_debug import MACHO_MAGICS
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
@@ -814,8 +814,6 @@ def _dump_macho(
     extra_hash_dirs: tuple[Path, ...] = (),
     dump_manifest: DumpManifest | None = None,
     frontend_context: str = "host",
-    debug_format: str | None = None,
-    **debug_kwargs: Any,
 ) -> AbiSnapshot:
     """Mach-O dump: export table from macholib + header-AST analysis.
 
@@ -873,7 +871,6 @@ def _dump_macho(
         _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
         # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
         return new_snapshot(
-            **macho_dwarf_kwargs(dylib_path, debug_format, debug_kwargs),
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -931,7 +928,6 @@ def _dump_macho(
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
         new_snapshot(
-            **macho_dwarf_kwargs(dylib_path, debug_format, debug_kwargs),
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -1127,10 +1123,9 @@ _FORMAT_HANDLERS: tuple[_FormatHandler, ...] = (
     ),
     _FormatHandler(
         name="macho",
-        builder=with_extraction_limitations(_dump_macho),
+        builder=_dump_macho,
         magics=MACHO_MAGICS,
         accepts_dwarf_only=True,
-        accepts_debug_format=True,
     ),
     _FormatHandler(
         name="pe",
