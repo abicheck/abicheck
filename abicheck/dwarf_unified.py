@@ -375,6 +375,31 @@ def parse_dwarf_from_session(
             note_debug_info_read_failure(f"CU at {CU.cu_offset} unreadable: {exc!r}")
         try:
             _adv_process_cu(CU, adv)
+        except RecursionError as exc:  # TEMP DIAGNOSTIC: which DIEs recurse
+            frames = []
+            tb = exc.__traceback__
+            while tb is not None:
+                f = tb.tb_frame
+                die = next(
+                    (
+                        v
+                        for k, v in f.f_locals.items()
+                        if k in ("type_die", "die", "t", "mt", "elem", "child")
+                        and hasattr(v, "offset")
+                    ),
+                    None,
+                )
+                frames.append(
+                    (f.f_code.co_name, f.f_lineno, getattr(die, "offset", None))
+                )
+                tb = tb.tb_next
+            log.warning(
+                "RECURSION-DIAG frames=%d head=%r tail=%r",
+                len(frames),
+                frames[:30],
+                frames[-30:],
+            )
+            raise
         except (ELFError, OSError, ValueError, KeyError) as exc:
             log.warning("parse_dwarf: adv CU skipped in %s: %s", session.path, exc)
             note_debug_info_read_failure(f"CU at {CU.cu_offset} unreadable: {exc!r}")

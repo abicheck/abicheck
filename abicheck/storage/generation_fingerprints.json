@@ -3,14 +3,14 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "e9028f8c3733dc8e05153f6dbdb162733b91a8ac507aa9d2e3c37e1c6f077e94",
+      "abicheck/dumper.py": "0cd6f2196d91491dae658fa1ca3bd780b945cec4e743711f00f8a7f4f09fa0be",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
       "abicheck/dwarf_advanced.py": "2addcbd63e9263e9f89b9dc7bc252baa63c5dad332d8560cf690fb2437bf6c08",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
-      "abicheck/dwarf_unified.py": "4cef17c9d4ed06c753e792e3b9d448b2412dd76d505bf3607902f0f5ee869fc8",
+      "abicheck/dwarf_unified.py": "8101971f2aadeaf375c08363a45121159d7cb79b4e4b8c43af07bf02552d727c",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
       "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
@@ -187,7 +187,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_debug.py": "53b90872195f350d4d1e4f21d31f2d6681d3235eef36c409a69ba2dd56f8abde",
+      "abicheck/extract/macho_debug.py": "9c87a9508290d4412bbcb7f3a3e400214cb66dba41b70b372ca35a1314f14156",
       "abicheck/extract/macho_dsym.py": "50d9107d628f7439e430ff84a643c8689d24ea47437c8b2e9e54db19d7955c87",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
@@ -236,9 +236,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "3343d3064ba41927cb8499659f677c6c0389d389c9029ed6c9089bc1a621eb9d",
+    "fingerprint": "63ba3f400348a150486d8f317a061a6cd2f487f22a6be1491d45e39ac1d3032a",
     "generation": 77,
-    "reason": "Revert of the Mach-O dump wiring on main: the extractor scope returns to the reader-only state; generation 77 is unreleased, so the fingerprint is re-recorded in place"
+    "reason": "Re-land of the Mach-O dSYM wiring on main with the non-fatal adjacent-dSYM path and the RecursionError diagnostic; generation 77 is unreleased, so the fingerprint is re-recorded in place"
   },
   "resolver": {
     "files": {
