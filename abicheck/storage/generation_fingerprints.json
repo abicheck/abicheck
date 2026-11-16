@@ -241,11 +241,11 @@
       "abicheck/workflows/dump/formats.py": "634c897b872e20c7c1579a9f569700a32c1b99b204569e8bb198a4174587b6d2",
       "abicheck/workflows/dump/macho.py": "ee301926fd430c4eed3128e75b07fc494805ff76d0b2acbcd83fa7a8fc9f424e",
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
-      "abicheck/workflows/dump/pe.py": "b4ebef22a05a1a99207898660cd57f4347006d26f5bb2e13b794f6bc34c15056"
+      "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "af840bd617a4785995f5d20e0c44a9f5a27bee7b8b028f7e08ad1b57df705f82",
+    "fingerprint": "2d56483a485fcfc4acf1dac2c1d7e40fb09b4d61659ed75f8f1a232c3d15ad8e",
     "generation": 80,
-    "reason": "formats.py: a type annotation on the Mach-O adapter's return value (no behaviour change); same provisional generation 80."
+    "reason": "pe.py: extract the PDB failure recording into _record_pdb_failure (same call, same section); reduces extract_pe complexity for CodeFactor. No recorded output changes; generation 80 provisional."
   },
   "resolver": {
     "files": {

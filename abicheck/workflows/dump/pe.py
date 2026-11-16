@@ -229,13 +229,18 @@ def extract_pe(
         scope_fallback=scope_fallback,
         semantic_ir=pdb_ir,
     )
-    if pdb_failure is not None:
-        # ADR-062 D15: the PDB was there and its extractor failed, so the
-        # `debug` section (on this export-table path, nothing but the PDB's
-        # facts) is `failed` with the diagnostic, not present and empty.
-        # A header-scoped dump's `debug` section also holds the header
-        # parse's provenance, so it is not failed wholesale (known gap).
-        from ...storage.section_states import record_section_failure
-
-        record_section_failure(snap, "debug", [pdb_failure])
+    _record_pdb_failure(snap, pdb_failure)
     return snap
+
+
+def _record_pdb_failure(snap: AbiSnapshot, pdb_failure: str | None) -> None:
+    """ADR-062 D15: a PDB that was there and whose extractor failed marks the
+    ``debug`` section failed with the diagnostic, not present and empty. On this
+    export-table path the section holds nothing but the PDB's facts. A
+    header-scoped dump's ``debug`` section also holds the header parse's
+    provenance, so it is not failed wholesale (known gap)."""
+    if pdb_failure is None:
+        return
+    from ...storage.section_states import record_section_failure
+
+    record_section_failure(snap, "debug", [pdb_failure])

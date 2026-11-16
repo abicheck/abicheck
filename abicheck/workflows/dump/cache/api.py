@@ -490,10 +490,7 @@ def cached_run_dump(
     # snapshot is still returned, but a retry against a readable dSYM must be
     # able to answer differently, so this dump is never stored (the same rule
     # the optional-TU path applies).
-    recorded = (snap.dump_provenance or {}).get(EXTRACTION_LIMITATIONS_KEY)
-    unreadable_debug = isinstance(recorded, list) and (
-        ADJACENT_DSYM_UNREADABLE_LIMITATION in recorded
-    )
+    unreadable_debug = _has_unreadable_debug_input(snap)
     deps = parses.manifest() if initial_key else None
     # Re-derive after the dump: a tool that appeared or changed mid-run must
     # miss, not store under the key it was looked up with. Likewise a system
@@ -514,6 +511,14 @@ def cached_run_dump(
     elif finisher is not None:
         finished_key = ""  # unstable key: finish, but never store
     return _finish_and_store(snap, finisher, finished_key, req, deps)
+
+
+def _has_unreadable_debug_input(snap: AbiSnapshot) -> bool:
+    """Whether *snap* records that an adjacent debug bundle could not be read."""
+    recorded = (snap.dump_provenance or {}).get(EXTRACTION_LIMITATIONS_KEY)
+    return isinstance(recorded, list) and (
+        ADJACENT_DSYM_UNREADABLE_LIMITATION in recorded
+    )
 
 
 def _stamp_cache_hit(cached: AbiSnapshot, path: Path) -> None:
