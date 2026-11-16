@@ -3,9 +3,9 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "e9028f8c3733dc8e05153f6dbdb162733b91a8ac507aa9d2e3c37e1c6f077e94",
+      "abicheck/dumper.py": "0cd6f2196d91491dae658fa1ca3bd780b945cec4e743711f00f8a7f4f09fa0be",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
-      "abicheck/dwarf_advanced.py": "2addcbd63e9263e9f89b9dc7bc252baa63c5dad332d8560cf690fb2437bf6c08",
+      "abicheck/dwarf_advanced.py": "1a26b3efbc556780c7c97d7b16cb168b528c1460f14df12a6344d590b66efac5",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
@@ -53,6 +53,7 @@
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
+      "abicheck/extract/dwarf_type_alignment.py": "f338fc168722b77183b6c3345bedca1b53c80c81d849d53fdbe6b5c7b7c45cd9",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
@@ -188,7 +189,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_debug.py": "53b90872195f350d4d1e4f21d31f2d6681d3235eef36c409a69ba2dd56f8abde",
+      "abicheck/extract/macho_debug.py": "9c87a9508290d4412bbcb7f3a3e400214cb66dba41b70b372ca35a1314f14156",
       "abicheck/extract/macho_dsym.py": "50d9107d628f7439e430ff84a643c8689d24ea47437c8b2e9e54db19d7955c87",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
@@ -237,9 +238,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "eb92c7793cdbb87c2ef966c326f6673519d9e3db743548d3c2d40bb478395de4",
-    "generation": 78,
-    "reason": "unreleased generation 78 corrected in place: qualified-name claim keys, ELF32 word size, destructor spellings and the symmetric pure declaration of a binary-derived side"
+    "fingerprint": "a15918c9c310e891d1b6a5683fb62fb9dc61e91520bdbbd966fe365c8148e09b",
+    "generation": 80,
+    "reason": "the alignment walk stops a by-value cycle at any offset; output unchanged for terminating inputs"
   },
   "resolver": {
     "files": {

@@ -756,6 +756,20 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "such claim, which reads as no binary evidence (not as not pure), and "
         "no rewrite applies: a new fact on existing records, not a respelling."
     ),
+    79: GenerationSpellingChange(
+        "no type or name spelling changes. A Mach-O dump reads DWARF from the "
+        "adjacent .dSYM bundle (and an explicit debug_info_path bundle), so a "
+        "header-free and a header-built Mach-O snapshot carry the same DWARF "
+        "facts when the bundle is present. The dump cache keys the bundle, so a "
+        "snapshot dumped before the bundle existed is never served afterwards. "
+        "No stored spelling changes: a new fact on Mach-O snapshots."
+    ),
+    80: GenerationSpellingChange(
+        "no type or name spelling changes. The DWARF type-alignment walk now stops "
+        "a by-value cycle at any offset, and it returns the same answer for every "
+        "input that terminated before. A malformed cycle that previously never "
+        "terminated now reads as a finite answer."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
