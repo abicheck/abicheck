@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from abiforge.model.config import Config
-from abiforge.model.expect import VERDICT_RANK, Rule
+from abiforge.model.expect import VERDICT_RANK, BinaryLicence, Rule
 from abiforge.model.opkit import (
     _ALIGN,
     _ENUM_SIZE,
@@ -31,6 +31,7 @@ from abiforge.model.opkit import (
     _OFFSET,
     _REMOVED,
     _SIZE,
+    BUILD_RECORD,
     EditOp,
     Roles,
     _binary,
@@ -923,6 +924,9 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ),
         precondition=_all(_gnu, _not_already("short_enums", True)),
         rebuild=_with(short_enums=True),
+        # -fshort-enums changes no header text in a stripped dump: DWARF or
+        # build data records the flag (as for -fpack-struct).
+        carrier=BUILD_RECORD,
     ),
     EditOp(
         "rebuild_pack_struct",
@@ -966,6 +970,9 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ),
         precondition=_not_already("pack", 1),
         rebuild=_with(pack=1),
+        # -fpack-struct changes no header text: only a DWARF or build-data side
+        # records it (the stripped {B,H} dump is built without it).
+        carrier=frozenset({"D", "BD"}),
     ),
     EditOp(
         "rebuild_cxx11_abi_off",
@@ -1023,6 +1030,9 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         verdict_max="COMPATIBLE",
         precondition=_not_already("opt", "O2"),
         rebuild=_with(opt="O2"),
+        # An -O2 rebuild may lose the canary check only where no frame needs
+        # one; a RISK is honest exactly when nm shows the import dropped.
+        licences=(BinaryLicence("stack_chk_fail_dropped", "COMPATIBLE_WITH_RISK"),),
     ),
 )
 

@@ -747,6 +747,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "changes: the change is new DWARF evidence for Mach-O libraries that "
         "previously had none."
     ),
+    78: GenerationSpellingChange(
+        "no type or name spelling changes. A header-built ELF snapshot now keeps "
+        "the binary purity evidence of its header declarations (the "
+        "abicheck.binary_purity extension fact): the virtual function and the "
+        "record that the emitted vtable slots prove pure or abstract, read from "
+        "__cxa_pure_virtual relocations (WS-3 A6). An older snapshot carries no "
+        "such claim, which reads as no binary evidence (not as not pure), and "
+        "no rewrite applies: a new fact on existing records, not a respelling."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

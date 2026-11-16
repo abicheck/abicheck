@@ -143,7 +143,9 @@ from ..model.surface_facts import is_export_confirmed_absent
 from .depth_fact_availability import cleared_facts
 from .depth_projection_declarations import (
     binary_level_declarations,
+    declared_functions_kept,
     export_only_declarations,
+    exported_or_pure_claimed,
     pair_layout_scope,
 )
 
@@ -354,15 +356,14 @@ def _strip_header_and_above_evidence(
     if not dwarf_sourced:
         # A confirmed non-export -- the fact, not the conflated enum: a
         # declaration no binary-only view could ever have seen.
-        functions = [
-            f for f in snap.declarations.functions if not is_export_confirmed_absent(f)
-        ]
+        functions = declared_functions_kept(snap)
         variables = [
             v for v in snap.declarations.variables if not is_export_confirmed_absent(v)
         ]
         exported = _exported_symbol_names(snap)
         if exported is not None:
-            functions = [f for f in functions if f.mangled in exported]
+            keep = exported_or_pure_claimed(snap, exported)
+            functions = [f for f in functions if f.mangled in keep]
             variables = [v for v in variables if v.mangled in exported]
         # Rebuilt from binary-level facts only, the way a binary-only dump
         # synthesizes an export with no debug subprogram: discarding header
@@ -415,10 +416,8 @@ def _strip_header_and_above_evidence(
         # (triggered because its own scope derivation now sees empty
         # `types`/`enums` on both sides) falls back to a pool that was
         # already reduced, not the raw, unscoped DWARF universe.
-        from ..compare.debug_layout_view import (
-            debug_layout_declarations,
-            restrict_debug_layout,
-        )
+        from ..compare.debug_layout_view import restrict_debug_layout
+        from .depth_projection_declarations import binary_purity_layout
 
         restrict_debug_layout(snap, dwarf_struct_scope, dwarf_enum_scope)
         # Rebuild layout-only records/enums from the (scoped) debug layout:
@@ -431,9 +430,7 @@ def _strip_header_and_above_evidence(
         # the requested depth (bug class
         # `evidence.depth_projection_diverges_from_shallow_dump`). These are
         # debug-info facts, not the discarded header spellings.
-        snap.declarations.types, snap.declarations.enums = debug_layout_declarations(
-            snap
-        )
+        snap.declarations.types, snap.declarations.enums = binary_purity_layout(snap)
 
     snap.declarations.constants = {}
     # Sidecar keyed exactly like `constants` (same docstring as above) --

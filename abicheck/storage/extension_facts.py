@@ -41,6 +41,7 @@ from ..model.fact import Fact
 from ..model.vocabulary import ScopeOrigin
 from .canonical import canonical_form
 from .extension_fact_catalog import (
+    BINARY_PURITY,
     BINARY_SHA256,
     CU_STACK_PROTECTOR,
     CXX_CONCEPT_CONSTRAINTS,
@@ -297,6 +298,7 @@ def sync_model_extension_facts(snap: Any) -> None:
     # blocked one must not leave a stale or missing typedef_origins fact.
     _sync_typedef_origins(snap)
     _sync_std_reexports(snap)
+    _sync_binary_purity(snap)
     scan = getattr(snap, "cxx_concept_header_scan", None)
     if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
         return
@@ -499,6 +501,36 @@ def _apply_final_member_functions(snap: Any) -> None:
             func.is_final = False
 
 
+def _sync_binary_purity(snap: Any) -> None:
+    """Write ``AbiSnapshot.binary_purity`` as :data:`BINARY_PURITY`, or drop
+    a stale one when no binary evidence is held."""
+    if _blocked_reason(snap, BINARY_PURITY.section) is not None:
+        return
+    value = getattr(snap, "binary_purity", None)
+    if isinstance(value, dict):
+        write_extension_fact(snap, BINARY_PURITY, value)
+    elif value is None:
+        _drop_extension_fact(snap, BINARY_PURITY)
+
+
+def _apply_binary_purity(snap: Any) -> None:
+    """Restore ``AbiSnapshot.binary_purity``; a stored value that does not
+    decode is refused, since reading it as "no evidence" would silently drop
+    the purity a header dump proved."""
+    fact = read_extension_fact(snap, BINARY_PURITY)
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if fact.status is FactStatus.PRESENT and fact.value is not None:
+        snap.binary_purity = fact.value
+        return
+    if _blocked_reason(snap, BINARY_PURITY.section) is not None:
+        return
+    raise SnapshotError(
+        "snapshot's binary_purity extension fact is unreadable: "
+        + "; ".join(str(d) for d in fact.diagnostics)
+    )
+
+
 def _drop_extension_fact(snap: Any, fact: ExtensionFact[Any]) -> None:
     """Remove *fact* from *snap*'s carried extensions (a model field reset to
     ``None`` claims no value, so a stale stored one must not be re-saved).
@@ -543,6 +575,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     _apply_template_defaults(snap)
     decode_noexcept_unobserved(snap)
     _apply_final_member_functions(snap)
+    _apply_binary_purity(snap)
     _apply_typedef_origins(snap)
     _apply_std_reexports(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)

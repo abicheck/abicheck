@@ -384,6 +384,10 @@ def test_rebuild_preconditions_reject_a_no_op_rebuild() -> None:
 
 def test_every_rule_fires_for_some_config() -> None:
     # Vacuity guard: a rule whose predicate never holds is dead ground truth.
+    # clang 16 is a nightly-tier producer (outside the PR-tier pair above), and
+    # some rules key on its DWARF (DW_AT_deleted is omitted by clang 16 only),
+    # so the probe universe includes it: a rule for it is live, not dead.
+    clang16 = Toolchain("clang", 16, "clang-16", "clang++-16")
     probes = [
         _cfg(lang, std=s, flags=f, evidence=e, platform=p, producer=tc)
         for lang in ("c", "c++")
@@ -399,7 +403,7 @@ def test_every_rule_fires_for_some_config() -> None:
         )
         for e in EVIDENCE
         for p in (("linux", "elf"), ("win32", "pe"), ("darwin", "macho"))
-        for tc in (GCC, CLANG)
+        for tc in (GCC, CLANG, clang16)
     ]
     # The L3 build-data axis (Config.build_data, headers only).
     headers = [c for c in probes if c.evidence == "headers"]

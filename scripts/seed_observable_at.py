@@ -127,6 +127,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         ("elf", "pe"),
         "_OBS_DH_ELFPE",
     ),
+    "BH:PE": (
+        (("B", "H"),),
+        "declared in the public header and present in the export table",
+        ("pe",),
+        "_OBS_BH_PE",
+    ),
     "BH:ELFPE": (
         (("B", "H"),),
         "declared in the public header and present in the export table",

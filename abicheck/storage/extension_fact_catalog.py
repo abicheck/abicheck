@@ -59,6 +59,7 @@ from ..model.vocabulary import ScopeOrigin
 from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
+    "BINARY_PURITY",
     "BINARY_SHA256",
     "CU_STACK_PROTECTOR",
     "CXX_CONCEPT_CONSTRAINTS",
@@ -420,6 +421,51 @@ FINAL_MEMBER_FUNCTIONS: ExtensionFact[dict[str, list[str]]] = ExtensionFact(
 )
 
 
+def _binary_purity(value: Any) -> dict[str, Any]:
+    """``{"functions": {mangled: bool}, "records": {name: bool},
+    "unobserved": {name: reason}}`` -- the binary purity evidence of a
+    header-built ELF snapshot (extract/header_binary_purity.py)."""
+    if not isinstance(value, dict) or set(value) != {
+        "functions",
+        "records",
+        "unobserved",
+    }:
+        raise TypeError("expected a {'functions', 'records', 'unobserved'} map")
+    out: dict[str, Any] = {}
+    for key in ("functions", "records"):
+        table = value[key]
+        if not isinstance(table, dict) or not all(
+            isinstance(k, str) and isinstance(v, bool) for k, v in table.items()
+        ):
+            raise TypeError(f"{key!r} must map names to bools")
+        out[key] = dict(table)
+    unobserved = value["unobserved"]
+    if not isinstance(unobserved, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in unobserved.items()
+    ):
+        raise TypeError("'unobserved' must map names to reasons")
+    out["unobserved"] = dict(unobserved)
+    return out
+
+
+#: The binary purity evidence of a header-built ELF snapshot: the pure and
+#: non-pure claims the emitted vtable slots prove (``functions``, ``records``),
+#: and the records no claim could be made for (``unobserved``, with the
+#: reason). Written on the ``declarations`` section when a header dump read
+#: the library's vtables. Absent, no binary evidence was read: a projection
+#: then keeps no purity claim, which is what an older reader does too, so it
+#: is optional (ADR-062 D19).
+BINARY_PURITY: ExtensionFact[dict[str, Any]] = ExtensionFact(
+    name="abicheck.binary_purity",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="no binary purity evidence was read",
+    owner="ADR-062",
+    encode=_binary_purity,
+    decode=_binary_purity,
+)
+
+
 def _template_default_map(value: Any) -> dict[str, list[str | None] | None]:
     """A ``{key: [default | null, ...] | null}`` map (each template's spelled
     defaults, ``null`` when not known; ``model/template_default_table.py``)."""
@@ -633,6 +679,7 @@ def evidence_header_extras(
 #: declaring it as a module constant above and listing it here.
 EXTENSION_FACTS = ExtensionFactRegistry(
     (
+        BINARY_PURITY,
         BINARY_SHA256,
         CU_STACK_PROTECTOR,
         CXX_CONCEPT_HEADER_SCAN,
