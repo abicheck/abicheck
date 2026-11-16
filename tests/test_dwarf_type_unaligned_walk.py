@@ -243,3 +243,15 @@ def test_a_cycle_cut_does_not_hide_an_independent_misaligned_sibling(
         members.reverse()
     o = Die("DW_TAG_structure_type", 832, members=members)
     assert adv._type_unaligned_at(o, None, 0, None) is True
+
+
+def test_a_repeated_type_at_one_base_is_checked_once_and_keeps_its_answer() -> None:
+    # struct S { int x @0; }   struct O { S a @0; S b @0; }
+    # The second S at base 0 is the same (type, base) pair: deduplicated, and
+    # its answer is the one already computed (aligned -> False). A misaligned
+    # S at base 2 is still reported via its own pair.
+    s = Die("DW_TAG_structure_type", 840, members=[member(0, _int(841))])
+    aligned = Die("DW_TAG_structure_type", 842, members=[member(0, s), member(0, s)])
+    assert adv._type_unaligned_at(aligned, None, 0, None) is False
+    shifted = Die("DW_TAG_structure_type", 843, members=[member(0, s), member(2, s)])
+    assert adv._type_unaligned_at(shifted, None, 0, None) is True

@@ -105,3 +105,33 @@ def test_presence_only_with_no_dwarf_supplies_nothing(monkeypatch) -> None:
     assert (
         macho_debug.macho_dwarf_kwargs(LIB, None, {"debug_presence_only": True}) == {}
     )
+
+
+@pytest.mark.parametrize("has_dwarf", [True, False])
+def test_a_failed_adjacent_dwarf_read_is_recorded_not_dropped(
+    monkeypatch, has_dwarf: bool
+) -> None:
+    # The bundle exists, but its DWARF could not be read. Recorded as the fixed
+    # limitation (so the dump is not cached as if the bundle were absent), in
+    # both the presence and the full branches, and no debug input is attached.
+    def fake(dylib, debug_format, *, dwarf_source=None):
+        return (
+            SimpleNamespace(has_dwarf=has_dwarf),
+            SimpleNamespace(extraction=AdvancedExtractionStatus.FAILED),
+        )
+
+    monkeypatch.setattr(macho_debug, "_resolve_debug_metadata", fake)
+    options = {"debug_presence_only": True} if has_dwarf else {}
+    with collecting_extraction_limitations() as limits:
+        kw = macho_debug.macho_dwarf_kwargs(LIB, None, options)
+    assert kw == {}
+    assert limits == [macho_debug.ADJACENT_DSYM_UNREADABLE_LIMITATION]
+
+
+def test_a_not_run_adjacent_read_stays_silent(monkeypatch) -> None:
+    # NOT_RUN means no adjacent bundle exists: nothing to record, nothing to attach.
+    _patch(monkeypatch, status=AdvancedExtractionStatus.NOT_RUN)
+    with collecting_extraction_limitations() as limits:
+        kw = macho_debug.macho_dwarf_kwargs(LIB, None, {})
+    assert kw == {}
+    assert limits == []
