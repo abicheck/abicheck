@@ -35,7 +35,7 @@ PLATFORM_BUG_CLASSES: tuple[BugClass, ...] = (
             "GLIBC_2.2.5 against nothing read the x86-64 baseline as a new floor "
             "(catalog case138_needed_added: COMPATIBLE became COMPATIBLE_WITH_RISK)."
         ),
-        fixed_by=(0,),
+        fixed_by=(2097,),
         seed_tests=("tests/test_version_floor_new_provider.py",),
         axes={"arch": ("EM_X86_64", "EM_386", "unmeasured")},
     ),
