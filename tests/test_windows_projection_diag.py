@@ -38,25 +38,60 @@ def test_windows_callback_environ_fields(
     v1_lib, v2_lib, v1_hdr, v2_hdr = _built_case(CASE, tmp_path, shared_cmake_build_dir)
     from abicheck.policy.depth_projection import project_pair_to_depth
 
+    def attrs(obj):
+        try:
+            return dict(vars(obj))
+        except TypeError:
+            return {}
+
     lines: list[str] = []
     rich_old = dump(v1_lib, headers=_header_list(v1_hdr), version="old")
     rich_new = dump(v2_lib, headers=_header_list(v2_hdr), version="new")
     p_old, p_new = project_pair_to_depth(rich_old, rich_new, "binary")
-    for side, snap in (("projected-old", p_old), ("projected-new", p_new)):
-        decl = _read(lambda snap=snap: snap.declarations)
-        for rec in _read(lambda decl=decl: list(decl.types)) or []:
-            if "CALLBACK_ENVIRON" in str(getattr(rec, "name", "")):
-                for f in _read(lambda rec=rec: list(rec.fields)) or []:
-                    lines.append(f"[{side}] record {rec.name}: {f!r}"[:320])
-        layout = _read(lambda decl=decl: decl.debug_layout)
-        structs = (
-            _read(lambda layout=layout: layout.structs) if layout is not None else None
-        )
-        if isinstance(structs, dict):
-            for name, sl in structs.items():
-                if "CALLBACK_ENVIRON" in name:
-                    for f in _read(lambda sl=sl: list(sl.fields)) or []:
-                        lines.append(f"[{side}] layout {name}: {f!r}"[:320])
-        else:
-            lines.append(f"[{side}] debug_layout={str(layout)[:120]}")
+
+    def records(snap):
+        types = _read(lambda: list(snap.declarations.types)) or []
+        return {
+            r.name: r
+            for r in types
+            if "CALLBACK_ENVIRON" in str(getattr(r, "name", ""))
+        }
+
+    ro, rn = records(p_old), records(p_new)
+    lines.append(f"names old={sorted(ro)} new={sorted(rn)}")
+    for side, snap in (("old", p_old), ("new", p_new)):
+        types = _read(lambda snap=snap: list(snap.declarations.types)) or []
+        anon = [
+            getattr(r, "name", "?")
+            for r in types
+            if "unnamed" in str(getattr(r, "name", ""))
+            or "anon" in str(getattr(r, "name", "")).lower()
+            or "::" in str(getattr(r, "name", ""))
+        ]
+        lines.append(f"[{side}] anonymous-like record names: {anon[:20]}")
+    for name in sorted(set(ro) & set(rn)):
+        a, b = attrs(ro[name]), attrs(rn[name])
+        for k in sorted(set(a) | set(b)):
+            if k == "fields":
+                continue
+            if a.get(k) != b.get(k):
+                lines.append(
+                    f"[record {name}] attr {k}: old={str(a.get(k))[:160]} new={str(b.get(k))[:160]}"
+                )
+        fa = {f.name: f for f in ro[name].fields}
+        fb = {f.name: f for f in rn[name].fields}
+        for fname in sorted(set(fa) | set(fb)):
+            if fname not in fa or fname not in fb:
+                lines.append(
+                    f"[field {name}.{fname}] present only in {'old' if fname in fa else 'new'}"
+                )
+                continue
+            x, y = attrs(fa[fname]), attrs(fb[fname])
+            for k in sorted(set(x) | set(y)):
+                if x.get(k) != y.get(k):
+                    lines.append(
+                        f"[field {name}.{fname}] {k}: old={str(x.get(k))[:200]} new={str(y.get(k))[:200]}"
+                    )
+    if not any(x.startswith("[record") or x.startswith("[field") for x in lines):
+        lines.append("no projected attribute differs between old and new")
     raise AssertionError("WINDOWS-DIAG\n" + "\n".join(lines))
