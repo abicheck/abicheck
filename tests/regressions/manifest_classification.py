@@ -1104,7 +1104,12 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "the emission itself, never the declaration table."
         ),
         fixed_by=(2072,),
-        seed_tests=("tests/test_observable_at_matches_emission.py",),
+        seed_tests=(
+            "tests/test_observable_at_matches_emission.py",
+            # The ELF visibility input: a localized header-declared function is
+            # emitted at binary depth, so FUNC_VISIBILITY_CHANGED is observable at {B} on ELF.
+            "tests/test_abi_edit_corpus_matrix.py",
+        ),
         public_surfaces=("abicheck.checker.compare",),
         axes={
             "platform": ("elf", "pe", "macho"),
