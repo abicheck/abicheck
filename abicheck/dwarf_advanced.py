@@ -835,6 +835,18 @@ def _parse_producer(producer: str) -> ToolchainInfo:
 # ---------------------------------------------------------------------------
 
 
+def _named_convention(name: str) -> str:
+    """A stored convention name, with a legacy ``unknown(0x..)`` code mapped to its name.
+
+    A snapshot written before a code was named stores ``unknown(0xc1)``; the same
+    function read now says ``LLVM_Win64``. Both must compare equal.
+    """
+    m = re.fullmatch(r"unknown\(0x([0-9a-fA-F]+)\)", name)
+    if m is None:
+        return name
+    return _CC_NAMES.get(int(m.group(1), 16), name)
+
+
 def _diff_calling_conventions(
     old_meta: AdvancedDwarfMetadata,
     new_meta: AdvancedDwarfMetadata,
@@ -844,8 +856,8 @@ def _diff_calling_conventions(
     old_cc_keys = set(old_meta.calling_conventions)
     new_cc_keys = set(new_meta.calling_conventions)
     for fname in sorted(old_cc_keys & new_cc_keys):
-        old_cc = old_meta.calling_conventions[fname]
-        new_cc = new_meta.calling_conventions[fname]
+        old_cc = _named_convention(old_meta.calling_conventions[fname])
+        new_cc = _named_convention(new_meta.calling_conventions[fname])
         if old_cc != new_cc:
             results.append(
                 (
@@ -859,7 +871,8 @@ def _diff_calling_conventions(
     already_reported_cc = {
         fname
         for fname in (old_cc_keys & new_cc_keys)
-        if old_meta.calling_conventions[fname] != new_meta.calling_conventions[fname]
+        if _named_convention(old_meta.calling_conventions[fname])
+        != _named_convention(new_meta.calling_conventions[fname])
     }
     return results, already_reported_cc
 

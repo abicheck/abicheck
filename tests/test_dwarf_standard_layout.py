@@ -146,24 +146,22 @@ def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
         encoding="utf-8",
     )
     exe = tmp / "shapes"
-    subprocess.run(
-        [
-            gxx,
-            "-std=c++17",
-            "-g",
-            f"-gdwarf-{dwarf}",
-            "-O0",
-            # GCC drops the DWARF of a type nothing uses; the shapes are only
-            # queried by the oracle, so keep every definition.
-            "-fno-eliminate-unused-debug-types",
-            str(src),
-            "-o",
-            str(exe),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    cmd = [
+        gxx,
+        "-std=c++17",
+        "-g",
+        f"-gdwarf-{dwarf}",
+        "-O0",
+        # GCC drops the DWARF of a type nothing uses; the shapes are only
+        # queried by the oracle, so keep every definition.
+        "-fno-eliminate-unused-debug-types",
+        str(src),
+        "-o",
+        str(exe),
+    ]
+    compile_proc = subprocess.run(cmd, capture_output=True, text=True)
+    if compile_proc.returncode != 0:
+        pytest.fail(f"{cmd} failed for {src}:\n{compile_proc.stderr}")
     run = subprocess.run([str(exe)], check=True, capture_output=True, text=True)
     oracle = {}
     for line in run.stdout.splitlines():

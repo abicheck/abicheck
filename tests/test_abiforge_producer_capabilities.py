@@ -143,8 +143,8 @@ def test_llvm_convention_codes_name_what_clang_writes(tmp_path: Path) -> None:
     from abicheck.extract.dwarf_calling_conventions import CC_NAMES as _CC_NAMES
 
     clang = shutil.which("clang")
-    if clang is None:
-        pytest.fail("clang is required by the integration marker")
+    if clang is None or shutil.which("llvm-dwarfdump") is None:
+        pytest.skip("clang and llvm-dwarfdump are required")
     src = tmp_path / "llvm_cc.c"
     obj = tmp_path / "llvm_cc.o"
     src.write_text(_source() + "\n", encoding="utf-8")
@@ -174,3 +174,22 @@ def _dump(argv: list[str], obj: Path) -> str:
     return subprocess.run(
         [*argv, str(obj)], check=True, capture_output=True, text=True
     ).stdout
+
+
+def test_legacy_unknown_convention_codes_compare_equal_to_their_names() -> None:
+    """A generation-79 snapshot stores ``unknown(0xc1)`` for a function that is
+    ``LLVM_Win64`` now; the diff must not call the unchanged function changed.
+    Both operand orders are checked."""
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_calling_conventions
+
+    legacy = AdvancedDwarfMetadata()
+    legacy.calling_conventions["f"] = "unknown(0xc1)"
+    named = AdvancedDwarfMetadata()
+    named.calling_conventions["f"] = "LLVM_Win64"
+    for old, new in ((legacy, named), (named, legacy)):
+        results, reported = _diff_calling_conventions(old, new)
+        assert results == [] and reported == set()
+    changed = AdvancedDwarfMetadata()
+    changed.calling_conventions["f"] = "LLVM_vectorcall"
+    results, _ = _diff_calling_conventions(legacy, changed)
+    assert [r[0] for r in results] == ["calling_convention_changed"]
