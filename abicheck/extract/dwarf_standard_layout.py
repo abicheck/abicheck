@@ -23,7 +23,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from weakref import WeakKeyDictionary
 
 from ..dwarf_utils import resolve_type_die, unwrap_cv_typedef
 from ..model.fact import Fact
@@ -315,14 +314,10 @@ class StandardLayoutCollector:
         self._records.clear()
 
 
-#: One collector per builder, so one binary's summaries never serve another.
-_COLLECTORS: WeakKeyDictionary[Any, StandardLayoutCollector] = WeakKeyDictionary()
-
-
 def collector_for(builder: Any) -> StandardLayoutCollector:
-    """The collector of *builder*, created on first use."""
-    collector = _COLLECTORS.get(builder)
+    """The collector of *builder*, created on first use and kept on the builder."""
+    collector = getattr(builder, "_standard_layout_collector", None)
     if collector is None:
         collector = StandardLayoutCollector()
-        _COLLECTORS[builder] = collector
+        builder._standard_layout_collector = collector
     return collector
