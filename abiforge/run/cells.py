@@ -284,7 +284,10 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
     # The verdict depends on the library pair alone, never on the consumers.
     verdict, kinds = abicheck_answer(old, new)
     # The licences read the built pair with binutils, never abicheck's answer.
-    exp = op.expect(config, binary_facts(old.so, new.so))
+    # Read the pair only when the operator licenses something: most cells never
+    # need binutils, and the reader is ELF-or-Mach-O (see run/binfacts.py).
+    facts = binary_facts(old.so, new.so) if op.licences else {}
+    exp = op.expect(config, facts)
     if ctx.execute:
         truth = ctx.oracle.truth(
             seed,
