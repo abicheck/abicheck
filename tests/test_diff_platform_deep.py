@@ -542,12 +542,20 @@ class TestSymbolVersionChanges:
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.SYMBOL_VERSION_DEFINED_ADDED in _kinds(r)
 
-    def test_version_required_added_compat(self):
-        """New lib not previously required → COMPAT (not a new runtime constraint)."""
+    def test_version_required_added_is_a_new_floor(self):
+        """A newly needed provider whose node exceeds the binary-wide floor.
+
+        Nothing was required before, so GLIBC_2.34 raises the floor from no
+        requirement: SYMBOL_VERSION_REQUIRED_ADDED, and RUNTIME_FLOOR_RAISED with
+        an empty old tag. This replaces the earlier COMPAT expectation, which
+        treated a provider the old binary never needed as no new constraint.
+        """
         old_elf = ElfMetadata(versions_required={})
         new_elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.34"]})
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
-        assert ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT in _kinds(r)
+        assert ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED in _kinds(r)
+        assert ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT not in _kinds(r)
+        assert ChangeKind.RUNTIME_FLOOR_RAISED in _kinds(r)
 
     def test_version_required_added_breaking(self):
         """Genuinely newer version requirement on existing lib → BREAKING."""

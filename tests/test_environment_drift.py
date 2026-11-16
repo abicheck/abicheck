@@ -139,7 +139,16 @@ class TestRuntimeFloorRaised:
         changes = _diff_elf_symbol_versioning(self._old(), new)
         assert ChangeKind.RUNTIME_FLOOR_RAISED not in _kinds(changes)
 
-    def test_no_floor_finding_for_entirely_new_lib(self) -> None:
+    def test_new_lib_above_the_binary_floor_raises_it(self) -> None:
+        """A newly needed provider whose node exceeds the binary-wide floor.
+
+        The old binary's floor is libc's GLIBC_2.28. A newly linked libm that
+        needs GLIBC_2.35 raises that floor, so the roll-up reports 2.28 -> 2.35.
+        This replaces the earlier expectation that an entirely new library never
+        reports a floor, which hid exactly this raise (ADR-011 amendment,
+        2026-11-16). A newly needed provider at or below the floor still reports
+        nothing; see tests/test_version_floor_new_provider.py.
+        """
         new = _elf(
             needed=["libc.so.6", "libm.so.6"],
             versions_required={
@@ -148,7 +157,10 @@ class TestRuntimeFloorRaised:
             },
         )
         changes = _diff_elf_symbol_versioning(self._old(), new)
-        assert ChangeKind.RUNTIME_FLOOR_RAISED not in _kinds(changes)
+        floors = [c for c in changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED]
+        assert len(floors) == 1
+        assert floors[0].old_value == "GLIBC_2.28"
+        assert floors[0].new_value == "GLIBC_2.35"
 
     def test_prefixes_tracked_independently(self) -> None:
         old = _elf(
