@@ -360,6 +360,36 @@
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen71/corpus.json.gz"
     },
+    "72": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "2098cbb47959",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen72/corpus.json.gz"
+    },
+    "73": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "0cdd76d3e628",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen73/corpus.json.gz"
+    },
+    "74": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "785799578ae3",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen74/corpus.json.gz"
+    },
+    "75": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "ec8dc4ffde6a",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen75/corpus.json.gz"
+    },
+    "76": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "13af48ea23b2",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen76/corpus.json.gz"
+    },
     "9": {
       "castxml": "castxml version 0.7.0",
       "commit": "a614517e8979",

@@ -186,6 +186,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
                 "tests/test_family_f8_catalog_backend_parity.py",
+                # The Mach-O layout detectors against the ELF pair of the same
+                # logical change, in both fixup encodings, with seeded mutants.
+                "tests/test_family_f8_macho_layout.py",
                 # Each header backend reports a change's declared ChangeKinds
                 # (Clang, CastXML; native GCC in the native-gcc CI job).
                 "tests/test_header_backend_parity_regressions.py",
@@ -197,6 +200,17 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_tool_probe_hang_guard.py",
                 # castxml's derived data size against each target's compilers.
                 "tests/test_castxml_data_size_integration.py",
+                # The clang builtin-ABI probe measures the parse's own target
+                # (-m32 reaches it) and tolerates an ILP32 builtin set.
+                "tests/unit/extract/test_clang_builtin_probe_options.py",
+                # The same probe through the public dump of a real -m32 parse.
+                "tests/test_clang_builtin_probe_m32.py",
+                # The va_list parameter is recognised on a pointer-valued target
+                # (-m32) by the name the parse keeps, not only the x86-64 spelling.
+                "tests/test_clang_param_va_list.py",
+                # The time64 detector reads a typedef chain in either backend's
+                # spelling (clang chains, gcc flattens), to one finding.
+                "tests/test_time64_typedef_chain.py",
             ),
         ),
         Family(
@@ -232,7 +246,7 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
-            key="F19",
+            key="F21",
             title="An edit reads as its own kind on every evidence lane",
             invariant=(
                 "One source edit is reported with the change kind the catalog "
@@ -608,6 +622,9 @@ _F8 = (
     "extraction.linker_summary_flag_read_as_the_fact",
     "scoping.system_header_layout_unrecognized",
     "symbol_rule.single_object_format",
+    # A layout detector gated to ELF: a Mach-O pair lost its vtable and thunk
+    # findings (harness: test_family_f8_macho_layout.py).
+    "macho.layout_detector_blind",
     # A PE/Mach-O header parse discarded when no declaration's spelling met an
     # export (an MSVC DLL against an Itanium parse; a template-only header).
     "extraction.header_surface_discarded_on_export_mismatch",
@@ -661,9 +678,11 @@ _F10 = (
     "lifecycle.counter_or_handle_used_past_its_release",
 )
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
-_F19 = (
+_F21 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
     "comparability.runtime_abi_selector_refused_instead_of_reported",
+    "classification.demangled_signature_used_as_entity_name",
+    "classification.one_sibling_of_a_change_kind_family_read",
 )
 _F12 = (
     # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or
@@ -747,7 +766,7 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
-    ("F19", _F19),
+    ("F21", _F21),
     ("F12", _F12),
     ("F13", _F13),
     ("F14", _F14),

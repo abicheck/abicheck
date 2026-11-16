@@ -16,7 +16,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from abiforge.model.config import Config
-from abiforge.run.toolchains import uses_libstdcxx
 
 _CLASSES = frozenset({"cxx_classes"})
 
@@ -229,7 +228,7 @@ _PLATFORM: tuple[Known, ...] = (
         "std_string_abi_flipped",
         _XA,
         "wrong-kind",
-        lambda c: c.std.year >= 2020,
+        lambda c: c.std.year >= 2020 and c.producer.family == "gcc",
         "from C++20 the new-ABI std::string is constexpr and exports nothing, "
         "while the old COW string exports ~37 weak members (_ZNSs...): they "
         "dilute the __cxx11 marker share below the flip threshold",
@@ -352,7 +351,9 @@ KNOWN: tuple[Known, ...] = (
         "false-positive",
         # PE records no binding, so the coalesced-copy rule has no signal there
         # (ADR-089's PE limit); against libc++ (macOS) the rebuild reads NO_CHANGE.
-        lambda c: c.objfmt == "pe" and uses_libstdcxx(c.producer),
+        # gcc (MinGW) is libstdc++; the old probe of the installed driver made the
+        # record depend on the runner. A pinned family is the same condition here.
+        lambda c: c.objfmt == "pe" and c.producer.family == "gcc",
         "MinGW: -O2 inlines the std::string instantiations the -O0 build exported; a PE "
         "export carries no WEAK binding, so their loss reads func_removed / "
         "func_visibility_changed (BREAKING) while every consumer still runs",

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from abiforge.model.config import Config
+from abiforge.model.config import StdRange
 from abiforge.model.opkit import EditOp, Rule, _merge, _set
 from abiforge.operators.layout import _replace
 
@@ -25,10 +25,6 @@ _AT_MOST_RISK: dict[str, Any] = {
     "verdict_min": "COMPATIBLE",
     "verdict_max": "COMPATIBLE_WITH_RISK",
 }
-
-
-def _cxx17(c: Config) -> str | None:
-    return None if c.std.year >= 2017 else "inline variables need C++17"
 
 
 def _op(name: str, role: str, edit: Any, why: str, **kw: Any) -> EditOp:
@@ -125,7 +121,13 @@ VARIABLE_OPERATORS: tuple[EditOp, ...] = (
             ),
         ),
         min_evidence="binary",
-        precondition=_cxx17,
+        standards=(
+            StdRange(
+                "c++",
+                "c++17",
+                "P0386R2 (inline variables), [dcl.inline]",
+            ),
+        ),
         rules=(
             Rule(
                 lambda c: c.objfmt == "pe",

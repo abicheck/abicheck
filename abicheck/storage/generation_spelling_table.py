@@ -707,6 +707,46 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "fresh dump meet at the same join; a raw checker.compare call takes "
         "bound operands (extract.header_export_binding.bind_pe_header_operand)"
     ),
+    73: GenerationSpellingChange(
+        "fix/ws4-pe-variable-linkage: no stored type spelling changes. A header-backed "
+        "PE declaration of a namespace-scope global with a plain (C) spelling now binds "
+        "to the MSVC data export ?name@@3<type>A that decodes to its declared type "
+        "(extract/header_export_binding); the binding is a fact recorded at compare "
+        "time and at dump time, and the identity (mangled) is unchanged"
+    ),
+    74: GenerationSpellingChange(
+        "fix/nightly-builtin-probe-target (#2084): no stored type spelling changed. "
+        "A clang header parse under -m32 (or another non-host target) now probes the "
+        "builtin layout of the parse's own options, so long/unsigned long/long long "
+        "and the time_t family carry the 32-bit sizes they have on that target; a "
+        "stored snapshot of such a parse recorded the x86-64 sizes. The fact changes, "
+        "the spelling (the name a type is recorded under) does not. The pre-74 host-ABI "
+        "alignment of a builtin variable is demoted across this boundary by "
+        "policy/alignment_generation_drift (the exact LP64/ILP32 natural pair only)"
+    ),
+    75: GenerationSpellingChange(
+        "WS-4 PR 1 (feat/ws4-macho-vtable-facts): Mach-O object sizes (_ZTV/_ZTI/_ZTT "
+        "spans, kept only when pointer fixups corroborate them) are stored as the "
+        "extension fact abicheck.macho_object_sizes. No type or name "
+        "spelling changes and no load-time rewrite; a snapshot without the fact reads "
+        "as not derived, and the layout gate declines the Mach-O side."
+    ),
+    76: GenerationSpellingChange(
+        "fix/nightly-va-list-target (#2088): no stored type spelling changes. A clang "
+        "header parse on a pointer-valued va_list target (-m32: __builtin_va_list is "
+        "char *) keeps the typedef link on a decayed parameter and now recognises it as "
+        "a va_list parameter when the link reaches __builtin_va_list "
+        "(extract/headers/clang/qualifiers), so Param.is_va_list is set where it was not "
+        "before. The recorded parameter fact changes; the spelling does not"
+    ),
+    77: GenerationSpellingChange(
+        "dump of a Mach-O library reads DWARF from its .dSYM bundle: an explicit "
+        "debug_info_path bundle, or the bundle beside the library, through the "
+        "pyelftools DWARFInfo path. A bundle whose UUID does not match the library, "
+        "or that is missing, is absent evidence. No stored type or name spelling "
+        "changes: the change is new DWARF evidence for Mach-O libraries that "
+        "previously had none."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

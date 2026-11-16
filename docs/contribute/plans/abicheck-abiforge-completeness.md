@@ -777,11 +777,11 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-1 | ADR-093, `observable_at` on all kinds | A0, A1 | in review (schema, fill); ADR merged | #2067 merged; #2071 schema; fill PR (#2071 merged): 293 of 434 kinds classified, 141 UNCLASSIFIED (decided entries of four overflowing family modules moved into numbered siblings to stay under the 800-line cap) |
 | WS-2 | `{B,H}` correctness | A2, A3, A4, A5 | not started | — |
 | WS-3 | Pure virtual, key function, vtable home | A6 | not started | — |
-| WS-4 | Platform facts | A7 | in progress (PR 2, PE) | #2068 (PR 1, Mach-O); this PR (PR 2, PE); follow-up `fix/ws4-pe-variable-linkage` (plain C++ global variables, linkage fact, own generation bump) |
-| WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | in progress (PR 1 `variant_of` pass merged #2078; PR 2 `subsumed_by` collapse in review; ADR-093 D5 "related finding" not yet recorded: lands in PR 3 as an optional `related` field plus relation code on the disposition record) | PR 2: this PR |
+| WS-4 | Platform facts | A7 | in progress (PR 3, PE variables) | #2068 (PR 1, Mach-O); #2073 (PR 2, PE, merged); `fix/ws4-pe-variable-linkage` (PR 3: plain C++ globals bound to MSVC data exports by decoded type, own generation bump) |
+| WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | in progress (PR 1 `variant_of` pass merged #2078; PR 2 `subsumed_by` collapse in review; ADR-093 D5 "related finding" not yet recorded: lands in PR 3 as an optional `related` field plus relation code on the disposition record) | this PR. First relation candidate (confirmed on macOS, #2068): an exported thunk renamed by its offset (`_ZThn`/`_ZTv`) is reported as FUNC_REMOVED_ELF_ONLY/FUNC_ADDED, duplicating VTABLE_THUNK_OFFSET_CHANGED (`test_macho_cell_meets_its_strict_expectation[primary_base_grew-dwarf]`). |
 | WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | B0 merged | #2069 (PR 1, B0) |
-| WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | in review (PR 2 of 3) | this PR (PR 1: #2070, merged) |
-| WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | not started | — |
+| WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | in review (PR 2 of 3) | this PR (PR 1: #2070, merged); nightly corpus fix `fix/nightly-builtin-probe-target` (clang -m32 builtin probe; time64 typedef chain landed in #2085) |
+| WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | PR 1 (standards axis) in review | this PR |
 
 ### 11.3 File ownership and conflict hotspots
 

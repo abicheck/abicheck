@@ -124,7 +124,7 @@ dependency walk and debug roots to every member. No open gap remains.
 
 #### A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported (2026-11-12)
 
-**Status (2026-11-12): OPEN.** `glibcxx_dual_abi_flip_detected` needs `__cxx11` names to be at least 30% of the removed and added exports. From C++20 the new-ABI `std::string` is `constexpr` and an `-O0` library exports none of its members, while a `-D_GLIBCXX_USE_CXX11_ABI=0` rebuild exports the copy-on-write string's members as weak symbols (`_ZNSs...`, `_ZNKSs...`). Those count as added churn, and `elf_symbol_filter._STDLIB_PREFIXES` does not recognize the `Ss` substitution as the C++ runtime's, so six re-mangled functions fall below the threshold. `glibcxx_dual_abi_changed` and the removals still make it `BREAKING`. Found by the edit corpus (`std_string_abi_flipped` on `cxx_alt`, C++20 and later). Owner: `diff_platform.py`, `elf_symbol_filter.py`.
+**Status (2026-11-15): NARROWED to gcc producers.** Disproven for clang: the edit corpus's `std_string_abi_flipped` cells built by clang 18 pass (c++17 `headers.clang`, c++23 `dwarf`), see the [nightly status comment on #2082](https://github.com/abicheck/abicheck/pull/2082#issuecomment-6896801053). Still unverified for gcc: every gcc `std_string_abi_flipped` cell is skipped as not-applicable under `-fshort-enums`, so the gcc side of this entry has no run to confirm or refute it. The entry's `when` clause now applies to gcc producers only. `glibcxx_dual_abi_flip_detected` needs `__cxx11` names to be at least 30% of the removed and added exports. From C++20 the new-ABI `std::string` is `constexpr` and an `-O0` library exports none of its members, while a `-D_GLIBCXX_USE_CXX11_ABI=0` rebuild exports the copy-on-write string's members as weak symbols (`_ZNSs...`, `_ZNKSs...`). Those count as added churn, and `elf_symbol_filter._STDLIB_PREFIXES` does not recognize the `Ss` substitution as the C++ runtime's, so six re-mangled functions fall below the threshold. `glibcxx_dual_abi_changed` and the removals still make it `BREAKING`. Found by the edit corpus (`std_string_abi_flipped` on `cxx_alt`, C++20 and later). Owner: `diff_platform.py`, `elf_symbol_filter.py`.
 `wrong-kind` — the flip is reported as individual changes, not named as a flip.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `std_string_abi_flipped` entry in abiforge/known.py, which fails once the answer changes -->
 
@@ -284,6 +284,12 @@ current emitter, which is unchanged.
 <!-- canary: tests/test_l4_clang_projection_golden.py::test_pinned_set_matches_the_measured_projection_equivalence -->
 
 ### False-clean risk
+
+#### Overload sets of two class-template specializations are compared as one (2026-11-13)
+
+**Status (2026-11-13): OPEN.** `diff_templates.detect_overload_set_rerouted` groups functions by `function_overload_stem`, a stem that drops every template argument list, the enclosing class's included, so `C<int>::f` and `C<long>::f` share one overload set. When each specialization loses one overload and gains another (`C<int>::f`: `{f(int), f(double)}` -> `{f(int), f(float)}`, and the reverse for `C<long>`), the merged old and new sets are equal and no `overload_set_rerouted` is reported. The removed overloads still read `func_removed`, so the release still gates, but the re-routing explanation is missing. `main` grouped by `_strip_template_args` with the same effect; #2028 kept it. Closing it means keying on the enclosing scope with its template arguments, normalized so that two backends' spellings (`C<long>`, `C<long int>`) still match. Found by review on #2049. Owner: `diff_templates.py` (`compare/`).
+`false-clean` — a reroute inside one class-template specialization is unreported when another specialization of the same template moves the opposite way.
+<!-- canary: tests/test_template_stem_real_mangling.py::test_two_specializations_swapping_overloads_read_as_no_reroute -->
 
 #### A failed bundle snapshot build is reported but does not floor the exit code (2026-11-13)
 

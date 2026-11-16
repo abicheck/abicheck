@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from abiforge.model.config import Config
+from abiforge.model.config import Config, StdRange
 from abiforge.model.expect import Rule
 from abiforge.model.opkit import _REMOVED, Edit, EditOp, _set
 
@@ -148,12 +148,6 @@ def _x86_64_gnu(c: Config) -> str | None:
     return None
 
 
-def _cxx_before_17(c: Config) -> str | None:
-    if c.std.lang == "c++" and c.std.year < 2017:
-        return None
-    return "dynamic exception specifications were removed in C++17"
-
-
 _CONVENTIONS = (
     _op(
         "func_became_ms_abi",
@@ -210,7 +204,15 @@ _CONVENTIONS = (
         "throw(int) -> throw(int, long): the mangled name and call are "
         "unchanged, but the promised exception set grew",
         expected=frozenset({"FUNC_EXCEPTION_SPEC_CHANGED"}),
-        precondition=_cxx_before_17,
+        standards=(
+            StdRange(
+                "c++",
+                "c++11",
+                "ISO/IEC 14882:1998 [except.spec] (dynamic exception specifications)",
+                last="c++14",
+                end_cite="P0003R5 (removed from C++17)",
+            ),
+        ),
         **_RISK,
         **_HEADERS,
     ),
@@ -297,7 +299,13 @@ _VALUES_AND_NAMES = (
         _decl(
             "elf.ren",
             "int mylib_r_init(void);\nint mylib_r_run(int n);",
-            "int mylib_r_init(void) { return 1; }\nint mylib_r_run(int n) { return n + 1; }",
+            # mylib_r_run has a loop body so that it stays above the
+            # fingerprint size floor (8 bytes) on every toolchain and
+            # optimisation level (measured: 45-277 bytes). The prefix pairing
+            # is then a fact on binary evidence, not a size accident.
+            "int mylib_r_init(void) { return 1; }\n"
+            "int mylib_r_run(int n) { int s = 0; int i; for (i = 0; i < n; i++) "
+            "s += i * n + (s ^ i); return s; }",
         ),
         "every function gains a mylib_ prefix: each old name an existing "
         "binary imports is gone",
@@ -305,6 +313,18 @@ _VALUES_AND_NAMES = (
         # Each old name is gone; from symbols alone a tool may pair it with
         # its prefixed twin instead of reporting a bare removal.
         any_of=(_REMOVED | {"FUNC_LIKELY_RENAMED"},),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "binary",
+                {
+                    "expected": frozenset(
+                        {"SYMBOL_RENAMED_BATCH", "FUNC_LIKELY_RENAMED"}
+                    )
+                },
+                "mylib_r_run is above the fingerprint floor, so the prefixed twin "
+                "is paired as a likely rename from symbols alone",
+            ),
+        ),
         min_evidence="binary",
     ),
     _op(

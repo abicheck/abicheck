@@ -59,6 +59,7 @@ from .manifest_integration import INTEGRATION_BUG_CLASSES
 from .manifest_lifecycle import LIFECYCLE_BUG_CLASSES
 from .manifest_measurement import MEASUREMENT_BUG_CLASSES
 from .manifest_performance import PERFORMANCE_BUG_CLASSES
+from .manifest_platform import PLATFORM_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_serialization import SERIALIZATION_BUG_CLASSES
 from .manifest_test_harness import TEST_HARNESS_BUG_CLASSES
@@ -80,6 +81,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + EXTRACTION_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES
     + PERFORMANCE_BUG_CLASSES
+    + PLATFORM_BUG_CLASSES
     + CONCURRENCY_BUG_CLASSES
     + SERIALIZATION_BUG_CLASSES
     + GUARD_BUG_CLASSES

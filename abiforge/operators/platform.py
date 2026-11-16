@@ -657,18 +657,16 @@ _ALT = (
         ),
         "every api_v1_* function is renamed api_v2_*: consumers bound to the "
         "v1 names fail to load",
+        # The required kind is the versioned-scheme fact at every evidence
+        # level and toolchain. FUNC_LIKELY_RENAMED is a size-dependent
+        # fingerprint guess and is not required (see inline_namespace_bumped).
         expected=frozenset({"VERSIONED_SYMBOL_SCHEME_DETECTED"}),
         any_of=(_REMOVED,),
         rules=(
             Rule(
                 lambda c: c.evidence == "binary",
-                {
-                    "expected": frozenset(
-                        {"VERSIONED_SYMBOL_SCHEME_DETECTED", "FUNC_LIKELY_RENAMED"}
-                    ),
-                    "any_of": (),
-                },
-                "symbols alone pair the old and new names as a likely rename",
+                {"any_of": ()},
+                "binary evidence names the removed v1 symbols as ELF-only removals",
             ),
         ),
         **_BINARY,

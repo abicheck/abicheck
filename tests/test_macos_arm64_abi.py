@@ -41,6 +41,14 @@ def _macho(install_name: str = "", compat_version: str = "1.0.0") -> object:
         exports: list = dc_field(default_factory=list)
         current_version: str = ""
         min_os_version: str = ""
+        # A parsed dylib always records that size derivation ran; the layout
+        # gate refuses a Mach-O side where it did not.
+        sizes_derived: bool | None = True
+
+        @property
+        def export_map(self) -> dict:
+            # Mirrors MachoMetadata.export_map: the name -> export mapping.
+            return {e.name: e for e in self.exports if e.name}
 
     return _MockMacho(install_name=install_name, compat_version=compat_version)
 

@@ -138,11 +138,14 @@ from .extract.headers.clang.qualifiers import (  # noqa: F401  (compatibility re
     _last_top_level_ptr_end,
     _record_kind,
     _reduce_opaque_kind_set,
+    builtin_va_list_decl_ids as _builtin_va_list_decl_ids,
     clang_exception_spec as _clang_exception_spec,
     is_noexcept_qualifier as _is_noexcept_qualifier,
 )
 from .extract.headers.clang.redeclarations import RedeclarationIdentity
-from .extract.headers.clang.return_type import return_type as _clang_return_type
+from .extract.headers.clang.return_type import (
+    return_type as _return_type,  # noqa: F401  (compatibility re-export)
+)
 from .extract.headers.clang.template_param_indexes import (
     TemplateParamIndexes,
     build_template_param_indexes,
@@ -190,12 +193,6 @@ from .storage import header_ast_cache as dumper_cache
 #: Single source of truth is now ``extract.headers.clang.context.BUILTIN_FILES``;
 #: kept as a module attribute of the same name for any external reader of it.
 _BUILTIN_FILES = _clang_context.BUILTIN_FILES
-
-
-def _return_type(qualtype: str) -> str:
-    """See ``extract.headers.clang.return_type.return_type`` (the canonical
-    implementation this delegates to) for the full contract."""
-    return _clang_return_type(qualtype)
 
 
 # Deprecation message for a node, or None: see
@@ -909,6 +906,7 @@ class _ClangAstParser:
             function_template_defaults=function_template_default_index(self._root),
             explicit_facts=self.explicit_instantiations,
             function_constraints=FunctionConstraintIndex(self._root),
+            va_list_decl_ids=_builtin_va_list_decl_ids(self._root),
         )
 
     def parse_variables(self) -> list[Variable]:

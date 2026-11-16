@@ -432,7 +432,7 @@
     },
     {
       "path": "abicheck/diff_cpp_patterns.py",
-      "baseline_lines": 1032,
+      "baseline_lines": 976,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -531,7 +531,7 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1223,
+      "baseline_lines": 1141,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -553,7 +553,7 @@
     },
     {
       "path": "abicheck/dumper_clang.py",
-      "baseline_lines": 1341,
+      "baseline_lines": 1339,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

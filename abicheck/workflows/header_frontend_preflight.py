@@ -208,10 +208,10 @@ def _require_supported_castxml(
     are the ones the late path applies. When the fallback would take over,
     nothing is raised and the dump proceeds exactly as before.
     """
-    from ..dumper import _castxml_fallback_reason
     from ..errors import SnapshotError, UnsupportedCastxmlVersionError
     from ..extract.headers.backend_plan import BackendPlan
     from ..extract.headers.castxml.backend import _resolve_gated_castxml_bin
+    from ..extract.headers.castxml_fallback import _castxml_fallback_reason
 
     try:
         _resolve_gated_castxml_bin(None)

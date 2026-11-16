@@ -180,7 +180,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `var_removed_elf_only` | BREAKING | 0 | 0 | 1 |
 | `var_visibility_changed` | BREAKING | 0 | 0 | 0 |
 | `versioned_symbol_scheme_detected` | RISK | 1 | 0 | 0 |
-| `vtable_slot_count_changed` | BREAKING | 1 | 0 | 1 |
+| `vtable_slot_count_changed` | BREAKING | 1 | 0 | 3 |
 | `vtable_thunk_offset_changed` | BREAKING | 1 | 0 | 1 |
 | `vtable_thunk_set_changed` | BREAKING | 0 | 0 | 0 |
 | `vtt_slot_count_changed` | BREAKING | 1 | 0 | 0 |
