@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +20,13 @@ from elftools.elf.elffile import ELFFile
 from abicheck.extract.dwarf_standard_layout import StandardLayoutCollector
 
 pytestmark = pytest.mark.integration
+
+#: The oracles read ELF DWARF (readelf, pyelftools) and build ELF shared objects.
+#: Windows and macOS produce PE and Mach-O, which these tests do not cover.
+_LINUX_ELF_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="reads ELF DWARF and builds ELF shared objects: Linux only",
+)
 
 _RECORD_TAGS = {"DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"}
 
@@ -170,6 +178,7 @@ def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
     return exe, oracle
 
 
+@_LINUX_ELF_ONLY
 @pytest.mark.parametrize("dwarf", [4, 5])
 def test_dwarf_standard_layout_matches_the_compiler(tmp_path: Path, dwarf: int) -> None:
     exe, oracle = _compile_and_oracle(tmp_path, dwarf)

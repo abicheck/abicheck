@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,6 +28,12 @@ from abiforge.operators import OPERATORS
 from abiforge.run.toolchains import toolchain
 
 pytestmark = pytest.mark.integration
+
+#: readelf and llvm-dwarfdump read ELF DWARF; PE and Mach-O hosts are not the oracle.
+_LINUX_ELF_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="reads ELF DWARF with readelf/llvm-dwarfdump: Linux only",
+)
 
 #: One function per convention, each named after it. ``sysv_abi`` is the x86-64
 #: default, so a producer writes nothing for it; the others are the non-default
@@ -101,6 +108,7 @@ def _producers() -> list[tuple[str, str]]:
     return found
 
 
+@_LINUX_ELF_ONLY
 @pytest.mark.parametrize(("family", "compiler"), _producers())
 def test_capability_row_matches_the_compiler(
     family: str, compiler: str, tmp_path: Path
@@ -133,6 +141,7 @@ def test_minimal_evidence_follows_the_producer(family: str, expected_sets: set) 
     assert set(minimal_evidence_sets(op, base)) == expected_sets
 
 
+@_LINUX_ELF_ONLY
 def test_llvm_convention_codes_name_what_clang_writes(tmp_path: Path) -> None:
     """Each code abicheck names for a clang x86-64 convention is the one clang writes.
 

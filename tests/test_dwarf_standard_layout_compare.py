@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,13 @@ import pytest
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
+
+#: The oracles read ELF DWARF (readelf, pyelftools) and build ELF shared objects.
+#: Windows and macOS produce PE and Mach-O, which these tests do not cover.
+_LINUX_ELF_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="reads ELF DWARF and builds ELF shared objects: Linux only",
+)
 
 _TAKE = 'extern "C" int take_s(S s) { return 0; }\n'
 _USE = 'extern "C" int use_s(S* s) { return s != nullptr; }\n'
@@ -116,6 +124,7 @@ def _compare(old: Path, new: Path, report: Path) -> dict:
     return json.loads(report.read_text(encoding="utf-8"))
 
 
+@_LINUX_ELF_ONLY
 @pytest.mark.parametrize("name", list(_CASES))
 def test_record_edit_is_reported_from_dwarf(name: str, tmp_path: Path) -> None:
     old_decls, new_decls, extra, expected, absent, verdict = _CASES[name]
