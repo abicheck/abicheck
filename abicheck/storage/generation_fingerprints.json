@@ -238,14 +238,14 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
       "abicheck/workflows/dump/elf_fallback.py": "31947cad933371a0d3863476ad34e1f9e3e60f8474b2eddbe161fdc1182eb2fa",
-      "abicheck/workflows/dump/formats.py": "79ca61f4805264f6763daf4ff0fbf6783e2e39f961f49b8d05eaf512c95c9ef3",
+      "abicheck/workflows/dump/formats.py": "634c897b872e20c7c1579a9f569700a32c1b99b204569e8bb198a4174587b6d2",
       "abicheck/workflows/dump/macho.py": "ee301926fd430c4eed3128e75b07fc494805ff76d0b2acbcd83fa7a8fc9f424e",
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "b4ebef22a05a1a99207898660cd57f4347006d26f5bb2e13b794f6bc34c15056"
     },
-    "fingerprint": "0b7e55258343e482346b2960edf85acfef9c8972d0bf0d5d4fcbbd719fd45627",
+    "fingerprint": "af840bd617a4785995f5d20e0c44a9f5a27bee7b8b028f7e08ad1b57df705f82",
     "generation": 80,
-    "reason": "Same PR's single provisional bump to 80 (main has no 80): adds the FAILED adjacent-DWARF limitation and the header-free Mach-O limitation collector to it; no separate bump."
+    "reason": "formats.py: a type annotation on the Mach-O adapter's return value (no behaviour change); same provisional generation 80."
   },
   "resolver": {
     "files": {
