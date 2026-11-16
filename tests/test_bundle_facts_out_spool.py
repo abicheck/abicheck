@@ -43,7 +43,10 @@ import itertools
 import json
 import pickle
 import random
+import subprocess
 import sys
+import threading
+import time
 import tracemalloc
 import weakref
 from pathlib import Path
@@ -173,6 +176,70 @@ def _pairs(old_map, snaps, keys):
     """``(member file name, snapshot)`` -- the pair shape the comparison
     hands over (``release_old_member_snapshots``)."""
     return [(old_map[k].name, snaps[k]) for k in keys]
+
+
+def _write_peak(root: Path, members: int, suffix: str) -> tuple[int, int]:
+    """The peak of one spooled write of *members* members, and their payload.
+
+    Runs inside a fresh interpreter (see :func:`_peak_in_fresh_process`):
+    ``tracemalloc`` counts every thread of the process, so in a shared test
+    worker another thread's allocations would be read as this write's.
+    """
+    names = tuple(f"lib{i}" for i in range(members))
+    old_map = _release_dir(root / f"{members}{suffix}", names)
+    with BlobSpool(root) as spool:
+        handles = [
+            (
+                old_map[f"{n}.so"].name,
+                spool.put_snapshot(_snap(n, n=600, salt=n)),
+            )
+            for n in names
+        ]
+        payload = sum(h.length for _, h in handles)
+        gc.collect()
+        tracemalloc.start()
+        tracemalloc.reset_peak()
+        _write_spooled(
+            root / f"{members}{suffix}" / f"b{suffix}",
+            old_map,
+            handles,
+            lambda p: pytest.fail(f"{p} is paired, not stranded"),
+            None,
+            None,
+            spool=spool,
+        )
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    return peak, payload
+
+
+_PEAK_CHILD = """
+import json, sys
+sys.path.insert(0, {tests!r})
+from pathlib import Path
+import test_bundle_facts_out_spool as spool_tests
+peak, payload = spool_tests._write_peak(Path({root!r}), {members}, {suffix!r})
+print(json.dumps([peak, payload]))
+"""
+
+
+def _peak_in_fresh_process(root: Path, members: int, suffix: str) -> tuple[int, int]:
+    """:func:`_write_peak` in a new interpreter with nothing else running in it."""
+    root.mkdir(parents=True, exist_ok=True)
+    script = _PEAK_CHILD.format(
+        tests=str(Path(__file__).resolve().parent),
+        root=str(root),
+        members=members,
+        suffix=suffix,
+    )
+    out = subprocess.run(
+        [sys.executable, "-I", "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    peak, payload = json.loads(out.strip().splitlines()[-1])
+    return peak, payload
 
 
 def _write_spooled(path, old_map, pairs, resolve, manifest, surface, spool=None):
@@ -405,38 +472,9 @@ class TestRetention:
     def test_write_peak_does_not_grow_with_member_count(self, tmp_path: Path) -> None:
         """Relative, not absolute: writing 8 spooled members peaks well below
         what holding 6 more members' payload would add over writing 2."""
-
-        def peak_for(members: int, suffix: str) -> tuple[int, int]:
-            names = tuple(f"lib{i}" for i in range(members))
-            old_map = _release_dir(tmp_path / f"{members}{suffix}", names)
-            with BlobSpool(tmp_path) as spool:
-                handles = [
-                    (
-                        old_map[f"{n}.so"].name,
-                        spool.put_snapshot(_snap(n, n=600, salt=n)),
-                    )
-                    for n in names
-                ]
-                payload = sum(h.length for _, h in handles)
-                gc.collect()
-                tracemalloc.start()
-                tracemalloc.reset_peak()
-                _write_spooled(
-                    tmp_path / f"{members}{suffix}" / f"b{suffix}",
-                    old_map,
-                    handles,
-                    lambda p: pytest.fail(f"{p} is paired, not stranded"),
-                    None,
-                    None,
-                    spool=spool,
-                )
-                _, peak = tracemalloc.get_traced_memory()
-                tracemalloc.stop()
-            return peak, payload
-
         for suffix in (".json", ".zip"):
-            small_peak, small_payload = peak_for(2, suffix)
-            large_peak, large_payload = peak_for(8, suffix)
+            small_peak, small_payload = _peak_in_fresh_process(tmp_path, 2, suffix)
+            large_peak, large_payload = _peak_in_fresh_process(tmp_path, 8, suffix)
             added_payload = large_payload - small_payload
             assert added_payload > 1_000_000, "the fixture must be big enough to see"
             assert large_peak - small_peak < added_payload * 0.25, (
@@ -444,6 +482,39 @@ class TestRetention:
                 f"{added_payload} bytes of extra members -- the write is "
                 "holding members again"
             )
+
+    def test_peak_measurement_ignores_other_threads_in_the_process(
+        self, tmp_path: Path
+    ) -> None:
+        """The measured peak is the write's, not the process's: a thread that
+        allocates while the test runs (another xdist task, a pool) must not
+        change the reading. Regression for the flake where tracemalloc counted
+        a background worker's allocations as the write's peak."""
+        quiet = _peak_in_fresh_process(tmp_path / "quiet", 8, ".zip")
+        stop = threading.Event()
+
+        def churn() -> None:
+            held: list[bytearray] = []
+            while not stop.is_set():
+                held.append(bytearray(256 * 1024))
+                if len(held) > 64:
+                    held.clear()
+                time.sleep(0.001)
+
+        worker = threading.Thread(target=churn, daemon=True)
+        worker.start()
+        try:
+            busy = _peak_in_fresh_process(tmp_path / "busy", 8, ".zip")
+        finally:
+            stop.set()
+            worker.join()
+        # Interpreter-internal allocation jitter is a few hundred bytes between
+        # identical children; the flake this guards against moved the reading
+        # by about 13 MB. A 1% tolerance of the member payload separates them.
+        jitter = abs(busy[0] - quiet[0])
+        assert jitter < quiet[1] * 0.01, (
+            f"a background thread moved the write's peak by {jitter} bytes"
+        )
 
 
 class TestSpool:

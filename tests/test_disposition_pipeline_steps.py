@@ -152,11 +152,11 @@ class TestDispositionPipeline:
     def test_custom_pipeline_with_subset_of_steps(self):
         """Custom pipeline with only some steps."""
         from abicheck.model import AbiSnapshot
-        from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
-        from abicheck.post_processing import (
+        from abicheck.policy.finding_disposition.dedup_ast_dwarf_step import (
             DeduplicateAstDwarf,
-            FilterReservedFieldRenames,
         )
+        from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
+        from abicheck.post_processing import FilterReservedFieldRenames
 
         pipeline = DispositionPipeline(
             [
