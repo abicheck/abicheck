@@ -1647,6 +1647,10 @@ def _check_kind_relation_tables(root: Path, findings: list[Finding]) -> None:
                         )
                     )
     for stale in sorted(KIND_RELATION_TABLE_BASELINE - seen):
+        # An entry whose file is absent from this tree is not stale; only a
+        # file that is present but no longer holds the table is.
+        if not (root / stale.split(":", 1)[0]).is_file():
+            continue
         findings.append(
             Finding(
                 "kind-relation-table",
