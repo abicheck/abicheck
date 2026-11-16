@@ -36,30 +36,27 @@ def test_windows_callback_environ_fields(
     tmp_path: Path, shared_cmake_build_dir: Path | None
 ) -> None:
     v1_lib, v2_lib, v1_hdr, v2_hdr = _built_case(CASE, tmp_path, shared_cmake_build_dir)
+    from abicheck.policy.depth_projection import project_pair_to_depth
+
     lines: list[str] = []
-    for side, lib, hdr in (("old", v1_lib, v1_hdr), ("new", v2_lib, v2_hdr)):
-        for route, headers in (("headers", _header_list(hdr)), ("binary", [])):
-            snap = dump(lib, headers=headers, version=side)
-            decl = _read(lambda: snap.declarations)
-            types = _read(lambda: list(decl.types))
-            if isinstance(types, list):
-                for rec in types:
-                    if "CALLBACK_ENVIRON" in str(getattr(rec, "name", "")):
-                        for f in _read(lambda rec=rec: list(rec.fields)) or []:
-                            lines.append(
-                                f"[{side}/{route}] castxml.record {rec.name}: {f!r}"[
-                                    :300
-                                ]
-                            )
-            layout = _read(lambda: decl.debug_layout)
-            structs = _read(lambda: layout.structs) if layout is not None else None
-            if isinstance(structs, dict):
-                for name, sl in structs.items():
-                    if "CALLBACK_ENVIRON" in name:
-                        for f in _read(lambda sl=sl: list(sl.fields)) or []:
-                            lines.append(
-                                f"[{side}/{route}] pdb.layout {name}: {f!r}"[:300]
-                            )
-            else:
-                lines.append(f"[{side}/{route}] debug_layout={str(layout)[:120]}")
+    rich_old = dump(v1_lib, headers=_header_list(v1_hdr), version="old")
+    rich_new = dump(v2_lib, headers=_header_list(v2_hdr), version="new")
+    p_old, p_new = project_pair_to_depth(rich_old, rich_new, "binary")
+    for side, snap in (("projected-old", p_old), ("projected-new", p_new)):
+        decl = _read(lambda snap=snap: snap.declarations)
+        for rec in _read(lambda decl=decl: list(decl.types)) or []:
+            if "CALLBACK_ENVIRON" in str(getattr(rec, "name", "")):
+                for f in _read(lambda rec=rec: list(rec.fields)) or []:
+                    lines.append(f"[{side}] record {rec.name}: {f!r}"[:320])
+        layout = _read(lambda decl=decl: decl.debug_layout)
+        structs = (
+            _read(lambda layout=layout: layout.structs) if layout is not None else None
+        )
+        if isinstance(structs, dict):
+            for name, sl in structs.items():
+                if "CALLBACK_ENVIRON" in name:
+                    for f in _read(lambda sl=sl: list(sl.fields)) or []:
+                        lines.append(f"[{side}] layout {name}: {f!r}"[:320])
+        else:
+            lines.append(f"[{side}] debug_layout={str(layout)[:120]}")
     raise AssertionError("WINDOWS-DIAG\n" + "\n".join(lines))
