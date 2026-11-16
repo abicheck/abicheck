@@ -199,7 +199,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `base_class_position_changed` | BREAKING | 1 | 0 | 0 |
 | `base_class_virtual_changed` | BREAKING | 1 | 0 | 0 |
 | `bit_int_width_changed` | BREAKING | 1 | 0 | 0 |
-| `calling_convention_changed` | BREAKING | 4 | 0 | 2 |
+| `calling_convention_changed` | BREAKING | 4 | 0 | 3 |
 | `char8t_migration` | BREAKING | 1 | 0 | 0 |
 | `enum_last_member_value_changed` | RISK | 1 | 0 | 0 |
 | `enum_member_added` | COMPATIBLE | 2 | 0 | 4 |
