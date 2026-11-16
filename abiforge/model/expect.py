@@ -58,7 +58,7 @@ MISMATCH_CLASSES = (
     "wrong-kind",
     "refused",
 )
-PASSING_CLASSES = ("agree", "non-observable", "unobservable")
+PASSING_CLASSES = ("agree", "non-observable", "unobservable", "evidence-limited")
 
 
 @dataclass(frozen=True)
@@ -294,8 +294,20 @@ class Reconciled:
 
 
 def reconcile(
-    exec_truth: ExecTruth, exp: Expectation, verdict: str, kinds: frozenset[str]
+    exec_truth: ExecTruth,
+    exp: Expectation,
+    verdict: str,
+    kinds: frozenset[str],
+    *,
+    disclosed: frozenset[str] = frozenset(),
+    evidence: frozenset[str] | None = None,
 ) -> Reconciled:
+    """Classify one cell against the execution oracle.
+
+    ``disclosed`` are the kinds whose downgrade ADR-084 disclosed in the run;
+    ``evidence`` the configuration's atoms (None: unknown, so the ADR-084 rule
+    does not apply).
+    """
     if verdict == "REFUSED":
         return Reconciled("refused", tuple(exp.problems(verdict, kinds)))
     problems = tuple(exp.problems(verdict, kinds))
@@ -303,6 +315,23 @@ def reconcile(
     broke = exec_truth.available and (
         exec_truth.binary_break or exec_truth.source_break
     )
+    if (
+        evidence is not None
+        and not ({"H", "S"} & evidence)
+        and exec_truth.available
+        and exec_truth.source_break
+        and not exec_truth.binary_break
+        and verdict == "COMPATIBLE_WITH_RISK"
+        and kinds & disclosed
+        and not problems
+    ):
+        # ADR-084 at reconcile: a source-only break that DWARF or binary input
+        # cannot back is judged correct only as a disclosed COMPATIBLE_WITH_RISK.
+        return Reconciled(
+            "evidence-limited",
+            problems,
+            "source-only break at binary depth: its downgrade is disclosed (ADR-084)",
+        )
     if exec_truth.available and (
         (exp.benign and exec_truth.binary_break)
         or (exp.source_compatible and exec_truth.source_break)

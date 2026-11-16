@@ -88,3 +88,72 @@ def test_the_field_cells_expect_the_capped_verdict_at_dwarf(op_name: str) -> Non
 def test_a_header_stripped_cell_keeps_api_break() -> None:
     exp = OP_BY_NAME["field_became_const"].expect(_cfg("headers", True))
     assert exp.verdict_min == "API_BREAK"
+
+
+# --- ADR-084 at reconcile: a source-only break at binary depth -----------------
+
+from abiforge.model.expect import (  # noqa: E402
+    ExecTruth,
+    Expectation as _Exp,
+    reconcile,
+)
+
+# (verdict abicheck reports, disclosed?) -> class, for a source-only break with
+# no header or source evidence. The four outcomes of the rule, written by hand.
+RECONCILE_ORACLE = {
+    ("COMPATIBLE", False): "false-clean",
+    ("NO_CHANGE", False): "false-clean",
+    ("COMPATIBLE_WITH_RISK", False): "false-clean",
+    ("COMPATIBLE_WITH_RISK", True): "evidence-limited",
+    ("API_BREAK", False): "agree",
+    ("API_BREAK", True): "agree",
+}
+GATED_KINDS = (
+    "FIELD_BECAME_CONST",
+    "FIELD_ACCESS_CHANGED",
+    "TYPE_REMOVED",
+    "METHOD_ACCESS_CHANGED",
+)
+SOURCE_ONLY = ExecTruth(available=True, binary_break=False, source_break=True)
+
+
+@pytest.mark.parametrize("kind", GATED_KINDS)
+@pytest.mark.parametrize(("verdict", "disclosed"), sorted(RECONCILE_ORACLE))
+def test_source_only_break_outcomes_at_binary_depth(
+    kind: str, verdict: str, disclosed: bool
+) -> None:
+    exp = _Exp(
+        expected=frozenset({kind}),
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="API_BREAK",
+        observable=True,
+    )
+    got = reconcile(
+        SOURCE_ONLY,
+        exp,
+        verdict,
+        frozenset({kind}),
+        disclosed=frozenset({kind}) if disclosed else frozenset(),
+        evidence=frozenset({"B", "D"}),
+    ).cls
+    assert got == RECONCILE_ORACLE[(verdict, disclosed)]
+
+
+def test_header_evidence_keeps_the_existing_rule() -> None:
+    """With H in the evidence the ADR-084 rule is off: the disclosed downgrade
+    is still a clean verdict against a source break, so it is a false clean."""
+    exp = _Exp(
+        expected=frozenset({"FIELD_BECAME_CONST"}),
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="API_BREAK",
+        observable=True,
+    )
+    got = reconcile(
+        SOURCE_ONLY,
+        exp,
+        "COMPATIBLE_WITH_RISK",
+        frozenset({"FIELD_BECAME_CONST"}),
+        disclosed=frozenset({"FIELD_BECAME_CONST"}),
+        evidence=frozenset({"B", "H"}),
+    ).cls
+    assert got == "false-clean"
