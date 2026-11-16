@@ -783,6 +783,8 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | in review (PR 2 of 3) | this PR (PR 1: #2070, merged); nightly corpus fix `fix/nightly-builtin-probe-target` (clang -m32 builtin probe; time64 typedef chain landed in #2085) |
 | WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | PR 1 (standards axis) in review | this PR |
 
+**WS-6 PE follow-up (open).** `object_became_weak` on PE (`tests/test_edit_corpus_platform_expectations.py`) owes `VAR_REMOVED` only where `observable_at` admits it at the cell's evidence (catalog `{B,D}`/`{B,H}`, so not at binary). Whether abicheck emits `VAR_REMOVED` on PE at binary is **unverified**: there is no PE corpus lane, so no run shows it. A real PE run decides whether `VAR_REMOVED` gets a PE `{B}` alternative. Until then the test derives the owed group from the catalog.
+
 ### 11.3 File ownership and conflict hotspots
 
 **Owned paths.** Edit another workstream's paths only through a small,
