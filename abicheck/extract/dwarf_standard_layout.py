@@ -22,7 +22,7 @@ Two steps, so no DIE's children are walked twice:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from ..dwarf_utils import resolve_type_die, unwrap_cv_typedef
 from ..model.fact import Fact
@@ -149,8 +149,16 @@ def _summarize(die: Any, children: list[Any]) -> _Summary:
     )
 
 
+_T = TypeVar("_T")
+
+
 class _Resolver:
-    """Tri-state trait over collected summaries; memoized and cycle-safe."""
+    """Tri-state trait over collected summaries; memoized and cycle-safe.
+
+    A walk that stops at ``_MAX_DEPTH`` answers "unknown" for that call only: the
+    answer depends on the depth it was asked at, so it is not memoized (see
+    :meth:`_settle`). ``_cut`` counts those depth stops.
+    """
 
     def __init__(self, summaries: dict[Key, _Summary]) -> None:
         self._s = summaries
@@ -158,17 +166,30 @@ class _Resolver:
         self._has_data: dict[Key, bool | None] = {}
         self._first: dict[Key, frozenset[Key] | None] = {}
         self._mult: dict[Key, dict[Key, int] | None] = {}
+        self._cut = 0
+
+    def _settle(
+        self, memo: dict[Key, _T | None], key: Key, before: int, value: _T | None
+    ) -> _T | None:
+        """Memoize *value* unless a depth stop happened since *before*."""
+        if self._cut != before:
+            memo.pop(key, None)  # depth-dependent: recomputed on a later query
+        else:
+            memo[key] = value
+        return value
 
     def trait(self, key: Key, depth: int = 0) -> bool | None:
         if key in self._trait:
             return self._trait[key]
         s = self._s.get(key)
-        if s is None or s.incomplete or depth > _MAX_DEPTH:
+        if s is None or s.incomplete:
+            return None
+        if depth > _MAX_DEPTH:
+            self._cut += 1
             return None
         self._trait[key] = None  # provisional: breaks an ill-formed cycle
-        result = self._compute(key, s, depth)
-        self._trait[key] = result
-        return result
+        before = self._cut
+        return self._settle(self._trait, key, before, self._compute(key, s, depth))
 
     def _compute(self, key: Key, s: _Summary, depth: int) -> bool | None:
         if s.local_false:
@@ -200,18 +221,21 @@ class _Resolver:
         if key in self._has_data:
             return self._has_data[key]
         s = self._s.get(key)
-        if s is None or s.incomplete or depth > _MAX_DEPTH:
+        if s is None or s.incomplete:
+            return None
+        if depth > _MAX_DEPTH:
+            self._cut += 1
             return None
         if s.members:
             self._has_data[key] = True
             return True
+        before = self._cut
         flags = [
             None if base is None else self._has_data_members(base, depth + 1)
             for base, _ in s.base_edges
         ]
         out: bool | None = True if True in flags else (None if None in flags else False)
-        self._has_data[key] = out
-        return out
+        return self._settle(self._has_data, key, before, out)
 
     def _base_multiplicity(self, key: Key, depth: int = 0) -> dict[Key, int] | None:
         """How many base subobjects of each type *key* has, over every path.
@@ -223,40 +247,46 @@ class _Resolver:
         if key in self._mult:
             return self._mult[key]
         s = self._s.get(key)
-        if s is None or depth > _MAX_DEPTH:
+        if s is None:
+            return None
+        if depth > _MAX_DEPTH:
+            self._cut += 1
             return None
         self._mult[key] = None  # provisional: an ill-formed cycle stays unknown
+        before = self._cut
         out: dict[Key, int] = {}
         for base, _ in s.base_edges:
             inner = None if base is None else self._base_multiplicity(base, depth + 1)
             if base is None or inner is None:
-                return None
+                return self._settle(self._mult, key, before, None)
             for k, n in ((base, 1), *inner.items()):
                 out[k] = min(2, out.get(k, 0) + n)
-        self._mult[key] = out
-        return out
+        return self._settle(self._mult, key, before, out)
 
     def _first_member_types(self, ref: Ref, depth: int = 0) -> frozenset[Key] | None:
         """Record keys in [class.prop]/3's set M(X) for a type reference."""
         kind, key = ref
         if kind == "scalar":
             return frozenset()
-        if kind != "record" or key is None or depth > _MAX_DEPTH:
+        if kind != "record" or key is None:
             return None
         if key in self._first:
             return self._first[key]
         s = self._s.get(key)
         if s is None or s.incomplete:
             return None
+        if depth > _MAX_DEPTH:
+            self._cut += 1
+            return None
+        self._first[key] = None  # provisional: a self-containing type is unknown
+        before = self._cut
         out: set[Key] = {key}
         for member in s.members if s.union else s.members[:1]:
             inner = self._first_member_types(member, depth + 1)
             if inner is None:
-                self._first[key] = None
-                return None
+                return self._settle(self._first, key, before, None)
             out |= inner
-        self._first[key] = frozenset(out)
-        return self._first[key]
+        return self._settle(self._first, key, before, frozenset(out))
 
     def _data_member_rules(self, key: Key, s: _Summary) -> bool | None:
         """[class.prop]/3.5 (data members in at most one class of the hierarchy,

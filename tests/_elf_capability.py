@@ -38,13 +38,14 @@ def _prefix(family: str) -> list[str] | None:
     return [path, *_CLANG_ELF_TARGET] if family == "clang" else [path]
 
 
-#: The standard headers the ELF oracles compile against. The probe includes them
-#: too, so a target with no C++ standard library reads as a missing capability.
+#: The standard headers an oracle compiles against. Opt-in (``std_headers=True``):
+#: a probe for a source with no headers must not fail on a target that lacks a
+#: C++ standard library, and an oracle that uses the headers must check for them.
 _PROBE_HEADERS = "#include <cstdio>\n#include <type_traits>\n"
 
 
-def _writes_elf(prefix: list[str], kind: str) -> bool:
-    """Whether *prefix* compiles a C++ probe (with the oracle's headers) to ELF *kind*."""
+def _writes_elf(prefix: list[str], kind: str, *, std_headers: bool = False) -> bool:
+    """Whether *prefix* compiles a C++ probe to ELF *kind*, optionally with the std headers."""
     suffix = {"object": ".o", "shared": ".so", "executable": ""}[kind]
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "probe.cpp"
@@ -54,7 +55,8 @@ def _writes_elf(prefix: list[str], kind: str) -> bool:
             if kind == "executable"
             else "int probe() { return 0; }\n"
         )
-        src.write_text(_PROBE_HEADERS + body, encoding="utf-8")
+        header = _PROBE_HEADERS if std_headers else ""
+        src.write_text(header + body, encoding="utf-8")
         cmd = [*prefix, *_KIND_FLAGS[kind], str(src), "-o", str(out)]
         done = subprocess.run(cmd, capture_output=True, text=True)
         if done.returncode != 0 or not out.exists():
@@ -62,7 +64,9 @@ def _writes_elf(prefix: list[str], kind: str) -> bool:
         return out.read_bytes()[:4] == _ELF_MAGIC
 
 
-def elf_capability(family: str, kind: str) -> list[str] | None:
+def elf_capability(
+    family: str, kind: str, *, std_headers: bool = False
+) -> list[str] | None:
     """The compiler prefix that writes an ELF *kind* for *family*, or None.
 
     A None answer means the host has no ELF-capable producer for this family;
@@ -71,13 +75,15 @@ def elf_capability(family: str, kind: str) -> list[str] | None:
     prefix = _prefix(family)
     if prefix is None:
         return None
-    return prefix if _writes_elf(prefix, kind) else None
+    return prefix if _writes_elf(prefix, kind, std_headers=std_headers) else None
 
 
-def skip_reason(family: str, kind: str) -> str:
+def skip_reason(family: str, kind: str, *, std_headers: bool = False) -> str:
     """The skip message for a missing ELF capability, naming it (not the OS)."""
+    what = " with the C++ standard headers" if std_headers else ""
     return (
-        f"no {family} on this host can write an ELF {kind} (the ELF-DWARF capability)"
+        f"no {family} on this host can write an ELF {kind}{what} "
+        "(the ELF-DWARF capability)"
     )
 
 

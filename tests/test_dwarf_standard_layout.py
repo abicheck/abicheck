@@ -146,9 +146,9 @@ def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
     host = _host_cxx()
     if host is None:
         pytest.skip("no host C++ compiler runs the shapes (the run-time oracle)")
-    elf = elf_capability("clang", "object")
+    elf = elf_capability("clang", "object", std_headers=True)
     if elf is None:
-        pytest.skip(skip_reason("clang", "object"))
+        pytest.skip(skip_reason("clang", "object", std_headers=True))
     body = "\n".join(decl for _, decl in _SHAPES)
     # A class with an inline virtual function gets a full DWARF definition only
     # once its constructor (and so its vtable) is emitted, so construct each one.

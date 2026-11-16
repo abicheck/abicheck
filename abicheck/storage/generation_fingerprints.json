@@ -53,7 +53,7 @@
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
-      "abicheck/extract/dwarf_standard_layout.py": "d59d6510be9b3be5463743e78ce139d4eb16900fff86af6b40bf5b2aa59b2d00",
+      "abicheck/extract/dwarf_standard_layout.py": "233bf5002e0ec8b8155d1b5822371fbcb04e0d1bc8b4032147c11cc5c0443283",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
@@ -239,9 +239,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c0e8d496fcf4952c310da5f837d88fa9f8cfced2dbdfc5fed4c3b00d6ded4af7",
+    "fingerprint": "a68327cc9cae1434504bf60a5f1bfb495c6ac82a4d7d63000d20dab907add6b4",
     "generation": 80,
-    "reason": "WS-6 standard-layout resolver: memoize base-subobject multiplicity and return False before base expansion; same results, bounded work per record"
+    "reason": "WS-6 resolver: depth-limited answers are not memoized (cut counter via _settle); results are unchanged for every depth-independent record"
   },
   "resolver": {
     "files": {

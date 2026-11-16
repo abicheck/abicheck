@@ -320,3 +320,17 @@ def test_a_complete_record_gets_its_resolved_trait() -> None:
     collector.finalize()
     # An empty complete class is standard-layout: [class.prop]/3 holds vacuously.
     assert holder.is_standard_layout is True
+
+
+def test_a_depth_cut_answer_does_not_leak_into_a_later_query() -> None:
+    # Empty classes R_n : R_(n+1), 70 deep. Asked from R1, the walk to R40 is cut
+    # by the depth limit; that unknown must not be memoized for a later query
+    # for R40, which must still resolve to True (as on a fresh resolver).
+    length = 70
+    summaries = {k(n): summary(bases=[(k(n + 1), False)]) for n in range(1, length)}
+    summaries[k(length)] = summary()
+    fresh = _Resolver(summaries)
+    assert fresh.trait(k(40)) is True
+    shared = _Resolver(summaries)
+    shared.trait(k(1))
+    assert shared.trait(k(40)) is True
