@@ -732,6 +732,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "as not derived, and the layout gate declines the Mach-O side."
     ),
     76: GenerationSpellingChange(
+        "fix/nightly-va-list-target (#2088): no stored type spelling changes. A clang "
+        "header parse on a pointer-valued va_list target (-m32: __builtin_va_list is "
+        "char *) keeps the typedef link on a decayed parameter and now recognises it as "
+        "a va_list parameter when the link reaches __builtin_va_list "
+        "(extract/headers/clang/qualifiers), so Param.is_va_list is set where it was not "
+        "before. The recorded parameter fact changes; the spelling does not"
+    ),
+    77: GenerationSpellingChange(
         "feat/ws4-macho-dwarf-reader: a Mach-O library's DWARF is read from its "
         "adjacent .dSYM bundle (ADR-021 step 5) or an explicit --debug-root bundle, "
         "through the pyelftools DWARFInfo path; a bundle whose UUID does not match the library, or that is missing, "
