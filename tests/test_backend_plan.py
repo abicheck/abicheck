@@ -12,7 +12,6 @@ import itertools
 
 import pytest
 
-from abicheck.dumper import _castxml_fallback_reason
 from abicheck.errors import SnapshotError, UnsupportedCastxmlVersionError
 from abicheck.extract.header_ast_backend import _resolve_header_backend
 from abicheck.extract.headers import toolchain
@@ -22,6 +21,7 @@ from abicheck.extract.headers.backend_plan import (
     ast_frontend_pin,
     auto_selected,
 )
+from abicheck.extract.headers.castxml_fallback import _castxml_fallback_reason
 
 _ENV_VARS = (
     "ABICHECK_AST_FRONTEND",

@@ -28,7 +28,7 @@ from abiforge.model.config import (
     Toolchain,
     default_config,
 )
-from abiforge.model.expect import evidence_floor
+from abiforge.model.expect import observability_floor
 from abiforge.model.seeds import SEED_BY_NAME
 from abiforge.operators import OP_BY_NAME
 from abiforge.run import harness
@@ -103,24 +103,39 @@ def test_an_unknown_evidence_level_is_refused() -> None:
 # --- floors: what a cell can show --------------------------------------------
 
 
-def test_a_dwarf_fact_is_unobservable_in_stripped_headers_but_not_in_the_default_cell() -> (
+def test_an_enum_value_is_observable_in_stripped_headers_by_its_declared_observable_at() -> (
     None
 ):
-    op = OP_BY_NAME["enum_change_value"]  # min_evidence "dwarf"
+    """ADR-093 declares {B,H} an observing configuration of an enum value change
+    (``observable_at``), so the stripped cell requires it. The checker's answer at
+    that cell is the WS-2 (A2) defect this now exposes, not an excuse here."""
+    op = OP_BY_NAME["enum_change_value"]
     default = default_config("c", GCC)
     stripped = default.with_(stripped=True)
     assert op.expect(default).observable is True
     exp = op.expect(stripped)
+    assert exp.observable is True
+    assert "ENUM_MEMBER_VALUE_CHANGED" in exp.expected
+
+
+def test_a_kind_observed_only_through_dwarf_drops_out_of_stripped_headers() -> None:
+    """A kind whose only declared configuration needs DWARF is unobservable at
+    stripped headers: nothing is required, and the note says why."""
+    from abiforge.model.expect import Expectation, observability_floor
+
+    stripped = default_config("c", GCC).with_(stripped=True)
+    exp = observability_floor(
+        Expectation(expected=frozenset({"TIME64_ABI_CHANGED"})), stripped
+    )
     assert exp.observable is False
-    assert exp.verdict_min == "NO_CHANGE"
+    assert exp.expected == frozenset()
     assert "headers.stripped evidence cannot show this edit" in (exp.note or "")
 
 
 def test_a_header_fact_stays_observable_in_stripped_headers() -> None:
-    exp = evidence_floor(
+    exp = observability_floor(
         OP_BY_NAME["enum_change_value"].base(),
         default_config("c", GCC).with_(stripped=True),
-        "headers",
     )
     assert exp.observable is not False
 

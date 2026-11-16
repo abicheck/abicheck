@@ -1,0 +1,15 @@
+{
+ "cells": {
+  "by_value_struct_became_nontrivial-cxx_alt-BH-at-minimum": "A2.4",
+  "field_access_narrowed-cxx_more-BD-at-minimum": "A2.8",
+  "field_became_const-c_elf-BD-at-minimum": "A2.8",
+  "func_became_ms_abi-c_elf-BD-at-minimum": "A2.7",
+  "rebuild_optimized-cxx_stdlib-BH-below-minimum": "A2.11",
+  "rebuild_pack_struct-c_core-BH-at-minimum": "A2.10",
+  "rebuild_pack_struct-cxx_classes-BH-at-minimum": "A2.10",
+  "record_became_packed-c_elf-BH-at-minimum": "A2.2",
+  "record_lost_standard_layout-cxx_more-BD-at-minimum": "A2.9",
+  "record_lost_trivially_copyable-cxx_more-BH-at-minimum": "A2.4",
+  "returned_struct_grew_past_registers-c_elf_alt-BH-at-minimum": "A2.3"
+ }
+}

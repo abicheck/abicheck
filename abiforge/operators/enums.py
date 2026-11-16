@@ -84,7 +84,6 @@ _EDITS: dict[str, tuple[str, str | None, str, dict[str, Any]]] = {
         {
             "expected": frozenset({"ENUM_MEMBER_RENAMED"}),
             **_SOURCE,
-            "min_evidence": "headers",
         },
     ),
     "alias": (
@@ -102,7 +101,6 @@ _EDITS: dict[str, tuple[str, str | None, str, dict[str, Any]]] = {
         {
             "expected": frozenset({"ENUM_BECAME_SCOPED"}),
             **_SOURCE,
-            "min_evidence": "headers",
         },
     ),
     "added": (
@@ -113,7 +111,6 @@ _EDITS: dict[str, tuple[str, str | None, str, dict[str, Any]]] = {
             "expected": frozenset({"TYPE_ADDED"}),
             "verdict_min": "COMPATIBLE",
             "verdict_max": "COMPATIBLE",
-            "min_evidence": "headers",
         },
     ),
     "removed": (
@@ -124,7 +121,6 @@ _EDITS: dict[str, tuple[str, str | None, str, dict[str, Any]]] = {
         {
             "expected": frozenset({"TYPE_REMOVED"}),
             **_SOURCE,
-            "min_evidence": "headers",
         },
     ),
     "opaque": (
@@ -132,7 +128,7 @@ _EDITS: dict[str, tuple[str, str | None, str, dict[str, Any]]] = {
         None,
         "the definition becomes an opaque declaration: the type keeps its size "
         "(its underlying type is fixed), but every enumerator is gone",
-        {"expected": frozenset({"ENUM_MEMBER_REMOVED"}), "min_evidence": "headers"},
+        {"expected": frozenset({"ENUM_MEMBER_REMOVED"})},
     ),
 }
 
@@ -171,7 +167,6 @@ def _operators() -> tuple[EditOp, ...]:
             _, p, _ = enum_names(prefix, edit)
             role = f"{prefix}.{edit}"
             kw = dict(truth)
-            kw.setdefault("min_evidence", "dwarf")
             out.append(
                 EditOp(
                     f"{_WORD[prefix]}_{suffix}"

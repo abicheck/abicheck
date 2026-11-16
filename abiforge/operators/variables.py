@@ -70,7 +70,6 @@ VARIABLE_OPERATORS: tuple[EditOp, ...] = (
         ),
         "a weak definition in a DSO still satisfies a consumer's reference",
         expected=frozenset({"SYMBOL_BINDING_CHANGED"}),
-        min_evidence="binary",
         rules=(
             Rule(
                 lambda c: c.objfmt == "pe",
@@ -98,7 +97,6 @@ VARIABLE_OPERATORS: tuple[EditOp, ...] = (
         ),
         "g_vold becomes g_vnew: consumers referencing g_vold fail to load",
         any_of=(_REMOVED,),
-        min_evidence="binary",
     ),
     _op(
         "object_became_inline_variable",
@@ -120,7 +118,6 @@ VARIABLE_OPERATORS: tuple[EditOp, ...] = (
                 }
             ),
         ),
-        min_evidence="binary",
         standards=(
             StdRange(
                 "c++",
@@ -153,6 +150,5 @@ VARIABLE_OPERATORS: tuple[EditOp, ...] = (
         "against the old library asks for g_obj@LIBEDIT_1.0 and fails to load",
         roles=("build.vscript", "elf.obj"),
         expected=frozenset({"SYMBOL_MOVED_VERSION_NODE"}),
-        min_evidence="binary",
     ),
 )

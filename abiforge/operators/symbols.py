@@ -36,7 +36,7 @@ _RISK: dict[str, Any] = {
     "verdict_max": "COMPATIBLE_WITH_RISK",
 }
 _SOURCE_BREAK: dict[str, Any] = {"verdict_min": "API_BREAK", "verdict_max": "API_BREAK"}
-_HEADERS = {"min_evidence": "headers"}
+_HEADERS: dict[str, object] = {}
 
 _POINTEE_QUALIFIERS = (
     _op(
@@ -135,7 +135,6 @@ _EXPORTS = (
         ),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="binary",
     ),
 )
 
@@ -325,7 +324,6 @@ _VALUES_AND_NAMES = (
                 "is paired as a likely rename from symbols alone",
             ),
         ),
-        min_evidence="binary",
     ),
     _op(
         "internal_table_grown",
@@ -338,7 +336,6 @@ _VALUES_AND_NAMES = (
         "a reserved-name exported array doubles: a consumer's copy relocation "
         "reserves the old 16 bytes, and the library now writes 32 there",
         expected=frozenset({"SYMBOL_SIZE_CHANGED_INTERNAL"}),
-        min_evidence="binary",
     ),
 )
 

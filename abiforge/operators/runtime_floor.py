@@ -40,6 +40,5 @@ RUNTIME_FLOOR_OPERATORS: tuple[EditOp, ...] = (
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max="COMPATIBLE_WITH_RISK",
         touches=("elf.vget",),
-        min_evidence="binary",
     ),
 )
