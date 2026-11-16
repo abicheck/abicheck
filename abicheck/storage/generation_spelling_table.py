@@ -740,11 +740,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "before. The recorded parameter fact changes; the spelling does not"
     ),
     77: GenerationSpellingChange(
-        "feat/ws4-macho-dwarf-reader: a Mach-O library's DWARF is read from its "
-        "adjacent .dSYM bundle (ADR-021 step 5) or an explicit --debug-root bundle, "
-        "through the pyelftools DWARFInfo path; a bundle whose UUID does not match the library, or that is missing, "
-        "is absent evidence. No stored type or name spelling changes: the change "
-        "is new DWARF evidence for Mach-O libraries that previously had none."
+        "dump of a Mach-O library reads DWARF from its .dSYM bundle: an explicit "
+        "debug_info_path bundle, or the bundle beside the library, through the "
+        "pyelftools DWARFInfo path. A bundle whose UUID does not match the library, "
+        "or that is missing, is absent evidence. No stored type or name spelling "
+        "changes: the change is new DWARF evidence for Mach-O libraries that "
+        "previously had none."
     ),
 }
 
