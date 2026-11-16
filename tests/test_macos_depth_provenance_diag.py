@@ -44,11 +44,12 @@ def test_macos_one_side_headers_provenance(tmp_path: Path) -> None:
         snap = load_snapshot(out)
         ev = debug_info_evidence(snap)
         lines.append(f"[{label}] debug_info_evidence={ev!r}")
+        decl = snap.declarations
         lines.append(
-            f"[{label}] has_dwarf={snap.dwarf is not None and getattr(snap.dwarf, 'has_dwarf', None)}"
+            f"[{label}] debug_layout={getattr(decl, 'debug_layout', None)!r}"[:300]
         )
         lines.append(
-            f"[{label}] dwarf_advanced={getattr(snap.dwarf_advanced, 'extraction', None)!r}"
+            f"[{label}] debug_advanced={getattr(decl, 'debug_advanced', None)!r}"[:300]
         )
         lines.append(
             f"[{label}] types={len(snap.types)} functions={len(snap.functions)}"
