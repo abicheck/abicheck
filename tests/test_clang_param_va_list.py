@@ -678,3 +678,82 @@ def test_live_m32_cxx_namespace_and_using_alias_are_structural(tmp_path: Path) -
     for fn, want in expected.items():
         assert fn in params, f"clang emitted no ParmVarDecl for {fn}"
         assert _clang_param_is_va_list(params[fn], ids) is want, fn
+
+
+class TestMalformedAliasNodesAreIgnored:
+    """A declaration container may hold a non-object child, and an alias
+    declaration may lack a string id or a string underlying link. Neither may
+    crash the index or make a declaration count as reaching the builtin."""
+
+    def test_non_object_children_in_a_container_are_skipped(self) -> None:
+        root = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                "stray-string",
+                None,
+                {
+                    "kind": "TypedefDecl",
+                    "id": "0xB",
+                    "name": "__builtin_va_list",
+                    "type": {"qualType": "char *"},
+                },
+                {
+                    "kind": "TypedefDecl",
+                    "id": "0xV",
+                    "name": "va_list",
+                    "type": {"qualType": "__builtin_va_list", "typeAliasDeclId": "0xB"},
+                },
+            ],
+        }
+        assert builtin_va_list_decl_ids(root) == frozenset({"0xB", "0xV"})
+
+    def test_alias_without_a_string_id_is_not_indexed(self) -> None:
+        root = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "TypedefDecl",
+                    "id": 7,
+                    "name": "__builtin_va_list",
+                    "type": {"qualType": "char *"},
+                },
+                {
+                    "kind": "TypedefDecl",
+                    "name": "__builtin_va_list",
+                    "type": {"qualType": "char *"},
+                },
+            ],
+        }
+        assert builtin_va_list_decl_ids(root) == frozenset()
+
+    def test_non_string_underlying_link_ends_the_chain(self) -> None:
+        # A typeAliasDeclId that is not a string is no link: the typedef is
+        # indexed under its own name, which is not __builtin_va_list, so the
+        # chain stops and the declaration is excluded.
+        root = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "TypedefDecl",
+                    "id": "0xV",
+                    "name": "va_list",
+                    "type": {"qualType": "char *", "typeAliasDeclId": 42},
+                },
+            ],
+        }
+        assert builtin_va_list_decl_ids(root) == frozenset()
+
+    @pytest.mark.parametrize("alias_id", [42, None, ["0xB"]])
+    def test_non_string_param_alias_id_is_never_a_va_list_link(
+        self, alias_id: object
+    ) -> None:
+        node = {
+            "kind": "ParmVarDecl",
+            "name": "ap",
+            "type": {
+                "qualType": "va_list",
+                "desugaredQualType": "char *",
+                "typeAliasDeclId": alias_id,
+            },
+        }
+        assert _clang_param_is_va_list(node, frozenset({"0xB", "0xV"})) is False
