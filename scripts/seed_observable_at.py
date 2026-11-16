@@ -192,7 +192,7 @@ def taxonomy_owner() -> dict[str, str]:
 
 
 def operator_evidence() -> dict[str, list[tuple[str, str]]]:
-    """Kind -> [(operator name, min_evidence)] over abiforge's operators."""
+    """Kind -> [(operator name, evidence source)] over abiforge's operators."""
     sys.path.insert(0, str(REPO))
     from abiforge.operators import OPERATORS
 
@@ -201,7 +201,9 @@ def operator_evidence() -> dict[str, list[tuple[str, str]]]:
         kinds = set(op.expected)
         for group in op.any_of:
             kinds |= set(group)
-        me = op.min_evidence if isinstance(op.min_evidence, str) else "fn"
+        # The evidence floor is no longer a per-operator field: it is each
+        # kind's observable_at, applied per configuration.
+        me = "observable_at"
         for kind in kinds:
             out[kind.lower()].append((op.name, me))
     return out

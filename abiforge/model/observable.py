@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 from abiforge.checkers.abicheck import observable_at
 from abiforge.model.config import Config
-from abiforge.model.expect import ADVISORY_KINDS
+from abiforge.model.expect import _LANGUAGE_NAME, ADVISORY_KINDS
 from abiforge.model.opkit import EditOp
 
 #: Evidence atom sets the corpus can build, with the configuration that builds them.
@@ -55,8 +55,11 @@ def unclassified_kinds(op: EditOp) -> frozenset[str]:
     return frozenset(k for k in expected_kinds(op) if observable_at(k) is None)
 
 
-def minimal_evidence_sets(op: EditOp) -> frozenset[frozenset[str]]:
-    """The minimal atom sets over the classified expected kinds on ELF, an antichain."""
+def minimal_evidence_sets(op: EditOp, base: Config) -> frozenset[frozenset[str]]:
+    """The minimal atom sets over the classified expected kinds on *base*'s ELF
+    platform, an antichain. A condition scoped to another language is skipped,
+    as ``kind_observable`` skips it for the same configuration."""
+    language = _LANGUAGE_NAME[base.lang]
     alts: set[frozenset[str]] = set()
     for kind in expected_kinds(op):
         spec = observable_at(kind)
@@ -64,6 +67,8 @@ def minimal_evidence_sets(op: EditOp) -> frozenset[frozenset[str]]:
             continue
         for cond in spec:
             if cond.platform is not None and "elf" not in cond.platform:
+                continue
+            if cond.language is not None and language not in cond.language:
                 continue
             alts |= set(cond.alternatives)
     return frozenset(a for a in alts if not any(b < a for b in alts))
@@ -95,7 +100,7 @@ def min_level_cells(
         # A reverse check needs a declared floor: with an UNCLASSIFIED expected
         # kind the floor is unknown, so the operator gets no cells (reported).
         return (), ()
-    minimal = minimal_evidence_sets(op)
+    minimal = minimal_evidence_sets(op, base)
     cells: list[Cell] = []
     unsupported: list[frozenset[str]] = []
     for m in sorted(minimal, key=lambda s: (len(s), sorted(s))):

@@ -931,6 +931,19 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "rebuilding with -fpack-struct=1 removes padding: offsets and sizes move",
         any_of=(_SIZE | _OFFSET,),
         rules=(
+            # Without the header dump the packing shows no size or offset change
+            # at this pack/bits: DWARF cannot see the alignment drop either.
+            Rule(
+                lambda c: (
+                    c.evidence != "headers"
+                    and (
+                        c.flags.bits == 32
+                        or (c.flags.pack is not None and c.flags.pack <= 4)
+                    )
+                ),
+                {"any_of": ()},
+                "alignof drop is visible only in the header dump; DWARF shows no size or offset change here",
+            ),
             Rule(
                 lambda c: (
                     c.flags.bits == 32
