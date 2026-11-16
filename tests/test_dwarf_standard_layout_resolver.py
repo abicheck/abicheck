@@ -252,3 +252,71 @@ def test_a_diamond_ladder_with_a_shared_base_is_false_without_expanding_paths() 
         summaries[k(3 * n + 2)] = summary(bases=[(below, False)])
     summaries[k(3 * (levels + 1))] = summary()
     assert trait(summaries, 3) is False
+
+
+def test_a_base_chain_past_the_depth_limit_is_unknown() -> None:
+    # Empty classes derive from one another, and only the bottom one has data.
+    # Whether the hierarchy holds data is reached through the chain, past
+    # _MAX_DEPTH, so the top record is unknown rather than decided.
+    length = _MAX_DEPTH + 4
+    summaries = {k(n): summary(bases=[(k(n + 1), False)]) for n in range(1, length)}
+    summaries[k(length)] = summary(members=[_SCALAR])
+    assert trait(summaries, 1) is None
+
+
+def test_the_first_member_set_of_a_record_is_the_same_on_a_second_query() -> None:
+    # M(X) of a record with no members is the record itself, on every query.
+    resolver = _Resolver({k(2): summary()})
+    first = resolver._first_member_types(rec(2))
+    assert first == frozenset({k(2)})
+    assert resolver._first_member_types(rec(2)) == first
+
+
+def test_a_declaration_left_unresolved_keeps_its_holder_unset() -> None:
+    from types import SimpleNamespace as NS
+
+    from abicheck.extract.dwarf_standard_layout import collector_for
+
+    class Builder:
+        pass
+
+    die = NS(
+        tag="DW_TAG_structure_type",
+        offset=7,
+        cu=NS(cu_offset=0),
+        attributes={"DW_AT_declaration": NS(value=True)},
+    )
+    holder = NS(is_standard_layout=None, is_standard_layout_fact=None)
+    collector = collector_for(Builder())
+    collector.add(die, [], holder)
+    collector.finalize()
+    assert holder.is_standard_layout is None
+    assert holder.is_standard_layout_fact is None
+
+
+def test_the_subobject_walk_stops_at_the_depth_limit() -> None:
+    # Past _MAX_DEPTH the walk gives up: unknown, never a clean answer.
+    resolver = _Resolver({k(1): summary(bases=[(k(2), False)]), k(2): summary()})
+    assert resolver._base_multiplicity(k(1), _MAX_DEPTH + 1) is None
+
+
+def test_a_complete_record_gets_its_resolved_trait() -> None:
+    from types import SimpleNamespace as NS
+
+    from abicheck.extract.dwarf_standard_layout import collector_for
+
+    class Builder:
+        pass
+
+    die = NS(
+        tag="DW_TAG_structure_type",
+        offset=8,
+        cu=NS(cu_offset=0),
+        attributes={},
+    )
+    holder = NS(is_standard_layout=None, is_standard_layout_fact=None)
+    collector = collector_for(Builder())
+    collector.add(die, [], holder)
+    collector.finalize()
+    # An empty complete class is standard-layout: [class.prop]/3 holds vacuously.
+    assert holder.is_standard_layout is True
