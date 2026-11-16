@@ -43,6 +43,7 @@ from .model import AbiSnapshot, stdlib_namespaces_excluded
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolBinding, SymbolType
+from .model.glibc_baseline import arch_baseline
 from .model.identity import EntityId
 from .name_classification import is_stdlib_local_name_symbol
 
@@ -161,7 +162,7 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
                 # provider names them). A new provider's node raises it only
                 # when it exceeds that maximum; an unparseable marker
                 # (GLIBC_PRIVATE) is never a floor.
-                old_floor, _ = _binary_wide_max(old_elf, prefix)
+                old_floor, _ = _effective_old_floor(old_elf, new_elf, prefix)
                 new_floor = ver_tuple != _UNPARSEABLE_VERSION and ver_tuple > old_floor
                 kind = (
                     ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED
@@ -281,6 +282,24 @@ def _binary_wide_max(elf: Any, prefix: str) -> tuple[tuple[int, ...], str]:
     return best
 
 
+def _effective_old_floor(
+    old_elf: Any, new_elf: Any, prefix: str
+) -> tuple[tuple[int, ...], str]:
+    """The floor a newly needed provider is measured against.
+
+    The binary-wide maximum of *prefix*, but never below the architecture's
+    ``GLIBC_`` baseline (model/glibc_baseline.py): every glibc on that
+    architecture provides the baseline node, so it is no floor. When the
+    baseline is the higher value, its tag names the baseline and why.
+    """
+    floor, tag = _binary_wide_max(old_elf, prefix)
+    if prefix == "GLIBC":
+        baseline = arch_baseline(getattr(new_elf, "machine", None))
+        if baseline is not None and baseline[0] > floor:
+            return baseline[0], f"{baseline[1]} (architecture baseline)"
+    return floor, tag
+
+
 def _new_provider_floor_changes(
     lib: str, new_vers: set[str], old_elf: Any, new_elf: Any
 ) -> list[Change]:
@@ -295,7 +314,7 @@ def _new_provider_floor_changes(
     changes: list[Change] = []
     prefixes = {v.rsplit("_", 1)[0] for v in new_vers if "_" in v}
     for prefix in sorted(prefixes):
-        old_floor, old_tag = _binary_wide_max(old_elf, prefix)
+        old_floor, old_tag = _effective_old_floor(old_elf, new_elf, prefix)
         new_floor, new_tag = _binary_wide_max(new_elf, prefix)
         if new_floor <= old_floor:
             continue

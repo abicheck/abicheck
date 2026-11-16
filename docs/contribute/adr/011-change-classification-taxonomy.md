@@ -236,11 +236,22 @@ them):
 - an unparseable marker (`GLIBC_PRIVATE`, `GLIBC_ABI_DT_RELR`) is not a floor
   and stays `_COMPAT`.
 
+The floor is never below the architecture's `GLIBC_` baseline: the oldest node
+every glibc on that architecture provides (`model/glibc_baseline.py`). A node at
+or below it raises nothing, so a newly linked `libc` symbol version of
+`GLIBC_2.2.5` on x86-64 (or `GLIBC_2.0` on i386) stays
+`SYMBOL_VERSION_REQUIRED_ADDED_COMPAT`. Above it, the floor is measured from the
+baseline and its tag names the baseline and the reason. The table covers the
+architectures whose baseline was measured on a host libc (x86-64, i386); any other
+architecture has no exemption, which errs toward a possible floor finding rather
+than a suppressed one.
+
 An already-needed provider keeps its per-library rule: a node no newer than that
 provider's own old maximum is `_COMPAT`, and `RUNTIME_FLOOR_RAISED` fires only
 for a raise of an existing floor.
 
-**Migration**: a library that newly links a versioned provider can now get
+**Migration**: a library that newly links a versioned provider above its
+architecture's baseline can now get
 `BREAKING` where it was `COMPATIBLE` before, whenever that provider's version
 node is above the binary's existing floor. The verdict changes only for that
 shape. Re-check the affected build with the new release, or add an explicit

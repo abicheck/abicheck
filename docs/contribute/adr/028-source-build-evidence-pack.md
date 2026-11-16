@@ -506,3 +506,10 @@ single extractor, and it would reappear at the contract-mode level if the
 default flip does not draw this line explicitly. No default changes with
 this amendment; it names the precondition for the change ADR-049's own
 "Phase 7: default flip" item already tracks as open.
+
+## Cross-reference (2026-11-16): version-floor classification
+
+A newly needed provider's version nodes are classified by ADR-011's amendment of
+2026-11-16 (a node above the architecture's glibc baseline is a runtime floor).
+The evidence pack does not change that rule; it only supplies the provider's
+verneed table and `e_machine`.
