@@ -25,6 +25,7 @@ from abicheck.extract.macho_dsym import (
     macho_uuid,
     read_dsym_dwarf,
 )
+from tests._macho_synthetic import N_EXT, N_SECT, MachoSymbol, write_dylib
 
 _MH_MAGIC_64 = 0xFEEDFACF
 _MH_DSYM = 0xA
@@ -413,3 +414,104 @@ def test_an_explicit_bundle_for_a_fat_library_is_a_reported_failure(
     )
     with pytest.raises(SnapshotError, match="not a thin"):
         _resolve_debug_metadata(lib, None, dwarf_source=bundle)
+
+
+def _exporting_dylib(path: Path, uid: str) -> Path:
+    """A dylib with an LC_UUID and one export, so ``dump`` reads its surface."""
+    return write_dylib(
+        path,
+        [MachoSymbol("__twice", N_SECT | N_EXT, n_sect=1, n_value=0x1000)],
+        sections=[("__TEXT", "__text", 0x1000, 0x10)],
+        export_trie=[("_twice", 0)],
+        uuid=uid,
+    )
+
+
+_NO_GCC = pytest.mark.skipif(
+    shutil.which("gcc") is None or not sys.platform.startswith("linux"),
+    reason="needs a Linux gcc that emits ELF (on macOS gcc is clang and emits Mach-O)",
+)
+
+
+def test_dump_without_a_bundle_carries_no_dwarf(tmp_path: Path) -> None:
+    from abicheck.dumper import dump
+
+    lib = _exporting_dylib(
+        tmp_path / "libn.dylib", "11111111-2222-3333-4444-555555555555"
+    )
+    snap = dump(lib, [])
+    assert snap.declarations.debug_advanced is None
+
+
+@pytest.mark.integration
+@_NO_GCC
+def test_dump_reads_the_discovered_dsym_through_the_public_api(tmp_path: Path) -> None:
+    from abicheck.dumper import dump
+    from abicheck.model.dwarf_facts import AdvancedExtractionStatus
+
+    src = tmp_path / "lib.c"
+    src.write_text("int twice(int x) { return 2 * x; }\n")
+    elf = tmp_path / "libp.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", "-o", str(elf), str(src)], check=True
+    )
+    uid = "11111111-2222-3333-4444-555555555555"
+    lib = _exporting_dylib(tmp_path / "libp.dylib", uid)
+    _bundle_beside(
+        lib,
+        _macho(
+            tmp_path / "bundle.bin",
+            filetype=_MH_DSYM,
+            uuid=uid,
+            sections=_sections_from_elf(elf),
+        ),
+    )
+    adv = dump(lib, []).declarations.debug_advanced
+    assert adv is not None
+    assert adv.extraction is AdvancedExtractionStatus.COMPLETED
+
+
+@pytest.mark.integration
+@_NO_GCC
+def test_dump_reads_an_explicit_dsym_through_the_public_api(tmp_path: Path) -> None:
+    from abicheck.dumper import dump
+    from abicheck.model.dwarf_facts import AdvancedExtractionStatus
+
+    src = tmp_path / "lib.c"
+    src.write_text("int triple(int x) { return 3 * x; }\n")
+    elf = tmp_path / "libq.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", "-o", str(elf), str(src)], check=True
+    )
+    uid = "11111111-2222-3333-4444-555555555555"
+    lib = _exporting_dylib(tmp_path / "libq.dylib", uid)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    bundle = _macho(
+        elsewhere / "bundle.bin",
+        filetype=_MH_DSYM,
+        uuid=uid,
+        sections=_sections_from_elf(elf),
+    )
+    adv = dump(lib, [], debug_info_path=bundle).declarations.debug_advanced
+    assert adv is not None
+    assert adv.extraction is AdvancedExtractionStatus.COMPLETED
+
+
+def test_dump_refuses_an_explicit_bundle_of_another_binary(tmp_path: Path) -> None:
+    from abicheck.dumper import dump
+    from abicheck.errors import SnapshotError
+
+    lib = _exporting_dylib(
+        tmp_path / "libq.dylib", "11111111-2222-3333-4444-555555555555"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    bundle = _macho(
+        elsewhere / "bundle.bin",
+        filetype=_MH_DSYM,
+        uuid="99999999-2222-3333-4444-555555555555",
+        sections=[("__debug_info", b"\x00" * 16)],
+    )
+    with pytest.raises(SnapshotError, match="not used"):
+        dump(lib, [], debug_info_path=bundle)

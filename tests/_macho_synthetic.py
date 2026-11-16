@@ -15,6 +15,7 @@ A non-``test_`` helper: import it, do not copy it.
 from __future__ import annotations
 
 import struct
+import uuid as _uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -300,8 +301,11 @@ def write_dylib(
     sections: Sequence[SectionSpec] | None = None,
     fixup_slots: Sequence[int] | None = None,
     fixup_encoding: str = "classic",
+    uuid: str | None = None,
 ) -> Path:
     """Write a dylib whose symbol table holds *symbols* and return *path*.
+
+    With *uuid* (hyphenated) the image also carries an LC_UUID with that value.
 
     With *export_trie* (``(name, flags)`` pairs, names with the leading
     underscore) the image also carries an LC_DYLD_EXPORTS_TRIE listing them;
@@ -352,6 +356,7 @@ def write_dylib(
     trie_cmd_size = 16 if export_trie is not None else 0
     dyld_cmd_size = 48 if has_dyld_info else 0
     chained_cmd_size = 16 if chained else 0
+    uuid_cmd_size = 24 if uuid is not None else 0
     header_size = 32
     symtab_off = (
         header_size
@@ -360,6 +365,7 @@ def write_dylib(
         + trie_cmd_size
         + dyld_cmd_size
         + chained_cmd_size
+        + uuid_cmd_size
     )
     stroff = symtab_off + 16 * len(entries)
     symtab = struct.pack(
@@ -380,6 +386,9 @@ def write_dylib(
     ncmds = segment_count + 1
     if export_trie is not None:
         commands += struct.pack("<IIII", _LC_DYLD_EXPORTS_TRIE, 16, trie_off, len(trie))
+        ncmds += 1
+    if uuid is not None:
+        commands += struct.pack("<II16s", 0x1B, 24, _uuid.UUID(uuid).bytes)
         ncmds += 1
     if has_dyld_info:
         commands += struct.pack(
