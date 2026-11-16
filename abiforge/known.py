@@ -301,32 +301,6 @@ KNOWN: tuple[Known, ...] = (
     ),
     Known(
         "rebuild_optimized",
-        frozenset({"cxx_stdlib"}),
-        "false-positive",
-        # ELF: the weak std:: copies and covered imports are demoted (ADR-089
-        # A7, #1960); with DWARF every unit's DW_AT_producer shows
-        # -fstack-protector-strong still on, so the lost canary is demoted too.
-        # Binary only, nothing records the flag. clang on ELF reads COMPATIBLE.
-        # Under the pre-C++11 string ABI (-D_GLIBCXX_USE_CXX11_ABI=0) the -O0
-        # build has no protected frame either, so no canary is lost and the
-        # rebuild reads COMPATIBLE: correct, not part of this gap.
-        # From C++20 the old-ABI -O0 build guards a frame too (the nightly
-        # drew c++20 + cxx11abi0 once the cxx_alt seed joined the array).
-        lambda c: (
-            c.objfmt == "elf"
-            and c.producer.family == "gcc"
-            and c.evidence == "binary"
-            and (c.flags.cxx11_abi != 0 or c.std.year >= 2020)
-        ),
-        "-O2 leaves no frame that needs a stack canary; without debug info no unit "
-        "records -fstack-protector, so stack_canary_removed keeps its RISK (marked as "
-        "weaker evidence); every consumer still runs",
-        GAP_O2_STD,
-        issues=frozenset({"stronger-than:COMPATIBLE"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
-    ),
-    Known(
-        "rebuild_optimized",
         frozenset({"c_core"}),
         "false-positive",
         # i386 -O0 guards fill_rec's frame and calls __stack_chk_fail; -O2 needs no

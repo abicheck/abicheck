@@ -22,7 +22,12 @@ from abiforge.model.config import (
     has_feature,
     in_standards,
 )
-from abiforge.model.expect import Expectation, Rule, observability_floor
+from abiforge.model.expect import (
+    BinaryLicence,
+    Expectation,
+    Rule,
+    observability_floor,
+)
 from abiforge.model.seeds import RoleText, Seed
 from abiforge.model.space import feature_standards
 
@@ -84,6 +89,16 @@ class EditOp:
     # The language-space constructs the edit exercises, when its roles do not
     # say it (``abiforge.model.space.op_constructs``); empty = read the roles.
     constructs: tuple[str, ...] = ()
+    # The evidence atoms that carry the edit when it is a build-flag edit
+    # (``-fpack-struct``, ``-fshort-enums``): the flag is in neither the binary
+    # nor a distributed header, so a configuration sees the edit only if it
+    # records the build (DWARF ``D`` or build data ``BD``). Empty = the edit is
+    # carried by the binary or by the header text itself.
+    carrier: frozenset[str] = frozenset()
+    # Verdict ceilings the edit may take only when an independent binary fact
+    # is confirmed (``model.expect.BinaryLicence``): an -O2 rebuild may be a
+    # RISK only where nm shows the canary import actually lost.
+    licences: tuple[BinaryLicence, ...] = ()
 
     def applies_to(self, seed: Seed) -> bool:
         if seed.gate_role is not None and seed.gate_role not in self.roles:
@@ -152,15 +167,21 @@ class EditOp:
             verdict_max=self.verdict_max,
         )
 
-    def expect(self, config: Config) -> Expectation:
+    def expect(
+        self, config: Config, facts: Mapping[str, bool] | None = None
+    ) -> Expectation:
         """The ground truth for *config*: the base, the first matching rule, then the
-        kinds the configuration observes (``observability_floor``, plan B1)."""
+        kinds the configuration observes (``observability_floor``, plan B1), then
+        the licences *facts* (the binary oracle's, ``run.binfacts``) confirm."""
         exp = self.base()
         for rule in self.rules:
             if rule.when(config):
                 exp = rule.apply(exp)
                 break
-        return self.with_derived(observability_floor(exp, config), config.objfmt)
+        exp = observability_floor(exp, config, carrier=self.carrier)
+        for licence in self.licences:
+            exp = licence.apply(exp, facts or {})
+        return self.with_derived(exp, config.objfmt)
 
     def with_derived(self, exp: Expectation, objfmt: str = "elf") -> Expectation:
         """*exp* plus the kinds that follow from it rather than from the edit.

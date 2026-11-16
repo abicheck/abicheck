@@ -35,7 +35,7 @@ given evidence cannot show it, abicheck stayed clean).
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
 from abiforge.checkers.abicheck import observable_at
@@ -149,13 +149,41 @@ def kind_observable(kind: str, config: Config) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class BinaryLicence:
+    """A verdict ceiling an edit may take only when a binary fact is confirmed.
+
+    The fact is one ``abiforge.run.binfacts`` reads from the two built
+    libraries (nm/readelf), never from abicheck's answer. While the fact holds,
+    the expectation's ``verdict_max`` rises to ``verdict_max`` (the RISK-level
+    finding the fact entails is honest); while it does not, the strict
+    expectation stands and a finding of that level is a false positive.
+    """
+
+    fact: str
+    verdict_max: str
+
+    def apply(self, exp: Expectation, facts: Mapping[str, bool]) -> Expectation:
+        if not facts.get(self.fact) or not exp.observable:
+            return exp
+        if exp.verdict_max is not None and (
+            VERDICT_RANK[exp.verdict_max] >= VERDICT_RANK[self.verdict_max]
+        ):
+            return exp
+        return replace(
+            exp,
+            verdict_max=self.verdict_max,
+            note=f"{exp.note} [licensed: {self.fact} confirmed by nm]".strip(),
+        )
+
+
 #: A kind that follows from the edit's verdict rather than from its own
 #: evidence (``with_derived``): it never decides whether the edit is observable.
 ADVISORY_KINDS: frozenset[str] = frozenset({"SONAME_BUMP_RECOMMENDED"})
 
 
 def observability_floor(
-    exp: Expectation, config: Config, observed: frozenset[str] | None = None
+    exp: Expectation, config: Config, carrier: frozenset[str] = frozenset()
 ) -> Expectation:
     """The expectation the evidence can show, kind by kind.
 
@@ -165,9 +193,13 @@ def observability_floor(
     still holds). An advisory kind (``ADVISORY_KINDS``) follows the edit and is
     never the reason an edit is observable. The note says what was dropped.
     """
-    del observed  # reserved: callers pass nothing; kinds are decided here
     edit = (exp.expected | frozenset().union(*exp.any_of)) - ADVISORY_KINDS
     seen = frozenset(k for k in edit if kind_observable(k, config))
+    if carrier and not (config.evidence_set.atoms & carrier):
+        # A build-flag edit: the flag is recorded only by a carrier atom, so a
+        # configuration without one cannot see any of the edit's kinds, even
+        # where a header-level kind would otherwise be observable.
+        seen = frozenset()
     hidden = edit - seen
     if edit and not seen:
         return replace(
