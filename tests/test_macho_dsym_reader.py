@@ -338,10 +338,12 @@ def test_a_missing_explicit_bundle_is_a_reported_failure(tmp_path: Path) -> None
         _resolve_debug_metadata(lib, None, dwarf_source=tmp_path / "gone.dSYM")
 
 
-def test_a_refused_adjacent_bundle_is_reported_in_the_dump(tmp_path: Path) -> None:
-    """A stale dSYM beside the library is a visible failure, not silently ignored."""
-    from abicheck.errors import SnapshotError
+def test_a_refused_adjacent_bundle_is_a_non_fatal_limitation(tmp_path: Path) -> None:
+    """A stale dSYM beside the library does not fail the dump; it is recorded."""
     from abicheck.extract.debug_dump import _resolve_debug_metadata
+    from abicheck.extract.extraction_limitations import (
+        collecting_extraction_limitations,
+    )
 
     lib = _dylib(tmp_path / "libp.dylib", "11111111-2222-3333-4444-555555555555")
     other = _macho(
@@ -351,8 +353,24 @@ def test_a_refused_adjacent_bundle_is_reported_in_the_dump(tmp_path: Path) -> No
         sections=[("__debug_info", b"\x00" * 16)],
     )
     _bundle_beside(lib, other)
-    with pytest.raises(SnapshotError, match="adjacent dSYM .* ignored"):
-        _resolve_debug_metadata(lib, None)
+    with collecting_extraction_limitations() as limits:
+        _resolve_debug_metadata(lib, None)  # must not raise
+    assert len(limits) == 1
+    assert limits[0].startswith("adjacent dSYM ") and " ignored: " in limits[0]
+    assert "does not match the dylib's 11111111" in limits[0]
+
+
+def test_the_builder_wrapper_writes_limitations_into_the_snapshot() -> None:
+    from abicheck.extract.binary_format import with_extraction_limitations
+    from abicheck.extract.extraction_limitations import record_extraction_limitation
+    from abicheck.model.snapshot import AbiSnapshot
+
+    def builder(**_kw: object) -> AbiSnapshot:
+        record_extraction_limitation("adjacent dSYM x ignored: refused")
+        return AbiSnapshot(library="libp.dylib", version="1")
+
+    snap = with_extraction_limitations(builder)(**{})
+    assert "adjacent dSYM x ignored: refused" in repr(snap.dump_provenance)
 
 
 @pytest.mark.parametrize(

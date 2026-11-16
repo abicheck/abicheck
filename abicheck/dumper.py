@@ -45,7 +45,7 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
-from .extract.binary_format import _FormatHandler
+from .extract.binary_format import _FormatHandler, with_extraction_limitations
 from .extract.compiler_driver import resolve_clang_bin
 from .extract.debug_dump import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
@@ -1193,7 +1193,7 @@ def _dump_pe(
 _FORMAT_HANDLERS: tuple[_FormatHandler, ...] = (
     _FormatHandler(
         name="elf",
-        builder=_dump_elf,
+        builder=with_extraction_limitations(_dump_elf),
         magics=(b"\x7fELF",),
         accepts_dwarf_only=True,
         accepts_debug_format=True,

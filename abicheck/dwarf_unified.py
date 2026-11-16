@@ -213,8 +213,12 @@ def _macho_dsym_session(
         # A bundle beside the library that does not belong to it is a stale or
         # wrong dSYM the user may believe is in use: say so in the dump instead
         # of ignoring it. Nothing was read, so the status stays NOT_RUN.
+        # An optional input the user did not name must not break the dump: the
+        # refusal is a non-fatal limitation in the snapshot's provenance.
         log.warning("parse_dwarf: adjacent dSYM %s not used: %s", bundle, reason)
-        note_debug_info_read_failure(f"adjacent dSYM {bundle} ignored: {reason}")
+        from .extract.extraction_limitations import record_extraction_limitation
+
+        record_extraction_limitation(f"adjacent dSYM {bundle} ignored: {reason}")
         return None, AdvancedExtractionStatus.NOT_RUN
     return session, AdvancedExtractionStatus.COMPLETED
 
