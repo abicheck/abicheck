@@ -1,7 +1,7 @@
 # -- symbols: export-table facts (B) --------------------------------------
 func_added  B  # diff_symbols.py:624: a binary-only NEW reports an undeclared export through the ordinary function diff (FUNC_ADDED), from the export table alone; undeclared_exports.py:141-197 adds FUNC_ADDED_ELF_ONLY only for a header-backed NEW
 func_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (dumper.py:966, 1115)
-func_export_added  U  # export_transition.py:221: emission depends on declaration state (_export_was_gained); not established from B alone
+func_export_added  DH  # export_transition.py:188-221: _export_was_gained needs is_export_confirmed_absent(old), which requires the declaration (header or DWARF) on the old side; binary-only snapshots pair as FUNC_ADDED instead
 func_language_linkage_changed  BH  # compare/function_signature.py:487: declaration linkage needs headers; B alone shows only the mangled name
 func_likely_renamed  B  # diff_symbols_renames.py:535-542: name-fingerprint candidates
 func_removed  DH:ELFPE+B:MACHO  # diff_symbols.py:249: binary-only snapshots (ELF, PE, Mach-O: dumper.py:966, 1115) emit FUNC_REMOVED_ELF_ONLY for export-table-only records; FUNC_REMOVED needs DWARF or headers
@@ -9,7 +9,7 @@ func_removed_elf_only  B  # export-table-only kind: emitted for binary-only snap
 func_visibility_changed  B:ELF+BH:PE+B:MACHO  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
 var_added  B  # diff_symbols_variables.py:210: a binary-only NEW reports an added variable export from the export table alone (VAR_ADDED); the ELF-only variant is undeclared_exports.py:141-197
 var_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (undeclared_exports.py:197)
-var_export_added  U  # export_transition.py:250: same path as func_export_added; not established from B alone
+var_export_added  DH  # export_transition.py:250: same _export_was_gained gate as func_export_added; needs the declaration on the old side
 var_removed  DH  # diff_symbols_variables.py:86: binary-only snapshots emit VAR_REMOVED_ELF_ONLY for export-table-only records
 var_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols_variables.py:86)
 var_visibility_changed  U  # emitted only from template_instance_absence.py:516 (typed template evidence)
@@ -308,3 +308,6 @@ public_to_internal_dependency    BHS
 public_virtual_dispatch_set_changed BHS
 source_surface_dso_mismatch      L4
 target_dependency_added          L5
+# -- batch 1 (G3): serialization tags and tail padding ------------------
+serialization_tag_changed  H  # diff_serialization.py:290: tag values come from declared constants in the header (_collect_valued_declarations over the snapshot)
+tail_padding_reuse_changed  H  # diff_layout.py:343-363 consumes data_size_bits, which only the castxml header parse records (castxml/data_size.py:61: unknown inputs leave it None); DWARF carries no data size

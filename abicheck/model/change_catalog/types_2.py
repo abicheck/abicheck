@@ -140,6 +140,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "tail_padding_reuse_changed",
         _R,
+        observable_at=(_OBS_H,),
         impact="The type's data size (the bytes its own members occupy, excluding "
         "trailing tail padding) changed while sizeof stayed the same. A derived "
         "class may reuse a base's tail padding, so this can silently shift a "
