@@ -145,6 +145,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_B_CXX",
     ),
+    "BH_BD_ACCESS": (
+        (("B", "H"), ("B", "D")),
+        "access level: the public header declares it, DWARF carries it as DW_AT_accessibility",
+        (),
+        "_OBS_H_OR_D",
+    ),
     "L4": (
         (("B", "H", "BD", "S"),),
         "needs the source translation unit (S)",

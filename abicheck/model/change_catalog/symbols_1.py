@@ -60,6 +60,12 @@ _OBS_BH = observable(
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
+#: An access level: the header declares it and DWARF carries it as DW_AT_accessibility.
+_OBS_H_OR_D = observable(
+    ("B", "H"),
+    ("B", "D"),
+    rationale="access level: the public header declares it, DWARF carries it as DW_AT_accessibility",
+)
 #: Mach-O has no ``*_elf_only`` variant at binary evidence: the export trie
 #: alone names the removed or hidden function, so the base kind is observed
 #: at {B} there (recorded by the macOS integration lane, _OBSERVED_ON_MACHO).
@@ -248,7 +254,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_H,),
+        observable_at=(_OBS_H_OR_D,),
     ),
     _E(
         "func_added",
