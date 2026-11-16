@@ -26,7 +26,7 @@ from typing import Any
 
 from abiforge.model.config import Config
 from abiforge.model.expect import Rule
-from abiforge.model.opkit import Edit, EditOp, Roles, _set
+from abiforge.model.opkit import BUILD_RECORD, Edit, EditOp, Roles, _set
 from abiforge.model.seeds import RoleText
 
 __all__ = ["BUILD_DATA_OPERATORS", "needs_build_data"]
@@ -108,6 +108,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "EXCEPTIONS_MODE_CHANGED",
         "C code built with unwind tables: a C++ exception may now pass through "
         "the library; nothing in the interface records the mode",
+        carrier=BUILD_RECORD,
     ),
     _elf(
         "l3_tls_model_local_dynamic",
@@ -116,6 +117,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "an explicit TLS model a consumer cannot see; for an exported __thread "
         "variable the compiler keeps global-dynamic access, so the binary "
         "interface is unchanged and only the build mode moved",
+        carrier=BUILD_RECORD,
     ),
     _elf(
         "l3_lto_enabled",
@@ -125,6 +127,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         # A toolchain that compiles but cannot load its LTO linker plugin
         # fails at link time: probe the link so the cell is unavailable.
         probe_flags=("-flto",),
+        carrier=BUILD_RECORD,
     ),
     _elf(
         "l3_sanitizer_enabled",
@@ -173,6 +176,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "layout is unchanged, but a "
         "packing mode a consumer must match is now in force",
         precondition=_packing_not_tighter,
+        carrier=BUILD_RECORD,
     ),
     _elf(
         "l3_language_standard_raised",
@@ -181,6 +185,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "the library is compiled as a newer C dialect (the later -std wins); "
         "the seed's declarations mean the same in both, so only the "
         "ABI-relevant build flag moved",
+        carrier=BUILD_RECORD,
     ),
     _cxx(
         "l3_threadsafe_statics_disabled",
@@ -188,6 +193,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "THREADSAFE_STATICS_MODE_CHANGED",
         "the seed's function-local static is constant-initialized, so no "
         "guard is emitted either way; a later dynamic static would race",
+        carrier=BUILD_RECORD,
     ),
     _cxx(
         "l3_rtti_disabled",
@@ -203,6 +209,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "STDLIB_DEBUG_MODE_CHANGED",
         "libstdc++ assertions add checks, not layout (unlike _GLIBCXX_DEBUG); "
         "the build's standard-library mode moved",
+        carrier=BUILD_RECORD,
     ),
     _cxx(
         "l3_whole_program_vtables",
@@ -214,5 +221,6 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"WHOLE_PROGRAM_VTABLES_MODE_CHANGED", "LTO_MODE_CHANGED"}),
         precondition=_clang_with_build_data,
         probe_flags=("-flto=thin", "-fwhole-program-vtables"),
+        carrier=BUILD_RECORD,
     ),
 )
