@@ -262,7 +262,7 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
     cc_inputs = compile_context_header_inputs(req.compile)
     if cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
         return ""
-    cache_headers = [*cache_headers, *cc_inputs[0], *_debug_sidecar(req)]
+    cache_headers = [*cache_headers, *cc_inputs[0], *_debug_inputs(req)]
     cache_includes = [*cache_includes, *cc_inputs[1]]
 
     base = _dump_cache_extra_key(
@@ -319,21 +319,40 @@ def _pe_debug_sidecar(req: DumpCacheRequest) -> list[Path]:
     return [found] if found is not None else []
 
 
-def _debug_sidecar(req: DumpCacheRequest) -> list[Path]:
-    """The debug artifact beside the binary that the dump will read, content-hashed.
+def _mach_o_debug_inputs(req: DumpCacheRequest) -> list[Path]:
+    """The ``<lib>.dSYM`` DWARF file a Mach-O dump reads beside the binary
+    (ADR-021 step 5), as :func:`abicheck.dwarf_unified._adjacent_dsym_binary`
+    resolves it: the same enumeration the dump itself performs."""
+    from ....dwarf_unified import _adjacent_dsym_binary
 
-    A PE dump reads the PDB beside it (:func:`_pe_debug_sidecar`). A Mach-O dump
-    reads the DWARF of the ``<lib>.dSYM`` bundle beside it (ADR-021 step 5). Its
-    key must hash that bundle too: the binary's bytes alone cannot see it, so a
-    dump made before the bundle existed would be served for a dump made after
-    it, and the reverse. Adding, replacing or removing the bundle now misses.
+    bundle = _adjacent_dsym_binary(req.path)
+    return [bundle] if bundle is not None else []
+
+
+#: Each binary format's debug inputs that a default dump reads, enumerated by
+#: the resolver the dump itself uses. A format absent here reads no debug input
+#: beyond its own bytes. ELF has none: a default ELF dump reads its own DWARF
+#: sections only, and build-id, ``.gnu_debuglink`` and debuginfod lookup run
+#: only with ``debug_roots``/``enable_debuginfod``, which are gated out of the
+#: cache (:func:`_dump_is_cacheable`). Explicit ``pdb_path`` and
+#: ``debug_format`` are gated out too.
+_DEBUG_INPUT_RESOLVERS: dict[str, Callable[[DumpCacheRequest], list[Path]]] = {
+    "macho": _mach_o_debug_inputs,
+    "pe": _pe_debug_sidecar,
+}
+
+
+def _debug_inputs(req: DumpCacheRequest) -> list[Path]:
+    """Every debug artifact a cacheable dump of *req* reads beside the binary.
+
+    Each path is content-hashed into the whole-snapshot key like a header, so
+    adding, replacing or removing one misses the cache. Anything a dump can read
+    that is not listed here must be gated out of the cache instead
+    (:func:`_dump_is_cacheable`); the regression table in
+    ``tests/test_dump_cache_debug_inputs.py`` holds the two together.
     """
-    if req.binary_fmt == "macho":
-        from ....dwarf_unified import _adjacent_dsym_binary
-
-        bundle = _adjacent_dsym_binary(req.path)
-        return [bundle] if bundle is not None else []
-    return _pe_debug_sidecar(req)
+    resolver = _DEBUG_INPUT_RESOLVERS.get(req.binary_fmt)
+    return resolver(req) if resolver is not None else []
 
 
 def cached_run_dump(
