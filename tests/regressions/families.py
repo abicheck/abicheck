@@ -819,7 +819,12 @@ for _key, _ids in (
     ),
     (
         "F20",
-        ("observability.declared_value_misses_observed_emission",),
+        (
+            "observability.declared_value_misses_observed_emission",
+            # A declared observability (a carrier, an unlicensed ceiling) must
+            # cover the configuration the edit is observed in.
+            "abiforge.expectation.observed_only_where_recorded",
+        ),
     ),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
