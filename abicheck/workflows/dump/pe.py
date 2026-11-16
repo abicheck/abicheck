@@ -26,9 +26,11 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ...dwarf_advanced import AdvancedDwarfMetadata
 from ...errors import SnapshotError, ValidationError
 from ...extract.surface_fact_producers import export_table_surface_facts
 from ...model import AbiSnapshot, EnumType, Function, RecordType, Visibility
+from ...model.dwarf_facts import AdvancedExtractionStatus
 from ..snapshot_factory import new_snapshot
 from .scoped import try_header_scoped_dump
 
@@ -40,16 +42,24 @@ if TYPE_CHECKING:
 _logger = logging.getLogger("abicheck.service")
 
 
-def pe_pdb_debug_kwargs(path: Path, pdb_path: Path | None = None) -> dict[str, Any]:
+def pe_pdb_debug_kwargs(
+    path: Path, pdb_path: Path | None = None, *, presence_only: bool = False
+) -> dict[str, Any]:
     """The ``dwarf``/``dwarf_advanced`` snapshot inputs a PE's PDB supplies.
 
     The one decision every PE builder makes (header-free and header-built alike):
-    the PDB located for *path* (or the explicit *pdb_path*), or no debug info at
-    all when none is found or it cannot be parsed.
+    the PDB located for *path* (or the explicit *pdb_path*), or no debug info when
+    none is found or it cannot be parsed. Under *presence_only* (symbols-only or
+    presence-only requests) the presence fact is kept and the advanced type pass
+    is not run, as ELF does.
     """
     meta, adv, _failure = extract_pdb_debug_outcome(path, pdb_path)
     if meta is None:
         return {}
+    if presence_only:
+        adv = AdvancedDwarfMetadata(
+            has_dwarf=bool(meta.has_dwarf), extraction=AdvancedExtractionStatus.NOT_RUN
+        )
     return {"dwarf": meta, "dwarf_advanced": adv}
 
 
@@ -109,6 +119,7 @@ def extract_pe(
     lang: str = "c++",
     lang_explicit: bool = False,
     pdb_path: Path | None = None,
+    presence_only: bool = False,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
@@ -146,6 +157,12 @@ def extract_pe(
         )
 
     dwarf_meta, dwarf_adv, pdb_failure = extract_pdb_debug_outcome(path, pdb_path)
+    if presence_only and dwarf_meta is not None:
+        # ELF's contract under symbols-only: presence kept, no type expansion.
+        dwarf_adv = AdvancedDwarfMetadata(
+            has_dwarf=bool(dwarf_meta.has_dwarf),
+            extraction=AdvancedExtractionStatus.NOT_RUN,
+        )
 
     scope_fallback: str | None = None
     if headers:

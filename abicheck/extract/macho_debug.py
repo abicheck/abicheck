@@ -28,6 +28,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from ..dwarf_advanced import AdvancedDwarfMetadata
 from ..errors import SnapshotError
 from ..model.dwarf_facts import AdvancedExtractionStatus
 from .debug_dump import _resolve_debug_metadata
@@ -58,8 +59,9 @@ def macho_dwarf_kwargs(
     ``{}`` when no DWARF was read, so the snapshot is built exactly as it was
     without this path.
     """
-    if debug_kwargs.get("symbols_only") or debug_kwargs.get("debug_presence_only"):
-        return {}
+    presence_only = bool(
+        debug_kwargs.get("symbols_only") or debug_kwargs.get("debug_presence_only")
+    )
     explicit = debug_kwargs.get("debug_info_path")
     try:
         dwarf_meta, dwarf_adv = _resolve_debug_metadata(
@@ -73,6 +75,16 @@ def macho_dwarf_kwargs(
             f"adjacent dSYM of {dylib_path} is unreadable and not used: {exc}"
         )
         return {}
+    if presence_only:
+        # ELF's contract: presence is recorded, type expansion is not run.
+        if not dwarf_meta.has_dwarf:
+            return {}
+        return {
+            "dwarf": dwarf_meta,
+            "dwarf_advanced": AdvancedDwarfMetadata(
+                has_dwarf=True, extraction=AdvancedExtractionStatus.NOT_RUN
+            ),
+        }
     if dwarf_adv.extraction is not AdvancedExtractionStatus.COMPLETED:
         return {}
     return {"dwarf": dwarf_meta, "dwarf_advanced": dwarf_adv}

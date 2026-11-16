@@ -32,10 +32,13 @@ def _patch(monkeypatch, *, status=AdvancedExtractionStatus.COMPLETED, raises=Non
     return seen
 
 
-def test_symbols_only_resolves_nothing(monkeypatch) -> None:
-    seen = _patch(monkeypatch)
-    assert macho_debug.macho_dwarf_kwargs(LIB, None, {"symbols_only": True}) == {}
-    assert seen == {}
+def test_symbols_only_records_presence_and_runs_no_type_expansion(monkeypatch) -> None:
+    # ELF's contract under symbols_only: the presence fact is recorded, and the
+    # advanced (type) pass is not run.
+    _patch(monkeypatch)
+    kw = macho_debug.macho_dwarf_kwargs(LIB, None, {"symbols_only": True})
+    assert kw["dwarf"].has_dwarf is True
+    assert kw["dwarf_advanced"].extraction is AdvancedExtractionStatus.NOT_RUN
 
 
 def test_a_completed_resolution_supplies_dwarf_and_advanced(monkeypatch) -> None:

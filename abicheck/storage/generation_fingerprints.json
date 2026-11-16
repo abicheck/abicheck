@@ -189,7 +189,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_debug.py": "9c87a9508290d4412bbcb7f3a3e400214cb66dba41b70b372ca35a1314f14156",
+      "abicheck/extract/macho_debug.py": "8aaed081cb41a5e85ec0361fc9a6dac90125b7b4546bdec9642abaf2984badec",
       "abicheck/extract/macho_dsym.py": "50d9107d628f7439e430ff84a643c8689d24ea47437c8b2e9e54db19d7955c87",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
@@ -238,14 +238,14 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
       "abicheck/workflows/dump/elf_fallback.py": "31947cad933371a0d3863476ad34e1f9e3e60f8474b2eddbe161fdc1182eb2fa",
-      "abicheck/workflows/dump/formats.py": "e1b8bbde8db7f45dbc9dbd41a329c5da06b9f95f1a0c3e73dc6d7fd0ab89e17e",
+      "abicheck/workflows/dump/formats.py": "79ca61f4805264f6763daf4ff0fbf6783e2e39f961f49b8d05eaf512c95c9ef3",
       "abicheck/workflows/dump/macho.py": "26cd468d5dd4d4192c09cc356932d71f258f325e30c7deecbf28966d320f4812",
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
-      "abicheck/workflows/dump/pe.py": "4e3ce919b83f6329ceaf17b2a6967089f38e59fe93eb500a74619c57e5d6cac8"
+      "abicheck/workflows/dump/pe.py": "b4ebef22a05a1a99207898660cd57f4347006d26f5bb2e13b794f6bc34c15056"
     },
-    "fingerprint": "538a00fc16a010172f4908c407a4ed0e9a9b6cb8036d45c9502d75a4030989d3",
-    "generation": 82,
-    "reason": "the PE snapshot built from headers records the PDB debug information, as the header-free build does"
+    "fingerprint": "8e29fac8ef3704853c050ff0e53b3c76c7c749ce0889560293a43497026f783b",
+    "generation": 83,
+    "reason": "symbols-only and presence-only dumps keep the presence fact and skip the advanced type pass on every format"
   },
   "resolver": {
     "files": {

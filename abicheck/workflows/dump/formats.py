@@ -126,6 +126,7 @@ class PeAdapter:
             lang=r.lang,
             lang_explicit=r.lang_explicit,
             pdb_path=r.pdb_path,
+            presence_only=r.symbols_only or r.debug_presence_only,
             header_backend=r.header_backend,
             compile=r.compile,
             public_headers=r.public_headers,

@@ -95,16 +95,19 @@ def test_cli_routes_agree_on_dwarf_and_exports(
 
 
 @_NO_GCC
-def test_symbols_only_reads_no_dwarf_on_either_route(
+def test_symbols_only_records_presence_and_no_type_expansion_on_either_route(
     library: tuple[Path, Path],
 ) -> None:
-    lib, header = library
-    header_free = extract_macho(lib, "1", symbols_only=True)
-    assert debug_info_evidence(header_free).basic is False
-    dumper_route = dump(lib, [], version="1", symbols_only=True)
-    assert debug_info_evidence(dumper_route).basic is False
-    default = extract_macho(lib, "1")
-    assert debug_info_evidence(default).basic is True
+    # The ELF contract: the presence fact survives, and the advanced (type)
+    # pass does not run, on both routes.
+    lib, _header = library
+    for snapshot in (
+        extract_macho(lib, "1", symbols_only=True),
+        dump(lib, [], version="1", symbols_only=True),
+    ):
+        assert debug_info_evidence(snapshot).basic is True
+        assert snapshot.declarations.debug_advanced.extraction.value == "not_run"
+        assert not snapshot.declarations.types
 
 
 _LINUX_GCC = pytest.mark.skipif(
@@ -180,3 +183,107 @@ def test_pe_cli_routes_agree_on_the_pdb(tmp_path: Path) -> None:
         facts[label] = debug_info_evidence(load_snapshot(out)).basic
     assert facts["no-headers"] is True
     assert facts["no-headers"] == facts["headers"]
+
+
+def _elf_presence(path: Path, **options: bool) -> object:
+    from abicheck.workflows.dump import native
+
+    return native.extract_elf(path, [], [], "1", "c++", **options)
+
+
+def _macho_presence(path: Path, **options: bool) -> object:
+    return extract_macho(path, "1", **options)
+
+
+def _pe_presence(path: Path, **options: bool) -> object:
+    # PE has one presence switch; symbols-only and presence-only both mean it.
+    from abicheck.workflows.dump.pe import extract_pe
+
+    return extract_pe(path, "1", presence_only=True)
+
+
+def _elf_library(tmp_path: Path) -> Path:
+    src = tmp_path / "a.c"
+    src.write_text(
+        "struct P { int x; int y; };\nint area(struct P p) { return p.x * p.y; }\n"
+    )
+    lib = tmp_path / "libk.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", "-o", str(lib), str(src)], check=True
+    )
+    return lib
+
+
+def _pe_library(tmp_path: Path) -> Path:
+    src = tmp_path / "pe.c"
+    src.write_text("__declspec(dllexport) int twice(int x) { return 2 * x; }\n")
+    obj = tmp_path / "pe.obj"
+    subprocess.run(
+        [
+            "clang",
+            "--target=x86_64-pc-windows-msvc",
+            "-g",
+            "-c",
+            str(src),
+            "-o",
+            str(obj),
+        ],
+        check=True,
+    )
+    dll = tmp_path / "pe.dll"
+    subprocess.run(
+        [
+            "lld-link",
+            "/dll",
+            "/noentry",
+            "/debug",
+            "/export:twice",
+            f"/pdb:{tmp_path / 'pe.pdb'}",
+            f"/out:{dll}",
+            str(obj),
+        ],
+        check=True,
+    )
+    return dll
+
+
+@pytest.mark.parametrize("option", ["symbols_only", "debug_presence_only"])
+@pytest.mark.parametrize(
+    ("fmt", "build", "reader"),
+    [
+        pytest.param("elf", None, _elf_presence, marks=_LINUX_GCC, id="elf"),
+        pytest.param("macho", None, _macho_presence, id="macho"),
+        pytest.param("pe", None, _pe_presence, marks=_PE_TOOLS, id="pe"),
+    ],
+)
+def test_presence_options_record_presence_and_skip_type_expansion(
+    tmp_path: Path, fmt: str, build, reader, option: str
+) -> None:
+    # The ELF contract, required of every format under symbols-only and
+    # presence-only: the DWARF/PDB presence fact is recorded, and the advanced
+    # type pass does not run, so no types are expanded.
+    if fmt == "elf":
+        binary = _elf_library(tmp_path)
+    elif fmt == "pe":
+        binary = _pe_library(tmp_path)
+    else:
+        binary = _exporting_dylib(tmp_path / "libk.dylib", UID)
+        elf = tmp_path / "libk.so"
+        src = tmp_path / "a.c"
+        src.write_text("int twice(int x) { return 2 * x; }\n")
+        subprocess.run(
+            ["gcc", "-g", "-shared", "-fPIC", "-o", str(elf), str(src)], check=True
+        )
+        _bundle_beside(
+            binary,
+            _macho(
+                tmp_path / "x.bin",
+                filetype=_MH_DSYM,
+                uuid=UID,
+                sections=_sections_from_elf(elf),
+            ),
+        )
+    snapshot = reader(binary, **{option: True})
+    assert debug_info_evidence(snapshot).basic is True
+    assert snapshot.declarations.debug_advanced.extraction.value == "not_run"
+    assert not snapshot.declarations.types

@@ -772,6 +772,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no type or name spelling changes. A PE snapshot built from headers "
         "records its PDB debug information, as the header-free build does."
     ),
+    83: GenerationSpellingChange(
+        "no type or name spelling changes. Symbols-only and presence-only dumps keep "
+        "the DWARF or PDB presence fact and skip the advanced type pass, on every format."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
