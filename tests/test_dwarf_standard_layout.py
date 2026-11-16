@@ -8,9 +8,7 @@ several shapes per rule, so a rule cannot pass by matching one cell.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,15 +16,11 @@ import pytest
 from elftools.elf.elffile import ELFFile
 
 from abicheck.extract.dwarf_standard_layout import StandardLayoutCollector
+from tests._elf_capability import elf_capability, skip_reason
 
 pytestmark = pytest.mark.integration
 
 #: The oracles read ELF DWARF (readelf, pyelftools) and build ELF shared objects.
-#: Windows and macOS produce PE and Mach-O, which these tests do not cover.
-_LINUX_ELF_ONLY = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="reads ELF DWARF and builds ELF shared objects: Linux only",
-)
 
 _RECORD_TAGS = {"DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"}
 
@@ -133,10 +127,10 @@ _VIRTUAL = (
 
 
 def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
-    """Build the shapes into one executable and return the compiler's answers."""
-    gxx = shutil.which("g++")
-    if gxx is None:
-        pytest.fail("g++ is required by the integration marker")
+    """Build the shapes into one ELF executable and return the compiler's answers."""
+    prefix = elf_capability("gcc", "executable")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "executable"))
     body = "\n".join(decl for _, decl in _SHAPES)
     # A class with an inline virtual function gets a full DWARF definition only
     # once its constructor (and so its vtable) is emitted, so construct each one.
@@ -155,7 +149,7 @@ def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
     )
     exe = tmp / "shapes"
     cmd = [
-        gxx,
+        *prefix,
         "-std=c++17",
         "-g",
         f"-gdwarf-{dwarf}",
@@ -178,7 +172,6 @@ def _compile_and_oracle(tmp: Path, dwarf: int) -> tuple[Path, dict[str, bool]]:
     return exe, oracle
 
 
-@_LINUX_ELF_ONLY
 @pytest.mark.parametrize("dwarf", [4, 5])
 def test_dwarf_standard_layout_matches_the_compiler(tmp_path: Path, dwarf: int) -> None:
     exe, oracle = _compile_and_oracle(tmp_path, dwarf)

@@ -23,21 +23,16 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command
+from tests._elf_capability import elf_capability, skip_reason
 
 pytestmark = pytest.mark.integration
 
 #: The oracles read ELF DWARF (readelf, pyelftools) and build ELF shared objects.
-#: Windows and macOS produce PE and Mach-O, which these tests do not cover.
-_LINUX_ELF_ONLY = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="reads ELF DWARF and builds ELF shared objects: Linux only",
-)
 
 _TAKE = 'extern "C" int take_s(S s) { return 0; }\n'
 _USE = 'extern "C" int use_s(S* s) { return s != nullptr; }\n'
@@ -88,7 +83,9 @@ _CASES: dict[str, tuple[str, str, str, frozenset[str], frozenset[str], str]] = {
 }
 
 
-def _build(tmp: Path, name: str, side: str, decls: str, extra: str) -> Path:
+def _build(
+    prefix: list[str], tmp: Path, name: str, side: str, decls: str, extra: str
+) -> Path:
     src = tmp / f"{name}_{side}.cpp"
     out = tmp / f"lib{name}_{side}.so"
     src.write_text(
@@ -97,7 +94,7 @@ def _build(tmp: Path, name: str, side: str, decls: str, extra: str) -> Path:
     )
     subprocess.run(
         [
-            "g++",
+            *prefix,
             "-std=c++17",
             "-g",
             "-O0",
@@ -124,12 +121,14 @@ def _compare(old: Path, new: Path, report: Path) -> dict:
     return json.loads(report.read_text(encoding="utf-8"))
 
 
-@_LINUX_ELF_ONLY
 @pytest.mark.parametrize("name", list(_CASES))
 def test_record_edit_is_reported_from_dwarf(name: str, tmp_path: Path) -> None:
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
     old_decls, new_decls, extra, expected, absent, verdict = _CASES[name]
-    old = _build(tmp_path, name, "old", old_decls, extra)
-    new = _build(tmp_path, name, "new", new_decls, extra)
+    old = _build(prefix, tmp_path, name, "old", old_decls, extra)
+    new = _build(prefix, tmp_path, name, "new", new_decls, extra)
     report = _compare(old, new, tmp_path / "report.json")
     kinds = {c["kind"] for c in report.get("changes", [])}
     assert expected <= kinds, (sorted(kinds), sorted(expected))

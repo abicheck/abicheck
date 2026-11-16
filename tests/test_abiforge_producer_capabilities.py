@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,14 +25,10 @@ from abiforge.model.producer_capabilities import (
 from abiforge.model.seeds import SEEDS
 from abiforge.operators import OPERATORS
 from abiforge.run.toolchains import toolchain
+from tests._elf_capability import elf_capability, skip_reason
 
 pytestmark = pytest.mark.integration
 
-#: readelf and llvm-dwarfdump read ELF DWARF; PE and Mach-O hosts are not the oracle.
-_LINUX_ELF_ONLY = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="reads ELF DWARF with readelf/llvm-dwarfdump: Linux only",
-)
 
 #: One function per convention, each named after it. ``sysv_abi`` is the x86-64
 #: default, so a producer writes nothing for it; the others are the non-default
@@ -55,7 +50,7 @@ def _source() -> str:
     )
 
 
-def _cc_written_by(compiler: str, family: str, tmp: Path) -> dict[str, bool]:
+def _cc_written_by(prefix: list[str], family: str, tmp: Path) -> dict[str, bool]:
     """For each convention name, whether the compiler's DIE carries the attribute.
 
     The compiler's warnings (gcc ignores ``regcall``/``vectorcall`` on x86-64
@@ -66,7 +61,7 @@ def _cc_written_by(compiler: str, family: str, tmp: Path) -> dict[str, bool]:
     obj = tmp / f"{family}_cc.o"
     src.write_text(_source() + "\n", encoding="utf-8")
     subprocess.run(
-        [compiler, "-g", "-O0", "-c", str(src), "-o", str(obj)],
+        [*prefix, "-g", "-O0", "-c", str(src), "-o", str(obj)],
         check=True,
         capture_output=True,
         text=True,
@@ -108,12 +103,14 @@ def _producers() -> list[tuple[str, str]]:
     return found
 
 
-@_LINUX_ELF_ONLY
-@pytest.mark.parametrize(("family", "compiler"), _producers())
-def test_capability_row_matches_the_compiler(
-    family: str, compiler: str, tmp_path: Path
-) -> None:
-    written = _cc_written_by(compiler, family, tmp_path)
+@pytest.mark.parametrize("family", ["gcc", "clang"])
+def test_capability_row_matches_the_compiler(family: str, tmp_path: Path) -> None:
+    prefix = elf_capability(family, "object")
+    if prefix is None:
+        pytest.skip(skip_reason(family, "object"))
+    if shutil.which("readelf") is None:
+        pytest.skip("readelf is the DWARF oracle here and is not on this host")
+    written = _cc_written_by(prefix, family, tmp_path)
     oracle_writes_non_default = any(written[name] for name in _NON_DEFAULT)
     assert (
         producer_writes(
@@ -141,7 +138,6 @@ def test_minimal_evidence_follows_the_producer(family: str, expected_sets: set) 
     assert set(minimal_evidence_sets(op, base)) == expected_sets
 
 
-@_LINUX_ELF_ONLY
 def test_llvm_convention_codes_name_what_clang_writes(tmp_path: Path) -> None:
     """Each code abicheck names for a clang x86-64 convention is the one clang writes.
 
@@ -151,14 +147,18 @@ def test_llvm_convention_codes_name_what_clang_writes(tmp_path: Path) -> None:
     """
     from abicheck.extract.dwarf_calling_conventions import CC_NAMES as _CC_NAMES
 
-    clang = shutil.which("clang")
-    if clang is None or shutil.which("llvm-dwarfdump") is None:
-        pytest.skip("clang and llvm-dwarfdump are required")
+    prefix = elf_capability("clang", "object")
+    if prefix is None:
+        pytest.skip(skip_reason("clang", "object"))
+    if shutil.which("llvm-dwarfdump") is None:
+        pytest.skip(
+            "llvm-dwarfdump is the symbolic-name oracle and is not on this host"
+        )
     src = tmp_path / "llvm_cc.c"
     obj = tmp_path / "llvm_cc.o"
     src.write_text(_source() + "\n", encoding="utf-8")
     subprocess.run(
-        [clang, "-g", "-O0", "-c", str(src), "-o", str(obj)],
+        [*prefix, "-g", "-O0", "-c", str(src), "-o", str(obj)],
         check=True,
         capture_output=True,
         text=True,
