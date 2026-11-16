@@ -16,7 +16,9 @@ def test_macho_dsym_diagnostic(tmp_path: Path) -> None:
     src = tmp_path / "p.c"
     src.write_text("int foo(int x) { return x + 1; }\n")
     lib = tmp_path / "libp.dylib"
-    subprocess.run(["clang", "-g", "-dynamiclib", "-o", str(lib), str(src)], check=True)
+    obj = tmp_path / "p.o"
+    subprocess.run(["clang", "-g", "-c", "-o", str(obj), str(src)], check=True)
+    subprocess.run(["clang", "-dynamiclib", "-o", str(lib), str(obj)], check=True)
     dsym = Path(f"{lib}.dSYM")
     subprocess.run(["dsymutil", str(lib), "-o", str(dsym)], check=True)
     lines.append(
