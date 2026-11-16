@@ -23,10 +23,16 @@ dispatch; this module only owns the descriptor type.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from ..model.snapshot import AbiSnapshot
+from .extraction_limitations import (
+    add_snapshot_limitation,
+    collecting_extraction_limitations,
+)
 
 
 @dataclass(frozen=True)
@@ -60,3 +66,21 @@ class _FormatHandler:
         ):
             return True
         return False
+
+
+def with_extraction_limitations(builder: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a snapshot *builder* so its non-fatal limitations reach the snapshot.
+
+    Limitations recorded anywhere during the call (for example a refused
+    auto-discovered dSYM) are written to the returned snapshot's provenance.
+    """
+
+    @functools.wraps(builder)
+    def _build(*args: Any, **kwargs: Any) -> Any:
+        with collecting_extraction_limitations() as sink:
+            snap = builder(*args, **kwargs)
+        for reason in dict.fromkeys(sink):
+            add_snapshot_limitation(snap, reason)
+        return snap
+
+    return _build

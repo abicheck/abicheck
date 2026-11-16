@@ -739,6 +739,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "(extract/headers/clang/qualifiers), so Param.is_va_list is set where it was not "
         "before. The recorded parameter fact changes; the spelling does not"
     ),
+    77: GenerationSpellingChange(
+        "dump of a Mach-O library reads DWARF from its .dSYM bundle: an explicit "
+        "debug_info_path bundle, or the bundle beside the library, through the "
+        "pyelftools DWARFInfo path. A bundle whose UUID does not match the library, "
+        "or that is missing, is absent evidence. No stored type or name spelling "
+        "changes: the change is new DWARF evidence for Mach-O libraries that "
+        "previously had none."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
