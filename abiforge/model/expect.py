@@ -40,6 +40,7 @@ from dataclasses import dataclass, field, replace
 
 from abiforge.checkers.abicheck import observable_at
 from abiforge.model.config import Config
+from abiforge.model.producer_capabilities import dwarf_witness_present
 
 # Verdict names in increasing severity (see abicheck.checker_types.Verdict).
 VERDICT_RANK: dict[str, int] = {
@@ -144,7 +145,11 @@ def kind_observable(kind: str, config: Config) -> bool:
             continue
         if cond.language is not None and language not in cond.language:
             continue
-        if any(alt <= atoms for alt in cond.alternatives):
+        if any(
+            alt <= atoms
+            and ("D" not in alt or dwarf_witness_present(kind, config.producer))
+            for alt in cond.alternatives
+        ):
             return True
     return False
 

@@ -344,6 +344,15 @@ class ObservableSpec:
     language: frozenset[str] | None = None
 
 
+def default_verdict(kind_name: str) -> str | None:
+    """The catalog's ``default_verdict`` of ``ChangeKind`` *kind_name*, or None."""
+    from abicheck.model.change_catalog.assembled import REGISTRY
+    from abicheck.model.change_catalog.kinds import ChangeKind
+
+    meta = REGISTRY.get(ChangeKind[kind_name].value)
+    return None if meta is None else meta.default_verdict.name
+
+
 def observable_at(kind_name: str) -> tuple[ObservableSpec, ...] | None:
     """The ``observable_at`` of ``ChangeKind`` *kind_name*, or None when UNCLASSIFIED.
 

@@ -24,6 +24,7 @@ from abiforge.checkers.abicheck import observable_at
 from abiforge.model.config import Config
 from abiforge.model.expect import _LANGUAGE_NAME, ADVISORY_KINDS
 from abiforge.model.opkit import EditOp
+from abiforge.model.producer_capabilities import dwarf_witness_present
 
 #: Evidence atom sets the corpus can build, with the configuration that builds them.
 #: ``{B,H}`` is the stripped headers configuration (the primary cell, plan §2).
@@ -70,7 +71,11 @@ def minimal_evidence_sets(op: EditOp, base: Config) -> frozenset[frozenset[str]]
                 continue
             if cond.language is not None and language not in cond.language:
                 continue
-            alts |= set(cond.alternatives)
+            for alt in cond.alternatives:
+                # A DWARF alternative the producer never writes is no floor for it.
+                if "D" in alt and not dwarf_witness_present(kind, base.producer):
+                    continue
+                alts.add(frozenset(alt))
     return frozenset(a for a in alts if not any(b < a for b in alts))
 
 
