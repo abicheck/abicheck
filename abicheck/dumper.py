@@ -155,6 +155,7 @@ from .workflows.dump.elf_fallback import (
     _build_symbol_only_snapshot as _build_symbol_only_snapshot,
     _try_dwarf_snapshot as _try_dwarf_snapshot,
 )
+from .workflows.dump.pe import pe_pdb_debug_kwargs
 from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)
@@ -848,12 +849,8 @@ def _dump_macho(
             "type information will be missing."
         )
 
-        # `macho_meta.exports` entries are already normalized -- see the
-        # "already normalized" comment a few lines below, at the
-        # `exported_dynamic` build above, for the full account of why a
-        # second leading-underscore strip here corrupts every Itanium-
-        # mangled C++ export (this branch had the identical double-strip
-        # bug the with-headers path below used to have).
+        # `macho_meta.exports` are already normalized: no second underscore strip
+        # (see the note before the header parse below).
         # Split exports into functions (__TEXT) and variables (__DATA)
         # using section classification from Mach-O nlist entries.
         _relevant = [
@@ -1022,6 +1019,7 @@ def _dump_pe(
         _is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
         return new_snapshot(
             library=dll_path.name,
+            **pe_pdb_debug_kwargs(dll_path),
             version=version,
             source_path=str(dll_path.resolve()),
             source_mtime=_dll_mtime,
@@ -1065,6 +1063,7 @@ def _dump_pe(
     return finish_binary_snapshot(
         new_snapshot(
             library=dll_path.name,
+            **pe_pdb_debug_kwargs(dll_path),
             version=version,
             source_path=str(dll_path.resolve()),
             source_mtime=_dll_mtime,

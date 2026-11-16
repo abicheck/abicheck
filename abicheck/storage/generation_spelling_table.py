@@ -757,24 +757,20 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no rewrite applies: a new fact on existing records, not a respelling."
     ),
     79: GenerationSpellingChange(
-        "no type or name spelling changes. A Mach-O dump reads DWARF from the "
-        "adjacent .dSYM bundle (and an explicit debug_info_path bundle), so a "
-        "header-free and a header-built Mach-O snapshot carry the same DWARF "
-        "facts when the bundle is present. The dump cache keys the bundle, so a "
-        "snapshot dumped before the bundle existed is never served afterwards. "
-        "No stored spelling changes: a new fact on Mach-O snapshots."
+        "no type or name spelling changes. A Mach-O dump reads DWARF from its "
+        "adjacent .dSYM bundle, and the dump cache keys the bundle."
     ),
     80: GenerationSpellingChange(
-        "no type or name spelling changes. The DWARF type-alignment walk now stops "
-        "a by-value cycle at any offset, and it returns the same answer for every "
-        "input that terminated before. A malformed cycle that previously never "
-        "terminated now reads as a finite answer."
+        "no type or name spelling changes. The DWARF alignment walk stops a "
+        "by-value cycle at any offset; terminating inputs keep their answer."
     ),
     81: GenerationSpellingChange(
-        "no type or name spelling changes. A header-free Mach-O snapshot reads the "
-        "adjacent dSYM under the same request options as a snapshot built with "
-        "headers, and the dump workflow's snapshot builders are in the extractor "
-        "scope. No stored spelling changes."
+        "no type or name spelling changes. The header-free and header-built "
+        "Mach-O dumps read the same adjacent dSYM under the same options."
+    ),
+    82: GenerationSpellingChange(
+        "no type or name spelling changes. A PE snapshot built from headers "
+        "records its PDB debug information, as the header-free build does."
     ),
 }
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...errors import SnapshotError, ValidationError
 from ...extract.surface_fact_producers import export_table_surface_facts
@@ -38,6 +38,19 @@ if TYPE_CHECKING:
     from ...dwarf_metadata import DwarfMetadata
 
 _logger = logging.getLogger("abicheck.service")
+
+
+def pe_pdb_debug_kwargs(path: Path, pdb_path: Path | None = None) -> dict[str, Any]:
+    """The ``dwarf``/``dwarf_advanced`` snapshot inputs a PE's PDB supplies.
+
+    The one decision every PE builder makes (header-free and header-built alike):
+    the PDB located for *path* (or the explicit *pdb_path*), or no debug info at
+    all when none is found or it cannot be parsed.
+    """
+    meta, adv, _failure = extract_pdb_debug_outcome(path, pdb_path)
+    if meta is None:
+        return {}
+    return {"dwarf": meta, "dwarf_advanced": adv}
 
 
 def extract_pdb_debug(

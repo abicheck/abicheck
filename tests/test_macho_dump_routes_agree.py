@@ -22,7 +22,9 @@ exported symbol set of one library must not depend on the route taken.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -103,3 +105,78 @@ def test_symbols_only_reads_no_dwarf_on_either_route(
     assert debug_info_evidence(dumper_route).basic is False
     default = extract_macho(lib, "1")
     assert debug_info_evidence(default).basic is True
+
+
+_LINUX_GCC = pytest.mark.skipif(
+    shutil.which("gcc") is None or not sys.platform.startswith("linux"),
+    reason="needs a Linux gcc that emits ELF",
+)
+_PE_TOOLS = pytest.mark.skipif(
+    shutil.which("clang") is None or shutil.which("lld-link") is None,
+    reason="needs clang and lld-link to build a PE DLL with a PDB",
+)
+
+
+@_LINUX_GCC
+def test_elf_cli_routes_agree_on_dwarf(tmp_path: Path) -> None:
+    src = tmp_path / "a.c"
+    src.write_text(
+        "struct P { int x; int y; };\nint area(struct P p) { return p.x * p.y; }\n"
+    )
+    lib = tmp_path / "libk.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", "-o", str(lib), str(src)], check=True
+    )
+    header = tmp_path / "a.h"
+    header.write_text("struct P { int x; int y; };\nint area(struct P p);\n")
+    facts = {}
+    for label, extra in (("no-headers", []), ("headers", ["-H", str(header)])):
+        out = tmp_path / f"{label}.json"
+        result = CliRunner().invoke(main, ["dump", str(lib), *extra, "-o", str(out)])
+        assert result.exit_code == 0, result.output
+        facts[label] = debug_info_evidence(load_snapshot(out)).basic
+    assert facts["no-headers"] is True
+    assert facts["no-headers"] == facts["headers"]
+
+
+@_PE_TOOLS
+def test_pe_cli_routes_agree_on_the_pdb(tmp_path: Path) -> None:
+    src = tmp_path / "pe.c"
+    src.write_text("__declspec(dllexport) int twice(int x) { return 2 * x; }\n")
+    obj = tmp_path / "pe.obj"
+    subprocess.run(
+        [
+            "clang",
+            "--target=x86_64-pc-windows-msvc",
+            "-g",
+            "-c",
+            str(src),
+            "-o",
+            str(obj),
+        ],
+        check=True,
+    )
+    dll = tmp_path / "pe.dll"
+    subprocess.run(
+        [
+            "lld-link",
+            "/dll",
+            "/noentry",
+            "/debug",
+            "/export:twice",
+            f"/pdb:{tmp_path / 'pe.pdb'}",
+            f"/out:{dll}",
+            str(obj),
+        ],
+        check=True,
+    )
+    header = tmp_path / "a.h"
+    header.write_text("__declspec(dllexport) int twice(int x);\n")
+    facts = {}
+    for label, extra in (("no-headers", []), ("headers", ["-H", str(header)])):
+        out = tmp_path / f"{label}.json"
+        result = CliRunner().invoke(main, ["dump", str(dll), *extra, "-o", str(out)])
+        assert result.exit_code == 0, result.output
+        facts[label] = debug_info_evidence(load_snapshot(out)).basic
+    assert facts["no-headers"] is True
+    assert facts["no-headers"] == facts["headers"]
