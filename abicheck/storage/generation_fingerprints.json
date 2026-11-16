@@ -64,7 +64,7 @@
       "abicheck/extract/elf_data_initializer.py": "adc4a4dfac61e35334e81e2ac000f173c049fb06bfc87a31ec40b29eb50dd42f",
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
-      "abicheck/extract/elf_pure_virtual_slots.py": "117eda7a5a26efa5b0648874a930dd04b91810df188d9f391c90db4d72361d2c",
+      "abicheck/extract/elf_pure_virtual_slots.py": "c583305033c551840e206f28600400e6e01929e7a383284fb8261a644c76c191",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
       "abicheck/extract/elf_string_table.py": "8348fa460902944419d2f9fe0918d05d232dc0a6ebce3d606e1b1fcb68c69337",
       "abicheck/extract/elf_symbol_classify.py": "da6f10854228923bf08adfce3fa82f5b8ca265e5f834ac2fbdd349243e514728",
@@ -74,12 +74,13 @@
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "fc6262e7eeaf5834cfd354cef88cff7610dcfd30961f42118623635b9c57736d",
-      "abicheck/extract/export_table_read.py": "10943a78cbd4f4aad3dd9ee4f78421bfde9ff785487118915f98da6485ebdfec",
+      "abicheck/extract/export_table_read.py": "60fbf398e40df9cd48a9146ae1b79910cb7da865015a171405a727284848f7bd",
       "abicheck/extract/extraction_limitations.py": "b37f010164cf4e3e10e39a3cbb009e23b521244608da9269771e6c70806b4340",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "96f50bab97c55b180e0a35e91c6e1749b6aa21307da6eabff1836878395c2134",
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "896fe0141ddb2b6e4148ab170a17e690d65b052f4e34e6455a104a3f05524496",
+      "abicheck/extract/header_binary_purity.py": "c737ff3550693314b46b29490c3a4b1b7604131f6ec646ab9c3e582e9f2970b8",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_export_binding.py": "2a0059ee601dea4d1489028fdb438c5cceef5dff9f4e21b497740061e2d7a6fc",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
@@ -236,9 +237,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "3343d3064ba41927cb8499659f677c6c0389d389c9029ed6c9089bc1a621eb9d",
-    "generation": 77,
-    "reason": "Revert of the Mach-O dump wiring on main: the extractor scope returns to the reader-only state; generation 77 is unreleased, so the fingerprint is re-recorded in place"
+    "fingerprint": "eb92c7793cdbb87c2ef966c326f6673519d9e3db743548d3c2d40bb478395de4",
+    "generation": 78,
+    "reason": "unreleased generation 78 corrected in place: qualified-name claim keys, ELF32 word size, destructor spellings and the symmetric pure declaration of a binary-derived side"
   },
   "resolver": {
     "files": {

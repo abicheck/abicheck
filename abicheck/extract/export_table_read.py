@@ -35,6 +35,7 @@ from ..model.export_index import ExportTableState, snapshot_export_table_state
 from ..model.export_read import ExportReadState
 from ..storage import closure_identity
 from ..storage.snapshot_load_normalization import stamp_macho_elf_binding
+from .header_binary_purity import binary_purity_claims, binary_purity_extension
 from .header_export_binding import bind_pe_header_exports
 from .parse_failures import export_table_read_required
 from .surface_fact_producers import reconcile_export_absence, unread_export_fact
@@ -124,6 +125,14 @@ def finish_binary_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
         # Bind before reconciling: a header-backed PE declaration must already
         # carry its DLL's MSVC spelling when its export fact is judged.
         bind_pe_header_exports(snapshot)
+    if snapshot.elf is not None and snapshot.from_headers and snapshot.source_path:
+        # Binary purity evidence (WS-3 A6): the vtable slots prove which
+        # header virtuals are pure, kept so --depth binary can read them.
+        snapshot.binary_purity = binary_purity_extension(
+            binary_purity_claims(
+                Path(snapshot.source_path), snapshot.elf, snapshot.declarations.types
+            )
+        )
     stamp_macho_elf_binding(snapshot)
     reconcile_snapshot_export_absence(snapshot)
     return closure_identity.renumber_anonymous_closure_identities(snapshot)

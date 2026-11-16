@@ -74,7 +74,8 @@ __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 #: model/change_catalog/assembled.py` already uses -- adding a class to a sibling needs no
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
-    ANALYSIS_1_BUG_CLASSES
+    ABIFORGE_BUG_CLASSES
+    + ANALYSIS_1_BUG_CLASSES
     + ANALYSIS_2_BUG_CLASSES
     + CACHING_BUG_CLASSES
     + CLASSIFICATION_BUG_CLASSES
@@ -92,7 +93,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + TOOL_SURFACE_BUG_CLASSES
     + MEASUREMENT_BUG_CLASSES
     + LIFECYCLE_BUG_CLASSES
-    + ABIFORGE_BUG_CLASSES
 )
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}

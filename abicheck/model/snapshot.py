@@ -24,7 +24,7 @@ belongs to ``extract``, persisting one to ``storage``.
 from __future__ import annotations
 
 from dataclasses import InitVar, dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .abi_fundamental import AbiFundamental
 from .declaration_store import (
@@ -190,6 +190,7 @@ class AbiSnapshot:
         default=None, kw_only=True
     )
     cu_stack_protector: dict[str, int] | None = field(default=None, kw_only=True)
+    binary_purity: dict[str, Any] | None = field(default=None, kw_only=True)
     # ADR-015 origin of each typedef key (bare and qualified), classified by apply_provenance from the producer's declaring
     # header; a key absent (or None: never classified, DWARF, an older dump) is UNKNOWN, never private.
     # Extension fact ``abicheck.typedef_origins`` of the declarations section.

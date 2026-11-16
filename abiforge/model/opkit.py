@@ -26,6 +26,7 @@ from abiforge.model.expect import (
     BinaryLicence,
     Expectation,
     Rule,
+    binary_depth_cap,
     observability_floor,
 )
 from abiforge.model.seeds import RoleText, Seed
@@ -182,10 +183,10 @@ class EditOp:
             if rule.when(config):
                 exp = rule.apply(exp)
                 break
-        exp = observability_floor(exp, config, carrier=self.carrier)
+        floored = observability_floor(exp, config, carrier=self.carrier)
         for licence in self.licences:
-            exp = licence.apply(exp, facts or {})
-        return self.with_derived(exp, config.objfmt)
+            floored = licence.apply(floored, facts or {})
+        return self.with_derived(binary_depth_cap(floored, config), config.objfmt)
 
     def with_derived(self, exp: Expectation, objfmt: str = "elf") -> Expectation:
         """*exp* plus the kinds that follow from it rather than from the edit.

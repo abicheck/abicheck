@@ -453,6 +453,13 @@ def build_new(
 REFUSED = "REFUSED"
 
 
+def abicheck_judgement(
+    old: Built, new: Built
+) -> tuple[str, frozenset[str], frozenset[str]]:
+    """(verdict, kinds, disclosed kinds) from the checker adapter."""
+    return checker.judged(old.snapshot, new.snapshot)
+
+
 def abicheck_answer(old: Built, new: Built) -> tuple[str, frozenset[str]]:
     """(verdict name, ChangeKind names) from the checker adapter; ``REFUSED``
     plus the error type when the checker refuses to compare."""
