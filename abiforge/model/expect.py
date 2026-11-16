@@ -216,8 +216,10 @@ def binary_depth_cap(exp: Expectation, config: Config) -> Expectation:
         return exp
     return replace(
         exp,
+        # The ceiling stays API_BREAK: the source break is real, so the edit is
+        # not declared harmless (``benign``); the cap only lowers the floor.
         verdict_min="COMPATIBLE_WITH_RISK",
-        verdict_max="COMPATIBLE_WITH_RISK",
+        verdict_max="API_BREAK",
         note=(
             f"{exp.note} [ADR-084: {config.evidence_label} evidence without headers "
             "or sources cannot back an API_BREAK for binary-gated kinds]"

@@ -79,7 +79,10 @@ def test_the_oracle_rows_are_the_policy_gated_set() -> None:
 @pytest.mark.parametrize("op_name", ["field_became_const", "field_access_narrowed"])
 def test_the_field_cells_expect_the_capped_verdict_at_dwarf(op_name: str) -> None:
     exp = OP_BY_NAME[op_name].expect(_cfg("dwarf", False))
-    assert exp.verdict_min == exp.verdict_max == "COMPATIBLE_WITH_RISK"
+    # The floor is capped; the ceiling stays API_BREAK, so a real source break is
+    # not contradicted by the expectation.
+    assert exp.verdict_min == "COMPATIBLE_WITH_RISK"
+    assert exp.verdict_max == "API_BREAK"
 
 
 def test_a_header_stripped_cell_keeps_api_break() -> None:
