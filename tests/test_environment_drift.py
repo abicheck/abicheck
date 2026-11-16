@@ -139,17 +139,6 @@ class TestRuntimeFloorRaised:
         changes = _diff_elf_symbol_versioning(self._old(), new)
         assert ChangeKind.RUNTIME_FLOOR_RAISED not in _kinds(changes)
 
-    def test_no_floor_finding_for_entirely_new_lib(self) -> None:
-        new = _elf(
-            needed=["libc.so.6", "libm.so.6"],
-            versions_required={
-                "libc.so.6": ["GLIBC_2.17", "GLIBC_2.28"],
-                "libm.so.6": ["GLIBC_2.35"],
-            },
-        )
-        changes = _diff_elf_symbol_versioning(self._old(), new)
-        assert ChangeKind.RUNTIME_FLOOR_RAISED not in _kinds(changes)
-
     def test_prefixes_tracked_independently(self) -> None:
         old = _elf(
             needed=["libstdc++.so.6"],

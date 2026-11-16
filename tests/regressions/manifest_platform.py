@@ -25,6 +25,21 @@ from .bug_class_schema import BugClass
 
 PLATFORM_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="platform.version_floor_judged_from_nothing_not_baseline",
+        invariant=(
+            "A newly linked provider's GLIBC_ version node is a deployment floor "
+            "only above its architecture's baseline (the oldest node every glibc "
+            "on that architecture provides). A node at or below the baseline "
+            "raises no floor, and a floor that rises is measured from the "
+            "baseline, not from no requirement. Judging a new provider's "
+            "GLIBC_2.2.5 against nothing read the x86-64 baseline as a new floor "
+            "(catalog case138_needed_added: COMPATIBLE became COMPATIBLE_WITH_RISK)."
+        ),
+        fixed_by=(2097,),
+        seed_tests=("tests/test_version_floor_new_provider.py",),
+        axes={"arch": ("EM_X86_64", "EM_386", "unmeasured")},
+    ),
+    BugClass(
         id="macho.layout_detector_blind",
         invariant=(
             "A layout detector runs on every object format whose facts it can "
