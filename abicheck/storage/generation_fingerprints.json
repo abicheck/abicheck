@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "1df6c8929891e29f645208de7ebe4bf6584b2e1743f6e11fdbb660b067c69227",
+      "abicheck/dumper.py": "e9028f8c3733dc8e05153f6dbdb162733b91a8ac507aa9d2e3c37e1c6f077e94",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
       "abicheck/dwarf_advanced.py": "2addcbd63e9263e9f89b9dc7bc252baa63c5dad332d8560cf690fb2437bf6c08",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
@@ -187,7 +187,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_debug.py": "0130a83e629b59aabd7054133d6aa407a0f26683d9bdebcaf419cd8ac938fd60",
+      "abicheck/extract/macho_debug.py": "53b90872195f350d4d1e4f21d31f2d6681d3235eef36c409a69ba2dd56f8abde",
       "abicheck/extract/macho_dsym.py": "50d9107d628f7439e430ff84a643c8689d24ea47437c8b2e9e54db19d7955c87",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
@@ -236,9 +236,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "2d4b63d428fc91b2173002cf1ecb3b766bf719e4cbab5a7359ccb9859faa71a6",
+    "fingerprint": "3343d3064ba41927cb8499659f677c6c0389d389c9029ed6c9089bc1a621eb9d",
     "generation": 77,
-    "reason": "in-place re-record of generation 77, introduced by #2089 (Mach-O dSYM DWARF): its later commits (macho_debug wiring, castxml_fallback move) landed after the fingerprint was recorded; generation 77 is unreleased, so no bump"
+    "reason": "Revert of the Mach-O dump wiring on main: the extractor scope returns to the reader-only state; generation 77 is unreleased, so the fingerprint is re-recorded in place"
   },
   "resolver": {
     "files": {
