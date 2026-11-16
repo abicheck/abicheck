@@ -346,7 +346,10 @@ def test_cxx_signature_edits_are_visible_from_symbols_alone() -> None:
     cxx_bin = _cfg("c++", evidence="binary")
     c_bin = _cfg("c", evidence="binary")
     e = OP_BY_NAME["func_param_append"].expect(cxx_bin)
-    assert e.observable and e.any_of and "FUNC_REMOVED" in e.any_of[0]
+    # At binary evidence only the ELF-only twin is observable (FUNC_REMOVED needs
+    # headers or DWARF), so the floor is the twin, not the header kind.
+    assert e.observable and e.any_of and "FUNC_REMOVED_ELF_ONLY" in e.any_of[0]
+    assert "FUNC_REMOVED" not in e.any_of[0]
     assert not OP_BY_NAME["func_param_append"].expect(c_bin).observable
 
 

@@ -54,6 +54,5 @@ DEPENDENCY_OPERATORS: tuple[EditOp, ...] = (
         verdict_min="BREAKING",
         precondition=needs_follow_deps,
         touches=("elf.extra",),
-        min_evidence="binary",
     ),
 )
