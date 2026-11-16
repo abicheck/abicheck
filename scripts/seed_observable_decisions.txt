@@ -6,7 +6,7 @@ func_language_linkage_changed  BH  # compare/function_signature.py:487: declarat
 func_likely_renamed  B  # diff_symbols_renames.py:535-542: name-fingerprint candidates
 func_removed  DH:ELFPE+B:MACHO  # diff_symbols.py:249: binary-only snapshots (ELF, PE, Mach-O: dumper.py:966, 1115) emit FUNC_REMOVED_ELF_ONLY for export-table-only records; FUNC_REMOVED needs DWARF or headers
 func_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols.py:249)
-func_visibility_changed  BH:ELFPE+B:MACHO  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
+func_visibility_changed  B:ELF+BH:PE+B:MACHO  # diff_symbols.py:234: emitted from the declaration-aware f_hidden branch
 var_added  B  # diff_symbols_variables.py:210: a binary-only NEW reports an added variable export from the export table alone (VAR_ADDED); the ELF-only variant is undeclared_exports.py:141-197
 var_added_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (undeclared_exports.py:197)
 var_export_added  U  # export_transition.py:250: same path as func_export_added; not established from B alone

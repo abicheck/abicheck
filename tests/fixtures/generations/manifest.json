@@ -402,6 +402,12 @@
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen78/corpus.json.gz"
     },
+    "79": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "29873f4921b9",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen79/corpus.json.gz"
+    },
     "9": {
       "castxml": "castxml version 0.7.0",
       "commit": "a614517e8979",
@@ -419,12 +425,7 @@
     "69": "generations 69 (member-function final, gcc plugin function template specializations) and 70 (castxml global-variable guess) land together in PR #2063, so no main commit ever ran generation 69",
     "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
     "70": "generation 70 changed only castxml's guess for a global-namespace variable's mangling (the Itanium ABI does not mangle global variables); retired by generation 71 without a separate frozen snapshot, as generation 69 was",
-    "79": "generation 79 was a branch-local intermediate; it never merged to main",
-    "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
-    "80": "generation 80 was a provisional branch-local bump; it never merged to main",
-    "81": "generation 81 was a provisional branch-local bump; it never merged to main",
-    "82": "generation 82 was a provisional branch-local bump; it never merged to main",
-    "83": "Provisional branch-local generation superseded by 84 on this PR; dropped with the final renumber after #2102 lands"
+    "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them"
   },
   "sources_sha256": "e11d1372d25b44c7369c13f322830386c43e524c696f089c932f146f082d6514"
 }

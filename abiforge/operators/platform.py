@@ -14,6 +14,7 @@ from typing import Any
 from abiforge.model.expect import Rule
 from abiforge.model.opkit import (
     _REMOVED,
+    BUILD_RECORD,
     Edit,
     EditOp,
     Roles,
@@ -171,6 +172,7 @@ _DYNAMIC = (
         _cflags("-fstack-protector-strong -mavx2"),
         "code built for AVX2 may execute instructions an older x86 CPU lacks: "
         "the library can fault with SIGILL there",
+        carrier=BUILD_RECORD,
         expected=frozenset({"TARGET_ISA_CHANGED"}),
         rules=(
             Rule(
@@ -195,6 +197,7 @@ _DYNAMIC = (
         _cflags("-fstack-protector-strong -g0"),
         "the new build ships no DWARF: consumers are unaffected, but every "
         "type-level comparison of the release loses its evidence",
+        carrier=BUILD_RECORD,
         expected=frozenset({"DWARF_INFO_MISSING"}),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE_WITH_RISK",
@@ -208,6 +211,7 @@ _TOOLCHAIN = (
         _cflags("-fstack-protector-strong -mveclibabi=svml"),
         "vectorized math calls now target Intel SVML's entry points: a "
         "process without that library cannot resolve them",
+        carrier=BUILD_RECORD,
         expected=frozenset({"VECTOR_ABI_CHANGED"}),
         rules=(
             Rule(
@@ -233,6 +237,7 @@ _TOOLCHAIN = (
         "wchar_t shrinks to 16 bits: any wchar_t that crosses the boundary "
         "changes size (this library passes none, but the model is now foreign "
         "to the C library's)",
+        carrier=BUILD_RECORD,
         expected=frozenset({"WCHAR_MODEL_CHANGED"}),
         rules=(
             Rule(
@@ -686,6 +691,7 @@ _ALT = (
         precondition=_x86,
         host_arch=_X86_HOSTS,
         probe_flags=("-mlong-double-64",),
+        carrier=BUILD_RECORD,
     ),
     _alt(
         "integer_typedef_widened",

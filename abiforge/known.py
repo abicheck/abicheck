@@ -22,9 +22,6 @@ _CLASSES = frozenset({"cxx_classes"})
 GAP_CLANG_CHAR = (
     "A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth"
 )
-GAP_CASTXML_VAR_ALIGN = (
-    "castxml headers read a variable's alignment specifier only as a lower bound"
-)
 GAP_CASTXML_CONTRACT = "castxml records no GNU contract attribute on a function"
 GAP_VA_LIST = "Only the clang header backend marks a `va_list` parameter"
 GAP_GCC_THROW = (
@@ -35,9 +32,6 @@ GAP_O2_STD = (
     "or a break on MinGW"
 )
 GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
-GAP_CASTXML_ALIGN = (
-    "castxml headers read a variable's alignment specifier only as a lower bound"
-)
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
@@ -211,20 +205,6 @@ _PLATFORM: tuple[Known, ...] = (
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
     Known(
-        "object_alignment_reduced",
-        _ELF,
-        "wrong-verdict",
-        _hb("castxml"),
-        "castxml cannot read g_al's old aligned(16), so the address-derived "
-        "reduction is demoted to COMPATIBLE",
-        GAP_CASTXML_ALIGN,
-        # The same unread aligned(16): VAR_ALIGNMENT_CHANGED is missing too.
-        issues=frozenset(
-            {"weaker-than:COMPATIBLE_WITH_RISK", "none-of:VAR_ALIGNMENT_CHANGED"}
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
         "std_string_abi_flipped",
         _XA,
         "wrong-kind",
@@ -301,32 +281,6 @@ KNOWN: tuple[Known, ...] = (
     ),
     Known(
         "rebuild_optimized",
-        frozenset({"cxx_stdlib"}),
-        "false-positive",
-        # ELF: the weak std:: copies and covered imports are demoted (ADR-089
-        # A7, #1960); with DWARF every unit's DW_AT_producer shows
-        # -fstack-protector-strong still on, so the lost canary is demoted too.
-        # Binary only, nothing records the flag. clang on ELF reads COMPATIBLE.
-        # Under the pre-C++11 string ABI (-D_GLIBCXX_USE_CXX11_ABI=0) the -O0
-        # build has no protected frame either, so no canary is lost and the
-        # rebuild reads COMPATIBLE: correct, not part of this gap.
-        # From C++20 the old-ABI -O0 build guards a frame too (the nightly
-        # drew c++20 + cxx11abi0 once the cxx_alt seed joined the array).
-        lambda c: (
-            c.objfmt == "elf"
-            and c.producer.family == "gcc"
-            and c.evidence == "binary"
-            and (c.flags.cxx11_abi != 0 or c.std.year >= 2020)
-        ),
-        "-O2 leaves no frame that needs a stack canary; without debug info no unit "
-        "records -fstack-protector, so stack_canary_removed keeps its RISK (marked as "
-        "weaker evidence); every consumer still runs",
-        GAP_O2_STD,
-        issues=frozenset({"stronger-than:COMPATIBLE"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
-    ),
-    Known(
-        "rebuild_optimized",
         frozenset({"c_core"}),
         "false-positive",
         # i386 -O0 guards fill_rec's frame and calls __stack_chk_fail; -O2 needs no
@@ -360,26 +314,6 @@ KNOWN: tuple[Known, ...] = (
         GAP_O2_STD,
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"BREAKING", "COMPATIBLE_WITH_RISK"}),
-    ),
-    Known(
-        "var_alignment_raised",
-        frozenset({"c_elf"}),
-        "wrong-verdict",
-        # castxml 0.7 writes no align on a <Variable>: both sides record int's
-        # natural alignment as a lower bound, and the raised specifier leaves
-        # the address bounds overlapping. DWARF and the clang/gcc backends read it.
-        _hb("castxml"),
-        "castxml records no alignment specifier on a variable, so a raised "
-        "aligned(16) -> aligned(64) reads NO_CHANGE at castxml headers depth",
-        GAP_CASTXML_VAR_ALIGN,
-        issues=frozenset(
-            {
-                "missing:SONAME_BUMP_RECOMMENDED",
-                "missing:VAR_ALIGNMENT_CHANGED",
-                "weaker-than:BREAKING",
-            }
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
     ),
     *_BACKEND_GAPS,
     *_PLATFORM,

@@ -994,7 +994,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "recorded PARTIAL and never vetoes an address reduction: castxml, "
             "which writes no align on a Variable or Typedef, records the "
             "type's natural alignment as a lower bound wherever an alignment "
-            "specifier can apply; a DWARF 5 variable without DW_AT_alignment "
+            "specifier can apply, unless the clang join read the declaration's own "
+            "AlignedAttr (then the spelled value is declared); a DWARF 5 variable without DW_AT_alignment "
             "records its type's default (DWARF states it), as a lower bound "
             "on a GCC declaration/definition split; DWARF 4 and records stay "
             "unknown. A declared alignment change is then reported at every "
@@ -1009,6 +1010,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_variable_declared_alignment_integration.py",
             "tests/test_address_alignment_bound.py",
             "tests/test_rebuild_toolchain_drift_integration.py",
+            "tests/test_castxml_variable_alignment_join.py",
         ),
         axes={
             "compiler": ("gcc", "clang"),

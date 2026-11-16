@@ -41,8 +41,9 @@ from abiforge.model.expect import (
 from abiforge.model.seeds import Seed
 from abiforge.model.space import seed_constructs, seed_flags_conflict
 from abiforge.operators import EditOp
+from abiforge.run.binfacts import binary_facts
 from abiforge.run.exec import Blocked, ExecutionOracle
-from abiforge.run.harness import BaselineCache, NewBuildCache, abicheck_answer
+from abiforge.run.harness import BaselineCache, NewBuildCache, abicheck_judgement
 from abiforge.run.toolchains import (
     capability_gap,
     consumer_unavailable,
@@ -281,8 +282,12 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
     old = ctx.cache.get(seed, config)
     new = ctx.new_cache.get(op, seed, config)
     # The verdict depends on the library pair alone, never on the consumers.
-    verdict, kinds = abicheck_answer(old, new)
-    exp = op.expect(config)
+    verdict, kinds, disclosed = abicheck_judgement(old, new)
+    # The licences read the built pair with binutils, never abicheck's answer.
+    # Read the pair only when the operator licenses something: most cells never
+    # need binutils, and the reader is ELF-or-Mach-O (see run/binfacts.py).
+    facts = binary_facts(old.so, new.so) if op.licences else {}
+    exp = op.expect(config, facts)
     if ctx.execute:
         truth = ctx.oracle.truth(
             seed,
@@ -305,7 +310,14 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
         kinds=kinds,
         expectation=exp,
         exec_truth=truth,
-        reconciled=reconcile(truth, exp, verdict, kinds),
+        reconciled=reconcile(
+            truth,
+            exp,
+            verdict,
+            kinds,
+            disclosed=disclosed,
+            evidence=config.evidence_set.atoms,
+        ),
     )
 
 

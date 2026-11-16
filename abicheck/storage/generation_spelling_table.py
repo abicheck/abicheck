@@ -757,22 +757,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no rewrite applies: a new fact on existing records, not a respelling."
     ),
     79: GenerationSpellingChange(
-        "no type or name spelling changes. A Mach-O dump reads DWARF from its "
-        "adjacent .dSYM bundle, and the dump cache keys the bundle."
+        "WS-2 PR A2.1 (fix/ws2-a2-1-var-alignment-raised): no stored type spelling "
+        "changes. The castxml header path joins each variable's declared alignment "
+        "specifier from the clang AST (clang/var_alignment, castxml/clang_semantics_join): "
+        "a variable whose declaration spells aligned(N) or alignas(N) records that "
+        "value as PRESENT where it was a natural-alignment lower bound before. The "
+        "recorded alignment fact changes; the variable's name and type spelling do not"
     ),
     80: GenerationSpellingChange(
-        "no type or name spelling changes. The DWARF alignment walk stops a by-value cycle at any offset; terminating inputs keep their answer."
-    ),
-    81: GenerationSpellingChange(
-        "no type or name spelling changes. The header-free and header-built Mach-O dumps read the same adjacent dSYM under the same options."
-    ),
-    82: GenerationSpellingChange(
-        "no type or name spelling changes. A PE snapshot built from headers records its PDB debug information, as the header-free build does."
-    ),
-    83: GenerationSpellingChange(
-        "no type or name spelling changes. Symbols-only and presence-only dumps keep the DWARF or PDB presence fact and skip the advanced type pass, on every format."
-    ),
-    84: GenerationSpellingChange(
         "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable adjacent dSYM stores a fixed limitation and is not cached."
     ),
 }

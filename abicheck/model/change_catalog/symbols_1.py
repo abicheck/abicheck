@@ -72,6 +72,8 @@ _OBS_H_OR_D = observable(
 _MACHO = ObservabilityCondition(platform=frozenset({Platform.MACHO}))
 _ELF_PE = ObservabilityCondition(platform=frozenset({Platform.ELF, Platform.PE}))
 _OBS_B_MACHO = observable(("B",), condition=_MACHO)
+_ELF = ObservabilityCondition(platform=frozenset({Platform.ELF}))
+_PE = ObservabilityCondition(platform=frozenset({Platform.PE}))
 #: A C++ parameter change alters the mangled name, so the export table alone
 #: carries it; a C parameter change leaves the symbol unchanged and needs
 #: DWARF or the header (test_pr_tier_cell[func_param_type_change-*]).
@@ -616,10 +618,12 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
         observable_at=(
+            # ELF carries the visibility bits in st_other of the symbol table.
+            observable(("B",), condition=_ELF),
             observable(
                 ("B", "H"),
                 rationale="declared in the public header and present in the export table",
-                condition=_ELF_PE,
+                condition=_PE,
             ),
             _OBS_B_MACHO,
         ),

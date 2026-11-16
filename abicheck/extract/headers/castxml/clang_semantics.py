@@ -36,7 +36,13 @@ SEMANTICS_ATTR = "abicheck-clang-semantics"
 class CastxmlClangSemantics:
     """The joined facts as the castxml parser reads them."""
 
-    __slots__ = ("concepts", "mention_files", "noexcept", "template_defaults")
+    __slots__ = (
+        "concepts",
+        "mention_files",
+        "noexcept",
+        "template_defaults",
+        "variable_alignment",
+    )
 
     def __init__(
         self,
@@ -44,11 +50,24 @@ class CastxmlClangSemantics:
         mention_files: frozenset[str] = frozenset(),
         concepts: list[tuple[str, str, str]] | None = None,
         template_defaults: list[TemplateDefaultEntry] | None = None,
+        variable_alignment: dict[str, int] | None = None,
     ) -> None:
         self.noexcept = noexcept
         self.mention_files = mention_files
         self.concepts = concepts
         self.template_defaults = template_defaults
+        self.variable_alignment = variable_alignment
+
+    def declared_variable_alignment(self, names: tuple[str, ...]) -> int | None:
+        """The alignment (bits) a variable's declaration spells, read from the
+        clang AST by its mangled name then its name; ``None`` when the join has
+        no such declaration (castxml's natural value then stands)."""
+        if self.variable_alignment is None:
+            return None
+        for name in names:
+            if name and name in self.variable_alignment:
+                return self.variable_alignment[name]
+        return None
 
     def function_noexcept(
         self,
@@ -86,6 +105,7 @@ def load_clang_semantics(root: Element) -> CastxmlClangSemantics:
     loaded = json.loads(raw)
     noexcept = loaded.get("noexcept")
     concepts = loaded.get("concepts")
+    alignment = loaded.get("variable_alignment")
     return CastxmlClangSemantics(
         noexcept=None
         if noexcept is None
@@ -97,6 +117,9 @@ def load_clang_semantics(root: Element) -> CastxmlClangSemantics:
         template_defaults=valid_template_default_entries(
             loaded.get("template_defaults")
         ),
+        variable_alignment=None
+        if alignment is None
+        else {str(k): int(v) for k, v in alignment.items()},
     )
 
 

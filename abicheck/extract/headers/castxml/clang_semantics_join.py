@@ -31,6 +31,12 @@ what it read on the castxml root as one JSON attribute (:data:`SEMANTICS_ATTR`):
   (``clang/template_default_entries.template_default_entries``), or ``null``.
   castxml 0.7 emits no element for an uninstantiated template, so this is the
   only source of the fact on a castxml run; filtered by the public set too.
+* ``variable_alignment``: ``{mangled name: bits}`` of each variable whose
+  declaration spells an alignment specifier (``aligned``/``alignas``), read
+  from its ``AlignedAttr`` (``clang/var_alignment``). castxml writes no
+  specifier on a ``Variable``, so this is the only source of a declared
+  variable alignment on a castxml run. Parsed whenever a header's preprocessed
+  code spells one, C or C++.
 
 The clang result is a sidecar in the AST cache under the castxml cache key,
 like :mod:`.vector_join`; a missing or malformed sidecar is a miss. A clang
@@ -63,8 +69,10 @@ from ..clang.template_default_entries import (
     TemplateDefaultEntry,
     template_default_entries,
 )
+from ..clang.var_alignment import clang_variable_alignment_map
 from ..concept_scan import concept_header_scan
 from .clang_semantics import SEMANTICS_ATTR, valid_template_default_entries
+from .preprocessed_text import PreprocessedText, file_key, read_preprocessed_text
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +153,41 @@ def _mention_files(root: Element, headers: Iterable[Path]) -> frozenset[str]:
         if local and mentions_exception_spec(real):
             out.add(name)
     return frozenset(out)
+
+
+def _table_spells_alignment(table: PreprocessedText, name: str, real: str) -> bool:
+    """Whether the preprocessed table spells an alignment in castxml's file *name*.
+
+    The table keys the path as the preprocessing run named it; castxml reports
+    the resolved path (macOS /var -> /private/var, any symlinked directory). An
+    entry matches when it is *name* or resolves to *real*. An unrecorded table
+    counts as spelling one (``spells_alignment``).
+    """
+    if table.spells_alignment(name):
+        return True
+    if table.alignment_files is None:
+        return False
+    target = file_key(real)
+    return any(file_key(os.path.realpath(f)) == target for f in table.alignment_files)
+
+
+def _spells_alignment_locally(
+    root: Element, headers: Iterable[Path], table: PreprocessedText
+) -> bool:
+    """Whether a file local to *headers* spells an alignment specifier in its
+    preprocessed code. A system header a dependency pulls in (its own
+    ``alignas``/``aligned``) is not the library's surface and never triggers the
+    clang parse, which would otherwise run on every castxml dump."""
+    files, dirs = _local_roots(headers)
+    for el in root.iter("File"):
+        name = el.get("name") or ""
+        if not name or name.startswith("<"):
+            continue
+        real = os.path.realpath(name)
+        local = real in files or any(real.startswith(d) for d in dirs)
+        if local and _table_spells_alignment(table, name, real):
+            return True
+    return False
 
 
 def special_member_key(tag: str, class_name: str, params: Iterable[object]) -> str:
@@ -262,7 +305,10 @@ def _encode_template_defaults(
 
 
 _Sidecar = tuple[
-    dict[str, bool], list[tuple[str, str, str]], list[TemplateDefaultEntry]
+    dict[str, bool],
+    list[tuple[str, str, str]],
+    list[TemplateDefaultEntry],
+    dict[str, int],
 ]
 
 
@@ -274,6 +320,13 @@ def _valid_sidecar(payload: Any) -> _Sidecar | None:
     template_defaults = valid_template_default_entries(payload.get("template_defaults"))
     if template_defaults is None:
         return None
+    # Likewise one written before the variable alignments were joined.
+    alignment = payload.get("variable_alignment")
+    if not isinstance(alignment, dict) or not all(
+        isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)
+        for k, v in alignment.items()
+    ):
+        return None
     if not isinstance(noexcept, dict) or not all(
         isinstance(k, str) and isinstance(v, bool) for k, v in noexcept.items()
     ):
@@ -283,7 +336,12 @@ def _valid_sidecar(payload: Any) -> _Sidecar | None:
         for e in concepts
     ):
         return None
-    return noexcept, [(e[0], e[1], e[2]) for e in concepts], template_defaults
+    return (
+        noexcept,
+        [(e[0], e[1], e[2]) for e in concepts],
+        template_defaults,
+        alignment,
+    )
 
 
 def _with_semantics(
@@ -292,6 +350,7 @@ def _with_semantics(
     mention_files: frozenset[str],
     concepts: list[tuple[str, str, str]] | None,
     template_defaults: list[TemplateDefaultEntry] | None,
+    variable_alignment: dict[str, int] | None,
 ) -> Element:
     carried = Element(root.tag, dict(root.attrib))
     carried.set(
@@ -302,6 +361,7 @@ def _with_semantics(
                 "mention_files": sorted(mention_files),
                 "concepts": None if concepts is None else [list(e) for e in concepts],
                 "template_defaults": _encode_template_defaults(template_defaults),
+                "variable_alignment": variable_alignment,
             },
             sort_keys=True,
         ),
@@ -364,14 +424,19 @@ def join_clang_semantics(
     specification, a concept or a ``requires``-clause, is returned untouched
     and costs nothing: castxml's values stand.
     """
-    if lang == "c" or not _is_cxx_root(root):
-        return root
-    mention_files = _mention_files(root, headers)
+    cxx = lang != "c" and _is_cxx_root(root)
+    # A variable's alignment specifier is C's too: the parse runs for any root
+    # whose preprocessed code spells one (an absent table cannot be ruled out).
+    spelled = read_preprocessed_text(root)
+    wants_alignment = spelled is not None and _spells_alignment_locally(
+        root, headers, spelled
+    )
+    mention_files = _mention_files(root, headers) if cxx else frozenset()
     # A template with no constraint is recorded too (the empty set), so the
     # baseline of a requires-clause added later is modelled: any template
     # (abbreviated ones included) counts, not only a constrained one.
-    wants_concepts = concept_header_scan(headers) or _spells_template(headers)
-    if not mention_files and not wants_concepts:
+    wants_concepts = cxx and (concept_header_scan(headers) or _spells_template(headers))
+    if not mention_files and not wants_concepts and not wants_alignment:
         return root
     store = ast_cache_store(key, SEMANTICS_SIDECAR_BACKEND)
     entry = store.path(key)
@@ -382,9 +447,9 @@ def join_clang_semantics(
     )
     if cached is not None:
         cache_dep_manifest.note(cache_dep_manifest.recall(str(entry), entry))
-        noexcept, concepts, template_defaults = cached
+        noexcept, concepts, template_defaults, alignment = cached
         return _with_semantics(
-            root, noexcept, mention_files, concepts, template_defaults
+            root, noexcept, mention_files, concepts, template_defaults, alignment
         )
     try:
         with cache_dep_manifest.recording() as clang_parse:
@@ -420,10 +485,11 @@ def join_clang_semantics(
             exc,
         )
         cache_dep_manifest.note_uncacheable()
-        return _with_semantics(root, None, mention_files, None, None)
+        return _with_semantics(root, None, mention_files, None, None, None)
     noexcept = clang_noexcept_map(clang_root)
     concepts = concept_constraint_entries(clang_root)
     template_defaults = template_default_entries(clang_root)
+    alignment = clang_variable_alignment_map(clang_root)
     deps = clang_parse.manifest()
     if deps is not None and cache_dep_manifest.write_sidecar(entry, deps):
         store.publish(
@@ -432,7 +498,10 @@ def join_clang_semantics(
                 "noexcept": noexcept,
                 "concepts": [list(e) for e in concepts],
                 "template_defaults": _encode_template_defaults(template_defaults),
+                "variable_alignment": alignment,
             },
             (),
         )
-    return _with_semantics(root, noexcept, mention_files, concepts, template_defaults)
+    return _with_semantics(
+        root, noexcept, mention_files, concepts, template_defaults, alignment
+    )
