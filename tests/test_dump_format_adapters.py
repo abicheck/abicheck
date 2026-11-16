@@ -209,3 +209,31 @@ def test_real_adapter_forwards_every_extractor_parameter(
             # field, so it is checked against that derivation explicitly.
             assert param in _DERIVED_PARAMS, f"undeclared derived parameter {param!r}"
             assert received[param] is _DERIVED_PARAMS[param](values), param
+
+
+@pytest.mark.parametrize(
+    ("symbols_only", "debug_presence_only"),
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+def test_pe_presence_is_symbols_only_or_debug_presence_only(
+    monkeypatch: pytest.MonkeyPatch, symbols_only: bool, debug_presence_only: bool
+) -> None:
+    """The PE adapter derives one presence switch from two request flags. Each
+    input must matter: checked over all four Boolean combinations, so an adapter
+    that drops either flag fails here."""
+    values: dict[str, Any] = {
+        f: object() for f in NativeExtractRequest.__dataclass_fields__
+    }
+    values["symbols_only"] = symbols_only
+    values["debug_presence_only"] = debug_presence_only
+    request = NativeExtractRequest(**values)
+    original = inspect.signature(pe.extract_pe)  # before the patch replaces it
+    received: dict[str, Any] = {}
+
+    def capture(*args: Any, **kwargs: Any) -> AbiSnapshot:
+        received.update(original.bind(*args, **kwargs).arguments)
+        return AbiSnapshot(library="l", version="1")
+
+    monkeypatch.setattr(pe, "extract_pe", capture)
+    FORMAT_ADAPTERS["pe"].extract(request)
+    assert received["presence_only"] is (symbols_only or debug_presence_only)
