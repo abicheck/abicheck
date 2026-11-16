@@ -20,7 +20,12 @@ import pytest
 from abiforge.model.config import default_config
 from abiforge.model.expect import BinaryLicence, Expectation
 from abiforge.operators import OPERATORS
-from abiforge.run.binfacts import STACK_CHK_FAIL, binary_facts, undefined_symbols
+from abiforge.run.binfacts import (
+    STACK_CHK_FAIL,
+    binary_facts,
+    library_format,
+    undefined_symbols,
+)
 from abiforge.run.toolchains import toolchain
 
 pytestmark = pytest.mark.skipif(
@@ -61,21 +66,34 @@ def _build(tmp: Path, name: str, opt: str, protector: str) -> Path:
 
 
 def _calls_canary(lib: Path) -> bool:
-    """Oracle: does any function's disassembly call the protector's check?"""
+    """Oracle: does any function's disassembly call the protector's check?
+
+    x86 spells the call ``call``; AArch64 spells it ``bl``.
+    """
     text = subprocess.run(
         ["objdump", "-d", str(lib)], check=True, capture_output=True, text=True
     ).stdout
-    return bool(re.search(rf"call\s+\S+\s+<{STACK_CHK_FAIL}(@plt)?>", text))
+    return bool(re.search(r"\b(?:call|bl)\s+\S+\s+<__stack_chk_fail(?:@plt)?>", text))
 
 
+def _supported(*libs: Path) -> None:
+    """Skip when a built library is not ELF or Mach-O (MinGW builds PE)."""
+    for lib in libs:
+        if library_format(lib) not in ("elf", "macho"):
+            pytest.skip(f"{library_format(lib)} libraries are not read by the oracle")
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("opt", OPT_LEVELS)
 @pytest.mark.parametrize("protector", PROTECTORS)
 def test_nm_fact_agrees_with_the_disassembly_oracle(tmp_path, opt, protector) -> None:
     """Each shape's imported-canary bit is the one the disassembly shows."""
     lib = _build(tmp_path, "a", opt, protector)
+    _supported(lib)
     assert (STACK_CHK_FAIL in undefined_symbols(lib)) is _calls_canary(lib)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("opt", OPT_LEVELS)
 @pytest.mark.parametrize("protector", PROTECTORS)
 def test_dropped_fact_follows_from_the_flags(tmp_path, opt, protector) -> None:
@@ -87,6 +105,7 @@ def test_dropped_fact_follows_from_the_flags(tmp_path, opt, protector) -> None:
     """
     old = _build(tmp_path, "old", "-O0", protector)
     new = _build(tmp_path, "new", opt, protector)
+    _supported(old, new)
     fact = binary_facts(old, new)["stack_chk_fail_dropped"]
     if protector == "-fno-stack-protector":
         assert fact is False

@@ -82,9 +82,11 @@ def test_every_matrix_pair_of_a_carrier_operator_has_a_floor_cell() -> None:
         if op.requires(base) is not None or not op.applies_to(seed):
             continue
         cells, unsupported = min_level_cells(op, base)
-        # An UNCLASSIFIED kind gets no floor cell: reported, never dropped.
+        at_min = [c for c in cells if c.role == "at-minimum"]
+        # An UNCLASSIFIED kind or an unbuildable floor is reported, never dropped;
+        # otherwise the edit owes a real at-minimum cell (not just below-minimum).
         reported = bool(unsupported) or bool(unclassified_kinds(op))
-        assert cells or reported, (op.name, seed.name)
+        assert at_min or reported, (op.name, seed.name)
 
 
 # --- the compiler is the oracle for the layout a build flag moves ----------
@@ -98,6 +100,7 @@ SHAPES = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("shape", sorted(SHAPES))
 def test_the_same_header_has_a_different_layout_under_the_build_flag(
     tmp_path, shape

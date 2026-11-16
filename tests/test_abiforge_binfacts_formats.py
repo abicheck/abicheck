@@ -51,6 +51,9 @@ class FakeNm:
         self.missing = missing
 
     def __call__(self, argv, **kwargs):
+        # The reader must ask for a checked run, or a failing nm would read as an
+        # empty import set instead of "unavailable".
+        assert kwargs.get("check") is True, "nm must run with check=True"
         self.calls.append(list(argv))
         if self.missing:
             raise FileNotFoundError("nm")
