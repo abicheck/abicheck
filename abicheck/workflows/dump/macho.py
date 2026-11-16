@@ -49,6 +49,9 @@ def extract_macho(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     include_labels: dict[Path, str] | None = None,
+    debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -111,9 +114,14 @@ def extract_macho(
     from ...extract.macho_debug import macho_dwarf_kwargs
 
     # The DWARF decision is the one the header-built dump makes (dumper's
-    # _dump_macho): the adjacent dSYM, never the presence of headers.
+    # _dump_macho): the adjacent dSYM, under the same request options, never the
+    # presence of headers.
+    debug_options = {
+        "symbols_only": symbols_only,
+        "debug_presence_only": debug_presence_only,
+    }
     snapshot = new_snapshot(
-        **macho_dwarf_kwargs(path, None, {}),
+        **macho_dwarf_kwargs(path, debug_format, debug_options),
         library=path.name,
         version=version,
         functions=funcs,

@@ -155,6 +155,9 @@ class MachoAdapter:
             public_headers=r.public_headers,
             public_header_dirs=r.public_header_dirs,
             include_labels=r.include_labels,
+            debug_format=r.debug_format,
+            symbols_only=r.symbols_only,
+            debug_presence_only=r.debug_presence_only,
         )
 
 

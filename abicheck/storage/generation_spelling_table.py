@@ -770,6 +770,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "input that terminated before. A malformed cycle that previously never "
         "terminated now reads as a finite answer."
     ),
+    81: GenerationSpellingChange(
+        "no type or name spelling changes. A header-free Mach-O snapshot reads the "
+        "adjacent dSYM under the same request options as a snapshot built with "
+        "headers, and the dump workflow's snapshot builders are in the extractor "
+        "scope. No stored spelling changes."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

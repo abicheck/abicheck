@@ -236,11 +236,16 @@
       "abicheck/pe_metadata.py": "179d05863acd9039f6dddfcf07e121475f03feeec6ba6512afc9e94875105c7e",
       "abicheck/sycl_metadata.py": "10d6bb8dbd898b6f43c66f898fd1a964790705cadb5addac9d5801e47b341758",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
-      "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
+      "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
+      "abicheck/workflows/dump/elf_fallback.py": "31947cad933371a0d3863476ad34e1f9e3e60f8474b2eddbe161fdc1182eb2fa",
+      "abicheck/workflows/dump/formats.py": "e1b8bbde8db7f45dbc9dbd41a329c5da06b9f95f1a0c3e73dc6d7fd0ab89e17e",
+      "abicheck/workflows/dump/macho.py": "26cd468d5dd4d4192c09cc356932d71f258f325e30c7deecbf28966d320f4812",
+      "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
+      "abicheck/workflows/dump/pe.py": "fbe77a1492ed1513826e9d98535e95f952d3a80f17ee55d539d7631a93c6736f"
     },
-    "fingerprint": "a15918c9c310e891d1b6a5683fb62fb9dc61e91520bdbbd966fe365c8148e09b",
-    "generation": 80,
-    "reason": "the alignment walk stops a by-value cycle at any offset; output unchanged for terminating inputs"
+    "fingerprint": "a3070dbd8857fd210f6335c20aa307e7a2528200d56a5b99db8301fe335625b6",
+    "generation": 81,
+    "reason": "the dump builders decide the Mach-O debug inputs a snapshot records; the header-free route now reads the dSYM under the same options"
   },
   "resolver": {
     "files": {
