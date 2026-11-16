@@ -29,6 +29,7 @@ from abiforge.model.observable import min_level_cells, unclassified_kinds
 from abiforge.model.seeds import SEEDS
 from abiforge.operators import OPERATORS, matrix
 from abiforge.run.cells import CellContext, run_cell
+from abiforge.run.tiers import enabled_tiers
 from abiforge.run.toolchains import toolchain
 
 # Nightly, non-gating (plan B2): the PR tier never runs these. Their red set is the
@@ -89,7 +90,11 @@ def _params():
     return params
 
 
-_PARAMS = _params()
+# Same gate as ``test_abi_edit_corpus_matrix.py``: the cells exist only when
+# ``ABICHECK_EDIT_CORPUS_TIER`` names the nightly tier. Without it this module
+# collects nothing, so the full PR suite (which does not deselect
+# ``edit_corpus_nightly``) never builds a cell or needs castxml.
+_PARAMS = _params() if "nightly" in enabled_tiers() else []
 
 
 @pytest.mark.parametrize("op,seed,cell,role", _PARAMS)
