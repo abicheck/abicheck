@@ -262,7 +262,7 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
     cc_inputs = compile_context_header_inputs(req.compile)
     if cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
         return ""
-    cache_headers = [*cache_headers, *cc_inputs[0], *_pe_debug_sidecar(req)]
+    cache_headers = [*cache_headers, *cc_inputs[0], *_debug_sidecar(req)]
     cache_includes = [*cache_includes, *cc_inputs[1]]
 
     base = _dump_cache_extra_key(
@@ -317,6 +317,23 @@ def _pe_debug_sidecar(req: DumpCacheRequest) -> list[Path]:
 
     found = locate_pdb(req.path, allow_network=False)
     return [found] if found is not None else []
+
+
+def _debug_sidecar(req: DumpCacheRequest) -> list[Path]:
+    """The debug artifact beside the binary that the dump will read, content-hashed.
+
+    A PE dump reads the PDB beside it (:func:`_pe_debug_sidecar`). A Mach-O dump
+    reads the DWARF of the ``<lib>.dSYM`` bundle beside it (ADR-021 step 5). Its
+    key must hash that bundle too: the binary's bytes alone cannot see it, so a
+    dump made before the bundle existed would be served for a dump made after
+    it, and the reverse. Adding, replacing or removing the bundle now misses.
+    """
+    if req.binary_fmt == "macho":
+        from ....dwarf_unified import _adjacent_dsym_binary
+
+        bundle = _adjacent_dsym_binary(req.path)
+        return [bundle] if bundle is not None else []
+    return _pe_debug_sidecar(req)
 
 
 def cached_run_dump(
