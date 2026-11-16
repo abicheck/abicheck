@@ -49,6 +49,7 @@ from __future__ import annotations
 import logging
 import os
 import stat
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -123,6 +124,151 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
     return session
 
 
+_MACHO64_LE_MAGIC = b"\xcf\xfa\xed\xfe"  # MH_MAGIC_64, little-endian
+# Fat (universal) headers and the other Mach-O forms: not read by this reader.
+_MACHO_OTHER_MAGICS = frozenset(
+    {
+        b"\xca\xfe\xba\xbe",  # FAT_MAGIC (big-endian)
+        b"\xbe\xba\xfe\xca",  # FAT_CIGAM
+        b"\xce\xfa\xed\xfe",  # MH_MAGIC (32-bit, little-endian)
+        b"\xfe\xed\xfa\xce",  # MH_CIGAM (32-bit, big-endian)
+        b"\xfe\xed\xfa\xcf",  # MH_CIGAM_64 (64-bit, big-endian)
+    }
+)
+_CPU_X86_64 = 0x01000007
+_CPU_ARM64 = 0x0100000C
+
+
+def _adjacent_dsym_binary(so_path: Path) -> Path | None:
+    """The DWARF file of the bundle beside *so_path* (ADR-021 step 5).
+
+    ``<lib>.dSYM/Contents/Resources/DWARF/<lib>``, and for a framework
+    ``Foo.framework/Foo`` the bundle is ``Foo.framework.dSYM``.
+    """
+    name = so_path.name
+    candidates = [so_path.parent / f"{name}.dSYM" / "Contents/Resources/DWARF" / name]
+    if so_path.parent.name.endswith(".framework"):
+        fw = so_path.parent
+        candidates.append(
+            fw.parent / f"{fw.name}.dSYM" / "Contents/Resources/DWARF" / name
+        )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _macho_arch(f: BinaryIO) -> str:
+    f.seek(4)
+    cputype = struct.unpack("<I", f.read(4))[0]
+    f.seek(0)
+    return {_CPU_X86_64: "x64", _CPU_ARM64: "aarch64"}.get(cputype, "unknown")
+
+
+def _macho_session_from_bundle(
+    so_path: Path, bundle: Path, f: BinaryIO
+) -> tuple[DwarfSession | None, str | None]:
+    """A session over *bundle*'s DWARF for the library *so_path*, or the refusal.
+
+    The bundle must carry the library's UUID; a missing, fat, malformed or
+    mismatched bundle returns ``(None, reason)``. *f* is the library's open
+    handle, owned by the returned session.
+    """
+    from .extract.macho_dsym import DsymDwarf, macho_uuid, read_dsym_dwarf
+
+    if f.seek(0) or f.read(4) != _MACHO64_LE_MAGIC:
+        return (
+            None,
+            "library is not a thin little-endian 64-bit Mach-O (fat and 32-bit slices are not read)",
+        )
+    f.seek(0)
+    got = read_dsym_dwarf(bundle, dylib_uuid=macho_uuid(so_path))
+    if not isinstance(got, DsymDwarf):
+        return None, got.reason
+    session = DwarfSession(
+        path=Path(so_path),
+        _file=f,
+        elf=None,
+        dwarf=got.dwarf,
+        arch=_macho_arch(f),
+    )
+    return session, None
+
+
+def _macho_dsym_session(
+    so_path: Path, f: BinaryIO
+) -> tuple[DwarfSession | None, AdvancedExtractionStatus]:
+    """DWARF of a Mach-O library from the bundle beside it (ADR-021 step 5).
+
+    No bundle, or a bundle that is refused, yields no session with status
+    ``NOT_RUN``: nothing was read, which is absent evidence. A refused bundle
+    is logged with its reason; the explicit path reports it as a failure.
+    """
+    bundle = _adjacent_dsym_binary(so_path)
+    if bundle is None:
+        log.debug("parse_dwarf: no dSYM bundle beside %s", so_path)
+        return None, AdvancedExtractionStatus.NOT_RUN
+    session, reason = _macho_session_from_bundle(so_path, bundle, f)
+    if session is None:
+        # A bundle beside the library that does not belong to it is a stale or
+        # wrong dSYM the user may believe is in use: say so in the dump instead
+        # of ignoring it. Nothing was read, so the status stays NOT_RUN.
+        # An optional input the user did not name must not break the dump: the
+        # refusal is a non-fatal limitation in the snapshot's provenance.
+        log.warning("parse_dwarf: adjacent dSYM %s not used: %s", bundle, reason)
+        from .extract.extraction_limitations import record_extraction_limitation
+
+        record_extraction_limitation(f"adjacent dSYM {bundle} ignored: {reason}")
+        return None, AdvancedExtractionStatus.NOT_RUN
+    return session, AdvancedExtractionStatus.COMPLETED
+
+
+def parse_dwarf_from_macho_dsym(
+    so_path: Path,
+    dsym: Path,
+    *,
+    _session_out: list[DwarfSession] | None = None,
+) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
+    """DWARF of Mach-O *so_path* from the explicitly named bundle *dsym*.
+
+    The explicit input (``--debug-root`` / ``dwarf_source``) is the user's
+    statement that this bundle holds the library's DWARF, so a bundle that is
+    refused is a recorded read failure, never a silent empty surface. Same
+    contract as :func:`parse_dwarf`: never raises; ``_session_out`` hands the
+    open session to the caller.
+    """
+    try:
+        f = open(so_path, "rb")  # noqa: SIM115 - owned by the session below
+    except OSError as exc:
+        note_debug_info_read_failure(f"library {so_path} unreadable: {exc}")
+        return DwarfMetadata(), AdvancedDwarfMetadata(
+            extraction=AdvancedExtractionStatus.FAILED
+        )
+    session, reason = _macho_session_from_bundle(so_path, dsym, f)
+    if session is None:
+        f.close()
+        note_debug_info_read_failure(
+            f"explicit dSYM {dsym} for {so_path} is not used: {reason}"
+        )
+        return DwarfMetadata(), AdvancedDwarfMetadata(
+            extraction=AdvancedExtractionStatus.FAILED
+        )
+    try:
+        meta, adv = parse_dwarf_from_session(session)
+    except Exception as exc:  # noqa: BLE001 - mirror parse_dwarf's guard
+        log.warning("parse_dwarf: failed to parse CUs in %s: %s", dsym, exc)
+        note_debug_info_read_failure(f"DWARF compilation units unreadable: {exc!r}")
+        session.close()
+        return DwarfMetadata(), AdvancedDwarfMetadata(
+            extraction=AdvancedExtractionStatus.FAILED
+        )
+    if _session_out is not None:
+        _session_out.append(session)
+    else:
+        session.close()
+    return meta, adv
+
+
 def _open_dwarf_session_with_status(
     so_path: Path,
 ) -> tuple[DwarfSession | None, AdvancedExtractionStatus]:
@@ -143,6 +289,22 @@ def _open_dwarf_session_with_status(
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
             log.warning("parse_dwarf: not a regular file: %s", so_path)
+            f.close()
+            return None, AdvancedExtractionStatus.NOT_RUN
+
+        f.seek(0)
+        magic = f.read(4)
+        f.seek(0)
+        if magic == _MACHO64_LE_MAGIC:
+            return _macho_dsym_session(so_path, f)
+        if magic in _MACHO_OTHER_MAGICS:
+            # Fat (universal) or 32-bit / big-endian Mach-O: not read yet. Absent
+            # with a reason, never an ELF parse error.
+            log.warning(
+                "parse_dwarf: %s is a fat or non-64-bit little-endian Mach-O; "
+                "its DWARF is not read (no slice selection yet)",
+                so_path,
+            )
             f.close()
             return None, AdvancedExtractionStatus.NOT_RUN
 

@@ -38,7 +38,7 @@ an executable contract: the prediction is *identical* regardless of which
 caller asks, over a range of inputs, not just the one case each existing
 test file happened to already cover.
 
-Fallback *policy* (``dumper._castxml_fallback_reason`` -- only discoverable
+Fallback *policy* (``extract.headers.castxml_fallback._castxml_fallback_reason`` -- only discoverable
 by actually attempting castxml and observing a specific failure signature)
 is a deliberately separate concern and is untouched by this split; it has
 its own tests elsewhere (``test_clang_castxml_origin_parity.py`` and
