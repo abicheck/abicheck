@@ -25,7 +25,6 @@ _PARAMS = frozenset(
 )
 _REMANGLED: dict[str, Any] = {
     "any_of": (_PARAMS | _REMOVED,),
-    "min_evidence": "binary",
     "rules": (_binary_mangled(*_PARAMS),),
 }
 
@@ -49,7 +48,6 @@ _TYPEDEFS = (
         "a new typedef is declared: nothing existing changes",
         verdict_min="NO_CHANGE",
         verdict_max="COMPATIBLE",
-        min_evidence="headers",
     ),
     _op(
         "typedef_respelled_as_alias",
@@ -59,7 +57,6 @@ _TYPEDEFS = (
         "name, so nothing changes",
         verdict_min="NO_CHANGE",
         verdict_max="NO_CHANGE",
-        min_evidence="headers",
     ),
 )
 
@@ -72,7 +69,6 @@ _TEMPLATES = (
         "nothing existing changes",
         verdict_min="NO_CHANGE",
         verdict_max="COMPATIBLE",
-        min_evidence="headers",
     ),
     _op(
         "template_param_added_defaulted",
@@ -128,7 +124,6 @@ _TEMPLATES = (
         expected=frozenset({"FUNC_ADDED"}),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE",
-        min_evidence="binary",
     ),
     _op(
         "template_specialization_added",
@@ -149,7 +144,6 @@ _TEMPLATES = (
         "copy of the primary, so tps<int> behaves differently on each side",
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="binary",
     ),
     _op(
         "template_specialization_removed",
@@ -163,7 +157,6 @@ _TEMPLATES = (
         "the explicit specialization tpz<int> goes: old consumers that called "
         "it hold an undefined reference to its symbol and fail to load",
         any_of=(_REMOVED,),
-        min_evidence="binary",
     ),
 )
 

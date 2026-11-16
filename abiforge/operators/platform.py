@@ -187,7 +187,6 @@ _DYNAMIC = (
         ),
         precondition=_x86,
         host_arch=_X86_HOSTS,
-        min_evidence="dwarf",
         **_RISK,
     ),
     _op(
@@ -199,7 +198,6 @@ _DYNAMIC = (
         expected=frozenset({"DWARF_INFO_MISSING"}),
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE_WITH_RISK",
-        min_evidence="dwarf",
     ),
 )
 
@@ -226,7 +224,6 @@ _TOOLCHAIN = (
         host_arch=_X86_HOSTS,
         # A gcc switch: clang refuses it, so its cells read unavailable.
         probe_flags=("-mveclibabi=svml",),
-        min_evidence="dwarf",
         **_RISK,
     ),
     _op(
@@ -249,7 +246,6 @@ _TOOLCHAIN = (
                 "library passes no wchar_t",
             ),
         ),
-        min_evidence="dwarf",
         **_RISK,
     ),
     _op(
@@ -275,7 +271,6 @@ _TOOLCHAIN = (
             ),
         ),
         verdict_min="COMPATIBLE_WITH_RISK",
-        min_evidence="dwarf",
     ),
 )
 
@@ -302,7 +297,6 @@ _BIT_INT = (
         expected=frozenset({"BIT_INT_WIDTH_CHANGED"}),
         features=("bit_int",),
         precondition=_bit_int_toolchain,
-        min_evidence="dwarf",
     ),
 )
 
@@ -426,7 +420,6 @@ _EXPORTS = (
         "consumer that calls it fails to link; built consumers are unaffected",
         expected=frozenset({"PUBLIC_NOT_EXPORTED"}),
         **_AT_MOST_RISK,
-        min_evidence="headers",
     ),
     _op(
         "exported_but_undeclared",
@@ -447,12 +440,10 @@ _EXPORTS = (
                 "under -fvisibility=hidden only the header's default-visibility "
                 "block exported wget: leaving the header hides it, and "
                 "consumers fail to load",
-                min_evidence="binary",
             ),
         ),
         verdict_min="API_BREAK",
         verdict_max="API_BREAK",
-        min_evidence="headers",
     ),
     _op(
         "export_localized_header_kept",
@@ -684,7 +675,6 @@ _ALT = (
         expected=frozenset({"STRUCT_RETURN_CONVENTION_CHANGED"}),
         precondition=_x86_64,
         host_arch=_X86_HOSTS,
-        min_evidence="dwarf",
     ),
     _alt(
         "long_double_made_64bit",
@@ -696,7 +686,6 @@ _ALT = (
         precondition=_x86,
         host_arch=_X86_HOSTS,
         probe_flags=("-mlong-double-64",),
-        min_evidence="dwarf",
     ),
     _alt(
         "integer_typedef_widened",
@@ -714,7 +703,6 @@ _ALT = (
         expected=frozenset({"INTEGER_MODEL_CHANGED"}),
         precondition=_x86_64,
         host_arch=_X86_HOSTS,
-        min_evidence="dwarf",
     ),
     _alt(
         "time_bits_64",
@@ -726,7 +714,6 @@ _ALT = (
         precondition=lambda c: (
             None if c.flags.bits == 32 else "time_t is already 64-bit"
         ),
-        min_evidence="dwarf",
     ),
     _alt(
         "header_only_function_params_changed",
@@ -739,7 +726,6 @@ _ALT = (
         "hscale lives only in the header: callers passing an int no longer compile",
         expected=frozenset({"HEADER_ONLY_FUNCTION_PARAMS_CHANGED"}),
         **_SOURCE_BREAK,
-        min_evidence="headers",
     ),
     _alt(
         "internal_helper_hidden",
@@ -838,7 +824,6 @@ _CXX = (
         expected=frozenset({"VALUE_ABI_TRAIT_CHANGED"}),
         precondition=_x86_64,
         host_arch=_X86_HOSTS,
-        min_evidence="dwarf",
     ),
     _xa(
         "internal_type_grew",
@@ -851,7 +836,6 @@ _CXX = (
         "lib::detail::Impl is internal by name, yet lib::Holder embeds it by "
         "value: its growth moves Holder::x",
         expected=frozenset({"INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API"}),
-        min_evidence="headers",
     ),
     _xa(
         "header_inline_removed",
@@ -861,7 +845,6 @@ _CXX = (
         "longer compile, built ones carry their own copy",
         expected=frozenset({"INLINE_FUNCTION_REMOVED"}),
         **_SOURCE_BREAK,
-        min_evidence="headers",
     ),
     _xa(
         "char_param_became_char8",
@@ -875,7 +858,6 @@ _CXX = (
         "callers passing a char string no longer compile",
         expected=frozenset({"CHAR8T_MIGRATION"}),
         features=("char8_t",),
-        min_evidence="dwarf",
     ),
     _xa(
         "internal_template_instance_dropped",
@@ -889,7 +871,6 @@ _CXX = (
         "walk<float> is no longer instantiated: consumers whose inlined "
         "sum_range<float> calls it fail to load",
         expected=frozenset({"INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API"}),
-        min_evidence="headers",
     ),
     _op(
         "gnu_unique_static_added",
