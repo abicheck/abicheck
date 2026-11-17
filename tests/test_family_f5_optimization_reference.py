@@ -128,6 +128,8 @@ COVERAGE: dict[str, str] = {
     "abicheck.workflows.evaluation_identities::memoized::builtin_policy_identity": R,
     "abicheck.workflows.evaluation_identities::memoized::severity_preset_identity": "UNCOVERED: reached only under --severity-preset; pure function of a packaged preset name",
     "abicheck.demangle::memoized::demangle": R,
+    "abicheck.demangle::memoized::_is_itanium_mangled": R,
+    "abicheck.compare.glibcxx_dual_abi::memoized::normalize_dual_abi_spelling": "UNCOVERED: a pure string normalisation of one demangled name, with no cell varying the spelling set beyond the dual-ABI oracle. Its equivalence to the unmemoised function is pinned by tests/test_glibcxx_dual_abi_pairing.py (per-symbol pairing on real g++ output) and tests/test_glibcxx_dual_abi_pairing.py::test_pairing_is_invariant_under_input_order",
     "abicheck.diff_helpers::memoized::depth_aware_bare_name": B,
     "abicheck.diff_symbols_renames::memoized::_rename_name_parse": "UNCOVERED: rename heuristics need a removed+added pair with matching fingerprints; no cell fixture has one",
     "abicheck.extract.headers.clang.abi_target::memoized::_default_triple": "UNCOVERED: clang's default -print-target-triple, memoized on (executable, content digest); no cell varies the clang binary within one process. The rule it feeds is pinned by tests/test_clang_binary_abi_target.py, which re-probes a Windows-default clang through the real CLI",
