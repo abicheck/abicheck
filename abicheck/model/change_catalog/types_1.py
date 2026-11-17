@@ -44,6 +44,11 @@ from .registry import (
 )
 
 _OBS_B = observable(("B",))
+_OBS_DH = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="layout or type fact: DWARF and the public header both carry it",
+)
 _OBS_H_HEADER = observable(
     ("B", "H"),
     rationale="a header-level fact: the public header declares the opaque type or typedef; neither the export table nor DWARF carries it",
@@ -66,6 +71,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "abi_equivalent_type_changed",
         _R,
+        observable_at=(_OBS_DH,),
         impact="A parameter, return, field or variable was retyped between two "
         "types the compiler passes, stores and returns identically (same size, "
         "alignment and register class: long -> long long on LP64, char -> signed "
@@ -151,6 +157,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "instantiation_missing_from_binary",
         _B,
+        observable_at=(_OBS_B,),
         impact="Header declares an explicit template instantiation that the shipped "
         "library no longer exports. Consumer source compiles cleanly but fails "
         "to link at load time with an undefined-symbol error. Common when a "
@@ -224,6 +231,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "overload_set_rerouted",
         _R,
+        observable_at=(_OBS_B,),
         impact="The overload set under a public name changed in a way "
         "where some overloads were removed and others added. "
         "Existing call sites that previously resolved to a removed "

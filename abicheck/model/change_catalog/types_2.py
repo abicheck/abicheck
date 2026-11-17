@@ -59,6 +59,10 @@ _OBS_B_ELF_MACHO = observable(
     ),
 )
 _OBS_B = observable(("B",))
+_OBS_H_HEADER = observable(
+    ("B", "H"),
+    rationale="a header-level fact: the public header declares the opaque type or typedef; neither the export table nor DWARF carries it",
+)
 _OBS_B_ELF = observable(
     ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
 )
@@ -158,6 +162,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "template_param_type_changed",
         _B,
+        observable_at=(_OBS_DH,),
         impact="A template's own parameter's inner type argument changed "
         "(e.g. a member of the type used to instantiate the "
         "template). The detector compares only the parsed argument "
@@ -497,6 +502,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "typedef_version_sentinel",
         _C,
+        observable_at=(_OBS_H_HEADER,),
         impact="Typedef name encodes a version number (e.g. png_libpng_version_1_6_46) — "
         "this is a compile-time sentinel that changes every release by design; "
         "it is never exported as an ELF symbol and does not affect binary ABI.",

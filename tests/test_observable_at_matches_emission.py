@@ -317,6 +317,24 @@ def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
 
 
 _HEADER_PAIRS = {
+    "template_param_type_changed": (
+        'template <class T> struct Box { T v; };\nextern "C" int h(Box<int> b);\n',
+        'template <class T> struct Box { T v; };\nextern "C" int h(Box<long> b);\n',
+        'extern "C" int h(Box<int> b){ return b.v; }\n',
+        'extern "C" int h(Box<long> b){ return (int)b.v; }\n',
+    ),
+    "abi_equivalent_type_changed": (
+        'extern "C" int h(long x);\n',
+        'extern "C" int h(long long x);\n',
+        'extern "C" int h(long x){ return (int)x; }\n',
+        'extern "C" int h(long long x){ return (int)x; }\n',
+    ),
+    "typedef_version_sentinel": (
+        'typedef int lib_version_1_6_46;\nextern "C" int api(int x);\n',
+        'typedef int lib_version_1_6_47;\nextern "C" int api(int x);\n',
+        'extern "C" int api(int x){ return x; }\n',
+        'extern "C" int api(int x){ return x; }\n',
+    ),
     "template_return_type_changed": (
         "template <class T> struct Box { T v; };\nBox<int> g(int x);\n",
         "template <class T> struct Box { T v; };\nBox<long> g(int x);\n",
@@ -415,3 +433,59 @@ def test_header_backed_kind_is_not_observed_from_a_stripped_binary(
             text=True,
         ).stdout
     )
+
+
+@pytest.mark.integration
+def test_template_instance_removal_and_overload_reroute_are_binary_observable(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle (GNU ELF producer): a tag rename re-mangles an exported
+    # template instance. The stripped binary pair (no headers, no DWARF) emits both
+    # the missing instance and the rerouted overload set, so both are observable
+    # from the binary alone.
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    (tmp_path / "h_old.h").write_text(
+        "#pragma once\nstruct Tag {};\ntemplate <class T> int f(T) { return 0; }\nint use_tag(Tag t);\n"
+    )
+    (tmp_path / "h_new.h").write_text(
+        "#pragma once\nstruct Tag2 {};\ntemplate <class T> int f(T) { return 0; }\nint use_tag(Tag2 t);\n"
+    )
+    (tmp_path / "old.cpp").write_text(
+        '#include "h_old.h"\nint use_tag(Tag t){ return f(t); }\nint keep_me(){ return f(1); }\n'
+    )
+    (tmp_path / "new.cpp").write_text(
+        '#include "h_new.h"\nint use_tag(Tag2 t){ return f(t); }\nint keep_me(){ return f(1); }\n'
+    )
+    dumps = []
+    for name, src in (("old", "old.cpp"), ("new", "new.cpp")):
+        so = tmp_path / f"lib{name}.so"
+        subprocess.run(
+            [
+                *prefix,
+                "-O0",
+                "-fPIC",
+                "-shared",
+                "-I",
+                str(tmp_path),
+                str(tmp_path / src),
+                "-o",
+                str(so),
+            ],
+            check=True,
+        )
+        out = tmp_path / f"{name}.json"
+        subprocess.run(
+            abicheck_command("dump", str(so), "-o", str(out)),
+            check=True,
+            capture_output=True,
+        )
+        dumps.append(out)
+    stdout = subprocess.run(
+        abicheck_command("compare", str(dumps[0]), str(dumps[1])),
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "instantiation_missing_from_binary" in stdout, stdout
+    assert "overload_set_rerouted" in stdout, stdout
