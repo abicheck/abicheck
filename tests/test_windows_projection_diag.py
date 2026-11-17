@@ -1,99 +1,100 @@
-"""TEMPORARY Windows diagnostic: how the fields of _TP_CALLBACK_ENVIRON_V3 come out.
+"""TEMPORARY Windows stress diagnostic for the intermittent depth-projection finding.
 
-Runs only on Windows, on the case the depth projection flags as unchanged
-(case226). It dumps each side with headers and without, and prints every
-_TP_CALLBACK_ENVIRON* field from each source (castxml record types and the PDB
-debug layout). It fails on purpose so the Windows CI log carries the output.
-Removed once the false type_field_type_changed is root-caused.
+Forces the failure instead of waiting for it. For each of the two cases it runs the
+projection comparison many times in one process (module state shared) and also in
+fresh processes (pytest on the depth test node), records each side's resolved PDB path,
+mtime and hash, and fails on purpose with the summary. Removed once the root cause is
+fixed.
 """
 
 from __future__ import annotations
 
+import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from abicheck.dumper import dump
-from tests.test_depth_projection_matches_shallow_dump import (
-    _built_case,
-    _header_list,
-)
+CASES = [
+    "case224_header_only_template_default_added",
+    "case226_header_only_template_default_unchanged",
+]
+IN_PROCESS = 20
+FRESH = 6
+ROOT = Path(__file__).resolve().parent.parent
 
-CASE = "case226_header_only_template_default_unchanged"
 
+def _pdb_fact(lib: Path) -> str:
+    from abicheck.pdb_utils import locate_pdb
 
-def _read(fn):
     try:
-        return fn()
-    except Exception as exc:  # diagnostic: record the failure, never crash
-        return f"<{type(exc).__name__}: {exc}>"
+        pdb = locate_pdb(lib, allow_network=False)
+    except Exception as exc:  # diagnostic: record, never crash
+        return f"<lookup {type(exc).__name__}: {exc}>"
+    if pdb is None:
+        return "no-pdb"
+    data = Path(pdb).read_bytes()
+    return f"{pdb} mtime={Path(pdb).stat().st_mtime:.0f} sha={hashlib.sha1(data).hexdigest()[:12]}"
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows diagnostic only")
-def test_windows_callback_environ_fields(
-    tmp_path: Path, shared_cmake_build_dir: Path | None
-) -> None:
-    v1_lib, v2_lib, v1_hdr, v2_hdr = _built_case(CASE, tmp_path, shared_cmake_build_dir)
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows stress diagnostic only")
+@pytest.mark.parametrize("case", CASES)
+def test_stress_depth_case(case: str, tmp_path: Path, shared_cmake_build_dir) -> None:
+    from abicheck.dumper import dump
     from abicheck.policy.depth_projection import project_pair_to_depth
+    from tests.test_depth_projection_matches_shallow_dump import (
+        Run,
+        _built_case,
+        _header_list,
+        _unexplained,
+    )
 
-    def attrs(obj):
-        try:
-            return dict(vars(obj))
-        except TypeError:
-            return {}
-
-    lines: list[str] = []
-    rich_old = dump(v1_lib, headers=_header_list(v1_hdr), version="old")
-    rich_new = dump(v2_lib, headers=_header_list(v2_hdr), version="new")
-    p_old, p_new = project_pair_to_depth(rich_old, rich_new, "binary")
-
-    def records(snap):
-        types = _read(lambda: list(snap.declarations.types)) or []
-        return {
-            r.name: r
-            for r in types
-            if "CALLBACK_ENVIRON" in str(getattr(r, "name", ""))
-        }
-
-    ro, rn = records(p_old), records(p_new)
-    lines.append(f"names old={sorted(ro)} new={sorted(rn)}")
-    for side, snap in (("old", p_old), ("new", p_new)):
-        types = _read(lambda snap=snap: list(snap.declarations.types)) or []
-        unnamed = [r for r in types if "unnamed" in str(getattr(r, "name", "")).lower()]
-        lines.append(
-            f"[{side}] {len(types)} records, {len(unnamed)} named like unnamed"
+    v1, v2, h1, h2 = _built_case(case, tmp_path, shared_cmake_build_dir)
+    pdbs = (_pdb_fact(v1), _pdb_fact(v2))
+    in_fail: list[str] = []
+    first_in: str | None = None
+    for i in range(IN_PROCESS):
+        rich_old = dump(v1, headers=_header_list(h1), version="v1")
+        rich_new = dump(v2, headers=_header_list(h2), version="v2")
+        p_old, p_new = project_pair_to_depth(rich_old, rich_new, "binary")
+        bin_old = dump(v1, headers=[], version="v1")
+        bin_new = dump(v2, headers=[], version="v2")
+        pr, orr = Run.of(p_old, p_new), Run.of(bin_old, bin_new)
+        un = _unexplained(pr, orr)
+        if un != {"only_binary_dump": [], "only_projected": []}:
+            in_fail.append(str(i))
+            if first_in is None:
+                detail = {
+                    k: pr.details.get(k) or orr.details.get(k)
+                    for k in un["only_projected"] + un["only_binary_dump"]
+                }
+                first_in = f"iter {i}: {un} full={detail}"
+    fresh_fail: list[str] = []
+    first_fresh: str | None = None
+    node = (
+        f"tests/test_depth_projection_matches_shallow_dump.py::"
+        f"test_binary_projection_matches_binary_only_dump[{case}]"
+    )
+    for i in range(FRESH):
+        res = subprocess.run(
+            [sys.executable, "-m", "pytest", node, "-q", "-p", "no:cacheprovider"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=900,
         )
-        for r in unnamed[:8]:
-            flds = [
-                f"{f.name}:{f.type}@{f.offset_bits}"
-                for f in (getattr(r, "fields", []) or [])
-            ]
-            lines.append(f"[{side}] unnamed record {r.name!r} fields={flds[:12]}"[:360])
-    for name in sorted(set(ro) & set(rn)):
-        a, b = attrs(ro[name]), attrs(rn[name])
-        for k in sorted(set(a) | set(b)):
-            if k == "fields":
-                continue
-            if a.get(k) != b.get(k):
-                lines.append(
-                    f"[record {name}] attr {k}: old={str(a.get(k))[:160]} new={str(b.get(k))[:160]}"
-                )
-        fa = {f.name: f for f in ro[name].fields}
-        fb = {f.name: f for f in rn[name].fields}
-        for fname in sorted(set(fa) | set(fb)):
-            if fname not in fa or fname not in fb:
-                lines.append(
-                    f"[field {name}.{fname}] present only in {'old' if fname in fa else 'new'}"
-                )
-                continue
-            x, y = attrs(fa[fname]), attrs(fb[fname])
-            for k in sorted(set(x) | set(y)):
-                if x.get(k) != y.get(k):
-                    lines.append(
-                        f"[field {name}.{fname}] {k}: old={str(x.get(k))[:200]} new={str(y.get(k))[:200]}"
-                    )
-    if not any(x.startswith("[record") or x.startswith("[field") for x in lines):
-        lines.append("no projected attribute differs between old and new")
-    raise AssertionError("WINDOWS-DIAG\n" + "\n".join(lines))
+        if res.returncode != 0:
+            fresh_fail.append(str(i))
+            if first_fresh is None:
+                tail = res.stdout[-1500:]
+                first_fresh = f"run {i}: {tail}"
+    raise AssertionError(
+        f"STRESS {case}\n"
+        f"pdb-per-side={pdbs}\n"
+        f"in-process failing {len(in_fail)}/{IN_PROCESS} iters={in_fail}\n"
+        f"first in-process: {first_in}\n"
+        f"fresh-process failing {len(fresh_fail)}/{FRESH} runs={fresh_fail}\n"
+        f"first fresh: {first_fresh}"
+    )
