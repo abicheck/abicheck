@@ -57,6 +57,7 @@ from xml.etree.ElementTree import Element
 
 from ....errors import SnapshotError
 from ....model.execution_cache import memoized
+from ....model.file_revision import content_witness
 from ....storage.ast_cache_location import ast_cache_store
 from ... import cache_dep_manifest
 from ..clang.abi_target import compile_binary_abi_tokens
@@ -104,15 +105,7 @@ _FUNCTION_KINDS = frozenset(
 )
 
 
-def _file_stamp(path: str) -> tuple[int, int] | None:
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
-
-
-@memoized(maxsize=4096, witness=_file_stamp)
+@memoized(maxsize=4096, witness=content_witness)
 def _file_mentions_exception_spec(path: str) -> bool:
     try:
         return _EXCEPTION_SPEC_TEXT.search(Path(path).read_bytes()) is not None

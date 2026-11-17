@@ -143,6 +143,10 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_surface_metrics_fan_in_index.py",
                 "tests/test_header_dir_expansion_canonical_order.py",
                 "tests/test_memo_stats_across_clear.py",
+                # A memo over a header's text or a compiler probe answers for the
+                # file as it is now: a rewrite within one process returns what an
+                # uncached scan would (test_file_memo_witness.py).
+                "tests/test_file_memo_witness.py",
             ),
         ),
         Family(
