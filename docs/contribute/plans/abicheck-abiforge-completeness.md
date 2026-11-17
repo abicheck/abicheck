@@ -790,6 +790,8 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 
 **WS-6 PE follow-up (open).** `object_became_weak` on PE (`tests/test_edit_corpus_platform_expectations.py`) owes `VAR_REMOVED` only where `observable_at` admits it at the cell's evidence (catalog `{B,D}`/`{B,H}`, so not at binary). Whether abicheck emits `VAR_REMOVED` on PE at binary is **unverified**: there is no PE corpus lane, so no run shows it. A real PE run decides whether `VAR_REMOVED` gets a PE `{B}` alternative. Until then the test derives the owed group from the catalog.
 
+**WS-1 DWARF `is_inline` reader gap (open, follow-up row).** The DWARF reader never sets `is_inline` (`is_inline_fact` stays `not_collected`), so `func_lost_inline` and `func_became_inline` are declared `{B,H}` and not `{B,D}`. This is a reader gap, not a physical absence: DWARF carries `DW_AT_inline` on an inline function's abstract instance, so a DWARF-reader change could make the twins observable from debug info. Oracle for the current declaration: a DWARF-only pair emits neither twin in either direction, and the same pair with headers emits both (`tests/test_observable_at_matches_emission.py`, inline tests). Re-decide the declaration when the reader sets the fact.
+
 ### 11.3 File ownership and conflict hotspots
 
 **Owned paths.** Edit another workstream's paths only through a small,
