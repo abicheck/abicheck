@@ -70,6 +70,11 @@ def _extract_abi_tags(mangled: str) -> tuple[frozenset[str], str]:
     return frozenset(tag_list), base
 
 
+def _demangle_churn(removed: set[str], added: set[str]) -> dict[str, str]:
+    """The demangled spellings of the churned names, in one deterministic batch."""
+    return demangle_batch(sorted(removed) + sorted(added))
+
+
 @registry.detector("abi_tag")
 def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect per-symbol Itanium ABI-tag set changes (e.g. gained/lost cxx11)."""
@@ -102,7 +107,6 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         added_by_base.setdefault(base, []).append(a)
 
     # Demangled spellings, read only if a tag change needs the flip check.
-    churned = sorted(removed) + sorted(added)
     demangled: dict[str, str] | None = None
 
     used: set[str] = set()
@@ -115,9 +119,11 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new_tags, _ = _extract_abi_tags(a)
         if old_tags == new_tags:
             continue  # base matched but tags identical — not a tag change
-        if demangled is None:
-            demangled = demangle_batch(churned)
-        if is_flip_pair(demangled.get(r, ""), demangled.get(a, "")):
+        if demangled is None and ("cxx11" in r or "cxx11" in a):
+            demangled = _demangle_churn(removed, added)
+        if demangled is not None and is_flip_pair(
+            demangled.get(r, ""), demangled.get(a, "")
+        ):
             continue  # one flipped function: the dual-ABI finding reports it
         used.add(a)
         gained = sorted(new_tags - old_tags)

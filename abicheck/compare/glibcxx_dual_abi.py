@@ -56,7 +56,6 @@ from ..detector_registry import registry
 from ..diff_helpers import make_change
 from ..model.build_mode_facts import GlibcxxDualAbi
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.execution_cache import memoized
 from ..model.glibcxx_dual_abi import (
     DualAbiSelection,
     SelectionSource,
@@ -108,7 +107,6 @@ _SHORT_STRING_RE = re.compile(
 )
 
 
-@memoized(maxsize=65536)
 def normalize_dual_abi_spelling(spelling: str) -> str:
     """``spelling`` (a demangled name or type) with the dual-ABI distinction
     removed: no ``__cxx11::``, no ``[abi:cxx11]``, and every

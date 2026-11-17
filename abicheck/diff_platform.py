@@ -1106,6 +1106,11 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     added = sorted(set(new_map.keys()) - set(old_map.keys()))
     if not removed or not added:
         return []
+    # A flip's demangled spellings (std::__cxx11::, [abi:cxx11]) come from a mangled
+    # name containing "cxx11", so with none in the churn there is no flip, no mass
+    # marker, and nothing to demangle.
+    if not any("cxx11" in n for n in removed + added):
+        return []
     pairing = pair_dual_abi_flips(
         removed, added, demangle_batch(removed), demangle_batch(added)
     )

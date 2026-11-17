@@ -93,7 +93,6 @@ _cxxfilt_import_confirmed_missing = False
 _cxxfilt_import_confirmed_broken = False
 
 
-@memoized(maxsize=65536)
 def _is_itanium_mangled(symbol: str, *, accept_macho_prefix: bool = False) -> bool:
     """True for a plain ELF ``_Z...`` name, or its Mach-O ``__Z...`` spelling
     when *accept_macho_prefix* is set.

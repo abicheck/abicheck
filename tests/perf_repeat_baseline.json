@@ -111,6 +111,7 @@
     "abicheck/compare/typedef_spelling_keys.py(typedef_spelling_index)": 2,
     "abicheck/deadline.py(_registration_window_depth)": 13,
     "abicheck/deadline.py(remaining)": 13,
+    "abicheck/demangle.py(_is_itanium_mangled)": 8813,
     "abicheck/demangle.py(demangle_one_batched)": 1350,
     "abicheck/demangle.py(strip_signature)": 308,
     "abicheck/diff_atomic.py(_has_atomic)": 1004,
@@ -310,5 +311,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 223416
+  "total": 232229
 }

@@ -80,7 +80,6 @@ from abicheck.workflows.dump.cache import (
     api as dump_cache_api,
 )
 from tests._abicheck_subprocess import abicheck_command
-from tests._family_f5_dual_abi import dual_abi_flip_functions
 
 # ── coverage table: every inventoried site -> the cell that bypasses it ─────
 #
@@ -129,8 +128,6 @@ COVERAGE: dict[str, str] = {
     "abicheck.workflows.evaluation_identities::memoized::builtin_policy_identity": R,
     "abicheck.workflows.evaluation_identities::memoized::severity_preset_identity": "UNCOVERED: reached only under --severity-preset; pure function of a packaged preset name",
     "abicheck.demangle::memoized::demangle": R,
-    "abicheck.demangle::memoized::_is_itanium_mangled": R,
-    "abicheck.compare.glibcxx_dual_abi::memoized::normalize_dual_abi_spelling": R,
     "abicheck.diff_helpers::memoized::depth_aware_bare_name": B,
     "abicheck.diff_symbols_renames::memoized::_rename_name_parse": "UNCOVERED: rename heuristics need a removed+added pair with matching fingerprints; no cell fixture has one",
     "abicheck.extract.headers.clang.abi_target::memoized::_default_triple": "UNCOVERED: clang's default -print-target-triple, memoized on (executable, content digest); no cell varies the clang binary within one process. The rule it feeds is pinned by tests/test_clang_binary_abi_target.py, which re-probes a Windows-default clang through the real CLI",
@@ -379,10 +376,6 @@ def _release_dirs(root: Path, members: int = 4) -> tuple[Path, Path]:
             ),
         ]
         new_funcs = funcs[:2] if i % 2 else list(funcs)
-        if i == 0:
-            legacy_fn, cxx11_fn = dual_abi_flip_functions()
-            funcs.append(legacy_fn)
-            new_funcs.append(cxx11_fn)
         if i == 0:
             # A parameter-type change whose two spellings share a prefix: a
             # type-spelling cache keyed on less than the whole spelling

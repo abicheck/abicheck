@@ -27,8 +27,6 @@ from abicheck.compare.glibcxx_dual_abi_pairs import pair_dual_abi_flips
 from tests._abicheck_subprocess import abicheck_command
 from tests._elf_capability import elf_capability
 
-pytestmark = pytest.mark.integration
-
 #: The oracle reads ELF (``nm -D``) and builds the flip with the libstdc++ dual
 #: ABI, so it needs an ELF-writing g++ (the probe names the missing capability)
 #: plus nm and c++filt. A host without them is a skip; a compiler that runs and
@@ -125,6 +123,7 @@ def _expected_direction(old_demangled: list[str]) -> str:
     return "CXX11 ABI → legacy ABI" if with_tag else "legacy ABI → CXX11 ABI"
 
 
+@pytest.mark.integration
 @_NEEDS_ORACLE
 @pytest.mark.parametrize("n", [1, 2, 8], ids=["one", "two", "many"])
 @pytest.mark.parametrize("direction", ["legacy_to_cxx11", "cxx11_to_legacy"])
@@ -145,6 +144,7 @@ def test_a_flip_of_n_functions_is_detected_with_its_real_count(tmp_path, n, dire
     assert f"({_expected_direction(old_names)})" in description, description
 
 
+@pytest.mark.integration
 @_NEEDS_ORACLE
 @pytest.mark.parametrize(
     "abi_pair", [(0, 1), (1, 0)], ids=["legacy_to_cxx11", "cxx11_to_legacy"]
