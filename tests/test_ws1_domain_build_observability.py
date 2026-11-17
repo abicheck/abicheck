@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -29,16 +29,9 @@ import pytest
 from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.observability import UNCLASSIFIED
 from tests._abicheck_subprocess import abicheck_command
+from tests._elf_capability import elf_capability, skip_reason
 
-# The oracle builds ELF shared objects with gcc (-Wl,-soname, $ORIGIN RPATH).
-# Windows has no ELF toolchain path here, so it is a platform-missing skip.
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="ELF oracle: needs an ELF toolchain (gcc -Wl,-soname)",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 NUMPY_TARGET_1_20 = (
     b"_ARRAY_API is NULL pointer\0"
@@ -47,6 +40,20 @@ NUMPY_TARGET_1_20 = (
 )
 NUMPY_TARGET_2_0 = NUMPY_TARGET_1_20.replace(b"1.20", b"2.0")
 NUMPY_TARGET_1_23 = NUMPY_TARGET_1_20.replace(b"1.20", b"1.23")
+
+
+@lru_cache(maxsize=1)
+def _gcc_shared() -> tuple[str, ...] | None:
+    prefix = elf_capability("gcc", "shared")
+    return tuple(prefix) if prefix is not None else None
+
+
+def _gcc() -> list[str]:
+    """The ELF-capable gcc prefix; a missing capability is a named skip, not an OS skip."""
+    prefix = _gcc_shared()
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    return list(prefix)
 
 
 def _emit_c_binary(
@@ -59,7 +66,9 @@ def _emit_c_binary(
     src = out.with_suffix(".c")
     src.write_text(source)
     cmd = [
-        "gcc",
+        *_gcc(),
+        "-x",
+        "c",
         "-shared",
         "-fPIC",
         "-O1",
@@ -269,7 +278,9 @@ def test_wheel_closure_dependency_violation(tmp_path: Path) -> None:
     )
     subprocess.run(
         [
-            "gcc",
+            *_gcc(),
+            "-x",
+            "c",
             "-shared",
             "-fPIC",
             "-O1",
@@ -277,7 +288,9 @@ def test_wheel_closure_dependency_violation(tmp_path: Path) -> None:
             str(vended / "nparr_src.c"),
             "-o",
             str(vended / "nparr"),
-            str(vend),
+            "-L",
+            str(vend_dir),
+            "-l:libvend-0123abcd.so.1",
         ],
         check=True,
         capture_output=True,
@@ -335,7 +348,9 @@ def _library_dir(
         src = root / f"{name}.c"
         src.write_text(source)
         cmd = [
-            "gcc",
+            *_gcc(),
+            "-x",
+            "c",
             "-shared",
             "-fPIC",
             "-O1",
