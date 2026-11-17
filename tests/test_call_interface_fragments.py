@@ -15,6 +15,7 @@ classification a snapshot's DWARF facts supply.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -87,7 +88,9 @@ def _function(params: list[tuple[str, str]], ret: str) -> Function:
 
 
 def _sig(params: list[tuple[str, str]], ret: str) -> CallSignature:
-    return call_signature_of(_function(params, ret), _STRUCT.get(ret))
+    return call_signature_of(
+        _function(params, ret), _STRUCT.get(ret), linkage_reliable=True
+    )
 
 
 def test_e13_parameter_edits_match_the_proved_model() -> None:
@@ -147,6 +150,39 @@ def test_a_pre_83_clang_snapshot_cannot_vouch_for_c_linkage(
     assert assess_call_interface(sig, sig, SYSV_AMD64).status is want
 
 
+def test_a_loaded_pre_83_clang_snapshot_cannot_vouch_for_c_linkage(
+    tmp_path: Path,
+) -> None:
+    """The same stored member, through save -> rewrite the stamped extractor
+    generation to 82 -> load_snapshot, the path ADR-094 D9's caller takes."""
+    from abicheck.serialization import load_snapshot
+    from abicheck.storage.snapshot_codec import save_snapshot
+
+    member = _fn(name="f", mangled="plain_f", params=_long_param())
+    path = tmp_path / "snap.json"
+    save_snapshot(
+        AbiSnapshot(library="l", version="1", ast_producer="clang", functions=[member]),
+        path,
+    )
+    doc = json.loads(path.read_text())
+    gens = doc["sections"]["provenance"]["payload"]["fact_generations"]
+    assert gens["extractor"] >= CLANG_MEMBER_LINKAGE_GENERATION
+    assert linkage_evidence_reliable(load_snapshot(path)) is True
+    gens["extractor"] = CLANG_MEMBER_LINKAGE_GENERATION - 1
+    path.write_text(json.dumps(doc))
+    loaded = load_snapshot(path)
+    assert linkage_evidence_reliable(loaded) is False
+    (stored,) = loaded.declarations.functions
+    assert stored.is_extern_c and stored.mangled == "plain_f"
+    sig = call_signature_of(stored, linkage_reliable=linkage_evidence_reliable(loaded))
+    assert assess_call_interface(sig, sig, SYSV_AMD64).status is AxisStatus.UNKNOWN
+
+
+def test_linkage_evidence_has_no_default() -> None:
+    with pytest.raises(TypeError):
+        call_signature_of(_fn())  # type: ignore[call-arg]
+
+
 # ----------------------------------------------- outside the modelled domain
 
 _I = _FACT["int"]
@@ -187,8 +223,8 @@ def _one(ty: str, fact: AbiFundamental | None, depth: int = 0) -> Function:
 def test_a_slot_outside_the_domain_is_unknown(
     ty: str, fact: AbiFundamental | None, depth: int
 ) -> None:
-    old = call_signature_of(_one(ty, fact, depth))
-    new = call_signature_of(_fn())
+    old = call_signature_of(_one(ty, fact, depth), linkage_reliable=True)
+    new = call_signature_of(_fn(), linkage_reliable=True)
     assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.UNKNOWN
 
 
@@ -207,7 +243,8 @@ def _fn(**kw) -> Function:  # type: ignore[no-untyped-def]
 
 def test_only_sysv_amd64_is_modelled() -> None:
     sig = call_signature_of(
-        _fn(params=[Param(name="a", type="int", type_abi_fact=Fact.present(_I))])
+        _fn(params=[Param(name="a", type="int", type_abi_fact=Fact.present(_I))]),
+        linkage_reliable=True,
     )
     for abi in ("win64", "aapcs64", "x32", ""):
         assert assess_call_interface(sig, sig, abi).status is AxisStatus.UNKNOWN
@@ -215,15 +252,15 @@ def test_only_sysv_amd64_is_modelled() -> None:
 
 @pytest.mark.parametrize("variadic", [True, None])
 def test_variadic_or_unknown_variadic_is_unknown(variadic: bool | None) -> None:
-    old = call_signature_of(_fn(is_variadic=variadic))
-    new = call_signature_of(_fn())
+    old = call_signature_of(_fn(is_variadic=variadic), linkage_reliable=True)
+    new = call_signature_of(_fn(), linkage_reliable=True)
     assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.UNKNOWN
 
 
 @pytest.mark.parametrize("names", [["", "b"], ["a", "a"]])
 def test_unmatchable_parameter_names_are_unknown(names: list[str]) -> None:
     ps = [Param(name=n, type="int", type_abi_fact=Fact.present(_I)) for n in names]
-    sig = call_signature_of(_fn(params=ps))
+    sig = call_signature_of(_fn(params=ps), linkage_reliable=True)
     assert assess_call_interface(sig, sig, SYSV_AMD64).status is AxisStatus.UNKNOWN
 
 
@@ -274,17 +311,22 @@ def _long_param() -> list[Param]:
 def test_a_non_default_or_uncaptured_convention_is_unknown(
     old_attrs: list[str] | None, new_attrs: list[str] | None
 ) -> None:
-    old = call_signature_of(_fn(params=_long_param(), contract_attributes=old_attrs))
-    new = call_signature_of(_fn(params=_long_param(), contract_attributes=new_attrs))
+    old = call_signature_of(
+        _fn(params=_long_param(), contract_attributes=old_attrs), linkage_reliable=True
+    )
+    new = call_signature_of(
+        _fn(params=_long_param(), contract_attributes=new_attrs), linkage_reliable=True
+    )
     axis = assess_call_interface(old, new, SYSV_AMD64)
     assert axis.status is AxisStatus.UNKNOWN, axis
 
 
 def test_explicit_sysv_abi_is_the_default_convention() -> None:
     old = call_signature_of(
-        _fn(params=_long_param(), contract_attributes=["sysv_abi", "nonnull"])
+        _fn(params=_long_param(), contract_attributes=["sysv_abi", "nonnull"]),
+        linkage_reliable=True,
     )
-    new = call_signature_of(_fn(params=_long_param()))
+    new = call_signature_of(_fn(params=_long_param()), linkage_reliable=True)
     assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.PRESERVED
 
 
@@ -299,16 +341,18 @@ def test_a_possible_member_function_is_unknown() -> None:
                 params=_long_param(),
                 is_static=True,
                 is_extern_c=extern_c,
-            )
+            ),
+            linkage_reliable=True,
         )
         new = call_signature_of(
-            _fn(mangled=mangled, params=_long_param(), is_extern_c=extern_c)
+            _fn(mangled=mangled, params=_long_param(), is_extern_c=extern_c),
+            linkage_reliable=True,
         )
         axis = assess_call_interface(old, new, SYSV_AMD64)
         assert axis.status is AxisStatus.UNKNOWN and "implicit this" in axis.reason, (
             mangled
         )
-    c = call_signature_of(_fn(params=_long_param()))
+    c = call_signature_of(_fn(params=_long_param()), linkage_reliable=True)
     assert assess_call_interface(c, c, SYSV_AMD64).status is AxisStatus.PRESERVED
 
 
@@ -361,7 +405,7 @@ def test_extractor_members_are_unknown_and_c_linkage_is_modelled(
     )
     status = {}
     for fn in load_snapshot(snap).declarations.functions:
-        sig = call_signature_of(fn)
+        sig = call_signature_of(fn, linkage_reliable=True)
         status.setdefault(fn.name, set()).add(
             assess_call_interface(sig, sig, SYSV_AMD64).status
         )

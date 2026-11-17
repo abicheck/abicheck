@@ -133,14 +133,15 @@ def linkage_evidence_reliable(snapshot: AbiSnapshot) -> bool:
 
 
 def call_signature_of(
-    fn: Function, ret: RetShape | None = None, *, linkage_reliable: bool = True
+    fn: Function, ret: RetShape | None = None, *, linkage_reliable: bool
 ) -> CallSignature:
     """Reduce *fn* to a :class:`CallSignature` from its recorded facts.
 
     *ret* overrides the return shape for a struct return whose classification
     the caller knows; otherwise a scalar or ``void`` return is read from the
-    return slot's ABI fact. *linkage_reliable* is
-    :func:`linkage_evidence_reliable` of the snapshot *fn* came from; when it
+    return slot's ABI fact. *linkage_reliable* is required, and is
+    :func:`linkage_evidence_reliable` of the snapshot *fn* came from: there is
+    no default, so a caller cannot forget it and trust a stale flag. When it
     is false, no function is taken to have C linkage.
     """
     convention = _convention(fn.contract_attributes)
