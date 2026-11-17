@@ -774,4 +774,4 @@ adrs:
     disposition: gap
     use_cases: []
     surfaces: []
-    missing: Proposed roadmap ADR, not implemented; no ChangeAssessment, axis evaluators or compare_report.assessments field exist yet.
+    missing: Proposed roadmap ADR, partially implemented; only D8's call evaluator (compare/call_interface.py) exists, with no verdict effect. No ChangeAssessment or compare_report.assessments field exists yet.
