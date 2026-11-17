@@ -1,4 +1,4 @@
-# Formal-methods experiments E1–E12: results
+# Formal-methods experiments E1–E13: results
 
 Roadmap and rationale: [`docs/contribute/plans/formal-methods-and-generator-completeness.md`](../docs/contribute/plans/formal-methods-and-generator-completeness.md).
 E0 (the `TYPE_FIELD_OFFSET_CHANGED` rule) is in [`README.md`](README.md).
@@ -18,6 +18,7 @@ Run date 2026-11-12. Tools: Lean 4.15.0 (core only), gcc 13.3.0, castxml 0.7.0, 
 | E9 | Does unknown evidence create findings? | Header channel: no manufactured or changed-value claim in 12 erasure sweeps. The DWARF channel **cannot be swept**: it has no "unknown" value. Two latent "unknown → 0" encodings found there (not reachable from valid DWARF or from snapshots abicheck wrote) |
 | E11 | Are recorded real pipeline runs accepted by `DispositionPipeline.tla`? | **Yes for the recorded runs, after one spec extension.** 363 runs (358 of abiforge's 360 default cells with gcc + castxml; the 2 `-m32`/`-mx32` rebuilds need multilib and were not built; 10164 step transitions): 361 refined the E7 spec as written; 2 left it because `detect_cpp_patterns` records into the ledger itself, once for an object it creates and never shows. With that step shape modelled (`StepWith`'s `R`, `C`), all 363 are accepted by Python and by TLC (81 distinct traces), no state violates `NothingVanishes`, and no step drops and adds in one call. Four seeded-wrong trace shapes are rejected by both ([§ E11](#e11-trace-validation-of-the-disposition-pipeline)) |
 | E12 | Can a second fragment, C enum edits, be closed the same way? | **Yes**, for one insert/remove/re-initialization in a 1–4 enumerator C11 enum with initializers in {none, 0, 2, -1}: 11372 cases, generator bijection **proved**, gcc and clang values = model on 22744/22744 sides each, abicheck = oracle on 11372/11372 per compiler; revalued enumerators form an interval and same observable ⇔ same key **proved**, 32 classes, reduced set 355× smaller ([`ENUM_FRAGMENT.md`](ENUM_FRAGMENT.md)) |
+| E13 | Can a function-signature fragment be closed, with the calling convention as an oracle? | **Yes**, for one insert/remove/retype of a parameter of a C function with 1–3 `int`/`long`/`double`/`void *` parameters, x86-64 SysV: 2160 cases, generator bijection **proved**; when an edit keeps the call interface **proved** for any list length (`set_compatible_iff`, `rem_compatible_iff`) and confirmed by execution on gcc and clang on every case; abicheck = report contract on 2160/2160. **Finding**: 240 call-compatible, source-breaking edits gate as ABI breaks ([`FUNC_FRAGMENT.md`](FUNC_FRAGMENT.md), `known-gaps.md`) |
 
 ## E1. The record-layout space
 

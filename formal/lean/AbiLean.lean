@@ -3,3 +3,4 @@ import AbiLean.Examples
 import AbiLean.Layout
 import AbiLean.Fragment
 import AbiLean.EnumFragment
+import AbiLean.FuncFragment
