@@ -19,7 +19,14 @@ from abicheck.dumper import (
     _itanium_export_variable,
     _msvc_export_function,
 )
-from abicheck.model import AbiSnapshot, Function, Param, ScopeOrigin, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    ScopeOrigin,
+    Variable,
+    Visibility,
+)
 from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.observability import UNCLASSIFIED, Platform
 from abicheck.model.fact import Fact
@@ -217,3 +224,33 @@ def test_pure_virtual_flip_is_emitted_from_headers_and_observed_by_headers() -> 
     )
     assert _observes_on("func_virtual_became_pure", "elf", BINARY_AND_HEADERS)
     assert not _observes_on("func_virtual_became_pure", "elf", BINARY)
+
+
+def test_const_value_change_is_emitted_with_headers_and_not_from_bytes_alone() -> None:
+    # The value bytes live in the binary, but a binary-only snapshot has no
+    # type for the object, so the change is observed only when a header (or
+    # DWARF) supplies the declaration. Declared {B,D} and {B,H}, never {B}.
+    old_var = Variable(
+        name="kLimit", mangled="kLimit", type="const int", value="10", is_const=True
+    )
+    new_var = Variable(
+        name="kLimit", mangled="kLimit", type="const int", value="20", is_const=True
+    )
+    old = AbiSnapshot(
+        library="libsynth",
+        version="1",
+        platform="elf",
+        from_headers=True,
+        variables=[old_var],
+    )
+    new = AbiSnapshot(
+        library="libsynth",
+        version="2",
+        platform="elf",
+        from_headers=True,
+        variables=[new_var],
+    )
+    emitted = {c.kind.value for c in compare(old, new).changes}
+    assert "var_value_changed" in emitted, emitted
+    assert _observes_on("var_value_changed", "elf", BINARY_AND_HEADERS)
+    assert not _observes_on("var_value_changed", "elf", BINARY)

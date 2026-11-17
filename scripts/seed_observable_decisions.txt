@@ -317,3 +317,5 @@ dwarf_info_missing  D:PRESENCE  # diff_platform.py:1436-1452: fires only when th
 func_became_inline  H  # compare/function_lifecycle.py:98-128 reads is_inline; DWARF does not set it (extract emits is_inline_fact not_collected, oracle: DWARF-only pair emits nothing in either direction, headers pair emits func_became_inline)
 # -- batch 3 (G3): pure virtual -----------------------------------------------
 func_virtual_became_pure  H:PURE  # types_1.py / diff_types.py:1300: fires on a matched pair whose is_pure_virtual flips; a pure member has no symbol, so the DWARF-only surface never contains it (oracle: header pair emits it, DWARF-only pair emits nothing)
+# -- batch 3 (G3): const value -----------------------------------------------
+var_value_changed  DH  # types_2.py: the binary's section bytes are read only for a variable whose type a header or DWARF supplies. Oracle: stripped binary alone emits nothing; stripped binary + headers emits; -g binary without headers emits. Reader gap (binary-only dumps do not type the object): G7 (sec 11.2)
