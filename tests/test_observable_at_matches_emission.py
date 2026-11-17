@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +34,7 @@ from abicheck.model import (
 from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.observability import UNCLASSIFIED, Platform
 from abicheck.model.fact import Fact
+from tests._abicheck_subprocess import abicheck_command
 
 PLATFORMS = ["elf", "pe", "macho"]
 BINARY = ("B",)
@@ -300,13 +300,13 @@ def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
         subprocess.run(["strip", "--strip-debug", str(so)], check=True)
         out = tmp_path / f"{name}.json"
         subprocess.run(
-            [sys.executable, "-m", "abicheck.cli", "dump", str(so), "-o", str(out)],
+            abicheck_command("dump", str(so), "-o", str(out)),
             check=True,
             capture_output=True,
         )
         dumps.append(out)
     result = subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", "compare", str(dumps[0]), str(dumps[1])],
+        abicheck_command("compare", str(dumps[0]), str(dumps[1])),
         capture_output=True,
         text=True,
     )
