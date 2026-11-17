@@ -246,6 +246,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         description_template="Sanitizer runtime required: {detail}",
         entity=_ENT.BINARY,
         contract_subject=_CS.DEPENDENCY_EDGE,
+        observable_at=(_OBS_B_ELF,),
         operation=_OP.ADDED,
     ),
     _E(

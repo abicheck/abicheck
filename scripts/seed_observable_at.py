@@ -67,6 +67,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_BH",
     ),
+    "BHDOC": (
+        (("B", "H"),),
+        "the ratio counts exports against public-header declarations; a binary alone has no header records to compare with",
+        (),
+        "_OBS_BH_DOC",
+    ),
     "H": (
         (("B", "H"),),
         "declaration-only fact: visible in the public header",
@@ -114,6 +120,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         "compiler-flag fact: the header never carries it; DWARF and build data do",
         (),
         "_OBS_DBD",
+    ),
+    "BBD": (
+        (("B", "BD"),),
+        "compiler-flag fact: the header never carries it and the binary does not; build data (a compile database) does",
+        (),
+        "_OBS_BBD",
     ),
     "BHSG": (
         (("B", "H", "S", "G"),),
