@@ -12,6 +12,7 @@ detector against bytes the test read itself.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,16 @@ from abicheck.dumper import dump
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.declarations import Variable
 
-pytestmark = pytest.mark.integration
+# The section-byte reader is the ELF path. A PE or Mach-O build of the same
+# source exports no ``g_k`` from a bare ``-shared`` link, so these tests are
+# ELF-only by construction and skip elsewhere.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="ELF section-byte reader: these tests build ELF shared objects",
+    ),
+]
 
 
 def _snap(tmp_path: Path, name: str, src: str):

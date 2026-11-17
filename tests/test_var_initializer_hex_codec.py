@@ -8,6 +8,7 @@ comparison against it must not report a changed initializer.
 from __future__ import annotations
 
 import copy
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,16 @@ from abicheck.dumper import dump
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 
-pytestmark = pytest.mark.integration
+# The section-byte reader is the ELF path. A PE or Mach-O build of the same
+# source exports no ``g_k`` from a bare ``-shared`` link, so these tests are
+# ELF-only by construction and skip elsewhere.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="ELF section-byte reader: these tests build ELF shared objects",
+    ),
+]
 
 
 def _var(snap, name: str):
