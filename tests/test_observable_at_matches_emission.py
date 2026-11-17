@@ -323,6 +323,18 @@ _HEADER_PAIRS = {
         "Box<int> g(int x){ return Box<int>{x}; }\n",
         "Box<long> g(int x){ return Box<long>{x}; }\n",
     ),
+    "opaque_invariant_broken": (
+        "struct Impl;\nImpl* make();\nint use(Impl* p);\n",
+        "struct Impl { int x; };\nImpl* make();\nint use(Impl* p);\n",
+        "struct Impl { int x; };\nImpl* make(){ static Impl i{1}; return &i; }\nint use(Impl* p){ return p->x; }\n",
+        "Impl* make(){ static Impl i{1}; return &i; }\nint use(Impl* p){ return p->x; }\n",
+    ),
+    "handle_type_changed": (
+        "struct HandleA;\ntypedef struct HandleA* Handle;\nHandle make();\nint use(Handle h);\n",
+        "struct HandleB;\ntypedef struct HandleB* Handle;\nHandle make();\nint use(Handle h);\n",
+        "struct HandleA { int x; };\nHandle make(){ static HandleA a{1}; return &a; }\nint use(Handle h){ return h->x; }\n",
+        "struct HandleB { int x; };\nHandle make(){ static HandleB a{1}; return &a; }\nint use(Handle h){ return h->x; }\n",
+    ),
     "used_reserved_field": (
         'struct R { int a; int reserved1; };\nextern "C" int rsz(const R* r);\n',
         'struct R { int a; int priority; };\nextern "C" int rsz(const R* r);\n',

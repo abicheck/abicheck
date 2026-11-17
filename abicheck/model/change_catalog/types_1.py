@@ -44,6 +44,10 @@ from .registry import (
 )
 
 _OBS_B = observable(("B",))
+_OBS_H_HEADER = observable(
+    ("B", "H"),
+    rationale="a header-level fact: the public header declares the opaque type or typedef; neither the export table nor DWARF carries it",
+)
 
 _OBS_H_PURE = observable(
     ("B", "H"),
@@ -135,6 +139,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "handle_type_changed",
         _B,
+        observable_at=(_OBS_H_HEADER,),
         impact="An opaque handle typedef (a `void*` token or a pointer to a "
         "forward-declared struct) changed its underlying token type in a way "
         "callers can observe. Code that stored or compared the old handle "
@@ -185,6 +190,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "opaque_invariant_broken",
         _B,
+        observable_at=(_OBS_H_HEADER,),
         impact="A type that was opaque (its definition hidden from callers, crossed "
         "only by pointer) or PIMPL now exposes its layout — its complete "
         "definition became visible in the public include closure, or a "
