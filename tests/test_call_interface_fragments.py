@@ -312,9 +312,8 @@ def test_extractor_members_are_unknown_and_c_linkage_is_modelled(
 
     if shutil.which("g++") is None or shutil.which(frontend) is None:
         pytest.skip(f"g++ and {frontend} required")
-    if shutil.which("abicheck") is None:
-        pytest.skip("abicheck CLI required")
     from abicheck.serialization import load_snapshot
+    from tests._abicheck_subprocess import abicheck_command
 
     (tmp_path / "a.h").write_text(_MEMBER_HEADER)
     (tmp_path / "a.cpp").write_text(_MEMBER_SOURCE)
@@ -325,7 +324,7 @@ def test_extractor_members_are_unknown_and_c_linkage_is_modelled(
     )
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", frontend)
     subprocess.run(
-        ["abicheck", "dump", str(lib), "-H", str(tmp_path / "a.h"), "-o", str(snap)],
+        abicheck_command("dump", lib, "-H", tmp_path / "a.h", "-o", snap),
         check=True,
         capture_output=True,
     )

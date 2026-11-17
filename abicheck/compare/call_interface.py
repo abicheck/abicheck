@@ -61,6 +61,7 @@ from ..model.call_interface import (
 )
 from ..model.cc_attributes import is_cc_attribute
 from ..model.declarations import Function
+from ..model.owner_recovery import is_mangled_identity
 
 __all__ = [
     "AxisStatus",
@@ -125,7 +126,7 @@ def call_signature_of(fn: Function, ret: RetShape | None = None) -> CallSignatur
     # `is_extern_c` AND has an unmangled symbol, because a linkage
     # specification never changes a member's `_Z` symbol. Only those
     # functions are modelled.
-    c_linkage = fn.is_extern_c and not fn.mangled.startswith("_Z")
+    c_linkage = fn.is_extern_c and not is_mangled_identity(fn.mangled)
     maybe_member = not c_linkage
     if ret is None:
         ret = ret_shape_of(
