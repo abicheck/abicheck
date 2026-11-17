@@ -134,7 +134,6 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
     _E(
         "visibility_leak",
         _C,
-        observable_at=(_OBS_B_ELF,),
         impact="Internal symbols exported without -fvisibility=hidden; namespace pollution risk.",
         description_template="Old library exports {detail} internal-looking symbol(s) without -fvisibility=hidden (bad practice — accidental ABI surface enlargement): {name}",
         entity=_ENT.BINARY,
