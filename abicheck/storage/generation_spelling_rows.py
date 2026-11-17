@@ -735,4 +735,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable or unparseable adjacent dSYM stores a fixed limitation, is not cached, and the header-free Mach-O extractor collects it."
     ),
     82: GenerationSpellingChange("G7: initializer_hex; no spelling change"),
+    83: GenerationSpellingChange(
+        'no type or name spelling changes. A headerless PE dump\'s export-table functions take is_extern_c and entity_id from the PE identity function: a MinGW C++ export spelled _Z... is a C++ function, not extern "C", and carries an entity identity where the older extractor left it unset. Export names and return types are unchanged.'
+    ),
 }
