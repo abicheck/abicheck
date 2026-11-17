@@ -162,9 +162,12 @@ def test_stress_depth_case(case: str, tmp_path: Path, shared_cmake_build_dir) ->
     # Rebuild: fresh compile per run, raw PDB bytes against the projected spelling.
     rebuild_rows: list[str] = []
     mismatches: list[str] = []
+    # A short root: under pytest's tmp_path the MSBuild tlog path exceeds MAX_PATH (260)
+    # and the rebuild fails before any spelling is read.
+    short_root = Path("C:/abi_rb")
     for n in range(REBUILDS):
-        rb = tmp_path / f"rebuild_{n}"
-        rb.mkdir()
+        rb = short_root / f"{CASES.index(case)}_{n}"
+        rb.mkdir(parents=True, exist_ok=True)
         rv1, rv2, _rh1, _rh2 = _built_case(case, rb, None)
         bytes_old, bytes_new = _byte_counts(rv1), _byte_counts(rv2)
         proj_old, proj_new = project_pair_to_depth(
