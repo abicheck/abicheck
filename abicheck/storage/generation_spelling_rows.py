@@ -735,4 +735,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable or unparseable adjacent dSYM stores a fixed limitation, is not cached, and the header-free Mach-O extractor collects it."
     ),
     82: GenerationSpellingChange("G7: initializer_hex; no spelling change"),
+    83: GenerationSpellingChange(
+        "ADR-094 call axis (PR #2128): no stored type or name spelling changes. The clang "
+        'header backend no longer records a class member declared inside an extern "C" '
+        "block as C linkage ([dcl.link]/4): is_extern_c is now false for such a member, so "
+        "its EntityId keeps its mangled identity instead of the bare extern_c one. Names, "
+        "symbols and type spellings are unchanged; an older clang snapshot keeps the flag "
+        "as stored (the call axis declines to trust it), and no rewrite applies."
+    ),
 }
