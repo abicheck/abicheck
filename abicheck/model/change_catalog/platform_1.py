@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -42,6 +43,13 @@ from .registry import (
     Verdict,
 )
 
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
+_OBS_D_PRESENCE = observable(
+    ("B", "D"),
+    rationale="DWARF presence on the old side: only a debug-info read sees it",
+)
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
@@ -68,6 +76,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "common_symbol_risk",
         _C,
+        observable_at=(_OBS_B_ELF,),
         impact="An exported symbol is a tentative definition (STT_COMMON); "
         "its final address and merge behavior across translation "
         "units is decided by the linker, which can differ across "
@@ -90,6 +99,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "dwarf_info_missing",
         _C,
+        observable_at=(_OBS_D_PRESENCE,),
         impact="The new binary carries no DWARF debug info — this detector "
         "only checks whether DWARF is present, not why it's absent, "
         "so this fires whether the binary was never compiled with "

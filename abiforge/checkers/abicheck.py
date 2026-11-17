@@ -362,6 +362,15 @@ class ObservableSpec:
     language: frozenset[str] | None = None
 
 
+def default_verdict(kind_name: str) -> str | None:
+    """The catalog's ``default_verdict`` of ``ChangeKind`` *kind_name*, or None."""
+    from abicheck.model.change_catalog.assembled import REGISTRY
+    from abicheck.model.change_catalog.kinds import ChangeKind
+
+    meta = REGISTRY.get(ChangeKind[kind_name].value)
+    return None if meta is None else meta.default_verdict.name
+
+
 def binary_gated_kind_names() -> frozenset[str]:
     """The kinds ADR-084 caps to COMPATIBLE_WITH_RISK at binary or DWARF depth.
 

@@ -261,6 +261,9 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     "field_became_const": _RECORD_RELATIONS,
     "field_became_volatile": _RECORD_RELATIONS,
     "secondary_vtable_group_changed": _RECORD_RELATIONS,
+    # Standard layout is derived from the record DIE (bases, virtuality, access),
+    # which the projection's persisted layout does not keep (see _RECORD_RELATIONS).
+    "standard_layout_lost": _RECORD_RELATIONS,
     "type_base_changed": _RECORD_RELATIONS,
     "type_vtable_changed": _RECORD_RELATIONS,
     "vptr_introduced": _RECORD_RELATIONS,

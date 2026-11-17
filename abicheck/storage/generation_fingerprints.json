@@ -5,10 +5,10 @@
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
       "abicheck/dumper.py": "32c757268dbf7fb34b57704f4fb9df5d3076f4c98b183e7ad7bc2b240d04d8f0",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
-      "abicheck/dwarf_advanced.py": "1a26b3efbc556780c7c97d7b16cb168b528c1460f14df12a6344d590b66efac5",
+      "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
+      "abicheck/dwarf_snapshot.py": "c4226cd079a92be31cc3400453b03e696a25b6e4f754457bfdd471cff1cf9675",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "4cef17c9d4ed06c753e792e3b9d448b2412dd76d505bf3607902f0f5ee869fc8",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
@@ -45,6 +45,7 @@
       "abicheck/extract/dpcpp_jobs.py": "af360b567dd497b4ca16995fb19b820dbcd7ad6ff23d4c8448659841e4c47b96",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_abi_fact.py": "b169fadd8bb32ee4e67f9c70d46e5392215f648fac55d0c782aeabe51bc58495",
+      "abicheck/extract/dwarf_calling_conventions.py": "3944725995f3cb59ee04d7a6dddb67ce82fd8a10e976f244903885efd1b65f98",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_export_gaps.py": "ed04bbe774a14bc4b1c695f05ceb6a1da8e376cce001d780d63ccb9a9a52b412",
       "abicheck/extract/dwarf_layout_backfill.py": "aa6e6647edc2f60129a9762ffd131e0286a8be0432cb141cdea30675a304b630",
@@ -52,6 +53,7 @@
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
+      "abicheck/extract/dwarf_standard_layout.py": "233bf5002e0ec8b8155d1b5822371fbcb04e0d1bc8b4032147c11cc5c0443283",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
       "abicheck/extract/dwarf_type_alignment.py": "26897230d2b88662cd61e3e64180f6ca57a6ff361baebe33e61b046ebee68951",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
@@ -243,9 +245,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "a699ac74d43202340dea647be6e65e1e2455b6fe959cc112e004bda2f0f3bfc2",
-    "generation": 80,
-    "reason": "Presence-only Mach-O reads the dSYM section headers instead of parsing CUs (ELF's contract). The recorded facts are unchanged: same presence fact, same NOT_RUN advanced status, same fixed limitation and same explicit-bundle refusal. macho_dsym's validation is shared with the full read, unchanged in behaviour."
+    "fingerprint": "a4edc0fa49b2bf1845541990166bb3c2bd7b135304896d100a72fbc61094ccba",
+    "generation": 81,
+    "reason": "Import-order fix in dwarf_advanced after the merge; no behaviour change"
   },
   "resolver": {
     "files": {

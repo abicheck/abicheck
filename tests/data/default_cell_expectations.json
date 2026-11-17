@@ -2733,7 +2733,7 @@
   "expected": [],
   "observable": true,
   "verdict_max": null,
-  "verdict_min": "API_BREAK"
+  "verdict_min": "COMPATIBLE_WITH_RISK"
  },
  "record_lost_trivially_copyable|cxx_more": {
   "any_of": [],

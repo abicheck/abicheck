@@ -55,6 +55,7 @@ from .dwarf_utils import (
     resolve_type_die as _resolve_type_die,
 )
 from .extract import dwarf_subtree_index as _dsi
+from .extract.dwarf_calling_conventions import CC_NAMES as _CC_NAMES
 from .extract.dwarf_type_alignment import (
     _NATURAL_ALIGN,
     _aggregate_has_unaligned_member,
@@ -79,27 +80,6 @@ from .model.dwarf_facts import (
 
 log = logging.getLogger(__name__)
 
-# DW_AT_calling_convention values (DWARF 5 standard + vendor extensions)
-_CC_NAMES: dict[int, str] = {
-    0x01: "normal",
-    0x02: "program",
-    0x03: "nocall",
-    0x04: "pass_by_reference",  # DWARF 5
-    0x05: "pass_by_value",  # DWARF 5
-    0x40: "GNU_renesas_sh",
-    0x41: "GNU_borland_fastcall_i386",
-    0x80: "GNU_push_call_stub",  # GCC internal
-    0x81: "GNU_push_arg",  # GCC internal
-    0xB0: "BORLAND_safecall",
-    0xB1: "BORLAND_stdcall",
-    0xB2: "BORLAND_pascal",
-    0xB3: "BORLAND_msfastcall",
-    0xB4: "BORLAND_msreturn",
-    0xB5: "BORLAND_thiscall",
-    0xB6: "BORLAND_fastcall",
-    0xB9: "LLVM_PreserveMost",
-    0xD0: "LLVM_vectorcall",
-}
 
 # Flags in DW_AT_producer that affect binary ABI
 _ABI_FLAGS_RE = re.compile(
@@ -742,6 +722,18 @@ def _parse_producer(producer: str) -> ToolchainInfo:
 # ---------------------------------------------------------------------------
 
 
+def _named_convention(name: str) -> str:
+    """A stored convention name, with a legacy ``unknown(0x..)`` code mapped to its name.
+
+    A snapshot written before a code was named stores ``unknown(0xc1)``; the same
+    function read now says ``LLVM_Win64``. Both must compare equal.
+    """
+    m = re.fullmatch(r"unknown\(0x([0-9a-fA-F]+)\)", name)
+    if m is None:
+        return name
+    return _CC_NAMES.get(int(m.group(1), 16), name)
+
+
 def _diff_calling_conventions(
     old_meta: AdvancedDwarfMetadata,
     new_meta: AdvancedDwarfMetadata,
@@ -751,8 +743,8 @@ def _diff_calling_conventions(
     old_cc_keys = set(old_meta.calling_conventions)
     new_cc_keys = set(new_meta.calling_conventions)
     for fname in sorted(old_cc_keys & new_cc_keys):
-        old_cc = old_meta.calling_conventions[fname]
-        new_cc = new_meta.calling_conventions[fname]
+        old_cc = _named_convention(old_meta.calling_conventions[fname])
+        new_cc = _named_convention(new_meta.calling_conventions[fname])
         if old_cc != new_cc:
             results.append(
                 (
@@ -766,7 +758,8 @@ def _diff_calling_conventions(
     already_reported_cc = {
         fname
         for fname in (old_cc_keys & new_cc_keys)
-        if old_meta.calling_conventions[fname] != new_meta.calling_conventions[fname]
+        if _named_convention(old_meta.calling_conventions[fname])
+        != _named_convention(new_meta.calling_conventions[fname])
     }
     return results, already_reported_cc
 

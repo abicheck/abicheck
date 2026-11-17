@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from abiforge.checkers.abicheck import default_verdict
 from abiforge.model.expect import Rule
 from abiforge.model.opkit import (
     _ALIGN,
@@ -28,6 +29,13 @@ from abiforge.model.opkit import (
 )
 from abiforge.model.seeds import XCXX_SEED
 from abiforge.operators.platform import _X86_HOSTS, _x86_64
+
+
+def _kind_verdict(kind: str) -> str:
+    verdict = default_verdict(kind)
+    assert verdict is not None, f"{kind} has no catalog verdict"
+    return verdict
+
 
 __all__ = ["LAYOUT_OPERATORS"]
 
@@ -387,7 +395,9 @@ _TRAITS = (
             frozenset({"STANDARD_LAYOUT_LOST"}),
             frozenset({"FIELD_ACCESS_CHANGED"}),
         ),
-        verdict_min="API_BREAK",
+        # The catalog's default verdict for the kind, not a hand-written one: a
+        # loss of standard layout moves no layout by itself.
+        verdict_min=_kind_verdict("STANDARD_LAYOUT_LOST"),
     ),
 )
 
