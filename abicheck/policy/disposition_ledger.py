@@ -67,9 +67,6 @@ from .disposition_gate import (
     _reset_dated_overlays as _reset_dated_overlays,
     regate_record as regate_record,
 )
-from .disposition_suppression import (
-    record_suppressed_change as record_suppressed_change,
-)
 from .disposition_transitions import PROMOTABLE, scope_out
 from .disposition_types import (
     CONSUMER_ONLY_APPLICATION_POINTS as _CONSUMER_ONLY,

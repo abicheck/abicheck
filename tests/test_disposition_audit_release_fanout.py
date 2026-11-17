@@ -54,10 +54,8 @@ def _removed_and_suppressed(n: int) -> DiffResult:
     # ledger-closing primitive `compare()` uses, since this fixture's whole
     # point is the *disposition* pipeline, not symbol diffing itself.
     from abicheck.policy.disposition_close import finalize_ledger
-    from abicheck.policy.disposition_ledger import (
-        DispositionLedger,
-        record_suppressed_change,
-    )
+    from abicheck.policy.disposition_ledger import DispositionLedger
+    from abicheck.policy.disposition_suppression import record_suppressed_change
 
     ledger = DispositionLedger()
     kept: list[Change] = []
