@@ -30,17 +30,15 @@ only evidence of a flip. Pure: no snapshot, no ``Change`` is built here.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 __all__ = ["DualAbiPairing", "pair_dual_abi_flips"]
 
 _CXX11_TAG = "[abi:cxx11]"
 _CXX11_INLINE_NS = "__cxx11::"
-_STD_STRING_SPELLING = re.compile(
-    r"std::basic_string<char,std::char_traits<char>,std::allocator<char>>"
-)
-_WHITESPACE = re.compile(r"\s+")
+#: The compact spelling of libstdc++'s ``std::string`` in the new ABI's
+#: demangled name, with all whitespace removed.
+_NEW_STD_STRING = "std::basic_string<char,std::char_traits<char>,std::allocator<char>>"
 
 
 @dataclass(frozen=True)
@@ -68,10 +66,10 @@ def _cxx11_identity(demangled: str) -> str:
     old and new spellings of one function compare equal: ``std::string`` (the
     legacy ``Ss``) and ``std::__cxx11::basic_string<char, ...>``, and the
     ``[abi:cxx11]`` return-type tag, all reduce to one identity."""
-    compact = _WHITESPACE.sub(
-        "", demangled.replace(_CXX11_TAG, "").replace(_CXX11_INLINE_NS, "")
+    compact = "".join(
+        demangled.replace(_CXX11_TAG, "").replace(_CXX11_INLINE_NS, "").split()
     )
-    return _STD_STRING_SPELLING.sub("std::string", compact)
+    return compact.replace(_NEW_STD_STRING, "std::string")
 
 
 def _direction(removed_tagged: int, added_tagged: int) -> str:

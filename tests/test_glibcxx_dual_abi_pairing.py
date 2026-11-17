@@ -18,10 +18,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -88,22 +89,15 @@ def _compare(work: Path, old: Path, new: Path) -> list[dict]:
     old_json, new_json = work / f"{old.stem}.json", work / f"{new.stem}.json"
     for so, out in ((old, old_json), (new, new_json)):
         subprocess.run(
-            [sys.executable, "-m", "abicheck.cli", "dump", str(so), "-o", str(out)],
+            abicheck_command("dump", str(so), "-o", str(out)),
             check=True,
             capture_output=True,
         )
     report = work / f"{old.stem}_vs_{new.stem}.json"
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "compare",
-            str(old_json),
-            str(new_json),
-            "-o",
-            f"json={report}",
-        ],
+        abicheck_command(
+            "compare", str(old_json), str(new_json), "-o", f"json={report}"
+        ),
         capture_output=True,
     )
     return json.loads(report.read_text())["changes"]
