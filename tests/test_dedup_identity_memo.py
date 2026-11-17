@@ -163,3 +163,24 @@ def test_a_rewritten_identity_input_is_seen_by_the_next_lookup() -> None:
     after = memo.primary_id(change)
     assert after == resolve_change_identity(change).primary_id
     assert after != before
+
+
+def test_an_in_place_list_mutation_is_seen_by_the_next_lookup() -> None:
+    """A cached finding whose list field is appended to in place must not keep
+    its old identity: distinct findings must not be deduplicated against a stale
+    key (CodeRabbit, PR #2107)."""
+    from abicheck.compare.finding_identity import resolve_change_identity
+
+    memo = IdentityMemo()
+    change = Change(
+        kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+        symbol="lib.so",
+        description="The old snapshot's mismatched records are X.",
+        affected_symbols=["A"],
+    )
+    before = memo.primary_id(change)
+    assert change.affected_symbols is not None
+    change.affected_symbols.append("B")
+    after = memo.primary_id(change)
+    assert after == resolve_change_identity(change).primary_id
+    assert after != before

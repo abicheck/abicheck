@@ -652,7 +652,15 @@ def dedup_identity_key(
         if (
             hit is not None
             and hit[0] is change
-            and hit[1] == tuple(getattr(change, n) for n in INPUT_FIELDS)
+            and hit[1]
+            == tuple(
+                tuple(v)
+                if isinstance(v, list)
+                else frozenset(v)
+                if isinstance(v, set)
+                else v
+                for v in (getattr(change, n) for n in INPUT_FIELDS)
+            )
         ):
             return hit[2]
         return identity_memo.primary_id(change)

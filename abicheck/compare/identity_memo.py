@@ -39,7 +39,10 @@ class IdentityMemo:
     input fields (:data:`INPUT_FIELDS`) beside its primary id. A hit requires
     the current snapshot to equal the stored one, so any later rewrite of an
     input (for example the enum-name bridge setting ``qualified_name``) forces a
-    recompute, with no call site needing to remember to invalidate.
+    recompute, with no call site needing to remember to invalidate. Lists and
+    sets are frozen into the snapshot, so an in-place append to a list field
+    (``affected_symbols``) is seen too. Other mutable objects are compared by
+    equality as stored; no ``Change`` field holds one today.
 
     Keyed by ``id(change)`` and holding a strong reference to each change, so a
     freed object's id is never reused while its entry lives. Owned by one
@@ -55,7 +58,14 @@ class IdentityMemo:
         self.entries: dict[int, tuple[Change, tuple[object, ...], str]] = {}
 
     def primary_id(self, change: Change) -> str:
-        snapshot = tuple(getattr(change, name) for name in INPUT_FIELDS)
+        snapshot = tuple(
+            tuple(v)
+            if isinstance(v, list)
+            else frozenset(v)
+            if isinstance(v, set)
+            else v
+            for v in (getattr(change, name) for name in INPUT_FIELDS)
+        )
         hit = self.entries.get(id(change))
         if hit is not None and hit[0] is change and hit[1] == snapshot:
             return hit[2]
