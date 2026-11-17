@@ -255,9 +255,74 @@ def test_explicit_sysv_abi_is_the_default_convention() -> None:
 
 
 def test_a_possible_member_function_is_unknown() -> None:
-    """static long C::f(long) -> long C::f(long) adds an implicit this."""
-    old = call_signature_of(_fn(name="C::f", params=_long_param(), is_static=True))
-    new = call_signature_of(_fn(name="C::f", params=_long_param()))
-    assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.UNKNOWN
-    c = call_signature_of(_fn(name="ns::f", params=_long_param(), is_extern_c=True))
+    """static long C::f(long) -> long C::f(long) adds an implicit this. The
+    clang and castxml extractors store the leaf name (`f`); the symbol is
+    what marks a member."""
+    old = call_signature_of(
+        _fn(name="f", mangled="_ZN1C1fEl", params=_long_param(), is_static=True)
+    )
+    new = call_signature_of(_fn(name="f", mangled="_ZN1C1fEl", params=_long_param()))
+    axis = assess_call_interface(old, new, SYSV_AMD64)
+    assert axis.status is AxisStatus.UNKNOWN and "implicit this" in axis.reason
+    qualified = call_signature_of(_fn(name="C::f", params=_long_param()))
+    assert (
+        assess_call_interface(qualified, qualified, SYSV_AMD64).status
+        is AxisStatus.UNKNOWN
+    )
+    c = call_signature_of(
+        _fn(name="ns::f", mangled="_ZN2ns1fEl", params=_long_param(), is_extern_c=True)
+    )
     assert assess_call_interface(c, c, SYSV_AMD64).status is AxisStatus.PRESERVED
+
+
+# ------------------------------------- extractor-produced declarations
+
+_MEMBER_HEADER = """struct C { long f(long a); static long g(long a); };
+extern "C" long h(long a);
+"""
+_MEMBER_SOURCE = """#include "a.h"
+long C::f(long a) { return a; }
+long C::g(long a) { return a; }
+long h(long a) { return a; }
+"""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("frontend", ["castxml", "clang"])
+def test_extractor_members_are_unknown_and_c_linkage_is_modelled(
+    tmp_path: Path, frontend: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The extractors store a member's leaf name (`f`), and castxml adds
+    implicit special members with synthetic symbols; none of them may be
+    judged, since their implicit `this` is not in `params`."""
+    import shutil
+    import subprocess
+
+    if shutil.which("g++") is None or shutil.which(frontend) is None:
+        pytest.skip(f"g++ and {frontend} required")
+    if shutil.which("abicheck") is None:
+        pytest.skip("abicheck CLI required")
+    from abicheck.serialization import load_snapshot
+
+    (tmp_path / "a.h").write_text(_MEMBER_HEADER)
+    (tmp_path / "a.cpp").write_text(_MEMBER_SOURCE)
+    lib, snap = tmp_path / "liba.so", tmp_path / "snap.json"
+    subprocess.run(
+        ["g++", "-g", "-shared", "-fPIC", str(tmp_path / "a.cpp"), "-o", str(lib)],
+        check=True,
+    )
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", frontend)
+    subprocess.run(
+        ["abicheck", "dump", str(lib), "-H", str(tmp_path / "a.h"), "-o", str(snap)],
+        check=True,
+        capture_output=True,
+    )
+    status = {}
+    for fn in load_snapshot(snap).declarations.functions:
+        sig = call_signature_of(fn)
+        status.setdefault(fn.name, set()).add(
+            assess_call_interface(sig, sig, SYSV_AMD64).status
+        )
+    assert status["h"] == {AxisStatus.PRESERVED}
+    assert status["f"] == status["g"] == {AxisStatus.UNKNOWN}
+    assert all(v == {AxisStatus.UNKNOWN} for k, v in status.items() if k != "h"), status
