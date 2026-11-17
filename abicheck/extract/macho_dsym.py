@@ -170,13 +170,13 @@ def _descriptor(
     )
 
 
-def read_dsym_dwarf(dsym: Path, *, dylib_uuid: str | None) -> DsymDwarf | DsymAbsent:
-    """DWARF from the bundle's ``__DWARF`` segment, or why there is none.
+def _validated_dsym_bytes(
+    dsym: Path, *, dylib_uuid: str | None
+) -> tuple[bytes, str] | DsymAbsent:
+    """The bundle's bytes and UUID once they pass every check, or why not.
 
-    ``dsym`` is the Mach-O file inside the bundle
-    (``<lib>.dSYM/Contents/Resources/DWARF/<name>``). ``dylib_uuid`` is the
-    dylib's ``LC_UUID``; a bundle whose UUID differs was built from another
-    binary and is refused. ``None`` means the UUID could not be read at all.
+    The checks shared by the full DWARF read and the cheap presence probe, so
+    both refuse the same bundles for the same reasons.
     """
     if not dsym.is_file():
         return DsymAbsent("no dSYM file")
@@ -193,6 +193,40 @@ def read_dsym_dwarf(dsym: Path, *, dylib_uuid: str | None) -> DsymDwarf | DsymAb
         return DsymAbsent("dylib carries no LC_UUID; the dSYM cannot be matched")
     if uuid.upper() != dylib_uuid.upper():
         return DsymAbsent(f"dSYM UUID {uuid} does not match the dylib's {dylib_uuid}")
+    return data, uuid
+
+
+def dsym_debug_info_presence(
+    dsym: Path, *, dylib_uuid: str | None
+) -> bool | DsymAbsent:
+    """Whether the bundle's ``__DWARF`` segment carries ``__debug_info``.
+
+    The presence probe for presence-only requests: it validates the bundle the
+    same way :func:`read_dsym_dwarf` does, then reads the section headers only.
+    No DWARF compile unit is parsed, so no type information is built.
+    """
+    checked = _validated_dsym_bytes(dsym, dylib_uuid=dylib_uuid)
+    if isinstance(checked, DsymAbsent):
+        return checked
+    data, _uuid = checked
+    try:
+        return "debug_info" in _dwarf_sections(data)
+    except (ValueError, struct.error) as exc:
+        return DsymAbsent(f"dSYM DWARF unreadable: {exc}")
+
+
+def read_dsym_dwarf(dsym: Path, *, dylib_uuid: str | None) -> DsymDwarf | DsymAbsent:
+    """DWARF from the bundle's ``__DWARF`` segment, or why there is none.
+
+    ``dsym`` is the Mach-O file inside the bundle
+    (``<lib>.dSYM/Contents/Resources/DWARF/<name>``). ``dylib_uuid`` is the
+    dylib's ``LC_UUID``; a bundle whose UUID differs was built from another
+    binary and is refused. ``None`` means the UUID could not be read at all.
+    """
+    checked = _validated_dsym_bytes(dsym, dylib_uuid=dylib_uuid)
+    if isinstance(checked, DsymAbsent):
+        return checked
+    data, uuid = checked
     try:
         sections = _dwarf_sections(data)
         if "debug_info" not in sections:

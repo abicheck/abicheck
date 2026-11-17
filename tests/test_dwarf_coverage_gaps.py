@@ -24,6 +24,7 @@ from abicheck.dwarf_utils import (
     resolve_die_ref,
     resolve_type_die,
 )
+from abicheck.extract import dwarf_type_alignment as dta
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -788,49 +789,44 @@ class TestCheckPacked:
 
 
 class TestDecodeMemberLocation:
-    """_decode_member_location edge cases (lines 600-615)."""
+    """dta._decode_member_location edge cases (lines 600-615)."""
 
     def test_no_location(self):
         """Line 601: missing DW_AT_data_member_location => 0."""
-        from abicheck.dwarf_advanced import _decode_member_location
 
         die = MockDIE(tag="DW_TAG_member", attributes={})
-        assert _decode_member_location(die) == 0
+        assert dta._decode_member_location(die) == 0
 
     def test_int_location(self):
         """Line 603-604: integer value returned directly."""
-        from abicheck.dwarf_advanced import _decode_member_location
 
         die = MockDIE(
             tag="DW_TAG_member",
             attributes={"DW_AT_data_member_location": MockAttr(16)},
         )
-        assert _decode_member_location(die) == 16
+        assert dta._decode_member_location(die) == 16
 
     def test_loc_expr_plus_uconst(self):
         """DW_OP_plus_uconst location expression via shared decoder."""
-        from abicheck.dwarf_advanced import _decode_member_location
 
         # Shared decoder handles tuples: (opcode, operand)
         die = MockDIE(
             tag="DW_TAG_member",
             attributes={"DW_AT_data_member_location": MockAttr([(0x23, 24)])},
         )
-        assert _decode_member_location(die) == 24
+        assert dta._decode_member_location(die) == 24
 
     def test_loc_expr_raw_ints(self):
         """DW_OP_plus_uconst as raw integers via shared decoder."""
-        from abicheck.dwarf_advanced import _decode_member_location
 
         die = MockDIE(
             tag="DW_TAG_member",
             attributes={"DW_AT_data_member_location": MockAttr([0x23, 32])},
         )
-        assert _decode_member_location(die) == 32
+        assert dta._decode_member_location(die) == 32
 
     def test_multi_op_expression(self):
         """Multi-op expression handled by shared stack machine."""
-        from abicheck.dwarf_advanced import _decode_member_location
 
         # DW_OP_constu 8 + DW_OP_constu 4 + DW_OP_plus => 12
         die = MockDIE(
@@ -841,15 +837,14 @@ class TestDecodeMemberLocation:
                 )
             },
         )
-        assert _decode_member_location(die) == 12
+        assert dta._decode_member_location(die) == 12
 
 
 class TestUnwrapQualifiers:
-    """_unwrap_qualifiers edge cases (lines 395-424)."""
+    """dta._unwrap_qualifiers edge cases (lines 395-424)."""
 
     def test_unwrap_const_typedef(self):
         """Follow const -> typedef -> base_type."""
-        from abicheck.dwarf_advanced import _unwrap_qualifiers
 
         base = MockDIE(
             tag="DW_TAG_base_type",
@@ -870,12 +865,11 @@ class TestUnwrapQualifiers:
             offset=300,
         )
         cu = MockCU(cu_offset=0, die_map={100: base, 200: typedef, 300: const})
-        result = _unwrap_qualifiers(const, cu)
+        result = dta._unwrap_qualifiers(const, cu)
         assert result.tag == "DW_TAG_base_type"
 
     def test_unwrap_stops_at_none(self):
         """Line 412: resolve returns None => break."""
-        from abicheck.dwarf_advanced import _unwrap_qualifiers
 
         # Typedef with no DW_AT_type
         typedef = MockDIE(
@@ -884,12 +878,11 @@ class TestUnwrapQualifiers:
             offset=100,
         )
         cu = MockCU(cu_offset=0, die_map={100: typedef})
-        result = _unwrap_qualifiers(typedef, cu)
+        result = dta._unwrap_qualifiers(typedef, cu)
         assert result.tag == "DW_TAG_typedef"
 
     def test_unwrap_depth_limit(self):
         """Lines 417-420: depth limit reached logs and returns."""
-        from abicheck.dwarf_advanced import _unwrap_qualifiers
 
         # Create a chain of 13 typedefs (exceeds limit of 12)
         dies: dict[int, MockDIE] = {}
@@ -912,7 +905,7 @@ class TestUnwrapQualifiers:
                 )
         cu = MockCU(cu_offset=0, die_map=dies)
         first_die = dies[100]
-        result = _unwrap_qualifiers(first_die, cu)
+        result = dta._unwrap_qualifiers(first_die, cu)
         # Bounded walk: returns the last typedef reached without crashing.
         assert result is not None and result.offset == 1300
 
@@ -1889,7 +1882,7 @@ class TestDwarfSnapshotFallbacks:
 
 
 class TestAggregateHasUnalignedMemberNested:
-    """_aggregate_has_unaligned_member carries the parent offset into nested aggregates."""
+    """dta._aggregate_has_unaligned_member carries the parent offset into nested aggregates."""
 
     def _double(self) -> MockDIE:
         return MockDIE(
@@ -1930,7 +1923,6 @@ class TestAggregateHasUnalignedMemberNested:
         )
 
     def test_packed_outer_misaligns_nested_double(self):
-        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
         # struct __attribute__((packed)) Outer { char c; Inner i; };
         # c at 0, i at offset 1 -> i.d lands at absolute offset 1 (misaligned for 8-byte double).
@@ -1965,10 +1957,9 @@ class TestAggregateHasUnalignedMemberNested:
                 320: outer,
             },
         )
-        assert _aggregate_has_unaligned_member(self._wrapper(320), cu) is True
+        assert dta._aggregate_has_unaligned_member(self._wrapper(320), cu) is True
 
     def test_aligned_outer_with_nested_aggregate_is_not_unaligned(self):
-        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
         # struct Outer { Inner i; char c; };  — i at offset 0, properly aligned.
         member_i = MockDIE(
@@ -2002,7 +1993,7 @@ class TestAggregateHasUnalignedMemberNested:
                 350: outer,
             },
         )
-        assert _aggregate_has_unaligned_member(self._wrapper(350), cu) is False
+        assert dta._aggregate_has_unaligned_member(self._wrapper(350), cu) is False
 
     def _int(self) -> MockDIE:
         return MockDIE(
@@ -2012,7 +2003,6 @@ class TestAggregateHasUnalignedMemberNested:
         )
 
     def test_packed_outer_misaligns_array_element(self):
-        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
         # struct __attribute__((packed)) R { char c; int a[1]; };
         # a (int[1]) at offset 1 -> a[0] is a 4-byte int at a misaligned offset.
@@ -2047,10 +2037,9 @@ class TestAggregateHasUnalignedMemberNested:
             cu_offset=0,
             die_map={108: self._char(), 120: self._int(), 400: int_array, 430: outer},
         )
-        assert _aggregate_has_unaligned_member(self._wrapper(430), cu) is True
+        assert dta._aggregate_has_unaligned_member(self._wrapper(430), cu) is True
 
     def test_aligned_array_element_is_not_unaligned(self):
-        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
         # struct S { int a[2]; char c; };  — a at offset 0, properly aligned.
         int_array = MockDIE(
@@ -2084,10 +2073,9 @@ class TestAggregateHasUnalignedMemberNested:
             cu_offset=0,
             die_map={108: self._char(), 120: self._int(), 440: int_array, 470: outer},
         )
-        assert _aggregate_has_unaligned_member(self._wrapper(470), cu) is False
+        assert dta._aggregate_has_unaligned_member(self._wrapper(470), cu) is False
 
     def test_dw_at_alignment_override_misaligned(self):
-        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
         # A member type that declares DW_AT_alignment=8 (DWARF 5) placed at a
         # misaligned offset is caught via the alignment override, not byte size.
@@ -2119,10 +2107,9 @@ class TestAggregateHasUnalignedMemberNested:
             children=[member_c, member_x],
         )
         cu = MockCU(cu_offset=0, die_map={108: self._char(), 500: over, 530: outer})
-        assert _aggregate_has_unaligned_member(self._wrapper(530), cu) is True
+        assert dta._aggregate_has_unaligned_member(self._wrapper(530), cu) is True
 
     def test_pointer_return_type_is_not_aggregate(self):
-        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
         ptr = MockDIE(
             tag="DW_TAG_pointer_type",
@@ -2130,13 +2117,12 @@ class TestAggregateHasUnalignedMemberNested:
             offset=600,
         )
         cu = MockCU(cu_offset=0, die_map={600: ptr})
-        assert _aggregate_has_unaligned_member(self._wrapper(600), cu) is False
+        assert dta._aggregate_has_unaligned_member(self._wrapper(600), cu) is False
 
     def test_scalar_return_type_is_not_aggregate(self):
-        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
         cu = MockCU(cu_offset=0, die_map={120: self._int()})
-        assert _aggregate_has_unaligned_member(self._wrapper(120), cu) is False
+        assert dta._aggregate_has_unaligned_member(self._wrapper(120), cu) is False
 
 
 class TestBaseTypeCapture:

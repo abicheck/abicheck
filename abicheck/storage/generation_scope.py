@@ -84,6 +84,15 @@ EXTRACTOR_EXTRA_FILES: tuple[str, ...] = (
     # The native GCC plugin's source: it decides which facts that backend
     # records, as much as the Python projection does.
     "extract/headers/gcc/gcc_facts.cc",
+    # The dump workflow's snapshot builders and the adapters that route to them:
+    # they decide which debug inputs a binary's snapshot records (a header-free
+    # Mach-O dump reads the adjacent dSYM through extract_macho, a dump with
+    # headers through the dumper), so a change there changes stored facts.
+    "workflows/dump/macho.py",
+    "workflows/dump/formats.py",
+    "workflows/dump/pe.py",
+    "workflows/dump/native.py",
+    "workflows/dump/elf_fallback.py",
 )
 
 #: A module whose file stem contains one of these words is resolver-named and

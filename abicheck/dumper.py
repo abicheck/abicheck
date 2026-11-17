@@ -139,7 +139,7 @@ from .extract.headers.toolchain import (
     _tool_identity as _tool_identity,
     _tool_identity_metadata as _tool_identity_metadata,
 )
-from .extract.macho_debug import MACHO_MAGICS
+from .extract.macho_debug import MACHO_MAGICS, macho_dwarf_kwargs, warn_dwarf_only
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
@@ -155,6 +155,7 @@ from .workflows.dump.elf_fallback import (
     _build_symbol_only_snapshot as _build_symbol_only_snapshot,
     _try_dwarf_snapshot as _try_dwarf_snapshot,
 )
+from .workflows.dump.pe import pe_pdb_debug_kwargs
 from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)
@@ -814,6 +815,8 @@ def _dump_macho(
     extra_hash_dirs: tuple[Path, ...] = (),
     dump_manifest: DumpManifest | None = None,
     frontend_context: str = "host",
+    debug_format: str | None = None,
+    **debug_kwargs: Any,
 ) -> AbiSnapshot:
     """Mach-O dump: export table from macholib + header-AST analysis.
 
@@ -826,13 +829,7 @@ def _dump_macho(
             "--dump-manifest is not yet supported for Mach-O binaries"
             "; use a single-header dump for this format."
         )
-    if dwarf_only:
-        warnings.warn(
-            "dwarf_only=True is not supported for Mach-O; "
-            "falling back to normal extraction.",
-            UserWarning,
-            stacklevel=2,
-        )
+    warn_dwarf_only(dwarf_only)
     from .macho_metadata import parse_macho_metadata
 
     macho_meta = read_exports_or_fail(dylib_path, parse_macho_metadata)
@@ -852,12 +849,8 @@ def _dump_macho(
             "type information will be missing."
         )
 
-        # `macho_meta.exports` entries are already normalized -- see the
-        # "already normalized" comment a few lines below, at the
-        # `exported_dynamic` build above, for the full account of why a
-        # second leading-underscore strip here corrupts every Itanium-
-        # mangled C++ export (this branch had the identical double-strip
-        # bug the with-headers path below used to have).
+        # `macho_meta.exports` are already normalized: no second underscore strip
+        # (see the note before the header parse below).
         # Split exports into functions (__TEXT) and variables (__DATA)
         # using section classification from Mach-O nlist entries.
         _relevant = [
@@ -871,6 +864,7 @@ def _dump_macho(
         _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
         # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
         return new_snapshot(
+            **macho_dwarf_kwargs(dylib_path, debug_format, debug_kwargs),
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -928,6 +922,7 @@ def _dump_macho(
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
         new_snapshot(
+            **macho_dwarf_kwargs(dylib_path, debug_format, debug_kwargs),
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -1024,6 +1019,7 @@ def _dump_pe(
         _is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
         return new_snapshot(
             library=dll_path.name,
+            **pe_pdb_debug_kwargs(dll_path),
             version=version,
             source_path=str(dll_path.resolve()),
             source_mtime=_dll_mtime,
@@ -1067,6 +1063,7 @@ def _dump_pe(
     return finish_binary_snapshot(
         new_snapshot(
             library=dll_path.name,
+            **pe_pdb_debug_kwargs(dll_path),
             version=version,
             source_path=str(dll_path.resolve()),
             source_mtime=_dll_mtime,
@@ -1123,9 +1120,10 @@ _FORMAT_HANDLERS: tuple[_FormatHandler, ...] = (
     ),
     _FormatHandler(
         name="macho",
-        builder=_dump_macho,
+        builder=with_extraction_limitations(_dump_macho),
         magics=MACHO_MAGICS,
         accepts_dwarf_only=True,
+        accepts_debug_format=True,
     ),
     _FormatHandler(
         name="pe",
