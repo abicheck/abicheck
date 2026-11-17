@@ -59,12 +59,22 @@ def _dump(so: Path, out: Path, *extra: str) -> Path:
     return out
 
 
+# Documented ``compare`` outcomes that mean the comparison ran: 0 compatible,
+# 1 unconfirmed, 2 source break, 4 ABI break, 8 proven removed library. Any
+# other exit (usage error, crash) is a failed comparison, not an absent finding.
+_COMPARE_RAN = frozenset({0, 1, 2, 4, 8})
+
+
 def _compare_stdout(old: Path, new: Path, *extra: str) -> str:
-    return subprocess.run(
+    result = subprocess.run(
         abicheck_command("compare", str(old), str(new), *extra),
         capture_output=True,
         text=True,
-    ).stdout
+    )
+    assert result.returncode in _COMPARE_RAN, (
+        f"compare did not run (exit {result.returncode}):\n{result.stderr}"
+    )
+    return result.stdout
 
 
 def _observes(kind: str, config: tuple[str, ...]) -> bool:
