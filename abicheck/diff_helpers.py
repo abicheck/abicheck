@@ -464,6 +464,7 @@ _ANON_TYPE_RE = re.compile(
 )
 
 
+@memoized(maxsize=65536)
 def _same_anonymous_member_type(old_type: str, new_type: str) -> bool:
     """True when both spellings name one anonymous member type.
 
@@ -481,6 +482,7 @@ def _same_anonymous_member_type(old_type: str, new_type: str) -> bool:
     return _normalize_type_name(old_type) == _normalize_type_name(new_type)
 
 
+@memoized(maxsize=65536)
 def _field_type_genuinely_changed(
     old_type: str, new_type: str, *, cv_facts_reliable: bool
 ) -> bool:
