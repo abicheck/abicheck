@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -272,6 +273,10 @@ def test_const_value_change_is_emitted_with_headers_and_not_from_bytes_alone() -
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF-only claim; Mach-O binary-only surface does not show the closure export (sec 11.2)",
+)
 def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
     tmp_path: Path,
 ) -> None:
