@@ -56,6 +56,21 @@ def _gcc() -> list[str]:
     return list(prefix)
 
 
+_ELF_MACHINE_TAG = {0x3E: "manylinux_2_17_x86_64", 0xB7: "manylinux_2_17_aarch64"}
+_OTHER_ARCH = {
+    "manylinux_2_17_x86_64": "manylinux_2_17_aarch64",
+    "manylinux_2_17_aarch64": "manylinux_2_17_x86_64",
+}
+
+
+def _other_arch_tag(so: Path) -> str:
+    """A supported wheel tag whose architecture differs from the binary's e_machine."""
+    machine = int.from_bytes(so.read_bytes()[18:20], "little")
+    native = _ELF_MACHINE_TAG.get(machine)
+    assert native is not None, f"unexpected ELF e_machine {machine:#x}"
+    return _OTHER_ARCH[native]
+
+
 def _emit_c_binary(
     out: Path,
     source: str,
@@ -94,11 +109,15 @@ def _compare_kinds(
     old: Path, new: Path, tmp: Path, extra: tuple[str, ...] = ()
 ) -> set[str]:
     out = tmp / "report.json"
-    subprocess.run(
+    out.unlink(missing_ok=True)  # never read a report left by an earlier comparison
+    proc = subprocess.run(
         abicheck_command("compare", str(old), str(new), "-o", f"json={out}", *extra),
         capture_output=True,
         text=True,
     )
+    # 64 is a usage/operational error; verdict exit codes (0/1/2/4/8/3) are results.
+    assert proc.returncode != 64, proc.stderr
+    assert out.exists(), proc.stderr
     data = json.loads(out.read_text())
     kinds: set[str] = set()
 
@@ -249,7 +268,7 @@ def test_wheel_tag_architecture_mismatch(tmp_path: Path) -> None:
         so,
         so,
         old_tag="linux_x86_64",
-        new_tag="manylinux_2_17_aarch64",
+        new_tag=_other_arch_tag(so),
         old_req="numpy>=1.23",
         new_req="numpy>=1.23",
     )
