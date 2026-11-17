@@ -71,7 +71,6 @@
     "odr_source_conflict",
     "odr_type_variant",
     "opaque_invariant_broken",
-    "overload_added",
     "overload_set_rerouted",
     "platform_baseline_floor_raised",
     "public_consumer_compiled_dependency_changed",

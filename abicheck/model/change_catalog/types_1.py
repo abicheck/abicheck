@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -42,6 +43,7 @@ from .registry import (
     Verdict,
 )
 
+_OBS_B = observable(("B",))
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
@@ -191,6 +193,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "overload_added",
         _R,
+        observable_at=(_OBS_B,),
         impact="A new overload was added under a public name that previously had "
         "exactly one declaration. Old binaries are unaffected (binary "
         "compatible), but the change is not source-compatible: taking the "

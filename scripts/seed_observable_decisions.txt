@@ -315,3 +315,5 @@ tail_padding_reuse_changed  H  # diff_layout.py:343-363 consumes data_size_bits,
 common_symbol_risk  B:ELF  # diff_platform_elf_symbols.py:268-282: reads ELF symbol types (STT_COMMON) only
 dwarf_info_missing  D:PRESENCE  # diff_platform.py:1436-1452: fires only when the old side has DWARF and the new side lacks it, so the pair needs DWARF evidence (own rationale in platform_1.py)
 func_became_inline  H  # compare/function_lifecycle.py:98-128 reads is_inline; DWARF does not set it (extract emits is_inline_fact not_collected, oracle: DWARF-only pair emits nothing in either direction, headers pair emits func_became_inline)
+# -- batch 4 (G3): overloads ----------------------------------------------------
+overload_added  B  # diff_types.py:444-461: an overload added to an exported free function is emitted from the export table alone (stripped binary: overload_added, func_added); a member overload needs the header (its class is not exported) and is a surface limit, not a reason to lower or raise B

@@ -197,3 +197,13 @@ def test_dwarf_only_inline_pair_emits_neither_twin() -> None:
     old, new = _inline_pair(None, None)
     emitted = {c.kind.value for c in compare(old, new).changes}
     assert not emitted & set(_INLINE_TWINS), emitted
+
+
+def test_exported_free_function_overload_is_emitted_from_the_binary_alone() -> None:
+    # An overload added to an exported free function reads from the export
+    # table alone (the mangled names differ), so the binary observes it.
+    old = _export_snapshot("1", "elf", ["_Z1gi"], [])
+    new = _export_snapshot("2", "elf", ["_Z1gi", "_Z1gd"], [])
+    emitted = {c.kind.value for c in compare(old, new).changes}
+    assert "overload_added" in emitted, emitted
+    assert _observes_on("overload_added", "elf", BINARY)
