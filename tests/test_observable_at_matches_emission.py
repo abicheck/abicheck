@@ -197,3 +197,23 @@ def test_dwarf_only_inline_pair_emits_neither_twin() -> None:
     old, new = _inline_pair(None, None)
     emitted = {c.kind.value for c in compare(old, new).changes}
     assert not emitted & set(_INLINE_TWINS), emitted
+
+
+def test_pure_virtual_flip_is_emitted_from_headers_and_observed_by_headers() -> None:
+    # A concrete virtual that became pure: only the public header declares the
+    # member (a pure virtual has no body and no symbol), so the emission is a
+    # header-backed one. The binary alone must not observe it.
+    concrete = _header_function("f", ("int",))
+    concrete.is_virtual = True
+    pure = _header_function("f", ("int",))
+    pure.is_virtual = True
+    pure.is_pure_virtual = True
+    old = _header_snapshot("1", "elf", [concrete])
+    new = _header_snapshot("2", "elf", [pure])
+    emitted = {c.kind.value for c in compare(old, new).changes}
+    assert "func_virtual_became_pure" in emitted, emitted
+    assert (
+        REGISTRY.entries["func_virtual_became_pure"].observable_at is not UNCLASSIFIED
+    )
+    assert _observes_on("func_virtual_became_pure", "elf", BINARY_AND_HEADERS)
+    assert not _observes_on("func_virtual_became_pure", "elf", BINARY)

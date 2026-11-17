@@ -85,6 +85,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_DH",
     ),
+    "H:PURE": (
+        (("B", "H"),),
+        "a pure virtual has no body and no symbol: only the public header declares it, so a DWARF-only surface never holds it",
+        (),
+        "_OBS_H_PURE",
+    ),
     "D:PRESENCE": (
         (("B", "D"),),
         "DWARF presence on the old side: only a debug-info read sees it",
