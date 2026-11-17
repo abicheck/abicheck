@@ -795,6 +795,8 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 
 **WS-1 binary-only value reader gap (closed by G7, PR #2115).** A binary-only dump now records an exported read-only object's own section bytes (`Variable.initializer_hex`, declarations section v2, extractor generation 82), and `var_value_changed` compares them hex to hex when both sides have equal-length bytes. The kind is declared `{B}` on that evidence: the binary-only oracle (`tests/test_var_value_initializer_bytes.py`) emits the finding from bytes alone. The gap was that a stripped snapshot carried no type or value for the object, so the detector had nothing to compare.
 
+**WS-1 Mach-O gap for `unnamed_type_in_public_abi` (open).** The kind is declared `{B:ELF}`. On a macOS runner the same real-compile pair (`g++ -std=c++17`, exported closure-typed function added) reports only `LC_ID_DYLIB: modified`: the binary-only surface never shows the new exported closure function, so the kind is not emitted. Clang's ELF target does not reproduce the kind at all (the closure-typed function gets internal linkage), so the oracle is g++-specific and gated on the GNU ELF producer. Whether the Mach-O export reader misses the symbol or the detector does not handle Mach-O's leading-underscore mangling is open; the detector session decides. Re-declare for Mach-O only with a passing oracle.
+
 ### 11.3 File ownership and conflict hotspots
 
 **Owned paths.** Edit another workstream's paths only through a small,
