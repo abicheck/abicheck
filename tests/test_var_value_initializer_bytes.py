@@ -120,3 +120,52 @@ def test_length_mismatch_is_not_compared() -> None:
         name="g_t", mangled="g_t", type="?", initializer_hex="0100000002000000"
     )
     assert _initializer_bytes_changed(old, new) is False
+
+
+def test_versioned_alias_pair_has_no_bytes(tmp_path: Path) -> None:
+    # g_k@V1 and g_k@@V2 share the bare name, so the bare name cannot pick one
+    # value. The variable keeps no bytes rather than the table-order first.
+    src = tmp_path / "alias.c"
+    src.write_text(
+        "const int g_k_v1 = 3;\n"
+        '__asm__(".symver g_k_v1, g_k@V1");\n'
+        "const int g_k_v2 = 4;\n"
+        '__asm__(".symver g_k_v2, g_k@@V2");\n',
+        encoding="utf-8",
+    )
+    script = tmp_path / "alias.map"
+    script.write_text("V1 {};\nV2 {};\n", encoding="utf-8")
+    so = tmp_path / "alias.so"
+    import subprocess
+
+    subprocess.run(
+        [
+            "gcc",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            f"-Wl,--version-script={script}",
+            "-o",
+            str(so),
+            str(src),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    snap = dump(so, headers=[])
+    (bare,) = [v for v in snap.declarations.variables if v.name == "g_k"]
+    assert bare.initializer_hex is None
+    # The two distinct aliases are not ambiguous under their own names.
+    by_name = {v.name: v.initializer_hex for v in snap.declarations.variables}
+    assert by_name["g_k_v1"] == "03000000"
+    assert by_name["g_k_v2"] == "04000000"
+
+
+def test_relocation_coverage_is_by_overlap_not_by_start() -> None:
+    from abicheck.extract.elf_data_initializer import _covered_by_relocation
+
+    relocated = [10, 20]
+    assert _covered_by_relocation(relocated, 10, 1)  # a relocation at the start
+    assert not _covered_by_relocation(relocated, 11, 9)  # ends just before 20
+    assert _covered_by_relocation(relocated, 11, 10)  # reaches 20
+    assert not _covered_by_relocation([], 0, 8)

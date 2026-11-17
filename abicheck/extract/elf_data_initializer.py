@@ -223,25 +223,60 @@ def populate_initializer_bytes(snap: AbiSnapshot, so_path: Path) -> None:
 
 
 def _read_symbol_bytes(fh: IO[bytes], names: set[str]) -> dict[str, bytes]:
-    """The raw bytes at each name's exported object, read read-only sections only."""
+    """The raw bytes at each name's exported object, read read-only sections only.
+
+    A name with more than one defined object in ``.dynsym`` (a versioned alias
+    pair such as ``g_k@V1`` / ``g_k@@V2``) is unknown: the bare name cannot pick
+    one, and choosing by table order would make a reordered but unchanged
+    library read as changed. Such a name keeps no bytes.
+    """
     elf = ELFFile(fh)
-    blobs: dict[str, bytes] = {}
+    defined: dict[str, list[Any]] = {}
     for section in elf.iter_sections():
         if not isinstance(section, SymbolTableSection):
             continue
         if section["sh_type"] != "SHT_DYNSYM":
             continue
         for sym in section.iter_symbols():
-            name = sym.name
-            if name in blobs or name not in names:
-                continue
-            raw = _symbol_bytes(fh, elf, sym)
-            if raw is not None:
-                blobs[name] = raw
+            if sym.name in names and _is_defined_object(sym):
+                defined.setdefault(sym.name, []).append(sym)
+    relocated = _relocation_offsets(elf) if defined else []
+    blobs: dict[str, bytes] = {}
+    for name, syms in defined.items():
+        if len(syms) != 1:
+            continue
+        raw = _symbol_bytes(fh, elf, syms[0], relocated)
+        if raw is not None:
+            blobs[name] = raw
     return blobs
 
 
-def _symbol_bytes(fh: IO[bytes], elf: ELFFile, sym: Any) -> bytes | None:
+def _is_defined_object(sym: Any) -> bool:
+    entry = sym.entry
+    if entry["st_info"]["type"] != "STT_OBJECT":
+        return False
+    shndx = entry["st_shndx"]
+    return isinstance(shndx, int) and shndx != 0
+
+
+def _relocation_offsets(elf: ELFFile) -> list[int]:
+    """Sorted ``r_offset`` of every relocation in the file.
+
+    A relocated slot's stored bytes are a placeholder or an implicit addend
+    (REL), so an object any relocation covers has no byte evidence of its value.
+    """
+    from elftools.elf.relocation import RelocationSection
+
+    offsets: list[int] = []
+    for section in elf.iter_sections():
+        if isinstance(section, RelocationSection):
+            offsets.extend(int(rel["r_offset"]) for rel in section.iter_relocations())
+    return sorted(offsets)
+
+
+def _symbol_bytes(
+    fh: IO[bytes], elf: ELFFile, sym: Any, relocated: list[int]
+) -> bytes | None:
     """The bytes of *sym* if it is a readable, exported, read-only object."""
     entry = sym.entry
     if entry["st_info"]["type"] != "STT_OBJECT":
@@ -261,6 +296,17 @@ def _symbol_bytes(fh: IO[bytes], elf: ELFFile, sym: Any) -> bytes | None:
     offset_in_section = int(entry["st_value"]) - int(section["sh_addr"])
     if offset_in_section < 0 or offset_in_section + size > int(section["sh_size"]):
         return None
+    addr = int(entry["st_value"])
+    if _covered_by_relocation(relocated, addr, size):
+        return None
     fh.seek(int(section["sh_offset"]) + offset_in_section)
     raw = fh.read(size)
     return raw if len(raw) == size else None
+
+
+def _covered_by_relocation(relocated: list[int], addr: int, size: int) -> bool:
+    """Whether any relocation's ``r_offset`` falls inside ``[addr, addr + size)``."""
+    import bisect
+
+    i = bisect.bisect_left(relocated, addr)
+    return i < len(relocated) and relocated[i] < addr + size
