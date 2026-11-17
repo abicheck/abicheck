@@ -347,7 +347,10 @@ def _one_case(out: Path, row: dict, cls: dict, compilers: tuple[str, ...]) -> di
             "values_ok": all(
                 lay[s][row["id"]] == _expected(row, s) for s in ("old", "new")
             ),
-            "abicheck_ok": observed(by_enum.get(row["id"], [])) == want,
+            # a finding on anything but this case's enum (its probe function
+            # included) is a failure too
+            "abicheck_ok": observed(by_enum.get(row["id"], [])) == want
+            and set(by_enum) <= {row["id"]},
             # per-case run: the exit code is this case's own verdict
             "exit_ok": code == (4 if cls["verdict"] == "breaking" else 0),
         }
@@ -402,7 +405,13 @@ def main(argv: list[str] | None = None) -> int:
     if a.reduced:
         rows = [r for r in rows if r["rep"]]
     k, n = map(int, a.slice.split("/"))
+    if not 1 <= k <= n:
+        ap.error(f"--slice {a.slice}: need 1 <= K <= N")
     rows = rows[(k - 1) * len(rows) // n : k * len(rows) // n]
+    if not rows:
+        # an empty shard checked nothing; it must not read as a pass
+        print(f"slice {a.slice} selects no cases: nothing was checked")
+        return 2
     compilers = tuple(a.compilers.split(","))
     t0 = time.perf_counter()
     if a.per_case:
@@ -417,7 +426,14 @@ def main(argv: list[str] | None = None) -> int:
     a.out.mkdir(parents=True, exist_ok=True)
     (a.out / "summary.json").write_text(json.dumps(res, indent=1))
     print(json.dumps(res, indent=1))
-    return 0
+    if "bad" in res:
+        failed = bool(res["bad"])
+    else:
+        failed = any(
+            c["values_disagree"] or c["abicheck_disagree"] or c["stray_findings"]
+            for c in res["compilers"].values()
+        )
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
