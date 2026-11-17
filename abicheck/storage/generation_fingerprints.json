@@ -246,8 +246,8 @@
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
     "fingerprint": "db720ceeb84125ad5f9fbcacd9fc45baa941a51c525e90592a613f456af2da51",
-    "generation": 82,
-    "reason": "headerless PE export identity: is_extern_c and entity_id from the PE identity function (MinGW C++ exports are not extern C)"
+    "generation": 83,
+    "reason": "headerless PE export identity: is_extern_c and entity_id from the PE identity function (MinGW C++ exports are not extern C); 82 is taken by a concurrent PR"
   },
   "resolver": {
     "files": {
