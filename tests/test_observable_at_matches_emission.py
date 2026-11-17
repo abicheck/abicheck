@@ -22,6 +22,7 @@ from abicheck.dumper import (
 from abicheck.model import AbiSnapshot, Function, Param, ScopeOrigin, Visibility
 from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.observability import UNCLASSIFIED, Platform
+from abicheck.model.fact import Fact
 
 PLATFORMS = ["elf", "pe", "macho"]
 BINARY = ("B",)
@@ -150,3 +151,49 @@ def test_header_backed_emissions_are_observed_by_binary_and_headers(
 ) -> None:
     old, new = _header_pair(platform)
     _assert_emissions_observed(old, new, platform, BINARY_AND_HEADERS)
+
+
+# The inline twins (func_lost_inline, func_became_inline) share one emitter,
+# which reads is_inline only. The DWARF reader does not set it (is_inline_fact
+# stays not_collected), so the twins are observable from the public header and
+# not from the binary's debug info. Oracle: the real compare path, both
+# directions, and the DWARF-only pair must emit neither.
+_INLINE_TWINS = ("func_lost_inline", "func_became_inline")
+
+
+def _inline_function(inline: bool | None) -> Function:
+    fn = _header_function("f", ("int",))
+    if inline is None:
+        # What a DWARF-only dump records: the fact was never collected.
+        fn.is_inline_fact = Fact.not_collected("dwarf reader does not set is_inline")
+    else:
+        fn.is_inline = inline
+        fn.is_inline_fact = Fact.present(inline)
+    return fn
+
+
+def _inline_pair(old_inline: bool | None, new_inline: bool | None):
+    return (
+        _header_snapshot("1", "elf", [_inline_function(old_inline)]),
+        _header_snapshot("2", "elf", [_inline_function(new_inline)]),
+    )
+
+
+def test_inline_twins_are_emitted_from_headers_in_both_directions() -> None:
+    old, new = _inline_pair(True, False)
+    assert "func_lost_inline" in {c.kind.value for c in compare(old, new).changes}
+    old, new = _inline_pair(False, True)
+    assert "func_became_inline" in {c.kind.value for c in compare(old, new).changes}
+
+
+@pytest.mark.parametrize("kind", _INLINE_TWINS)
+def test_inline_twins_are_observed_by_headers_not_by_the_binary(kind: str) -> None:
+    assert REGISTRY.entries[kind].observable_at is not UNCLASSIFIED
+    assert _observes_on(kind, "elf", BINARY_AND_HEADERS)
+    assert not _observes_on(kind, "elf", BINARY)
+
+
+def test_dwarf_only_inline_pair_emits_neither_twin() -> None:
+    old, new = _inline_pair(None, None)
+    emitted = {c.kind.value for c in compare(old, new).changes}
+    assert not emitted & set(_INLINE_TWINS), emitted

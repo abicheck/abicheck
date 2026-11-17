@@ -85,6 +85,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_DH",
     ),
+    "D:PRESENCE": (
+        (("B", "D"),),
+        "DWARF presence on the old side: only a debug-info read sees it",
+        (),
+        "_OBS_D_PRESENCE",
+    ),
     "D1": (
         (("B", "D"),),
         "underlying size set by the compiler: only DWARF records it",
