@@ -218,3 +218,19 @@ def test_identity_table_for_pe_spellings(
     fn = msvc_export_function(symbol, is_x86_32=is_x86_32)
     assert fn.is_extern_c is expect_extern_c, (symbol, is_x86_32)
     _assert_entity(fn.entity_id, leaf=leaf, extra=extra)
+
+
+@pytest.mark.known_gap_canary
+def test_canary_lld_undecorated_i686_stdcall_leaf_is_not_decoded(
+    tmp_path: Path,
+) -> None:
+    """Known gap (docs/contribute/known-gaps.md, "PE i686 decorated exports
+    without the leading underscore"): lld writes an i686 stdcall export as
+    ``stdcall_fn@4``, and the identity decoder only strips the ``_``-prefixed
+    form, so the leaf keeps its ``@4``. Fails -- and the gap entry should be
+    archived -- once the decoder also strips the unprefixed form."""
+    dll = _build(
+        tmp_path / "stdcall.dll", _I686_STDCALL_SOURCE, "i686-windows-gnu", cxx=False
+    )
+    _, entity_id = _identities(dll)["stdcall_fn@4"]
+    assert entity_id.leaf_name == "stdcall_fn@4"

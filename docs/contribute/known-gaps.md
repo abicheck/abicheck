@@ -953,6 +953,12 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 <!-- no-canary: test-tooling gap in the agent-eval harness; needs an unmerged-commit git fixture -->
 
 
+### PE i686 decorated exports without the leading underscore (2026-11-17)
+
+**Status (2026-11-17): OPEN, narrow.** The PE identity decoder (`extract/export_symbol_identity.py`, `msvc_export_function`) strips i686 stdcall/fastcall decoration only from the `_`-prefixed export spelling (`_stdcall_fn@4`). lld writes the same exports without the leading underscore (`stdcall_fn@4`, `@fast_fn@4`), so the leaf name keeps its `@N` and the extern-C reading and entity identity are not decoded for them. Reproducer: a `clang --target=i686-windows-gnu -shared -fuse-ld=lld` DLL exporting a `__stdcall` function; `extract_pe` returns the export as `stdcall_fn@4` with leaf `stdcall_fn@4`. The headerless and header-built PE routes share this decoder, so the fix lands there once. Out of the current Linux focus (i686/PE). Owner: `extract/export_symbol_identity.py`.
+
+<!-- canary: tests/test_pe_noheader_export_identity.py::test_canary_lld_undecorated_i686_stdcall_leaf_is_not_decoded -->
+
 ## Do not re-attempt
 
 Approaches that were tried, measured or reviewed and did not help. Their value is stopping a re-attempt; read the write-up before trying anything similar.
