@@ -64,7 +64,7 @@
       "abicheck/extract/dwarf_vtable_completeness.py": "dc79514f133a5368be0b04bb31e3863337b876c1ba017c4b3023eb1609e1a4c2",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
       "abicheck/extract/elf_code_hash.py": "99cfa984364e0345077bf7bf960337a41f5a8eff887f6f7eb1138ec305e74258",
-      "abicheck/extract/elf_data_initializer.py": "d7edf791c13c29146fb1c60ec5b4a018fe510344101f14550c81091e76b5b333",
+      "abicheck/extract/elf_data_initializer.py": "642faaa77b490a82635b011d96ad0506d9695e218803c0a10e25d3ea21a1f6c4",
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_pure_virtual_slots.py": "c583305033c551840e206f28600400e6e01929e7a383284fb8261a644c76c191",
@@ -245,9 +245,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "99436706e202b6f0567eb435283439a5df37b3d8e4724c98e50481198b78c773",
+    "fingerprint": "1ae14da51f2649413d047e202a1169ce8945dfdb52a00ce80d1bbb3f05468a24",
     "generation": 82,
-    "reason": "G7 initializer_hex (generation 82) with main's #2116 memo keying and #2117's move of the header AST parser to its owner: pure moves and memo keying, no stored output changes"
+    "reason": "G7 initializer_hex (generation 82, unreleased): a file-scope static no longer takes an exported same-name object's bytes; the fix lands inside this unreleased generation, so no released snapshot carries the old answer"
   },
   "resolver": {
     "files": {

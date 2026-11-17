@@ -193,6 +193,29 @@ def test_a_zero_initialized_object_in_bss_is_not_read(tmp_path: Path) -> None:
     assert var is not None and var.initializer_hex is None
 
 
+def test_a_file_scope_static_with_the_same_name_is_not_given_the_exported_bytes(
+    tmp_path: Path,
+) -> None:
+    """A TU's file-scope ``static g`` is not the exported ``g``: the exported
+    object's bytes belong to the exported declaration only."""
+    from abicheck.extract.elf_data_initializer import populate_initializer_bytes
+    from abicheck.model import AbiSnapshot
+
+    so = build_shared("const int g = 7;\n", tmp_path / "g.so")
+    snap = AbiSnapshot(
+        library="libx",
+        version="1",
+        variables=[
+            Variable(name="g", mangled="g", type="?", is_static=True),
+            Variable(name="g", mangled="g", type="?"),
+        ],
+    )
+    populate_initializer_bytes(snap, so)
+    static_var, exported_var = snap.declarations.variables
+    assert static_var.initializer_hex is None
+    assert exported_var.initializer_hex == "07000000"
+
+
 def test_an_unreadable_binary_leaves_every_field_as_it_was(tmp_path: Path) -> None:
     from abicheck.extract.elf_data_initializer import populate_initializer_bytes
     from abicheck.model import AbiSnapshot

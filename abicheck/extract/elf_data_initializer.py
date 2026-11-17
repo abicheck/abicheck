@@ -29,6 +29,8 @@ from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
 
+from .headers.scope_segments import entity_is_record_member
+
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Variable
 
@@ -207,6 +209,12 @@ def populate_initializer_bytes(snap: AbiSnapshot, so_path: Path) -> None:
     """
     by_name: dict[str, list[Variable]] = {}
     for var in snap.declarations.variables:
+        # A file-scope ``static`` is never exported, so it cannot own an
+        # exported object's bytes even when its name matches one (a second TU's
+        # exported ``g`` would otherwise be copied onto it). Static data members
+        # are external and stay eligible.
+        if var.is_static and not entity_is_record_member(var.entity_id):
+            continue
         if var.mangled:
             by_name.setdefault(var.mangled, []).append(var)
     if not by_name:
