@@ -122,7 +122,6 @@
     "toolchain_version_changed",
     "typedef_version_sentinel",
     "undocumented_export_ratio_increased",
-    "used_reserved_field",
     "var_visibility_changed",
     "visibility_leak",
     "wheel_closure_dependency_violation",

@@ -327,3 +327,4 @@ unnamed_type_in_public_abi  B:ELF  # diff_unnamed_types.py: the closure's mangle
 # -- batch 5 (G3): template return type and tag rename -------------------------
 template_return_type_changed  DH  # diff_platform_templates.py:151: the inner template argument of the return type; header pair and DWARF-only pair emit it (Box<int> -> Box<long>), a stripped binary does not
 tag_type_renamed  DH  # diff_cpp_patterns.py:514: needs record types (header or DWARF) joined to symbols; the header and DWARF pairs emit it, the stripped binary does not
+used_reserved_field  DH  # diff_types_abicc_parity.py:132 and diff_types_surface.py RESERVED_FIELD: needs the field names (header or DWARF); header and DWARF pairs emit it (reserved1 -> priority), stripped binary does not

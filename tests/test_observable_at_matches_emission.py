@@ -323,6 +323,12 @@ _HEADER_PAIRS = {
         "Box<int> g(int x){ return Box<int>{x}; }\n",
         "Box<long> g(int x){ return Box<long>{x}; }\n",
     ),
+    "used_reserved_field": (
+        'struct R { int a; int reserved1; };\nextern "C" int rsz(const R* r);\n',
+        'struct R { int a; int priority; };\nextern "C" int rsz(const R* r);\n',
+        'extern "C" int rsz(const R* r){return r->a;}\n',
+        'extern "C" int rsz(const R* r){return r->a;}\n',
+    ),
     "tag_type_renamed": (
         "struct Tag {};\ntemplate <class T> int f(T) { return 0; }\nint use_tag(Tag t);\n",
         "struct Tag2 {};\ntemplate <class T> int f(T) { return 0; }\nint use_tag(Tag2 t);\n",

@@ -575,6 +575,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "used_reserved_field",
         _C,
+        observable_at=(_OBS_DH,),
         impact="A previously-reserved/padding field was put into real use; "
         "since the space was already part of the struct's layout, "
         "the struct's overall size is usually unaffected. This "
