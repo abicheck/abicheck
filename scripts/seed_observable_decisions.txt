@@ -311,3 +311,7 @@ target_dependency_added          L5
 # -- batch 1 (G3): serialization tags and tail padding ------------------
 serialization_tag_changed  H  # diff_serialization.py:290: tag values come from declared constants in the header (_collect_valued_declarations over the snapshot)
 tail_padding_reuse_changed  H  # diff_layout.py:343-363 consumes data_size_bits, which only the castxml header parse records (castxml/data_size.py:61: unknown inputs leave it None); DWARF carries no data size
+# -- batch 2 (G3): ELF COMMON symbols, DWARF presence, inline attribute -----
+common_symbol_risk  B:ELF  # diff_platform_elf_symbols.py:268-282: reads ELF symbol types (STT_COMMON) only
+dwarf_info_missing  D:PRESENCE  # diff_platform.py:1436-1452: fires only when the old side has DWARF and the new side lacks it, so the pair needs DWARF evidence (own rationale in platform_1.py)
+func_became_inline  DH  # compare/function_lifecycle.py:98-128: emitted from is_inline on both sides; headers or DWARF carry it, a binary-only pair has no value and emits nothing
