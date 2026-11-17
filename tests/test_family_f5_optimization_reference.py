@@ -229,6 +229,8 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.target_isa::memoized::parse_producer_target_isa": "UNCOVERED: pure parse of a producer string or note tokens; no reference-mode bypass cell applies. Equivalence is pinned by tests/unit/extract/test_target_isa_producer.py hand-written oracles",
     "abicheck.model.target_isa::memoized::parse_note_target_isa": "UNCOVERED: pure parse of a producer string or note tokens; no reference-mode bypass cell applies. Equivalence is pinned by tests/unit/extract/test_target_isa_producer.py hand-written oracles",
     "abicheck.model.target_isa::memoized::target_isa_from_sources": "UNCOVERED: pure parse of a producer string or note tokens; no reference-mode bypass cell applies. Equivalence is pinned by tests/unit/extract/test_target_isa_producer.py hand-written oracles",
+    "abicheck.diff_helpers::memoized::_field_type_genuinely_changed": "UNCOVERED: pure function of two type spellings and a fixed keyword flag it ignores; no reference-mode bypass cell applies, since a bypass would only re-run the same string logic. Its verdicts are pinned by tests/test_anonymous_member_spelling.py (hand-written same-member and real-change tables) and by the field-type unit tests",
+    "abicheck.diff_helpers::memoized::_same_anonymous_member_type": "UNCOVERED: pure function of two type spellings (anonymous-placeholder match and normalized equality); no reference-mode bypass cell applies. Pinned by tests/test_anonymous_member_spelling.py (hand-written same-member and real-change tables)",
 }
 
 _SITES = scan_optimization_sites()

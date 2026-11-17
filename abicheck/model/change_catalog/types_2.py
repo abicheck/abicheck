@@ -58,6 +58,14 @@ _OBS_B_ELF_MACHO = observable(
         platform=frozenset({Platform.ELF, Platform.MACHO})
     ),
 )
+_OBS_B = observable(("B",))
+_OBS_H_HEADER = observable(
+    ("B", "H"),
+    rationale="a header-level fact: the public header declares the opaque type or typedef; neither the export table nor DWARF carries it",
+)
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
@@ -123,6 +131,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "tag_type_renamed",
         _A,
+        observable_at=(_OBS_DH,),
         impact="An empty tag struct (zero fields, no methods) used solely for "
         "template specialization was renamed. Source naming the old tag no "
         "longer compiles. Layout-based detectors see no change because the "
@@ -153,6 +162,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "template_param_type_changed",
         _B,
+        observable_at=(_OBS_DH,),
         impact="A template's own parameter's inner type argument changed "
         "(e.g. a member of the type used to instantiate the "
         "template). The detector compares only the parsed argument "
@@ -172,6 +182,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "template_return_type_changed",
         _B,
+        observable_at=(_OBS_DH,),
         impact="A template's own return type's inner type argument "
         "changed. The detector compares only the parsed argument "
         "text under a matching outer template name, not whether the "
@@ -491,6 +502,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "typedef_version_sentinel",
         _C,
+        observable_at=(_OBS_H_HEADER,),
         impact="Typedef name encodes a version number (e.g. png_libpng_version_1_6_46) — "
         "this is a compile-time sentinel that changes every release by design; "
         "it is never exported as an ELF symbol and does not affect binary ABI.",
@@ -533,6 +545,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "unnamed_type_in_public_abi",
         _R,
+        observable_at=(_OBS_B_ELF,),
         impact="An exported symbol embeds an unnamed type in its mangled name — a "
         "lambda closure (`Ul…E_`) or an unnamed struct/enum (`Ut…_`). The "
         "Itanium mangling of unnamed types is per-translation-unit and "
@@ -568,6 +581,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "used_reserved_field",
         _C,
+        observable_at=(_OBS_DH,),
         impact="A previously-reserved/padding field was put into real use; "
         "since the space was already part of the struct's layout, "
         "the struct's overall size is usually unaffected. This "
@@ -589,6 +603,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "var_value_changed",
         _C,
+        observable_at=(_OBS_DH,),
         impact="A global variable's initial/static value changed; this "
         "detector only compares the value itself, not the "
         "variable's type or size, so this fires purely on the "

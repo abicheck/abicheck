@@ -143,6 +143,10 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_surface_metrics_fan_in_index.py",
                 "tests/test_header_dir_expansion_canonical_order.py",
                 "tests/test_memo_stats_across_clear.py",
+                # A memo over a header's text or a compiler probe answers for the
+                # file as it is now: a rewrite within one process returns what an
+                # uncached scan would (test_file_memo_witness.py).
+                "tests/test_file_memo_witness.py",
             ),
         ),
         Family(
@@ -192,6 +196,10 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
+                # Two readers spell one anonymous member differently (PDB
+                # <unnamed-tag>, header Outer::<unnamed-type-u>): the same member
+                # must not read as a type change across readers.
+                "tests/test_anonymous_member_spelling.py",
                 # A per-architecture ABI baseline: a version node at the target's
                 # baseline raises no floor (test_version_floor_new_provider.py).
                 "tests/test_version_floor_new_provider.py",

@@ -246,6 +246,9 @@ tests/test_ctor_dtor_key_drift.py
 tests/test_debug_evidence_presence.py
 tests/test_declaration_facts_cutover.py
 tests/test_declined_comparisons.py
+tests/test_dedup_ast_dwarf_subsumption_ledger.py
+tests/test_dedup_exact_identity_key.py
+tests/test_dedup_identity_memo.py
 tests/test_delta_operand_identity.py
 tests/test_demangle_batching_consumers.py
 tests/test_demangled_symbol_field.py
@@ -358,6 +361,7 @@ tests/test_followup_100_101.py
 tests/test_fp_rate_gate.py
 tests/test_frozen_namespace.py
 tests/test_frozen_namespace_single_matcher.py
+tests/test_func_became_inline_export_evidence.py
 tests/test_func_deleted.py
 tests/test_func_lost_inline_static.py
 tests/test_function_cutover.py
@@ -444,6 +448,7 @@ tests/test_no_shared_mutation.py
 tests/test_non_elf_artifact_membership.py
 tests/test_notice_advice_matches_setting.py
 tests/test_object_size_policy.py
+tests/test_observable_at_matches_emission.py
 tests/test_one_comparison_product_parity.py
 tests/test_opaque_identity_tiers.py
 tests/test_orphan_struct.py
@@ -462,10 +467,12 @@ tests/test_pair_evidence_shared.py
 tests/test_parallel_safety.py
 tests/test_param_kind_enum_identity.py
 tests/test_param_kind_fact.py
+tests/test_param_kind_fact_integration.py
 tests/test_pattern_audit_scenarios.py
 tests/test_pattern_modulation_disclosure.py
 tests/test_pattern_verdicts.py
 tests/test_pattern_verdicts_entity_ids.py
+tests/test_pe_header_export_join.py
 tests/test_pe_metadata_unit.py
 tests/test_pe_pdb_section_failure.py
 tests/test_perf_report.py
@@ -610,6 +617,7 @@ tests/test_stored_snapshot_source_licence.py
 tests/test_stripped_degradation.py
 tests/test_struct_cross_tier_dedup.py
 tests/test_struct_field_type_cross_tier_fold.py
+tests/test_subsumed_duplicate_invariance.py
 tests/test_support_gate_reasons.py
 tests/test_suppress_repeatable.py
 tests/test_suppression.py
@@ -664,6 +672,7 @@ tests/test_variable_identity_dedup.py
 tests/test_variable_removal_evidence_kind.py
 tests/test_vector_abi.py
 tests/test_verdict_semantic_oracle.py
+tests/test_version_floor_new_provider.py
 tests/test_versioned_symbol_scheme.py
 tests/test_versioning_policy.py
 tests/test_versioning_policy_wiring.py

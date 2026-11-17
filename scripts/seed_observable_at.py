@@ -85,6 +85,18 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_DH",
     ),
+    "H:PURE": (
+        (("B", "H"),),
+        "a pure virtual has no body and no symbol: only the public header declares it, so a DWARF-only surface never holds it",
+        (),
+        "_OBS_H_PURE",
+    ),
+    "H:HEADER": (
+        (("B", "H"),),
+        "a header-level fact: the public header declares the opaque type or typedef; neither the export table nor DWARF carries it",
+        (),
+        "_OBS_H_HEADER",
+    ),
     "D:PRESENCE": (
         (("B", "D"),),
         "DWARF presence on the old side: only a debug-info read sees it",

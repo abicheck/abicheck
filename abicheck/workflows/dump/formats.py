@@ -126,6 +126,7 @@ class PeAdapter:
             lang=r.lang,
             lang_explicit=r.lang_explicit,
             pdb_path=r.pdb_path,
+            presence_only=r.symbols_only or r.debug_presence_only,
             header_backend=r.header_backend,
             compile=r.compile,
             public_headers=r.public_headers,
@@ -143,7 +144,7 @@ class MachoAdapter:
         from .macho import extract_macho
 
         r = request
-        return extract_macho(
+        snap: AbiSnapshot = extract_macho(
             r.path,
             r.version,
             headers=r.headers,
@@ -155,7 +156,11 @@ class MachoAdapter:
             public_headers=r.public_headers,
             public_header_dirs=r.public_header_dirs,
             include_labels=r.include_labels,
+            debug_format=r.debug_format,
+            symbols_only=r.symbols_only,
+            debug_presence_only=r.debug_presence_only,
         )
+        return snap
 
 
 #: PE and Mach-O. The ELF adapter lives with its extractor in

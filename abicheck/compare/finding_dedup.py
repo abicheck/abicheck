@@ -645,22 +645,16 @@ def dedup_identity_key(
     if change.kind not in DEDUP_CATEGORY_BY_KIND:
         return None
     if identity_memo is not None:
-        # Inline validity check (not a call) so a hit costs one lookup and the
-        # memo's own primary_id runs only on a miss. The snapshot expression
-        # matches IdentityMemo.primary_id's.
+        # Inline validity check (not a call), so a hit costs one lookup and the
+        # memo's own primary_id runs only on a miss. The snapshot is taken raw:
+        # a change with a list or set field never equals the frozen snapshot the
+        # memo stored, so it recomputes (correct, merely uncached). No dedup-table
+        # kind's identity reads such a field, so freezing here would be dead code.
         hit = identity_memo.entries.get(id(change))
         if (
             hit is not None
             and hit[0] is change
-            and hit[1]
-            == tuple(
-                tuple(v)
-                if isinstance(v, list)
-                else frozenset(v)
-                if isinstance(v, set)
-                else v
-                for v in (getattr(change, n) for n in INPUT_FIELDS)
-            )
+            and hit[1] == tuple(getattr(change, n) for n in INPUT_FIELDS)
         ):
             return hit[2]
         return identity_memo.primary_id(change)

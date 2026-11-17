@@ -1884,7 +1884,7 @@ def test_odr_safe_fixture_merges_cleanly_through_real_clang_backend():
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend tu_merge test")
     from abicheck.dump_manifest import TranslationUnit
-    from abicheck.dumper import _header_ast_parser
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.manifest import run_tu_loop
 
     tu_a = TranslationUnit(
@@ -1895,7 +1895,7 @@ def test_odr_safe_fixture_merges_cleanly_through_real_clang_backend():
     )
     merged = run_tu_loop(
         (tu_a, tu_b),
-        header_ast_parser=_header_ast_parser,
+        header_ast_parser=header_ast_parser,
         roots=[_G32_DIR / "odr_safe" / "tu_a.h", _G32_DIR / "odr_safe" / "tu_b.h"],
         backend="clang",
         compiler="c++",
@@ -1915,7 +1915,7 @@ def test_odr_conflict_fixture_raises_through_real_clang_backend():
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend tu_merge test")
     from abicheck.dump_manifest import TranslationUnit
-    from abicheck.dumper import _header_ast_parser
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.manifest import run_tu_loop
 
     tu_a = TranslationUnit(
@@ -1936,7 +1936,7 @@ def test_odr_conflict_fixture_raises_through_real_clang_backend():
     with pytest.raises(TuMergeError) as excinfo:
         run_tu_loop(
             (tu_a, tu_b),
-            header_ast_parser=_header_ast_parser,
+            header_ast_parser=header_ast_parser,
             roots=[
                 _G32_DIR / "odr_conflict" / "tu_a.h",
                 _G32_DIR / "odr_conflict" / "tu_b.h",

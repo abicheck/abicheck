@@ -25,7 +25,7 @@ proving the loop works with just clang, the same castxml-absent-host
 reasoning ``test_clang_header_backend_integration.py`` documents for itself),
 each self-skipping when clang/g++ are unavailable:
 
-- ``test_run_tu_loop_real_clang_backend_*`` inject ``dumper._header_ast_parser``
+- ``test_run_tu_loop_real_clang_backend_*`` inject ``dumper.header_ast_parser``
   itself with ``backend="clang"`` over real header TUs, at the
   ``dumper_manifest.run_tu_loop`` layer directly.
 - ``TestDumpWithManifest`` goes one layer up, through ``dumper.dump()``
@@ -1148,7 +1148,7 @@ def test_run_tu_loop_empty_tus_returns_empty_merge():
 def test_run_tu_loop_real_clang_backend_merges_two_translation_units(tmp_path):
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend dumper_manifest test")
-    from abicheck.dumper import _header_ast_parser
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     header_a = tmp_path / "a.h"
     header_a.write_text("int add_a(int a, int b);\n")
@@ -1161,7 +1161,7 @@ def test_run_tu_loop_real_clang_backend_merges_two_translation_units(tmp_path):
     )
     merged = run_tu_loop(
         tus,
-        header_ast_parser=_header_ast_parser,
+        header_ast_parser=header_ast_parser,
         roots=[header_a, header_b],
         backend="clang",
         compiler="c++",
@@ -1177,7 +1177,7 @@ def test_run_tu_loop_real_clang_backend_merges_identical_redeclaration_across_tu
 ):
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend dumper_manifest test")
-    from abicheck.dumper import _header_ast_parser
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     header_a = tmp_path / "a.h"
     header_a.write_text("int shared_fn(int a, int b);\n")
@@ -1190,7 +1190,7 @@ def test_run_tu_loop_real_clang_backend_merges_identical_redeclaration_across_tu
     )
     merged = run_tu_loop(
         tus,
-        header_ast_parser=_header_ast_parser,
+        header_ast_parser=header_ast_parser,
         roots=[header_a, header_b],
         backend="clang",
         compiler="c++",
@@ -1205,7 +1205,7 @@ def test_run_tu_loop_real_clang_backend_raises_on_genuinely_conflicting_across_t
 ):
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend dumper_manifest test")
-    from abicheck.dumper import _header_ast_parser
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     header_a = tmp_path / "a.h"
     header_a.write_text("int shared_fn(int a, int b);\n")
@@ -1219,7 +1219,7 @@ def test_run_tu_loop_real_clang_backend_raises_on_genuinely_conflicting_across_t
     with pytest.raises(TuMergeError) as excinfo:
         run_tu_loop(
             tus,
-            header_ast_parser=_header_ast_parser,
+            header_ast_parser=header_ast_parser,
             roots=[header_a, header_b],
             backend="clang",
             compiler="c++",

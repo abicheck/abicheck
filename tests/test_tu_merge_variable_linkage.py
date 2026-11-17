@@ -113,7 +113,7 @@ def test_plain_c_static_and_extern_variables_of_the_same_name_stay_distinct_real
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend tu_merge test")
     from abicheck.dump_manifest import TranslationUnit
-    from abicheck.dumper import _header_ast_parser
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.manifest import run_tu_loop
 
     static_h = tmp_path / "static_counter.h"
@@ -125,7 +125,7 @@ def test_plain_c_static_and_extern_variables_of_the_same_name_stay_distinct_real
     tu_extern = TranslationUnit(name="tu_extern", forced_includes=(extern_h,))
     merged = run_tu_loop(
         (tu_static, tu_extern),
-        header_ast_parser=_header_ast_parser,
+        header_ast_parser=header_ast_parser,
         roots=[static_h, extern_h],
         backend="clang",
         compiler="cc",

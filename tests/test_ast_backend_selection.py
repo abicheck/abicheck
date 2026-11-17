@@ -16,7 +16,7 @@
 """ADR-063 Track T4 ("Dump request contract"), item 1's first still-open
 clause: splitting header-AST **backend selection** from **fallback policy**.
 
-Before this change, ``dumper._header_ast_parser`` computed its own dispatch
+Before this change, ``dumper.header_ast_parser`` computed its own dispatch
 inline (``_resolve_single_ast_backend`` then ``if resolved == "clang" or
 frontend_context != "host": ...``), and
 ``service_dump_pipeline.resolve_dump_request`` independently re-derived the
@@ -31,7 +31,7 @@ explicit pinned castxml with an auto request) are why the docstrings in
 are preserved by tests below.
 
 The fix: ``dumper._resolve_effective_ast_backend`` is now the one "selection"
-function -- pure, callable with no execution -- both ``_header_ast_parser``'s
+function -- pure, callable with no execution -- both ``header_ast_parser``'s
 own dispatch and ``service_compare_evidence.effective_frontend_for_context``
 (``resolve_dump_request``'s new call) delegate to. This file states that as
 an executable contract: the prediction is *identical* regardless of which
@@ -80,7 +80,7 @@ class TestResolveEffectiveAstBackend:
     def test_non_host_context_always_predicts_clang(self, requested):
         """Every request that is NOT an explicit/pinned castxml resolves to
         clang under a non-"host" context -- mirrors
-        ``_header_ast_parser``'s own ``if resolved == "clang" or
+        ``header_ast_parser``'s own ``if resolved == "clang" or
         frontend_context != "host": return _run_clang()``."""
         from abicheck.dumper import _resolve_effective_ast_backend
 

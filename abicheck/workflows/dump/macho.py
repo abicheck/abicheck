@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...errors import SnapshotError
+from ...extract.binary_format import with_extraction_limitations
 from ...extract.surface_fact_producers import export_table_surface_facts
 from ...model import AbiSnapshot, Function, Visibility
 from ...storage.snapshot_load_normalization import stamp_macho_elf_binding
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from ...compile_context import CompileContext
 
 
+@with_extraction_limitations
 def extract_macho(
     path: Path,
     version: str,
@@ -49,6 +51,9 @@ def extract_macho(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     include_labels: dict[Path, str] | None = None,
+    debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -108,7 +113,17 @@ def extract_macho(
         for exp in macho_meta.exports
         if exp.name
     ]
+    from ...extract.macho_debug import macho_dwarf_kwargs
+
+    # The DWARF decision is the one the header-built dump makes (dumper's
+    # _dump_macho): the adjacent dSYM, under the same request options, never the
+    # presence of headers.
+    debug_options = {
+        "symbols_only": symbols_only,
+        "debug_presence_only": debug_presence_only,
+    }
     snapshot = new_snapshot(
+        **macho_dwarf_kwargs(path, debug_format, debug_options),
         library=path.name,
         version=version,
         functions=funcs,

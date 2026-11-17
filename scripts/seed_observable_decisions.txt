@@ -315,3 +315,23 @@ tail_padding_reuse_changed  H  # diff_layout.py:343-363 consumes data_size_bits,
 common_symbol_risk  B:ELF  # diff_platform_elf_symbols.py:268-282: reads ELF symbol types (STT_COMMON) only
 dwarf_info_missing  D:PRESENCE  # diff_platform.py:1436-1452: fires only when the old side has DWARF and the new side lacks it, so the pair needs DWARF evidence (own rationale in platform_1.py)
 func_became_inline  H  # compare/function_lifecycle.py:98-128 reads is_inline; DWARF does not set it (extract emits is_inline_fact not_collected, oracle: DWARF-only pair emits nothing in either direction, headers pair emits func_became_inline)
+# -- batch 4 (G3): overloads ----------------------------------------------------
+overload_added  B  # diff_types.py:444-461: an overload added to an exported free function is emitted from the export table alone (stripped binary: overload_added, func_added); a member overload needs the header (its class is not exported) and is a surface limit, not a reason to lower or raise B
+
+# -- batch 3 (G3): pure virtual -----------------------------------------------
+func_virtual_became_pure  H:PURE  # types_1.py / diff_types.py:1300: fires on a matched pair whose is_pure_virtual flips; a pure member has no symbol, so the DWARF-only surface never contains it (oracle: header pair emits it, DWARF-only pair emits nothing)
+# -- batch 3 (G3): const value -----------------------------------------------
+var_value_changed  DH  # types_2.py: the binary's section bytes are read only for a variable whose type a header or DWARF supplies. Oracle: stripped binary alone emits nothing; stripped binary + headers emits; -g binary without headers emits. Reader gap (binary-only dumps do not type the object): G7 (sec 11.2)
+# -- batch 4 (G3): unnamed types ------------------------------------------------
+unnamed_type_in_public_abi  B:ELF  # diff_unnamed_types.py: the closure's mangled name is read from the ELF export table; the real-compile oracle uses a GNU ELF producer (g++): clang gives the closure-typed function internal linkage, so it is not exported and the kind does not fire. Mach-O: the binary-only surface does not show the exported closure function at all (macOS run: only LC_ID_DYLIB), so no Mach-O claim (sec 11.2)
+# -- batch 5 (G3): template return type and tag rename -------------------------
+template_return_type_changed  DH  # diff_platform_templates.py:151: the inner template argument of the return type; header pair and DWARF-only pair emit it (Box<int> -> Box<long>), a stripped binary does not
+tag_type_renamed  DH  # diff_cpp_patterns.py:514: needs record types (header or DWARF) joined to symbols; the header and DWARF pairs emit it, the stripped binary does not
+used_reserved_field  DH  # diff_types_abicc_parity.py:132 and diff_types_surface.py RESERVED_FIELD: needs the field names (header or DWARF); header and DWARF pairs emit it (reserved1 -> priority), stripped binary does not
+opaque_invariant_broken  H:HEADER  # pattern_verdicts.py:360-392: the public header's opaque type (forward decl) becomes complete or by-value; header pair emits it, DWARF-only and stripped pairs do not
+handle_type_changed  H:HEADER  # pattern_verdicts.py:425-460: a header typedef's token type changes (HandleA* -> HandleB*); header pair emits it, stripped binary does not
+template_param_type_changed  DH  # diff_platform_templates.py:172: an extern-C-named parameter whose template argument changed (Box<int> -> Box<long>): header and DWARF pairs emit it, a stripped binary does not
+instantiation_missing_from_binary  B  # diff_templates / template_instance_absence: a template instance exported by the old binary and absent from the new one; the stripped binary pair emits it (tag oracle), so B
+overload_set_rerouted  B  # diff_types: an overload set rerouted under the same mangled name family; the stripped binary pair emits it (tag oracle), so B
+abi_equivalent_type_changed  DH  # compare/abi_equivalent_retype.py: a retype the compiler passes identically (long -> long long on LP64) needs the declared types (header or DWARF); header and DWARF pairs emit it, a stripped binary does not
+typedef_version_sentinel  H:HEADER  # types_2.py: a typedef name carrying a release version; the header pair emits it, the stripped and DWARF-only pairs do not (the typedef is never exported)

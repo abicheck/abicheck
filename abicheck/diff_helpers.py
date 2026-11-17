@@ -56,6 +56,11 @@ from .model.execution_cache import memoized
 from .model.identity import EntityId
 from .model.int_spelling import canonical_int_runs
 from .model.qualified_name_split import iter_top_level_chars
+from .name_classification import (
+    canonicalize_type_name,
+    cv_qualifiers_only_differ,
+    func_signature_cv_only_differ,
+)
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -457,6 +462,67 @@ def canonicalize_record_symbol(
 _ANON_TYPE_RE = re.compile(
     r"<\s*(?:unnamed|anonymous)(?:\s+(union|struct|class|enum)\b)?", re.IGNORECASE
 )
+
+
+@memoized(maxsize=65536)
+def _same_anonymous_member_type(old_type: str, new_type: str) -> bool:
+    """True when both spellings name one anonymous member type.
+
+    A reader that cannot name an unnamed struct/union/enum writes a placeholder
+    (``<unnamed-tag>``), and another writes it scope-qualified
+    (``Outer::<unnamed-type-u>``). The same member then differs only by which
+    reader spelled it, so the spelling alone must never be a type change. Both
+    sides go through the anonymous-identity collapse ``diff_helpers`` already
+    uses for cross-reader comparison; a real kind change still differs there
+    (``<anonymous union>`` against ``<anonymous struct>``), and a change to a
+    named type is never anonymous on one side.
+    """
+    if not (_ANON_TYPE_RE.search(old_type) and _ANON_TYPE_RE.search(new_type)):
+        return False
+    return _normalize_type_name(old_type) == _normalize_type_name(new_type)
+
+
+@memoized(maxsize=65536)
+def _field_type_genuinely_changed(
+    old_type: str, new_type: str, *, cv_facts_reliable: bool
+) -> bool:
+    """True when a struct/union field's type spelling differs in a way that
+    should be reported as a field *type* change.
+
+    A cv-qualifier difference never is: behind a pointer/reference
+    (``cv_qualifiers_only_differ``) it changes nothing about the field, and
+    a by-value one (``int`` -> ``const int``) keeps size, alignment and offset
+    -- its real, source-level effect is reported by the dedicated
+    ``FIELD_BECAME_CONST``/``FIELD_LOST_CONST``/``FIELD_*_VOLATILE`` kinds
+    (``case30_field_qualifiers``), so reporting it here as well turned a
+    recompile-only API break into a BREAKING layout claim.
+
+    *cv_facts_reliable* is accepted for the callers' existing contract: when
+    either snapshot predates the CastXML CV-fact fix (``header_cv`` family,
+    ``model.snapshot_reliability``) the dedicated kinds stand down, and a
+    persisted pre-fix spelling that silently dropped a real ``const`` must
+    not resurface here as a type change either -- which the unconditional
+    rule above already guarantees.
+    """
+    del cv_facts_reliable
+    if canonicalize_type_name(old_type) == canonicalize_type_name(new_type):
+        return False
+    if _same_anonymous_member_type(old_type, new_type):
+        return False
+    if cv_qualifiers_only_differ(old_type, new_type):
+        return False
+    # A by-value cv-only difference keeps size, alignment and offset. With
+    # reliable cv facts it is reported by its own dedicated kinds
+    # (FIELD_BECAME_CONST -> API_BREAK, FIELD_BECAME_VOLATILE -> risk, ...),
+    # which say what the change actually is; adding TYPE_FIELD_TYPE_CHANGED
+    # on top misreported a source-only change as a BREAKING layout change
+    # (catalog case30). With unreliable facts it is neutralized for the
+    # tool-upgrade reason below.
+    # Only a spelling that names a qualifier can differ by one; skip the
+    # (comparatively costly) cv strip for the common plain type change.
+    if not any(q in t for q in ("const", "volatile") for t in (old_type, new_type)):
+        return True
+    return not func_signature_cv_only_differ(old_type, new_type)
 
 
 def _normalize_type_name(name: str) -> str:

@@ -26,7 +26,6 @@ is not keyed again (the walk stops at a ``Typedef``).
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -34,6 +33,7 @@ from xml.etree.ElementTree import Element
 
 from ....model.cc_attributes import CC_ATTRIBUTE_BASES
 from ....model.execution_cache import memoized
+from ....model.file_revision import content_witness
 from ..clang.ast_inner import ast_inner
 from .vector_spellings import (
     _castxml_function_key,
@@ -150,15 +150,7 @@ def _cc_spelling_re() -> re.Pattern[str]:
 _CC_SPELLING_RE = _cc_spelling_re()
 
 
-def _file_stamp(path: str) -> tuple[int, int] | None:
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
-
-
-@memoized(maxsize=4096, witness=_file_stamp)
+@memoized(maxsize=4096, witness=content_witness)
 def _file_mentions_calling_convention(path: str) -> bool:
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")

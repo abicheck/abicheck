@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -42,6 +43,21 @@ from .registry import (
     Verdict,
 )
 
+_OBS_B = observable(("B",))
+_OBS_DH = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="layout or type fact: DWARF and the public header both carry it",
+)
+_OBS_H_HEADER = observable(
+    ("B", "H"),
+    rationale="a header-level fact: the public header declares the opaque type or typedef; neither the export table nor DWARF carries it",
+)
+
+_OBS_H_PURE = observable(
+    ("B", "H"),
+    rationale="a pure virtual has no body and no symbol: only the public header declares it, so a DWARF-only surface never holds it",
+)
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
@@ -55,6 +71,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "abi_equivalent_type_changed",
         _R,
+        observable_at=(_OBS_DH,),
         impact="A parameter, return, field or variable was retyped between two "
         "types the compiler passes, stores and returns identically (same size, "
         "alignment and register class: long -> long long on LP64, char -> signed "
@@ -118,6 +135,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "func_virtual_became_pure",
         _B,
+        observable_at=(_OBS_H_PURE,),
         impact="Concrete virtual became pure; old binaries calling it get unresolved dispatch.",
         description_template="Function became pure virtual: {name}",
         entity=_ENT.FUNCTION,
@@ -127,6 +145,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "handle_type_changed",
         _B,
+        observable_at=(_OBS_H_HEADER,),
         impact="An opaque handle typedef (a `void*` token or a pointer to a "
         "forward-declared struct) changed its underlying token type in a way "
         "callers can observe. Code that stored or compared the old handle "
@@ -138,6 +157,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "instantiation_missing_from_binary",
         _B,
+        observable_at=(_OBS_B,),
         impact="Header declares an explicit template instantiation that the shipped "
         "library no longer exports. Consumer source compiles cleanly but fails "
         "to link at load time with an undefined-symbol error. Common when a "
@@ -177,6 +197,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "opaque_invariant_broken",
         _B,
+        observable_at=(_OBS_H_HEADER,),
         impact="A type that was opaque (its definition hidden from callers, crossed "
         "only by pointer) or PIMPL now exposes its layout — its complete "
         "definition became visible in the public include closure, or a "
@@ -191,6 +212,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "overload_added",
         _R,
+        observable_at=(_OBS_B,),
         impact="A new overload was added under a public name that previously had "
         "exactly one declaration. Old binaries are unaffected (binary "
         "compatible), but the change is not source-compatible: taking the "
@@ -209,6 +231,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "overload_set_rerouted",
         _R,
+        observable_at=(_OBS_B,),
         impact="The overload set under a public name changed in a way "
         "where some overloads were removed and others added. "
         "Existing call sites that previously resolved to a removed "

@@ -20,7 +20,7 @@ import logging
 import shutil as shutil  # noqa: F401  # legacy test patch target
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .dump_manifest import DumpManifest
@@ -82,12 +82,12 @@ from .extract.header_ast_backend import (
     _is_hybrid_request,
     _resolve_effective_ast_backend as _resolve_effective_ast_backend,
     _resolve_single_ast_backend as _resolve_single_ast_backend,
+    header_ast_parser,
     lang_to_profile,
     validate_native_gcc_format,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
 from .extract.header_order_witness import header_order_proof
-from .extract.headers import backend_registry
 from .extract.headers.ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
@@ -96,9 +96,6 @@ from .extract.headers.ast_config import (
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
-from .extract.headers.backend_plan import BackendPlan
-from .extract.headers.backend_protocol import HeaderParseRequest
-from .extract.headers.castxml.backend import CastxmlRunError
 from .extract.headers.castxml.dumper import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
@@ -112,9 +109,7 @@ from .extract.headers.castxml.probe import (
     _parse_castxml_version as _parse_castxml_version,
     _validate_castxml_output as _validate_castxml_output,
 )
-from .extract.headers.castxml_fallback import _castxml_fallback_reason
 from .extract.headers.compile_provenance import _ast_compile_provenance
-from .extract.headers.gcc.backend import NativeGccParser
 from .extract.headers.sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
     _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
@@ -139,7 +134,7 @@ from .extract.headers.toolchain import (
     _tool_identity as _tool_identity,
     _tool_identity_metadata as _tool_identity_metadata,
 )
-from .extract.macho_debug import MACHO_MAGICS
+from .extract.macho_debug import MACHO_MAGICS, macho_dwarf_kwargs, warn_dwarf_only
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
@@ -155,97 +150,10 @@ from .workflows.dump.elf_fallback import (
     _build_symbol_only_snapshot as _build_symbol_only_snapshot,
     _try_dwarf_snapshot as _try_dwarf_snapshot,
 )
+from .workflows.dump.pe import pe_pdb_debug_kwargs
 from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)
-
-
-def _header_ast_parser(
-    headers: list[Path],
-    extra_includes: list[Path],
-    *,
-    backend: str,
-    compiler: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    sysroot: Path | None,
-    nostdinc: bool,
-    lang: str | None,
-    exported_dynamic: set[str],
-    exported_static: set[str],
-    public_header_paths: list[str],
-    public_dir_paths: list[str],
-    extra_hash_dirs: tuple[Path, ...] = (),
-    frontend_context: str = "host",
-    pruning_header_roots: tuple[str, ...] | None = None,
-    no_binary_evidence: bool = False,
-) -> _CastxmlParser | _ClangAstParser | NativeGccParser:
-    """Run the resolved L2 backend and return its CastXML/Clang parser.
-
-    Both parser implementations expose the same format-builder interface.
-
-    Frontend context selection and header-only evidence semantics are
-    forwarded unchanged to the selected backend.
-    """
-    effective = _resolve_effective_ast_backend(backend, frontend_context)
-
-    request = HeaderParseRequest(
-        headers=headers,
-        extra_includes=extra_includes,
-        compiler=compiler,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        lang=lang,
-        exported_dynamic=exported_dynamic,
-        exported_static=exported_static,
-        public_header_paths=public_header_paths,
-        public_dir_paths=public_dir_paths,
-        extra_hash_dirs=extra_hash_dirs,
-        frontend_context=frontend_context,
-        pruning_header_roots=pruning_header_roots,
-        no_binary_evidence=no_binary_evidence,
-    )
-
-    def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
-        return cast(
-            _ClangAstParser,
-            backend_registry.HEADER_AST_BACKENDS["clang"].parse(
-                request, fallback_reason=fallback_reason
-            ),
-        )
-
-    if effective == "gcc":
-        return cast(
-            NativeGccParser, backend_registry.HEADER_AST_BACKENDS["gcc"].parse(request)
-        )
-    if effective == "clang":
-        return _run_clang()
-
-    plan = BackendPlan.from_environment()
-    auto_selected = plan.auto_selected(backend)
-    try:
-        return cast(
-            _CastxmlParser,
-            backend_registry.HEADER_AST_BACKENDS["castxml"].parse(request),
-        )
-    except CastxmlRunError as exc:
-        fallback_reason = _castxml_fallback_reason(
-            exc.original,
-            auto_selected=auto_selected,
-            compiler=compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            plan=plan,
-        )
-        if fallback_reason is None:
-            raise exc.original from None
-        return _run_clang(fallback_reason=fallback_reason)
 
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
@@ -695,7 +603,7 @@ def _dump_elf(
             dump_manifest=dump_manifest,
             headers=headers,
             extra_includes=extra_includes,
-            header_ast_parser=_header_ast_parser,
+            header_ast_parser=header_ast_parser,
             backend=header_backend,
             compiler=compiler,
             gcc_path=gcc_path,
@@ -814,6 +722,8 @@ def _dump_macho(
     extra_hash_dirs: tuple[Path, ...] = (),
     dump_manifest: DumpManifest | None = None,
     frontend_context: str = "host",
+    debug_format: str | None = None,
+    **debug_kwargs: Any,
 ) -> AbiSnapshot:
     """Mach-O dump: export table from macholib + header-AST analysis.
 
@@ -826,13 +736,7 @@ def _dump_macho(
             "--dump-manifest is not yet supported for Mach-O binaries"
             "; use a single-header dump for this format."
         )
-    if dwarf_only:
-        warnings.warn(
-            "dwarf_only=True is not supported for Mach-O; "
-            "falling back to normal extraction.",
-            UserWarning,
-            stacklevel=2,
-        )
+    warn_dwarf_only(dwarf_only)
     from .macho_metadata import parse_macho_metadata
 
     macho_meta = read_exports_or_fail(dylib_path, parse_macho_metadata)
@@ -852,12 +756,8 @@ def _dump_macho(
             "type information will be missing."
         )
 
-        # `macho_meta.exports` entries are already normalized -- see the
-        # "already normalized" comment a few lines below, at the
-        # `exported_dynamic` build above, for the full account of why a
-        # second leading-underscore strip here corrupts every Itanium-
-        # mangled C++ export (this branch had the identical double-strip
-        # bug the with-headers path below used to have).
+        # `macho_meta.exports` are already normalized: no second underscore strip
+        # (see the note before the header parse below).
         # Split exports into functions (__TEXT) and variables (__DATA)
         # using section classification from Mach-O nlist entries.
         _relevant = [
@@ -871,6 +771,7 @@ def _dump_macho(
         _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
         # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
         return new_snapshot(
+            **macho_dwarf_kwargs(dylib_path, debug_format, debug_kwargs),
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -902,7 +803,7 @@ def _dump_macho(
     # guaranteeing zero header/export matches for any C++ Mach-O binary and
     # falling back to export-table-only mode (observed on macOS CI; the
     # equivalent ELF path never had this double-strip).
-    parser = timed("header AST parse")(_header_ast_parser)(
+    parser = timed("header AST parse")(header_ast_parser)(
         headers,
         extra_includes,
         backend=header_backend,
@@ -928,6 +829,7 @@ def _dump_macho(
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
         new_snapshot(
+            **macho_dwarf_kwargs(dylib_path, debug_format, debug_kwargs),
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -1024,6 +926,7 @@ def _dump_pe(
         _is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
         return new_snapshot(
             library=dll_path.name,
+            **pe_pdb_debug_kwargs(dll_path),
             version=version,
             source_path=str(dll_path.resolve()),
             source_mtime=_dll_mtime,
@@ -1040,7 +943,7 @@ def _dump_pe(
             language_profile=profile_hint,
         )
 
-    parser = timed("header AST parse")(_header_ast_parser)(
+    parser = timed("header AST parse")(header_ast_parser)(
         headers,
         extra_includes,
         backend=header_backend,
@@ -1067,6 +970,7 @@ def _dump_pe(
     return finish_binary_snapshot(
         new_snapshot(
             library=dll_path.name,
+            **pe_pdb_debug_kwargs(dll_path),
             version=version,
             source_path=str(dll_path.resolve()),
             source_mtime=_dll_mtime,
@@ -1123,9 +1027,10 @@ _FORMAT_HANDLERS: tuple[_FormatHandler, ...] = (
     ),
     _FormatHandler(
         name="macho",
-        builder=_dump_macho,
+        builder=with_extraction_limitations(_dump_macho),
         magics=MACHO_MAGICS,
         accepts_dwarf_only=True,
+        accepts_debug_format=True,
     ),
     _FormatHandler(
         name="pe",

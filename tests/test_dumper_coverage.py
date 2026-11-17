@@ -299,7 +299,7 @@ class TestDumpSymbolFiltering:
         def _unexpected(*args, **kwargs):
             raise AssertionError("symbols_only must not parse headers")
 
-        monkeypatch.setattr("abicheck.dumper._header_ast_parser", _unexpected)
+        monkeypatch.setattr("abicheck.dumper.header_ast_parser", _unexpected)
         snap = dump(
             so_path=so_path,
             headers=[header],
@@ -942,10 +942,10 @@ class TestFromHeadersProvenance:
         `dumper_scoping.py`'s own wider post-hoc-filter root set -- or a
         declaration reached only through a `public_header_dirs` root is
         misclassified as a dependency and permanently pruned.
-        `_header_ast_parser` computes this internally (no explicit
+        `header_ast_parser` computes this internally (no explicit
         `pruning_header_roots` passed by `_dump_pe`) when its own
         `clang_header_dump` call receives none, so this test observes the
-        effect at that call rather than at `_header_ast_parser`'s own args."""
+        effect at that call rather than at `header_ast_parser`'s own args."""
         from unittest.mock import MagicMock, patch
 
         import abicheck.pe_metadata as _pe
@@ -1265,7 +1265,7 @@ class TestDwarfLayoutCoherencePopulation:
                 "_resolve_debug_metadata",
                 return_value=(DwarfMetadata(), AdvancedDwarfMetadata()),
             ),
-            patch.object(dumper, "_header_ast_parser", return_value=parser),
+            patch.object(dumper, "header_ast_parser", return_value=parser),
             patch.object(
                 dumper, "dwarf_layout_types_or_empty", return_value=["placeholder"]
             ),
@@ -1330,7 +1330,7 @@ class TestDwarfLayoutCoherencePopulation:
                 "_resolve_debug_metadata",
                 return_value=(DwarfMetadata(), AdvancedDwarfMetadata()),
             ),
-            patch.object(dumper, "_header_ast_parser", return_value=parser),
+            patch.object(dumper, "header_ast_parser", return_value=parser),
             patch.object(
                 dumper, "dwarf_layout_types_or_empty"
             ) as mock_dwarf_layout_types,
@@ -1385,5 +1385,5 @@ class TestFormatHandlerRegistry:
 
         h = dumper._HANDLERS_BY_NAME
         assert h["elf"].accepts_dwarf_only and h["elf"].accepts_debug_format
-        assert h["macho"].accepts_dwarf_only and not h["macho"].accepts_debug_format
+        assert h["macho"].accepts_dwarf_only and h["macho"].accepts_debug_format
         assert not h["pe"].accepts_dwarf_only and not h["pe"].accepts_debug_format
