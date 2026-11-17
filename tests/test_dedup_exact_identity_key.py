@@ -167,6 +167,10 @@ def test_symbol_bearing_primary_ids_are_byte_identical_to_base() -> None:
     import json
     from pathlib import Path
 
-    fixture = Path(__file__).parent / "fixtures" / "dedup_exact_primary_ids_base.json"
+    fixture = (
+        Path(__file__).parent
+        / "identity_fixtures"
+        / "dedup_exact_primary_ids_base.json"
+    )
     expected = json.loads(fixture.read_text(encoding="utf-8"))
     assert _symbol_bearing_primary_ids() == expected

@@ -65,4 +65,10 @@ class DeduplicateAstDwarf:
                 reason_code=f"subsumed_by:{kept_kind.value}:{key}",
             )
 
-        return deduplicate_ast_dwarf(changes, ctx.old, ctx.new, _record_subsumed)
+        return deduplicate_ast_dwarf(
+            changes,
+            ctx.old,
+            ctx.new,
+            _record_subsumed,
+            identity_memo=ctx.identity_memo,
+        )

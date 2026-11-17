@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from abicheck.compare.identity_memo import IdentityMemo
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind as K
@@ -32,7 +33,12 @@ _SNAP = AbiSnapshot(library="lib.so", version="1")
 
 def _run(changes: list[Change]) -> tuple[list[Change], DispositionLedger]:
     ledger = DispositionLedger()
-    ctx = SimpleNamespace(old=_SNAP, new=_SNAP, disposition_ledger=ledger)
+    ctx = SimpleNamespace(
+        old=_SNAP,
+        new=_SNAP,
+        disposition_ledger=ledger,
+        identity_memo=IdentityMemo(),
+    )
     kept = DeduplicateAstDwarf().run(list(changes), ctx)
     return kept, ledger
 
