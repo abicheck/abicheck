@@ -129,7 +129,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.workflows.evaluation_identities::memoized::severity_preset_identity": "UNCOVERED: reached only under --severity-preset; pure function of a packaged preset name",
     "abicheck.demangle::memoized::demangle": R,
     "abicheck.demangle::memoized::_is_itanium_mangled": R,
-    "abicheck.compare.glibcxx_dual_abi::memoized::normalize_dual_abi_spelling": "UNCOVERED: a pure string normalisation of one demangled name, with no cell varying the spelling set beyond the dual-ABI oracle. Its equivalence to the unmemoised function is pinned by tests/test_glibcxx_dual_abi_pairing.py (per-symbol pairing on real g++ output) and tests/test_glibcxx_dual_abi_pairing.py::test_pairing_is_invariant_under_input_order",
+    "abicheck.compare.glibcxx_dual_abi::memoized::normalize_dual_abi_spelling": R,
     "abicheck.diff_helpers::memoized::depth_aware_bare_name": B,
     "abicheck.diff_symbols_renames::memoized::_rename_name_parse": "UNCOVERED: rename heuristics need a removed+added pair with matching fingerprints; no cell fixture has one",
     "abicheck.extract.headers.clang.abi_target::memoized::_default_triple": "UNCOVERED: clang's default -print-target-triple, memoized on (executable, content digest); no cell varies the clang binary within one process. The rule it feeds is pinned by tests/test_clang_binary_abi_target.py, which re-probes a Windows-default clang through the real CLI",
@@ -240,6 +240,62 @@ _SITES = scan_optimization_sites()
 
 def _cell_sites(cell: str) -> list[str]:
     return sorted(k for k, v in COVERAGE.items() if v == cell)
+
+
+# ── dual-ABI spelling normaliser: memoised vs unwrapped ──────────────────────
+
+_NORMALIZE_KEY = (
+    "abicheck.compare.glibcxx_dual_abi::memoized::normalize_dual_abi_spelling"
+)
+_CXX11_STRING = (
+    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+)
+_LEGACY_STRING = (
+    "std::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+)
+
+
+def _dual_abi_spellings() -> list[str]:
+    """Sibling spellings: both ABIs, the inline namespace in a user namespace and
+    in std, the [abi:cxx11] tag, whitespace variants, a generated family, and
+    repeats (a memo must answer a repeated input the same as the first call)."""
+    base = [
+        "f(std::string const&)",
+        f"f({_CXX11_STRING} const&)",
+        "f[abi:cxx11](int)",
+        "api::__cxx11::f(int)",
+        "api::f(int)",
+        f"g({_LEGACY_STRING})",
+        f"g({_CXX11_STRING})",
+        "  h( int )  ",
+        "",
+    ]
+    generated = [f"n{i}({_CXX11_STRING} const&, int {i})" for i in range(20)]
+    return (base + generated) * 2
+
+
+def test_dual_abi_spelling_memo_matches_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck.compare.glibcxx_dual_abi import normalize_dual_abi_spelling
+
+    sites = [s for s in _SITES if s.key == _NORMALIZE_KEY]
+    assert sites, f"the H5 scan no longer finds {_NORMALIZE_KEY}"
+    objs = _import_all()
+    spellings = _dual_abi_spellings()
+    clear_functools(objs)
+    optimized = [normalize_dual_abi_spelling(x) for x in spellings]
+    # Repeats must have hit the memo: the second copy of the list is cache hits.
+    hits = sum(h for h, _ in cache_info_totals(objs).values())
+    assert hits > 0, "the optimized run never consulted the memo"
+    ref = ReferenceMode()
+    ref.install(monkeypatch, sites)
+    assert not ref.unpatchable, ref.unpatchable
+    reference = [normalize_dual_abi_spelling(x) for x in spellings]
+    assert ref.calls.get(_NORMALIZE_KEY, 0) > 0, (
+        "the reference run never bypassed the memo"
+    )
+    _assert_same("\n".join(optimized), "\n".join(reference), "dual-abi-spelling")
 
 
 # ── inventory completeness ──────────────────────────────────────────────────
@@ -378,6 +434,36 @@ def _release_dirs(root: Path, members: int = 4) -> tuple[Path, Path]:
             ),
         ]
         new_funcs = funcs[:2] if i % 2 else list(funcs)
+        if i == 0:
+            # A libstdc++ dual-ABI flip of one std::string function: the legacy
+            # spelling removed, the cxx11 spelling added. Reaches the pairing and
+            # its spelling normaliser on the release path.
+            funcs.append(
+                Function(
+                    name="legacy_str",
+                    mangled="_Z10legacy_strRKSs",
+                    return_type="int",
+                    params=[Param(name="s", type="const std::string &")],
+                    visibility=Visibility.PUBLIC,
+                )
+            )
+            new_funcs.append(
+                Function(
+                    name="legacy_str",
+                    mangled=(
+                        "_Z10legacy_strRKNSt7__cxx1112basic_stringIcSt11char_traits"
+                        "IcESaIcEEE"
+                    ),
+                    return_type="int",
+                    params=[
+                        Param(
+                            name="s",
+                            type="const std::__cxx11::string &",
+                        )
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            )
         if i == 0:
             # A parameter-type change whose two spellings share a prefix: a
             # type-spelling cache keyed on less than the whole spelling
