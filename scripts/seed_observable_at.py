@@ -151,6 +151,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_BH_ALIGN",
     ),
+    "DH:PEMACHO": (
+        (("B", "D"), ("B", "H")),
+        "layout or type fact: DWARF and the public header both carry it",
+        ("pe", "macho"),
+        "_OBS_DH_PEMACHO",
+    ),
     "DH:ELFPE": (
         (("B", "D"), ("B", "H")),
         "layout or type fact: DWARF and the public header both carry it",

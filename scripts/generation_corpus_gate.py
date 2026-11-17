@@ -11,9 +11,10 @@ runs before ``pip install``.
 For the ``EXTRACTOR_GENERATION`` G that ``abicheck/storage/versioning.py``
 declares, it requires:
 
-* ``SPELLING_MIGRATIONS`` in ``abicheck/storage/generation_spelling_table.py`` to
+* ``SPELLING_MIGRATIONS`` in ``abicheck/storage/generation_spelling_rows.py`` to
   hold exactly one row per generation 1..G, each with a reason that is not
-  empty and not one of that module's ``PLACEHOLDER_REASONS`` -- the row says
+  empty and not one of ``PLACEHOLDER_REASONS`` in
+  ``abicheck/storage/generation_spelling_types.py`` -- the row says
   what the bump's audit found, or which rewrites it declares;
 * ``tests/fixtures/generations/manifest.json`` to cover every retired
   generation 1..G-1: a frozen snapshot that exists on disk
@@ -34,7 +35,8 @@ from typing import Protocol
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSIONING = ROOT / "abicheck" / "storage" / "versioning.py"
-MIGRATIONS = ROOT / "abicheck" / "storage" / "generation_spelling_table.py"
+MIGRATIONS = ROOT / "abicheck" / "storage" / "generation_spelling_rows.py"
+TYPES = ROOT / "abicheck" / "storage" / "generation_spelling_types.py"
 CORPUS = ROOT / "tests" / "fixtures" / "generations"
 CHECK = "generation-corpus"
 
@@ -84,9 +86,17 @@ def _rows(tree: ast.Module) -> dict[int, str] | None:
 
 
 def evaluate(
-    versioning_text: str, migrations_text: str, manifest: dict | None, corpus: Path
+    versioning_text: str,
+    migrations_text: str,
+    manifest: dict | None,
+    corpus: Path,
+    types_text: str | None = None,
 ) -> list[str]:
-    """Every violation, as a message; empty when the bump is accounted for."""
+    """Every violation, as a message; empty when the bump is accounted for.
+
+    *types_text* is the file declaring ``PLACEHOLDER_REASONS``; when omitted,
+    it is read from :data:`TYPES`.
+    """
     match = _GENERATION.search(versioning_text)
     if match is None:
         return ["abicheck/storage/versioning.py declares no EXTRACTOR_GENERATION"]
@@ -94,7 +104,9 @@ def evaluate(
     tree = ast.parse(migrations_text)
     rows = _rows(tree)
     if rows is None:
-        return ["SPELLING_MIGRATIONS is not a dict literal in generation_spelling_table.py"]
+        return [
+            "SPELLING_MIGRATIONS is not a dict literal in generation_spelling_rows.py"
+        ]
     problems: list[str] = []
     expected = set(range(1, generation + 1))
     for missing in sorted(expected - set(rows)):
@@ -105,7 +117,9 @@ def evaluate(
         )
     for extra in sorted(set(rows) - expected):
         problems.append(f"SPELLING_MIGRATIONS has a row for future generation {extra}")
-    placeholders = _placeholders(tree)
+    if types_text is None:
+        types_text = TYPES.read_text(encoding="utf-8")
+    placeholders = _placeholders(ast.parse(types_text))
     for row, reason in sorted(rows.items()):
         if reason.strip().lower().rstrip(".") in placeholders:
             problems.append(
@@ -149,5 +163,6 @@ def check_generation_corpus(findings: _FindingsLike) -> None:
         MIGRATIONS.read_text(encoding="utf-8"),
         manifest,
         CORPUS,
+        types_text=TYPES.read_text(encoding="utf-8"),
     ):
         findings.err(CHECK, problem)

@@ -51,7 +51,7 @@ from .castxml_base_offset_migration import migrate_castxml_base_offsets
 from .castxml_noexcept_migration import migrate_castxml_noexcept
 from .clang_vtable_base_migration import migrate_clang_vtable_bases
 from .dwarf_field_size_migration import migrate_dwarf_field_size_unknown
-from .generation_spelling_table import SPELLING_MIGRATIONS
+from .generation_spelling_rows import SPELLING_MIGRATIONS
 from .versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,

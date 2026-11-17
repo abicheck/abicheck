@@ -32,10 +32,11 @@ def _bumped(versioning: str, to: int) -> str:
 
 def _with_row(migrations: str, generation: int, reason: str) -> str:
     """*migrations* with one more literal row appended to SPELLING_MIGRATIONS."""
-    anchor = "\n}\n\n#: Reasons that say nothing"
+    anchor = "\n}\n"
     assert anchor in migrations
     row = f"\n    {generation}: GenerationSpellingChange({reason!r}),"
-    return migrations.replace(anchor, row + anchor, 1)
+    head, _, tail = migrations.rpartition(anchor)
+    return head + row + anchor + tail
 
 
 def _frozen(manifest: dict, generation: int) -> dict:
@@ -123,11 +124,12 @@ def test_gate_placeholders_agree_with_the_runtime_predicate() -> None:
     helper must refuse the same set."""
     import ast
 
-    from abicheck.storage.generation_spelling_table import (
+    from abicheck.storage.generation_spelling_types import (
         PLACEHOLDER_REASONS,
         is_placeholder_reason,
     )
 
-    assert gate._placeholders(ast.parse(_MIGRATIONS)) == set(PLACEHOLDER_REASONS)
+    types = gate.TYPES.read_text(encoding="utf-8")
+    assert gate._placeholders(ast.parse(types)) == set(PLACEHOLDER_REASONS)
     assert all(is_placeholder_reason(r.upper() + ".") for r in PLACEHOLDER_REASONS)
     assert not is_placeholder_reason("abc1234: new fact X, no respelling")

@@ -64,6 +64,7 @@ _MODULES = (
 #: "internal" is a statement about who imports it, not a licence to be absent
 #: from the documented surface.
 _INTERNAL_MODULES = (
+    "abicheck.storage.dto_declarations_migration",
     "abicheck.storage.fact_payload_validation",
     "abicheck.storage.fact_decode",
     "abicheck.storage.guards",
@@ -90,7 +91,8 @@ _INTERNAL_MODULES = (
     "abicheck.storage.dwarf_layout_facts",
     "abicheck.storage.generation_scope",
     "abicheck.storage.generation_migrations",
-    "abicheck.storage.generation_spelling_table",
+    "abicheck.storage.generation_spelling_types",
+    "abicheck.storage.generation_spelling_rows",
     "abicheck.storage.castxml_array_migration",
     "abicheck.storage.castxml_base_offset_migration",
     "abicheck.storage.castxml_noexcept_migration",

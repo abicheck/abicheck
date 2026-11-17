@@ -33,7 +33,7 @@ from abicheck.model import (
 )
 from abicheck.serialization import snapshot_from_dict
 from abicheck.storage.generation_migrations import FACT_GENERATIONS_KEY
-from abicheck.storage.generation_spelling_table import SPELLING_MIGRATIONS
+from abicheck.storage.generation_spelling_rows import SPELLING_MIGRATIONS
 from abicheck.storage.snapshot_encode import flat_document_and_carriers
 from abicheck.storage.versioning import (
     EXTRACTOR_GENERATION,

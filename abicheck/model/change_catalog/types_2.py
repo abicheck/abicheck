@@ -69,6 +69,19 @@ _OBS_B_ELF = observable(
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
+# G7: the initial value is read from an ELF object's own section bytes, so a
+# binary-only ELF snapshot carries it without DWARF or a header. PE and Mach-O
+# binary-only dumps record no such bytes, so they keep the declaration-backed
+# alternatives (see ``var_value_changed``).
+_OBS_DH_PEMACHO = observable(
+    ("B", "D"),
+    ("B", "H"),
+    rationale="layout or type fact: DWARF and the public header both carry it",
+    condition=ObservabilityCondition(platform=frozenset({Platform.PE, Platform.MACHO})),
+)
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
@@ -603,7 +616,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "var_value_changed",
         _C,
-        observable_at=(_OBS_DH,),
+        observable_at=(_OBS_B_ELF, _OBS_DH_PEMACHO),
         impact="A global variable's initial/static value changed; this "
         "detector only compares the value itself, not the "
         "variable's type or size, so this fires purely on the "

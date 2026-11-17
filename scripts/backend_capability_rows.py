@@ -543,6 +543,16 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     FactRow(
         "Variable",
+        "initializer_hex",
+        _OTHER,
+        _OTHER,
+        note=(
+            "Generation 82: read from the exported object's own file-backed, "
+            "non-writable section by the ELF path, not from a header backend."
+        ),
+    ),
+    FactRow(
+        "Variable",
         "declared_in_headers_fact",
         _OTHER,
         _OTHER,
