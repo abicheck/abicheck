@@ -61,6 +61,13 @@ _OBS_B_ELF_MACHO = observable(
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
+_OBS_B = observable(
+    ("B",),
+    rationale=(
+        "initial value read from the object's own section bytes (G7): a "
+        "binary-only snapshot carries it without DWARF or a header"
+    ),
+)
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
@@ -589,7 +596,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "var_value_changed",
         _C,
-        observable_at=(_OBS_DH,),
+        observable_at=(_OBS_B,),
         impact="A global variable's initial/static value changed; this "
         "detector only compares the value itself, not the "
         "variable's type or size, so this fires purely on the "
