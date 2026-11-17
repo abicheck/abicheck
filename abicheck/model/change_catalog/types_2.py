@@ -589,6 +589,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "var_value_changed",
         _C,
+        observable_at=(_OBS_DH,),
         impact="A global variable's initial/static value changed; this "
         "detector only compares the value itself, not the "
         "variable's type or size, so this fires purely on the "

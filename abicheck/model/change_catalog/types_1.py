@@ -44,6 +44,11 @@ from .registry import (
 )
 
 _OBS_B = observable(("B",))
+
+_OBS_H_PURE = observable(
+    ("B", "H"),
+    rationale="a pure virtual has no body and no symbol: only the public header declares it, so a DWARF-only surface never holds it",
+)
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
@@ -120,6 +125,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "func_virtual_became_pure",
         _B,
+        observable_at=(_OBS_H_PURE,),
         impact="Concrete virtual became pure; old binaries calling it get unresolved dispatch.",
         description_template="Function became pure virtual: {name}",
         entity=_ENT.FUNCTION,
