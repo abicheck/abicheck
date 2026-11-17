@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """The cxx11 prefilter is an optimization: it must never change a finding.
 
-``_diff_glibcxx_dual_abi`` and ``_diff_abi_tags`` skip their demangling when no
-churned mangled name contains ``cxx11``. Reference mode
+``_diff_glibcxx_dual_abi`` skips its demangling when no churned mangled name
+contains ``cxx11``. Reference mode
 (``ABICHECK_REFERENCE_MODE=1``) disables that skip. Over generated churn sets
 (string flips, tag-only changes, user-namespace ``__cxx11`` moves, unchanged and
 removed-only functions, both directions) the optimized and reference findings
-must be equal.
+must be equal. (The ABI-tag detector no longer demangles at all: see its module
+docstring.)
 """
 
 from __future__ import annotations

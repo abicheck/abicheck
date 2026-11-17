@@ -22,25 +22,22 @@ mangled names differ, so an old binary referencing one will not resolve the
 other.
 
 This is the per-symbol analogue of the libstdc++ dual-ABI flip diagnostic
-(``glibcxx_dual_abi_flip_detected``). A tag change that is exactly one such
-flipped function (see :func:`compare.glibcxx_dual_abi_pairs.is_flip_pair`) is
-reported by that diagnostic instead, so it is not repeated here. Every other tag
-change is reported, whatever the churn around it.
+(``glibcxx_dual_abi_flip_detected``). A tag change is reported here whatever the
+churn around it: a flip of a ``std::string`` function changes the mangled base
+(the ``__cxx11`` namespace is part of it), so it never reaches this detector as
+a tag change, and the two findings never describe the same symbol.
 """
 
 from __future__ import annotations
 
 import re
 
-from .compare.glibcxx_dual_abi_pairs import is_flip_pair
 from .compare.template_surface import reconciled_public_functions
-from .demangle import demangle_batch
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, Function
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .model.execution_cache import reference_mode
 
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.
 # e.g. 'B5cxx11' -> tag 'cxx11'. Tags may repeat (a name can carry several).
@@ -69,11 +66,6 @@ def _extract_abi_tags(mangled: str) -> tuple[frozenset[str], str]:
 
     base = _ABI_TAG_RE.sub(_take, mangled)
     return frozenset(tag_list), base
-
-
-def _demangle_churn(removed: set[str], added: set[str]) -> dict[str, str]:
-    """The demangled spellings of the churned names, in one deterministic batch."""
-    return demangle_batch(sorted(removed) + sorted(added))
 
 
 @registry.detector("abi_tag")
@@ -107,9 +99,6 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         _, base = _extract_abi_tags(a)
         added_by_base.setdefault(base, []).append(a)
 
-    # Demangled spellings, read only if a tag change needs the flip check.
-    demangled: dict[str, str] | None = None
-
     used: set[str] = set()
     for r in sorted(removed):
         old_tags, base = _extract_abi_tags(r)
@@ -120,12 +109,6 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new_tags, _ = _extract_abi_tags(a)
         if old_tags == new_tags:
             continue  # base matched but tags identical — not a tag change
-        if demangled is None and (reference_mode() or "cxx11" in r or "cxx11" in a):
-            demangled = _demangle_churn(removed, added)
-        if demangled is not None and is_flip_pair(
-            demangled.get(r, ""), demangled.get(a, "")
-        ):
-            continue  # one flipped function: the dual-ABI finding reports it
         used.add(a)
         gained = sorted(new_tags - old_tags)
         lost = sorted(old_tags - new_tags)

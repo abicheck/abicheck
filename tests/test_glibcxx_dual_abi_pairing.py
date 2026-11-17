@@ -271,3 +271,39 @@ def test_a_user_namespace_move_with_a_std_string_argument_is_not_a_flip():
         {"m2": "api::f(std::__cxx11::list<int>)"},
     )
     assert p.paired == 0
+
+
+@pytest.mark.parametrize(
+    ("spelling", "expected"),
+    [
+        # libstdc++'s own inline namespace and tag are the dual-ABI spellings.
+        (
+            "f(std::__cxx11::list<int, std::allocator<int> > const&)",
+            "f(std::list<int, std::allocator<int> > const&)",
+        ),
+        ("f[abi:cxx11](int)", "f(int)"),
+        (
+            "f(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)",
+            "f(std::string const&)",
+        ),
+        # A user namespace's __cxx11:: names a different function: kept.
+        ("api::__cxx11::f(int)", "api::__cxx11::f(int)"),
+        ("api::f(std::__cxx11::list<int> const&)", "api::f(std::list<int> const&)"),
+        (
+            "ns::__cxx11::g(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)",
+            "ns::__cxx11::g(std::string)",
+        ),
+    ],
+)
+def test_normaliser_strips_only_the_std_inline_namespace(spelling, expected):
+    from abicheck.compare.glibcxx_dual_abi import normalize_dual_abi_spelling
+
+    assert normalize_dual_abi_spelling(spelling) == expected
+
+
+def test_user_namespace_move_is_not_equal_to_the_std_spelling_after_normalising():
+    from abicheck.compare.glibcxx_dual_abi import normalize_dual_abi_spelling
+
+    assert normalize_dual_abi_spelling(
+        "api::__cxx11::f(int)"
+    ) != normalize_dual_abi_spelling("api::f(int)")
