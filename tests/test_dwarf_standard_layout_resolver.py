@@ -381,3 +381,53 @@ def test_a_base_whose_type_is_not_a_record_has_no_key(monkeypatch) -> None:
     record = NS(tag="DW_TAG_class_type", offset=7, cu=NS(cu_offset=0))
     monkeypatch.setattr(sl, "resolve_type_die", lambda die, cu: record)
     assert sl._base_key(inheritance) == (0, 7)
+
+
+def test_a_type_reference_resolves_by_its_tag(monkeypatch) -> None:
+    from types import SimpleNamespace as NS
+
+    from abicheck.extract import dwarf_standard_layout as sl
+
+    monkeypatch.setattr(sl, "unwrap_cv_typedef", lambda die, cu: die)
+    cu = NS(cu_offset=0)
+    scalar = NS(tag="DW_TAG_base_type", offset=3, cu=cu)
+    record = NS(tag="DW_TAG_structure_type", offset=4, cu=cu)
+    pointer = NS(tag="DW_TAG_pointer_type", offset=5, cu=cu)
+    array = NS(tag="DW_TAG_array_type", offset=6, cu=cu)
+    assert "DW_TAG_base_type" in sl._SCALAR_TAGS
+    assert sl._ref_of(scalar) == sl._SCALAR
+    assert sl._ref_of(record) == ("record", (0, 4))
+    # A pointer member is a scalar: it does not make its class non-standard-layout.
+    assert sl._ref_of(pointer) == sl._SCALAR
+    # A type with no by-value meaning here (a function type) is unknown.
+    subroutine = NS(tag="DW_TAG_subroutine_type", offset=7, cu=cu)
+    assert sl._ref_of(subroutine) == sl._UNKNOWN
+    # An array is its element: an array of records holds a record by value.
+    monkeypatch.setattr(sl, "resolve_type_die", lambda die, cu: record)
+    assert sl._ref_of(array) == ("record", (0, 4))
+
+
+def test_a_reference_type_is_recognized(monkeypatch) -> None:
+    from types import SimpleNamespace as NS
+
+    from abicheck.extract import dwarf_standard_layout as sl
+
+    monkeypatch.setattr(sl, "unwrap_cv_typedef", lambda die, cu: die)
+    cu = NS(cu_offset=0)
+    assert sl._is_reference(NS(tag="DW_TAG_reference_type", offset=1, cu=cu))
+    assert sl._is_reference(NS(tag="DW_TAG_rvalue_reference_type", offset=2, cu=cu))
+    assert not sl._is_reference(NS(tag="DW_TAG_base_type", offset=3, cu=cu))
+    assert not sl._is_reference(None)
+
+
+def test_a_virtual_function_is_read_from_its_virtuality_attribute() -> None:
+    from types import SimpleNamespace as NS
+
+    from abicheck.extract import dwarf_standard_layout as sl
+
+    def die(**attrs):
+        return NS(attributes={k: NS(value=v) for k, v in attrs.items()})
+
+    assert sl._is_virtual(die(DW_AT_virtuality=1))
+    assert not sl._is_virtual(die(DW_AT_virtuality=0))
+    assert not sl._is_virtual(die())
