@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from .compare.debug_type_scope import debug_layout_scope
@@ -1091,126 +1090,47 @@ def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Cha
     return changes
 
 
-_CXX11_TAG = "[abi:cxx11]"
-_CXX11_INLINE_NS = "__cxx11::"
-_STD_STRING_SPELLING = re.compile(
-    r"std::basic_string<char,std::char_traits<char>,std::allocator<char>>"
-)
-
-
-def _has_cxx11_tag(demangled: str) -> bool:
-    return _CXX11_INLINE_NS in demangled or _CXX11_TAG in demangled
-
-
-def _cxx11_identity(demangled: str) -> str:
-    """The demangled name with the libstdc++ dual-ABI spellings removed, so the
-    old and new spellings of one function compare equal: ``std::string`` (the
-    legacy ``Ss``) and ``std::__cxx11::basic_string<char, ...>``, and the
-    ``[abi:cxx11]`` return-type tag, all reduce to one identity."""
-    compact = re.sub(
-        r"\s+", "", demangled.replace(_CXX11_TAG, "").replace(_CXX11_INLINE_NS, "")
-    )
-    return _STD_STRING_SPELLING.sub("std::string", compact)
-
-
 @registry.detector("glibcxx_dual_abi")
 def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a libstdc++ dual-ABI flip (``_GLIBCXX_USE_CXX11_ABI`` 0 <-> 1).
 
-    A flip re-mangles every exported function that takes or returns
-    ``std::string`` or ``std::list``: the same function is removed under one
-    spelling and added under the other. Those are paired per symbol: a removed
-    and an added export whose demangled identities agree once the dual-ABI
-    spellings are removed, and whose ``__cxx11`` tags differ, is one flip. One
-    flipped function is a flip; a library without ``std::string`` has no pair.
-
-    The demangler is the only source of identity, so a symbol it cannot read is
-    not paired. For those alone the older raw-marker mass heuristic remains (at
-    least five removed and five added, marker churn of at least 30%): with no
-    demangled identity it is the only evidence of a flip.
+    The pairing itself lives in ``compare/glibcxx_dual_abi_pairs``; this
+    detector only reads the churned exports and emits the change.
     """
-    changes: list[Change] = []
+    from .compare.glibcxx_dual_abi_pairs import pair_dual_abi_flips
+    from .demangle import demangle_batch
+
     old_map = exported_functions_by_mangled(old)
     new_map = exported_functions_by_mangled(new)
     removed = sorted(set(old_map.keys()) - set(new_map.keys()))
     added = sorted(set(new_map.keys()) - set(old_map.keys()))
     if not removed or not added:
-        return changes
-
-    from .demangle import demangle_batch
-
-    rem_dm = demangle_batch(removed)
-    add_dm = demangle_batch(added)
-
-    # Per identity: how many removed/added exports carry the cxx11 tag.
-    counts: dict[
-        str, list[int]
-    ] = {}  # identity -> [rem_tagged, rem_plain, add_tagged, add_plain]
-    for name in removed:
-        dm = rem_dm.get(name)
-        if dm:
-            slot = counts.setdefault(_cxx11_identity(dm), [0, 0, 0, 0])
-            slot[0 if _has_cxx11_tag(dm) else 1] += 1
-    for name in added:
-        dm = add_dm.get(name)
-        if dm:
-            slot = counts.setdefault(_cxx11_identity(dm), [0, 0, 0, 0])
-            slot[2 if _has_cxx11_tag(dm) else 3] += 1
-
-    rem_tagged_paired = add_tagged_paired = 0
-    for rem_t, rem_p, add_t, add_p in counts.values():
-        rem_tagged_paired += min(
-            rem_t, add_p
-        )  # legacy-spelled add pairs a tagged remove
-        add_tagged_paired += min(rem_p, add_t)  # tagged add pairs a legacy remove
-    paired = rem_tagged_paired + add_tagged_paired
-
-    # Symbols the demangler could not read: no identity, so only the raw marker
-    # heuristic can see them. Kept for that case alone.
-    un_removed = [n for n in removed if not rem_dm.get(n)]
-    un_added = [n for n in added if not add_dm.get(n)]
-    un_rem_tag = sum(1 for n in un_removed if _CXX11_INLINE_NS in n or "cxx11" in n)
-    un_add_tag = sum(1 for n in un_added if _CXX11_INLINE_NS in n or "cxx11" in n)
-    mass = (
-        len(un_removed) >= 5
-        and len(un_added) >= 5
-        and (un_rem_tag + un_add_tag) > 0
-        and (un_rem_tag + un_add_tag) >= (len(un_removed) + len(un_added)) * 0.3
+        return []
+    pairing = pair_dual_abi_flips(
+        removed, added, demangle_batch(removed), demangle_batch(added)
     )
-
-    if paired:
-        total = len(removed) + len(added)
-        direction = (
-            "CXX11 ABI → legacy ABI"
-            if rem_tagged_paired >= add_tagged_paired
-            else "legacy ABI → CXX11 ABI"
-        )
+    changes: list[Change] = []
+    if pairing.paired:
         changes.append(
             make_change(
                 ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED,
                 symbol="__glibcxx_dual_abi",
-                name=f"{paired} of {total}",
-                detail=direction,
-                old_value=f"{rem_tagged_paired} removed with marker",
-                new_value=f"{add_tagged_paired} added with marker",
+                name=f"{pairing.paired} of {len(removed) + len(added)}",
+                detail=pairing.direction,
+                old_value=f"{pairing.rem_tagged_paired} removed with marker",
+                new_value=f"{pairing.add_tagged_paired} added with marker",
             )
         )
-    elif mass:
-        total_churn = len(un_removed) + len(un_added)
-        marker_churn = un_rem_tag + un_add_tag
-        direction = (
-            "CXX11 ABI → legacy ABI"
-            if un_rem_tag > un_add_tag
-            else "legacy ABI → CXX11 ABI"
-        )
+    elif pairing.mass:
         changes.append(
             make_change(
                 ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED,
                 symbol="__glibcxx_dual_abi",
-                name=f"{marker_churn} of {total_churn}",
-                detail=direction,
-                old_value=f"{un_rem_tag} removed with marker",
-                new_value=f"{un_add_tag} added with marker",
+                name=f"{pairing.un_rem_tag + pairing.un_add_tag} of "
+                f"{pairing.un_removed + pairing.un_added}",
+                detail=pairing.un_direction,
+                old_value=f"{pairing.un_rem_tag} removed with marker",
+                new_value=f"{pairing.un_add_tag} added with marker",
             )
         )
     return changes
