@@ -230,3 +230,115 @@ def test_tlc_and_python_state_graphs_agree() -> None:
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert proc.stdout.count(" AGREE") == 3
+
+
+# --- E11: trace validation of DispositionPipeline.tla ----------------------
+# The corpus-wide run (every abiforge default cell, TLC included) is the
+# `trace-validation` job of .github/workflows/formal-lean.yml. These pin the
+# recorder and the Python trace checker on compiler-free pipeline runs.
+
+
+def _snap(names: list[str], version: str):  # type: ignore[no-untyped-def]
+    from abicheck.model import AbiSnapshot, Function, Visibility
+
+    return AbiSnapshot(
+        library="libfoo",
+        version=version,
+        functions=[
+            Function(name=n, mangled=n, return_type="int", visibility=Visibility.PUBLIC)
+            for n in names
+        ],
+    )
+
+
+_NAMES = [f"fn{i}" for i in range(4)]
+
+
+def _recorded_runs():  # type: ignore[no-untyped-def]
+    """Real compare() runs, 0-3 public functions removed, recorded as traces."""
+    from abicheck.checker import compare
+
+    trace = _load(FORMAL / "tla" / "disposition_trace.py")
+    results = []
+    with trace.recording("synthetic") as rec:
+        for removed in range(4):
+            results.append(compare(_snap(_NAMES, "1"), _snap(_NAMES[removed:], "2")))
+    return rec.traces, results
+
+
+def test_e11_recorder_observes_without_changing_the_result() -> None:
+    from abicheck.checker import compare
+
+    traces, recorded = _recorded_runs()
+    assert len(traces) == len(recorded) >= 4
+    plain = compare(_snap(_NAMES, "1"), _snap(_NAMES[3:], "2"))
+    assert plain.verdict == recorded[3].verdict
+    assert [c.kind for c in plain.changes] == [c.kind for c in recorded[3].changes]
+
+
+def test_e11_real_pipeline_runs_refine_the_spec() -> None:
+    chk = _load(FORMAL / "tla" / "check_trace.py")
+    traces, _ = _recorded_runs()
+    counts, examples = chk.check(traces, self_record=True)
+    assert counts["rejected_traces"] == 0, examples
+    assert counts["transitions"] > 20 * len(traces)  # every step was seen
+
+
+@pytest.mark.parametrize(
+    "shape", ["unrecorded_drop", "count_masked", "ledger_lost", "resurrected"]
+)
+def test_e11_each_wrong_trace_shape_is_rejected(shape: str) -> None:
+    """The oracle here is a hand-built trace, not the recorder: a trace whose
+    step drops finding 1 (recorded by the count trigger), mutated."""
+    chk = _load(FORMAL / "tla" / "check_trace.py")
+
+    def st(step: str, ch, lg):  # type: ignore[no-untyped-def]
+        return {
+            "step": step,
+            "changes": ch,
+            "duplicates": 0,
+            "buckets": [],
+            "ledger": lg,
+            "seen": [1, 2, 3],
+        }
+
+    good = {
+        "label": "hand",
+        "states": [
+            st("<init>", [1, 2, 3], []),
+            st("dedup", [2, 3], [1]),
+            st("next", [2, 3], [1]),
+        ],
+    }
+    assert chk.check([good], self_record=True)[0]["accepted_traces"] == 1
+    m = next(x for x in chk.mutants(good) if x["label"].endswith(f"[{shape}]"))
+    assert chk.check([m], self_record=True)[0]["rejected_traces"] == 1
+
+
+def test_e11_self_recording_is_rejected_only_by_the_pre_e11_spec() -> None:
+    """A step that records a finding it keeps (suppression, grouped-child
+    collapse) is outside the E7 spec's Step, inside E11's StepWith."""
+    chk = _load(FORMAL / "tla" / "check_trace.py")
+    t = {
+        "label": "self",
+        "states": [
+            {
+                "step": "<init>",
+                "changes": [1],
+                "duplicates": 0,
+                "buckets": [],
+                "ledger": [],
+                "seen": [1],
+            },
+            {
+                "step": "cpp",
+                "changes": [],
+                "duplicates": 0,
+                "buckets": [1],
+                "ledger": [1],
+                "seen": [1],
+            },
+        ],
+    }
+    assert chk.check([t], self_record=True)[0]["accepted_traces"] == 1
+    assert chk.check([t], self_record=False)[0]["rejected_traces"] == 1

@@ -17,6 +17,9 @@
    the invariant, not a necessary one: a mixed call that drops more findings
    than it adds still trips the count trigger and records them.
 
+   E11 validates real pipeline runs against StepWith: see
+   DispositionTrace.tla and check_trace.py.
+
    Checked by formal/tla/check_disposition.py (explicit-state BFS over the
    same transition relation). TLC: `java -cp tla2tools.jar tlc2.TLC
    -config MC_adds.cfg DispositionPipeline.tla` (expected: invariant
@@ -39,20 +42,33 @@ Init ==
   /\ ledger = {}
   /\ steps = 0
 
+(* One step with its choices named. D: dropped; M: moved to a bucket; A, B:
+   new objects added to `changes` / to a bucket; R: findings the step records
+   in the ledger itself (suppression, record_collapsed_findings); C: new
+   objects the step creates and records without ever showing them
+   (merge_late_findings folding a late duplicate). R and C only ever grow the
+   ledger, so they cannot make a finding vanish; the model-checked Step fixes
+   them to {}. They exist for trace validation (E11, DispositionTrace.tla),
+   where real steps do both. *)
+StepWith(D, M, A, B, R, C) ==
+  /\ D \subseteq changes /\ M \subseteq changes /\ D \cap M = {}
+  /\ A \subseteq fresh /\ B \subseteq fresh /\ C \subseteq fresh
+  /\ A \cap B = {} /\ C \cap (A \cup B) = {}
+  /\ R \subseteq seen \cup A \cup B
+  /\ (~AddsAllowed) => (A = {} /\ B = {})
+  /\ LET after   == (changes \ (D \cup M)) \cup A
+         trigger == Cardinality(after) + Cardinality(M \cup B) < Cardinality(changes)
+     IN /\ changes' = after
+        /\ buckets' = buckets \cup M \cup B
+        /\ ledger'  = ledger \cup R \cup C \cup (IF trigger THEN D ELSE {})
+        /\ seen'    = seen \cup A \cup B \cup C
+        /\ fresh'   = fresh \ (A \cup B \cup C)
+
 Step ==
   /\ steps < MaxSteps
   /\ \E D \in SUBSET changes, M \in SUBSET changes,
         A \in SUBSET fresh, B \in SUBSET fresh :
-       /\ D \cap M = {}
-       /\ A \cap B = {}
-       /\ (~AddsAllowed) => (A = {} /\ B = {})
-       /\ LET after   == (changes \ (D \cup M)) \cup A
-              trigger == Cardinality(after) + Cardinality(M \cup B) < Cardinality(changes)
-          IN /\ changes' = after
-             /\ buckets' = buckets \cup M \cup B
-             /\ ledger'  = IF trigger THEN ledger \cup D ELSE ledger
-             /\ seen'    = seen \cup A \cup B
-             /\ fresh'   = fresh \ (A \cup B)
+       StepWith(D, M, A, B, {}, {})
   /\ steps' = steps + 1
 
 Next == Step \/ (steps = MaxSteps /\ UNCHANGED vars)
