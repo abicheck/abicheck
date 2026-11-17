@@ -292,6 +292,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "soname_bump_unnecessary",
@@ -303,6 +304,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "soname_changed",

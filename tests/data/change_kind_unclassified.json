@@ -98,8 +98,6 @@
     "sanitizer_mode_changed",
     "sanitizer_runtime_required",
     "secondary_vtable_group_changed",
-    "soname_bump_recommended",
-    "soname_bump_unnecessary",
     "source_binary_provenance_mismatch",
     "source_fact_coverage_incomplete",
     "source_to_binary_mapping_changed",
@@ -126,7 +124,6 @@
     "undocumented_export_ratio_increased",
     "used_reserved_field",
     "var_visibility_changed",
-    "visibility_leak",
     "wheel_closure_dependency_violation",
     "wheel_rpath_not_portable",
     "wheel_tag_architecture_mismatch"
