@@ -16,9 +16,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **199**
+- Kinds with at least one real source: **200**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 85
+- Kinds per source: catalog 159, field_shapes 9, integration 86
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 105 |
+| unmapped | 120 | 104 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -520,6 +520,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `vector_abi_changed` | BREAKING | 0 | 0 | 0 |
 | `version_script_missing` | COMPATIBLE | 0 | 0 | 0 |
 | `virtual_method_added` | BREAKING | 0 | 0 | 0 |
-| `visibility_leak` | COMPATIBLE | 0 | 0 | 0 |
+| `visibility_leak` | COMPATIBLE | 0 | 0 | 1 |
 | `vtable_symbol_identity_changed` | RISK | 0 | 0 | 0 |
 | `writable_executable_segment` | RISK | 0 | 0 | 0 |

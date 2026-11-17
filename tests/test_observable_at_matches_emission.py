@@ -314,3 +314,41 @@ def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
         text=True,
     )
     assert "unnamed_type_in_public_abi" in result.stdout, result.stdout
+
+
+@pytest.mark.integration
+def test_internal_looking_export_on_the_old_side_is_a_visibility_leak_from_the_binary(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle (GNU ELF producer, as the closure oracle): the old
+    # binary exports an internal-looking helper; the leak is one-sided on the
+    # OLD snapshot's export table, so the stripped binary pair observes it.
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    old_src = tmp_path / "old.cpp"
+    new_src = tmp_path / "new.cpp"
+    old_src.write_text(
+        'extern "C" int api(int x){return x;}\n'
+        'extern "C" int internal_helper(int x){return x+1;}\n'
+    )
+    new_src.write_text('extern "C" int api(int x){return x;}\n')
+    dumps = []
+    for name, src in (("old", old_src), ("new", new_src)):
+        so = tmp_path / f"lib{name}.so"
+        subprocess.run(
+            [*prefix, "-O0", "-fPIC", "-shared", str(src), "-o", str(so)], check=True
+        )
+        out = tmp_path / f"{name}.json"
+        subprocess.run(
+            abicheck_command("dump", str(so), "-o", str(out)),
+            check=True,
+            capture_output=True,
+        )
+        dumps.append(out)
+    result = subprocess.run(
+        abicheck_command("compare", str(dumps[0]), str(dumps[1])),
+        capture_output=True,
+        text=True,
+    )
+    assert "visibility_leak" in result.stdout, result.stdout
