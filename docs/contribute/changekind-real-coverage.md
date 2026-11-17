@@ -16,9 +16,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **201**
+- Kinds with at least one real source: **202**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 87
+- Kinds per source: catalog 159, field_shapes 9, integration 89
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 103 |
+| unmapped | 120 | 102 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -302,7 +302,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `header_only_function_params_changed` | API_BREAK | 1 | 0 | 1 |
 | `hidden_friend_removed` | API_BREAK | 1 | 1 | 1 |
 | `inline_body_references_renamed_member` | BREAKING | 1 | 0 | 0 |
-| `instantiation_missing_from_binary` | BREAKING | 1 | 0 | 0 |
+| `instantiation_missing_from_binary` | BREAKING | 1 | 0 | 1 |
 | `internal_template_leaks_via_public_api` | BREAKING | 1 | 0 | 1 |
 | `internal_type_leaks_via_public_api` | BREAKING | 3 | 0 | 0 |
 | `method_access_changed` | API_BREAK | 1 | 0 | 1 |
@@ -455,7 +455,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `mandatory_template_param_added` | API_BREAK | 0 | 0 | 1 |
 | `odr_source_conflict` | RISK | 0 | 0 | 0 |
 | `opaque_invariant_broken` | BREAKING | 0 | 0 | 0 |
-| `overload_set_rerouted` | RISK | 0 | 0 | 0 |
+| `overload_set_rerouted` | RISK | 0 | 0 | 1 |
 | `param_became_va_list` | COMPATIBLE | 0 | 0 | 0 |
 | `param_lost_va_list` | COMPATIBLE | 0 | 0 | 0 |
 | `param_renamed` | RISK | 0 | 0 | 0 |

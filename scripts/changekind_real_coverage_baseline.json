@@ -114,7 +114,6 @@
     "odr_source_conflict",
     "opaque_invariant_broken",
     "os_deployment_floor_raised",
-    "overload_set_rerouted",
     "param_became_va_list",
     "param_lost_va_list",
     "param_pointee_qualifier_changed",
