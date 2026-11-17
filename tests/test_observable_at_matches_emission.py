@@ -11,9 +11,7 @@ pairs in the shape the dumper produces, not the seeder's decision table.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -36,6 +34,7 @@ from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.observability import UNCLASSIFIED, Platform
 from abicheck.model.fact import Fact
 from tests._abicheck_subprocess import abicheck_command
+from tests._elf_capability import elf_capability, skip_reason
 
 PLATFORMS = ["elf", "pe", "macho"]
 BINARY = ("B",)
@@ -273,10 +272,6 @@ def test_const_value_change_is_emitted_with_headers_and_not_from_bytes_alone() -
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="ELF-only claim; Mach-O binary-only surface does not show the closure export (sec 11.2)",
-)
 def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
     tmp_path: Path,
 ) -> None:
@@ -285,9 +280,11 @@ def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
     # info (no -g), so the binary alone observes the kind. No strip step: GNU
     # strip's --strip-debug is absent from macOS strip, and a build without -g
     # already carries no DWARF.
-    gxx = shutil.which("g++")
-    if gxx is None:
-        pytest.skip("g++ not available")
+    # The claim is g++'s linkage: clang gives the closure-typed function internal
+    # linkage (not exported), so only a GNU ELF producer exercises it.
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
     old_src = tmp_path / "old.cpp"
     new_src = tmp_path / "new.cpp"
     old_src.write_text(
@@ -301,7 +298,7 @@ def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
     for name, src in (("old", old_src), ("new", new_src)):
         so = tmp_path / f"lib{name}.so"
         subprocess.run(
-            [gxx, "-std=c++17", "-O0", "-fPIC", "-shared", str(src), "-o", str(so)],
+            [*prefix, "-std=c++17", "-O0", "-fPIC", "-shared", str(src), "-o", str(so)],
             check=True,
         )
         out = tmp_path / f"{name}.json"
