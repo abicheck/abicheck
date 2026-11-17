@@ -39,7 +39,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "VAR_VALUE_CHANGED. A side without bytes is unknown, never a change, and "
             "a header value is never compared against raw bytes."
         ),
-        fixed_by=(),
+        fixed_by=(2115,),
         seed_tests=(
             "tests/test_var_value_initializer_bytes.py",
             "tests/test_var_initializer_hex_codec.py",
