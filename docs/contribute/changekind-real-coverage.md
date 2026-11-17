@@ -16,9 +16,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **202**
+- Kinds with at least one real source: **203**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 89
+- Kinds per source: catalog 159, field_shapes 9, integration 90
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 102 |
+| unmapped | 120 | 101 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -94,7 +94,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
 | `func_removed` | BREAKING | 15 | 1 | 23 |
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 7 |
-| `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
+| `func_visibility_changed` | BREAKING | 2 | 0 | 3 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
 | `glibcxx_dual_abi_changed` | BREAKING | 0 | 0 | 3 |
 | `glibcxx_dual_abi_flip_detected` | COMPATIBLE | 1 | 0 | 0 |
@@ -435,7 +435,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_became_inline` | RISK | 0 | 0 | 0 |
 | `func_deleted` | BREAKING | 0 | 0 | 1 |
 | `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
-| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 0 |
+| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 1 |
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |
