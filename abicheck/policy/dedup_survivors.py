@@ -52,7 +52,11 @@ def deduplicate_recording_survivors(
 
     pairs: list[tuple[Change, Change]] = []
     kept = deduplicate_cross_detector(
-        changes, ctx.baseline_or_empty, ctx.new, replay_twin_pairs=pairs
+        changes,
+        ctx.baseline_or_empty,
+        ctx.new,
+        replay_twin_pairs=pairs,
+        identity_memo=ctx.identity_memo,
     )
     ledger = ctx.disposition_ledger
     if ledger is not None:

@@ -502,4 +502,30 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         },
     ),
+    BugClass(
+        id="identity.same_kind_dedup_key_drops_identity_fact",
+        invariant=(
+            "Two findings of one ChangeKind that differ in an identity-bearing "
+            "fact (qualified name, source location, occurrence disambiguator) "
+            "are both kept by the same-kind dedup pass, and only true "
+            "duplicates collapse. The key is derived from the canonical finding "
+            "identity, never a hand-picked field tuple that omits a fact. The "
+            "reported instance was `finding_dedup._dedup_exact` keying on "
+            "(kind, description, symbol, old, new), which merged two real "
+            "FIELD_RENAMED findings differing only in qualified name."
+        ),
+        # #2096 introduced the same-kind collapse and named this follow-up;
+        # append the fix PR number on merge.
+        fixed_by=(2096,),
+        seed_tests=(
+            # Exhaustive over every ChangeKind x each identity-bearing field,
+            # oracle = canonical identity primary_id plus disambiguator.
+            "tests/test_dedup_exact_identity_key.py",
+            "tests/test_diff_filtering_dedup_exact.py",
+        ),
+        axes={
+            "identity_fact": ("qualified_name", "source_location", "disambiguator"),
+            "copies": ("identical", "distinct"),
+        },
+    ),
 )

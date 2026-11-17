@@ -109,6 +109,7 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f3_identity.py",
                 "tests/test_pe_header_export_join.py",
+                "tests/test_dedup_exact_identity_key.py",
             ),
         ),
         Family(
@@ -557,6 +558,7 @@ _F3 = (
     "identity.platform_decorated_mangled_name",
     "identity.release_edge_keyed_on_side_summary",
     "identity.second_node_key_scheme",
+    "identity.same_kind_dedup_key_drops_identity_fact",
     "identity.special_member_variant_family",
     "matching.dedup_key_soundness",
     "evidence.backfill_bare_name_match",
