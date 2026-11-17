@@ -3,9 +3,9 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "e9028f8c3733dc8e05153f6dbdb162733b91a8ac507aa9d2e3c37e1c6f077e94",
+      "abicheck/dumper.py": "32c757268dbf7fb34b57704f4fb9df5d3076f4c98b183e7ad7bc2b240d04d8f0",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
-      "abicheck/dwarf_advanced.py": "82c16bed92c26d87c5d74315fe22c0218dc117e7a3e4798c6ec8b1ef356b2074",
+      "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "c4226cd079a92be31cc3400453b03e696a25b6e4f754457bfdd471cff1cf9675",
@@ -55,6 +55,7 @@
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_standard_layout.py": "233bf5002e0ec8b8155d1b5822371fbcb04e0d1bc8b4032147c11cc5c0443283",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
+      "abicheck/extract/dwarf_type_alignment.py": "26897230d2b88662cd61e3e64180f6ca57a6ff361baebe33e61b046ebee68951",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
@@ -190,8 +191,8 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/macho_debug.py": "53b90872195f350d4d1e4f21d31f2d6681d3235eef36c409a69ba2dd56f8abde",
-      "abicheck/extract/macho_dsym.py": "50d9107d628f7439e430ff84a643c8689d24ea47437c8b2e9e54db19d7955c87",
+      "abicheck/extract/macho_debug.py": "b0dd120827d3a8f7e4b4add6a197a06df8efcecfa3b92d482c892954cd0b6256",
+      "abicheck/extract/macho_dsym.py": "56c2ca93a16bdad453a524122078931b80b629ff5a2a835de6ff21139c78ac7f",
       "abicheck/extract/macho_fixups.py": "20998c1289cce7edb7108da4eac609d3c7f6654f601a2c685ca175065a63940d",
       "abicheck/extract/macho_object_sizes.py": "389f2f7a510b4b490fb591f8aaa7cc01f72e00b0f4d0c00afe68aed69df35ef4",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
@@ -237,11 +238,16 @@
       "abicheck/pe_metadata.py": "179d05863acd9039f6dddfcf07e121475f03feeec6ba6512afc9e94875105c7e",
       "abicheck/sycl_metadata.py": "10d6bb8dbd898b6f43c66f898fd1a964790705cadb5addac9d5801e47b341758",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
-      "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
+      "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
+      "abicheck/workflows/dump/elf_fallback.py": "31947cad933371a0d3863476ad34e1f9e3e60f8474b2eddbe161fdc1182eb2fa",
+      "abicheck/workflows/dump/formats.py": "634c897b872e20c7c1579a9f569700a32c1b99b204569e8bb198a4174587b6d2",
+      "abicheck/workflows/dump/macho.py": "ee301926fd430c4eed3128e75b07fc494805ff76d0b2acbcd83fa7a8fc9f424e",
+      "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
+      "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "a68327cc9cae1434504bf60a5f1bfb495c6ac82a4d7d63000d20dab907add6b4",
-    "generation": 80,
-    "reason": "WS-6 resolver: depth-limited answers are not memoized (cut counter via _settle); results are unchanged for every depth-independent record"
+    "fingerprint": "a4edc0fa49b2bf1845541990166bb3c2bd7b135304896d100a72fbc61094ccba",
+    "generation": 81,
+    "reason": "Import-order fix in dwarf_advanced after the merge; no behaviour change"
   },
   "resolver": {
     "files": {

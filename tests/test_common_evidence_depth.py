@@ -41,6 +41,11 @@ from abicheck.workflows.asymmetric_header_evidence import (
 _EXPORTS = ("_ZN3KLUD2Ev", "_ZN3KLUD1Ev", "_Z7klu_getP3KLD")
 
 
+def _beside(directory: Path) -> str:
+    """Names on disk beside the fixture: a failure shows any debug bundle that was there."""
+    return ", ".join(sorted(p.name for p in directory.iterdir()))
+
+
 def _snap(*, headers: bool, version: str = "1") -> AbiSnapshot:
     """The same library, with (header-parsed) or without its declarations.
 
@@ -240,20 +245,24 @@ def test_real_library_with_headers_on_one_side_is_unchanged(
     )
     report = json.loads(out.read_text())
     # The oracle on every platform: the same library, so no finding at all.
-    assert report["changes"] == [], [
-        (c["kind"], c.get("symbol")) for c in report["changes"]
-    ]
-    if sys.platform == "linux":
-        # ELF + DWARF: both sides carry type evidence at the common rung.
+    assert report["changes"] == [], (
+        [(c["kind"], c.get("symbol")) for c in report["changes"]],
+        _beside(tmp_path),
+    )
+    if sys.platform in ("linux", "darwin"):
+        # ELF + DWARF, and Mach-O + the adjacent dSYM's DWARF: both sides carry
+        # type evidence at the common rung (the binary route reads the dSYM DWARF).
         assert (report["verdict"], result.exit_code) == ("NO_CHANGE", 0)
     else:
-        # abicheck reads DWARF types from ELF only (Mach-O keeps DWARF in the
-        # object files; a MinGW PE DLL's DWARF is not read for types), so the
+        # abicheck does not read DWARF types from a MinGW PE DLL, so the
         # binary-rung pair has no type evidence on either side: an unconfirmed
         # no-change, never a clean pass or a break.
         assert (report["verdict"], result.exit_code) == ("UNCONFIRMED", 1)
         assert report["unconfirmed"]["observed_verdict"] == "NO_CHANGE"
-        assert report["unconfirmed"]["sides_without_type_evidence"] == ["old", "new"]
+        assert report["unconfirmed"]["sides_without_type_evidence"] == [
+            "old",
+            "new",
+        ], _beside(tmp_path)
 
 
 @pytest.mark.parametrize("blocked_side", ["old", "new"])
