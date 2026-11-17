@@ -181,3 +181,86 @@ def _symbol_integer(
     if len(raw) != size:
         return None
     return int.from_bytes(raw, "little" if little else "big", signed=signed)
+
+
+#: Largest object whose bytes are recorded. Beyond this the bytes are not read
+#: at all (``initializer_hex`` stays ``None``, unknown), so a large table cannot
+#: bloat a snapshot. ``SYMBOL_SIZE_CHANGED`` still reports a size change.
+_MAX_INITIALIZER_BYTES = 4096
+
+_SHF_WRITE = 0x1
+_SHF_ALLOC = 0x2
+
+
+def populate_initializer_bytes(snap: AbiSnapshot, so_path: Path) -> None:
+    """Fill ``Variable.initializer_hex`` for exported read-only objects.
+
+    The bytes at an exported ``STT_OBJECT``'s address, read from its own
+    section's file contents. Only a defined symbol in an allocated,
+    non-writable, file-backed section is read: that is where a ``const``
+    object's initializer lives, and it excludes a relocated pointer (its file
+    bytes are a relocation placeholder, in a writable ``.data.rel.ro``). An
+    object outside the size cap, undefined here, or in a ``NOBITS`` section is
+    left ``None`` -- unknown, never a fabricated value.
+
+    A binary that cannot be read is logged and leaves every field as it was.
+    """
+    by_name: dict[str, list[Variable]] = {}
+    for var in snap.declarations.variables:
+        if var.mangled:
+            by_name.setdefault(var.mangled, []).append(var)
+    if not by_name:
+        return
+    try:
+        with open(so_path, "rb") as fh:
+            blobs = _read_symbol_bytes(fh, set(by_name))
+    except (OSError, ELFError, ValueError) as exc:
+        log.debug("initializer bytes not read from %s: %s", so_path, exc)
+        return
+    for name, raw in blobs.items():
+        for var in by_name[name]:
+            var.initializer_hex = raw.hex()
+
+
+def _read_symbol_bytes(fh: IO[bytes], names: set[str]) -> dict[str, bytes]:
+    """The raw bytes at each name's exported object, read read-only sections only."""
+    elf = ELFFile(fh)
+    blobs: dict[str, bytes] = {}
+    for section in elf.iter_sections():
+        if not isinstance(section, SymbolTableSection):
+            continue
+        if section["sh_type"] != "SHT_DYNSYM":
+            continue
+        for sym in section.iter_symbols():
+            name = sym.name
+            if name in blobs or name not in names:
+                continue
+            raw = _symbol_bytes(fh, elf, sym)
+            if raw is not None:
+                blobs[name] = raw
+    return blobs
+
+
+def _symbol_bytes(fh: IO[bytes], elf: ELFFile, sym: Any) -> bytes | None:
+    """The bytes of *sym* if it is a readable, exported, read-only object."""
+    entry = sym.entry
+    if entry["st_info"]["type"] != "STT_OBJECT":
+        return None
+    shndx = entry["st_shndx"]
+    if not isinstance(shndx, int) or shndx == 0:  # SHN_UNDEF, or a special index
+        return None
+    size = int(entry["st_size"])
+    if size <= 0 or size > _MAX_INITIALIZER_BYTES:
+        return None
+    section = elf.get_section(shndx)
+    if section is None or section["sh_type"] == "SHT_NOBITS":
+        return None
+    flags = int(section["sh_flags"])
+    if not flags & _SHF_ALLOC or flags & _SHF_WRITE:
+        return None
+    offset_in_section = int(entry["st_value"]) - int(section["sh_addr"])
+    if offset_in_section < 0 or offset_in_section + size > int(section["sh_size"]):
+        return None
+    fh.seek(int(section["sh_offset"]) + offset_in_section)
+    raw = fh.read(size)
+    return raw if len(raw) == size else None

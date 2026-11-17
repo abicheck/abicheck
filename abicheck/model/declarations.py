@@ -496,6 +496,13 @@ class Variable:
     # keyword, so this closes off a new positional dependency without
     # touching any of them.
     is_static: bool = field(default=False, kw_only=True)
+    # Generation 82: the initializer bytes of an exported object, read from its
+    # file-backed, non-writable ELF section (lowercase hex). ``None`` is *not
+    # read* -- unknown, never "changed". A pointer in a writable section
+    # (``.data.rel.ro``) is never recorded, so a relocation-only change is not
+    # an initializer change. Compared only against the other side's bytes of
+    # the same length; a header ``value`` is never compared against these.
+    initializer_hex: str | None = field(default=None, kw_only=True)
     # See ``Function.explicit_instantiation_fact``: a static data member of an
     # explicitly instantiated class template, or a namespace-scope template
     # variable instance.

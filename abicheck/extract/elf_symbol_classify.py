@@ -31,7 +31,10 @@ from typing import TYPE_CHECKING, Any
 from ..elf_symbol_filter import is_abi_relevant_elf_symbol
 from ..errors import SnapshotError
 from ..model import AbiSnapshot, ElfVisibility, Fact, is_cxx_runtime_library
-from .elf_data_initializer import populate_const_integral_values
+from .elf_data_initializer import (
+    populate_const_integral_values,
+    populate_initializer_bytes,
+)
 
 if TYPE_CHECKING:
     from ..elf_metadata import ElfMetadata
@@ -62,6 +65,7 @@ def _populate_elf_visibility(snap: AbiSnapshot, so_path: Path | None = None) -> 
     """
     if so_path is not None:
         populate_const_integral_values(snap, so_path)
+        populate_initializer_bytes(snap, so_path)
     if snap.elf is None:
         return
     elf = snap.elf

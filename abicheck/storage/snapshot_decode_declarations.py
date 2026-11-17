@@ -284,6 +284,9 @@ def decode_declaration_lists(
             # did not exist, so nothing distinguished a static variable
             # anyway).
             is_static=v.get("is_static", False),
+            # Generation 82. Missing on an older snapshot -> None (not read):
+            # unknown, never a changed initializer.
+            initializer_hex=v.get("initializer_hex"),
             **decode_variable_facts(v, schema_version),
         )
         for v in d.get("variables", [])
