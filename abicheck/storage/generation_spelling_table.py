@@ -774,6 +774,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "LLVM_X86RegCall rather than unknown codes. Older snapshots carry no such fact, "
         "which reads as unknown, and no rewrite applies."
     ),
+    81: GenerationSpellingChange("Reserved for #2098 (open); 82 is provisional."),
+    82: GenerationSpellingChange("G7: initializer_hex; no spelling change."),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

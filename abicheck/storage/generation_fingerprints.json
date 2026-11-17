@@ -63,13 +63,13 @@
       "abicheck/extract/dwarf_vtable_completeness.py": "dc79514f133a5368be0b04bb31e3863337b876c1ba017c4b3023eb1609e1a4c2",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
       "abicheck/extract/elf_code_hash.py": "99cfa984364e0345077bf7bf960337a41f5a8eff887f6f7eb1138ec305e74258",
-      "abicheck/extract/elf_data_initializer.py": "adc4a4dfac61e35334e81e2ac000f173c049fb06bfc87a31ec40b29eb50dd42f",
+      "abicheck/extract/elf_data_initializer.py": "bd161a1ea8be0502bcd0e34124b24d8b23f328690e6cb298e2f9cd8b56428569",
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_pure_virtual_slots.py": "c583305033c551840e206f28600400e6e01929e7a383284fb8261a644c76c191",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
       "abicheck/extract/elf_string_table.py": "8348fa460902944419d2f9fe0918d05d232dc0a6ebce3d606e1b1fcb68c69337",
-      "abicheck/extract/elf_symbol_classify.py": "da6f10854228923bf08adfce3fa82f5b8ca265e5f834ac2fbdd349243e514728",
+      "abicheck/extract/elf_symbol_classify.py": "e7e4d0eb3bd5fab47da591e7c6180edee612adde5ab5eda2522f8d782cd368e9",
       "abicheck/extract/elf_symbol_fastpath.py": "9731dd43e2a99edd25f70a77c3c1fa02612d0de537cc73a98ea90b79167b1c21",
       "abicheck/extract/elf_symbol_origin.py": "3408f0fdb9d3ce98eff14007012ac4bf844256f6628d127c4853ef8b6c20dac4",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
@@ -239,9 +239,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "a68327cc9cae1434504bf60a5f1bfb495c6ac82a4d7d63000d20dab907add6b4",
-    "generation": 80,
-    "reason": "WS-6 resolver: depth-limited answers are not memoized (cut counter via _settle); results are unchanged for every depth-independent record"
+    "fingerprint": "efe51fef8111c366c34e926753e671c95decc0360c08888b7e559c6946090fc3",
+    "generation": 82,
+    "reason": "bumped to 82 for a semantic change"
   },
   "resolver": {
     "files": {
