@@ -22,8 +22,8 @@ import sys
 
 import pytest
 
-from abicheck.dumper import _header_ast_parser
 from abicheck.dumper_clang import _ClangAstParser
+from abicheck.extract.header_ast_backend import header_ast_parser
 from abicheck.extract.headers.clang import backend as clang_backend
 
 
@@ -67,7 +67,7 @@ def test_sys_platform_guess_is_never_stamped_as_the_effective_target(
     for host in ("darwin", "linux"):
         stamped.clear()
         monkeypatch.setattr(sys, "platform", host)
-        parser = _header_ast_parser(
+        parser = header_ast_parser(
             [],
             [],
             backend="clang",

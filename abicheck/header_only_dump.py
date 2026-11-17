@@ -91,7 +91,7 @@ def build_header_only_snapshot(
     ``policy.header_only_capabilities`` for what that tier structurally
     cannot carry.
     """
-    from .dumper import _header_ast_parser
+    from .extract.header_ast_backend import header_ast_parser
     from .extract.headers.compile_provenance import _ast_compile_provenance
     from .extract.headers.manifest import resolve_header_ast_result
     from .workflows.snapshot_factory import new_snapshot
@@ -107,7 +107,7 @@ def build_header_only_snapshot(
         dump_manifest=dump_manifest,
         headers=headers,
         extra_includes=extra_includes,
-        header_ast_parser=_header_ast_parser,
+        header_ast_parser=header_ast_parser,
         backend=backend,
         compiler="c++",
         gcc_path=gcc_path,

@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "32c757268dbf7fb34b57704f4fb9df5d3076f4c98b183e7ad7bc2b240d04d8f0",
+      "abicheck/dumper.py": "e9c50c27dd6055c65f7483e1f606ae3b632500a79fd626687296c80ee37a51ec",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
       "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
@@ -80,7 +80,7 @@
       "abicheck/extract/export_table_read.py": "60fbf398e40df9cd48a9146ae1b79910cb7da865015a171405a727284848f7bd",
       "abicheck/extract/extraction_limitations.py": "b37f010164cf4e3e10e39a3cbb009e23b521244608da9269771e6c70806b4340",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
-      "abicheck/extract/header_ast_backend.py": "96f50bab97c55b180e0a35e91c6e1749b6aa21307da6eabff1836878395c2134",
+      "abicheck/extract/header_ast_backend.py": "cab41edb9990b1b2b7d34a040b2431ac82e2898121495ab836551513a4d15f15",
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "896fe0141ddb2b6e4148ab170a17e690d65b052f4e34e6455a104a3f05524496",
       "abicheck/extract/header_binary_purity.py": "c737ff3550693314b46b29490c3a4b1b7604131f6ec646ab9c3e582e9f2970b8",
@@ -245,9 +245,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "8d84385a528e7235953914cd5e6ccfc80a7b9acb9f0a8239d2642aad403d9bd8",
+    "fingerprint": "9ad5094c5d9699e627ddd1332a2689add6cc18c6e533e05783c655da59837a15",
     "generation": 81,
-    "reason": "File-dependent memos key on the revision they read (content digest for header text, compiler binary revision for probes); every answer on an unchanged input is the same"
+    "reason": "merge origin/main (#2116 memo witness; pure memo change)"
   },
   "resolver": {
     "files": {

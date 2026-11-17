@@ -679,7 +679,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
     )
 
     def test_fallback_recovers_with_configured_gcc_path(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _header_ast_parser
+        from abicheck.extract.header_ast_backend import header_ast_parser
 
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
@@ -707,7 +707,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
                 return_value=sentinel,
             ),
         ):
-            result = _header_ast_parser(
+            result = header_ast_parser(
                 [header],
                 [],
                 compiler="c++",
@@ -729,8 +729,8 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
         string-matched stderr signatures this fallback already recognizes
         -- excluding it defeated the opt-in fallback's whole purpose for
         the one new reason a castxml can now be untrusted."""
-        from abicheck.dumper import _header_ast_parser
         from abicheck.errors import UnsupportedCastxmlVersionError
+        from abicheck.extract.header_ast_backend import header_ast_parser
 
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
@@ -754,7 +754,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
                 return_value=sentinel,
             ),
         ):
-            result = _header_ast_parser(
+            result = header_ast_parser(
                 [header],
                 [],
                 compiler="c++",
@@ -766,7 +766,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
         assert result._abicheck_ast_fallback_reason == "castxml-unsupported-version"
 
     def test_auto_fallback_is_fail_closed_by_default(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _header_ast_parser
+        from abicheck.extract.header_ast_backend import header_ast_parser
 
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
@@ -780,7 +780,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
             pytest.raises(SnapshotError, match="fallback is disabled"),
         ):
             os.environ.pop("ABICHECK_ALLOW_AST_FALLBACK", None)
-            _header_ast_parser(
+            header_ast_parser(
                 [header],
                 [],
                 compiler="c++",
@@ -792,7 +792,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
     def test_no_fallback_when_no_clang_driver_is_available(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.dumper import _header_ast_parser
+        from abicheck.extract.header_ast_backend import header_ast_parser
 
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
@@ -804,7 +804,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
             patch("abicheck.dumper.shutil.which", return_value=None),
             pytest.raises(SnapshotError),
         ):
-            _header_ast_parser(
+            header_ast_parser(
                 [header],
                 [],
                 compiler="c++",
