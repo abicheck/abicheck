@@ -117,13 +117,13 @@ def call_signature_of(fn: Function, ret: RetShape | None = None) -> CallSignatur
     convention = _convention(fn.contract_attributes)
     # A non-static member function receives an implicit `this` that `params`
     # does not list. Neither `is_static` (for a free function it means
-    # internal linkage) nor the name (extractors store the leaf, `f`) tells a
-    # member reliably. So only C-linkage functions are modelled: extern "C",
-    # or an unmangled symbol that is a plain identifier equal to the name.
-    # Everything else -- `_Z...` symbols, castxml's synthetic constructor and
-    # destructor names -- may be a member and is left to the prior verdict.
-    c_linkage = fn.is_extern_c or (fn.mangled == fn.name and fn.name.isidentifier())
-    maybe_member = not c_linkage
+    # internal linkage), the name (extractors store the leaf, `f`) nor the
+    # symbol (clang gives an uninstantiated template method its bare name as
+    # a fallback symbol) tells a member reliably. The extractors' C-linkage
+    # flag does: both header backends set `is_extern_c` for every function of
+    # a C header and every `extern "C"` declaration, and never for a member.
+    # Only those functions are modelled.
+    maybe_member = not fn.is_extern_c
     if ret is None:
         ret = ret_shape_of(
             fn.return_type_abi_fact, fn.return_pointer_depth, fn.return_type
@@ -159,7 +159,7 @@ def _domain_gap(old: CallSignature, new: CallSignature, abi: str) -> str | None:
         if sig.convention:
             return f"non-default calling convention ({sig.convention})"
         if sig.maybe_member:
-            return "not a C-linkage symbol: a possible member function's implicit this is not modelled"
+            return "not a C-linkage function: a possible member function's implicit this is not modelled"
     if old.variadic is not False or new.variadic is not False:
         return "variadic or unprototyped function"
     if old.params is None or new.params is None:

@@ -77,6 +77,7 @@ def _function(params: list[tuple[str, str]], ret: str) -> Function:
         return_type=ret,
         params=[_param(n, t) for n, t in params],
         is_variadic=False,
+        is_extern_c=True,
         contract_attributes=[],
         **kw,
     )
@@ -133,6 +134,7 @@ def _one(ty: str, fact: AbiFundamental | None, depth: int = 0) -> Function:
         return_type="void",
         params=[p],
         is_variadic=False,
+        is_extern_c=True,
         contract_attributes=[],
     )
 
@@ -165,6 +167,7 @@ def _fn(**kw) -> Function:  # type: ignore[no-untyped-def]
         "mangled": "f",
         "return_type": "void",
         "is_variadic": False,
+        "is_extern_c": True,
         "contract_attributes": [],
     }
     base.update(kw)
@@ -256,28 +259,27 @@ def test_explicit_sysv_abi_is_the_default_convention() -> None:
 
 def test_a_possible_member_function_is_unknown() -> None:
     """static long C::f(long) -> long C::f(long) adds an implicit this. The
-    clang and castxml extractors store the leaf name (`f`); the symbol is
-    what marks a member."""
-    old = call_signature_of(
-        _fn(name="f", mangled="_ZN1C1fEl", params=_long_param(), is_static=True)
-    )
-    new = call_signature_of(_fn(name="f", mangled="_ZN1C1fEl", params=_long_param()))
-    axis = assess_call_interface(old, new, SYSV_AMD64)
-    assert axis.status is AxisStatus.UNKNOWN and "implicit this" in axis.reason
-    qualified = call_signature_of(_fn(name="C::f", params=_long_param()))
-    assert (
-        assess_call_interface(qualified, qualified, SYSV_AMD64).status
-        is AxisStatus.UNKNOWN
-    )
-    c = call_signature_of(
-        _fn(name="ns::f", mangled="_ZN2ns1fEl", params=_long_param(), is_extern_c=True)
-    )
+    extractors store the leaf name (`f`), and clang may give an uninstantiated
+    template method its bare name as symbol; only the C-linkage flag decides."""
+    for mangled in ("_ZN1C1fEl", "f"):
+        old = call_signature_of(
+            _fn(
+                mangled=mangled, params=_long_param(), is_static=True, is_extern_c=False
+            )
+        )
+        new = call_signature_of(
+            _fn(mangled=mangled, params=_long_param(), is_extern_c=False)
+        )
+        axis = assess_call_interface(old, new, SYSV_AMD64)
+        assert axis.status is AxisStatus.UNKNOWN and "implicit this" in axis.reason
+    c = call_signature_of(_fn(name="ns::f", mangled="_ZN2ns1fEl", params=_long_param()))
     assert assess_call_interface(c, c, SYSV_AMD64).status is AxisStatus.PRESERVED
 
 
 # ------------------------------------- extractor-produced declarations
 
 _MEMBER_HEADER = """struct C { long f(long a); static long g(long a); };
+template <class T> struct A { virtual void t(); long u(long a); };
 extern "C" long h(long a);
 """
 _MEMBER_SOURCE = """#include "a.h"
@@ -325,4 +327,7 @@ def test_extractor_members_are_unknown_and_c_linkage_is_modelled(
         )
     assert status["h"] == {AxisStatus.PRESERVED}
     assert status["f"] == status["g"] == {AxisStatus.UNKNOWN}
+    # clang records the uninstantiated template's methods (castxml does not).
+    for name in ("t", "u"):
+        assert status.get(name, {AxisStatus.UNKNOWN}) == {AxisStatus.UNKNOWN}, status
     assert all(v == {AxisStatus.UNKNOWN} for k, v in status.items() if k != "h"), status
