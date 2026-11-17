@@ -169,3 +169,46 @@ def test_relocation_coverage_is_by_overlap_not_by_start() -> None:
     assert not _covered_by_relocation(relocated, 11, 9)  # ends just before 20
     assert _covered_by_relocation(relocated, 11, 10)  # reaches 20
     assert not _covered_by_relocation([], 0, 8)
+
+
+def _bytes_of(tmp_path: Path, name: str, src: str) -> Variable | None:
+    so = build_shared(src, tmp_path / f"{name}.so")
+    snap = dump(so, headers=[])
+    matches = [v for v in snap.declarations.variables if v.name == "g"]
+    return matches[0] if matches else None
+
+
+def test_an_object_over_the_size_cap_is_not_read(tmp_path: Path) -> None:
+    # 5000 bytes is over the 4096-byte cap: unknown, never a truncated value.
+    var = _bytes_of(
+        tmp_path,
+        "big",
+        "const char g[5000] = {1, 2, 3};\n",
+    )
+    assert var is not None and var.initializer_hex is None
+
+
+def test_a_writable_object_is_not_read(tmp_path: Path) -> None:
+    var = _bytes_of(tmp_path, "w", "int g = 5;\n")
+    assert var is not None and var.initializer_hex is None
+
+
+def test_a_zero_initialized_object_in_bss_is_not_read(tmp_path: Path) -> None:
+    # .bss has no file contents (SHT_NOBITS): there are no bytes to read.
+    var = _bytes_of(tmp_path, "bss", "int g[4];\n")
+    assert var is not None and var.initializer_hex is None
+
+
+def test_an_unreadable_binary_leaves_every_field_as_it_was(tmp_path: Path) -> None:
+    from abicheck.extract.elf_data_initializer import populate_initializer_bytes
+    from abicheck.model import AbiSnapshot
+
+    not_elf = tmp_path / "garbage.so"
+    not_elf.write_bytes(b"this is not an ELF file" * 8)
+    snap = AbiSnapshot(
+        library="libx",
+        version="1",
+        variables=[Variable(name="g", mangled="g", type="?", initializer_hex=None)],
+    )
+    populate_initializer_bytes(snap, not_elf)
+    assert snap.declarations.variables[0].initializer_hex is None
