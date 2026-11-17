@@ -127,6 +127,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "tag_type_renamed",
         _A,
+        observable_at=(_OBS_DH,),
         impact="An empty tag struct (zero fields, no methods) used solely for "
         "template specialization was renamed. Source naming the old tag no "
         "longer compiles. Layout-based detectors see no change because the "
@@ -176,6 +177,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "template_return_type_changed",
         _B,
+        observable_at=(_OBS_DH,),
         impact="A template's own return type's inner type argument "
         "changed. The detector compares only the parsed argument "
         "text under a matching outer template name, not whether the "
