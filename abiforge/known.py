@@ -37,7 +37,7 @@ GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away i
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
 GAP_FLAG_INVISIBLE_LAYOUT = (
     "A config-level layout flag a public header cannot carry: stripped {B,H} reads the "
-    "layout without it (no signal yet for reduced assurance)"
+    "layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)"
 )
 GAP_HEADER_TRAIT_STRIPPED = (
     "A value-ABI trait, a packed record or a struct return convention is not emitted from "
