@@ -40,6 +40,7 @@ from .diff_helpers import make_change
 from .model import AbiSnapshot, Function
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
+from .model.execution_cache import reference_mode
 
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.
 # e.g. 'B5cxx11' -> tag 'cxx11'. Tags may repeat (a name can carry several).
@@ -119,7 +120,7 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new_tags, _ = _extract_abi_tags(a)
         if old_tags == new_tags:
             continue  # base matched but tags identical — not a tag change
-        if demangled is None and ("cxx11" in r or "cxx11" in a):
+        if demangled is None and (reference_mode() or "cxx11" in r or "cxx11" in a):
             demangled = _demangle_churn(removed, added)
         if demangled is not None and is_flip_pair(
             demangled.get(r, ""), demangled.get(a, "")

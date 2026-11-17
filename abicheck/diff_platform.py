@@ -1099,6 +1099,7 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     from .compare.glibcxx_dual_abi_pairs import pair_dual_abi_flips
     from .demangle import demangle_batch
+    from .model.execution_cache import reference_mode
 
     old_map = exported_functions_by_mangled(old)
     new_map = exported_functions_by_mangled(new)
@@ -1109,7 +1110,7 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # A flip's demangled spellings (std::__cxx11::, [abi:cxx11]) come from a mangled
     # name containing "cxx11", so with none in the churn there is no flip, no mass
     # marker, and nothing to demangle.
-    if not any("cxx11" in n for n in removed + added):
+    if not reference_mode() and not any("cxx11" in n for n in removed + added):
         return []
     pairing = pair_dual_abi_flips(
         removed, added, demangle_batch(removed), demangle_batch(added)
