@@ -211,7 +211,6 @@
     "type_lost_final",
     "type_visibility_changed",
     "typedef_version_sentinel",
-    "undocumented_export_ratio_increased",
     "uninstantiated_template_removed",
     "union_field_type_changed",
     "var_added_elf_only",

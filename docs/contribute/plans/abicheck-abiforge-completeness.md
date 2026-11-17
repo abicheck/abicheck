@@ -808,7 +808,16 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 - `library_version_downgraded` (PE `VS_FIXEDFILEINFO`) and `compat_version_changed` (Mach-O) have platform-only emitters. This container has no MinGW or macOS toolchain, so no oracle can run here; declare from the Windows or macOS lane.
 - `rtti_mode_changed` and `sanitizer_mode_changed` fire from build data (`buildsource/build_diff.py`, compile flags), so their oracle needs a compile-commands input, not a binary pair. Next batch.
 - `undocumented_export_ratio_increased` and the `source_*` / `declaration_*` L4-L5 kinds need the header or source pipeline; not probed in this batch.
-**WS-1 `visibility_leak` oracle, handed to the platform session (open).** The kind is one-sided on the OLD snapshot's ELF export table (`diff_platform_elf_dynamic.py`). Oracle (GNU ELF producer, old exports `internal_helper`, new does not): the stripped binary pair emits `visibility_leak`, so the binary alone observes it; the declaration `{B:ELF}` is the platform owner's to make (its file, `platform_3.py`, moved to that session).
+**WS-1 batch 6 (source/platform, Linux first).** Declared with real-build oracles (`tests/test_observable_ws1_source_platform_2.py`): `sanitizer_runtime_required` `{B:ELF}`; `rtti_mode_changed` `{B,BD}` (the `-frtti`/`-fno-rtti` flag is compile data, visible only through a compile database); `undocumented_export_ratio_increased` `{B,H}` (the ratio needs public-header declarations on the new side).
+
+**Correction to the batch-5 row.** The batch-5 row above that `sanitizer_runtime_required` has a reader gap (a `-fsanitize=address` shared object dumps with no ELF identity, so the detector never runs) was **wrong**. The probe read the wrong JSON key (`elf`); a binary-only pair of an ASan-instrumented and a plain build does emit the kind. The batch-6 oracle is the evidence; there is no reader gap for this kind.
+
+**Open (WS-1, not declared).**
+- `sanitizer_mode_changed`: a compile database carrying `-fsanitize=address` did not emit it at `--depth build`, while the same pair emitted `sanitizer_runtime_required`. Probable gap in how the build-data reader parses the sanitizer option; re-decide after the reader is checked.
+- `func_deleted_elf_fallback`: not reproduced in three shapes (header `= delete`, plain header removal, binary-only). Each emits `func_removed`, `func_visibility_changed` or `func_removed_elf_only` instead. Needs a reproducer that makes the header attribution fail; until then no declaration.
+- `exported_object_alignment_reduced`, `inline_namespace_moved` and `abi_surface_explosion` are declared in `platform_1.py`, outside this workstream's ownership. Oracles: the first two emit from binary-only ELF pairs (`value_alignment` shrinks; two or more symbols move between inline namespaces); the third was not probed. Owed to the `platform_1.py` owner.
+- `platform_baseline_floor_raised` (build data), the `kabi_*` family and the `sycl_*` family were not probed in this batch.
+- Non-Linux, deferred (per the priority from the orchestrator): `library_version_downgraded` (PE `VS_FIXEDFILEINFO`) and `compat_version_changed` (Mach-O) stay UNCLASSIFIED until their own lane runs; no MinGW or macOS toolchain in this container.
 
 ### 11.3 File ownership and conflict hotspots
 
