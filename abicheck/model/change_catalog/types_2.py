@@ -61,13 +61,9 @@ _OBS_B_ELF_MACHO = observable(
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
-_OBS_B = observable(
-    ("B",),
-    rationale=(
-        "initial value read from the object's own section bytes (G7): a "
-        "binary-only snapshot carries it without DWARF or a header"
-    ),
-)
+# G7: the initial value is read from the object's own section bytes, so a
+# binary-only snapshot carries it without DWARF or a header.
+_OBS_B = observable(("B",))
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
