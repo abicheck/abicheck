@@ -26,7 +26,12 @@ from disposition_trace import recording  # noqa: E402
 
 from abiforge.model.config import Toolchain, default_config  # noqa: E402
 from abiforge.operators import matrix  # noqa: E402
-from abiforge.run.harness import BaselineCache, _as_config, run_operator  # noqa: E402
+from abiforge.run.harness import (  # noqa: E402
+    BaselineCache,
+    CompileError,
+    _as_config,
+    run_operator,
+)
 
 
 def _applies(op, seed) -> bool:  # type: ignore[no-untyped-def]
@@ -56,7 +61,11 @@ def main(argv: list[str] | None = None) -> int:
                 cfg = _as_config(seed, a.compiler)
                 run_operator(op, seed, cfg, cache, root / f"cell{i}")
                 ran += 1
-            except Exception as exc:  # noqa: BLE001 - an unbuildable cell is skipped and counted
+            except CompileError as exc:
+                # Only a cell the toolchain cannot build is skipped (e.g. the
+                # -m32/-mx32 rebuilds without multilib). A comparison or
+                # pipeline exception propagates: skipping it would drop
+                # exactly the run trace validation exists to check.
                 failed += 1
                 print(f"skip {rec.label}: {type(exc).__name__}: {str(exc)[:120]}")
         rec.dump(a.out)

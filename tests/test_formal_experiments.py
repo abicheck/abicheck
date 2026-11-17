@@ -342,3 +342,28 @@ def test_e11_self_recording_is_rejected_only_by_the_pre_e11_spec() -> None:
     }
     assert chk.check([t], self_record=True)[0]["accepted_traces"] == 1
     assert chk.check([t], self_record=False)[0]["rejected_traces"] == 1
+
+
+@pytest.mark.parametrize(
+    ("s1", "why"),
+    [
+        # drop 1, add 2, and forget 1 from seen: the count trigger is masked
+        ({"changes": [2], "buckets": [], "ledger": [], "seen": [2]}, "seen"),
+        # one fresh id added to changes and a bucket at once (A n B != {})
+        ({"changes": [1, 2], "buckets": [2], "ledger": [], "seen": [1, 2]}, "at once"),
+    ],
+)
+def test_e11_python_checker_enforces_stepwith_side_conditions(s1, why) -> None:  # type: ignore[no-untyped-def]
+    chk = _load(FORMAL / "tla" / "check_trace.py")
+    s0 = {
+        "step": "<init>",
+        "changes": [1],
+        "duplicates": 0,
+        "buckets": [],
+        "ledger": [],
+        "seen": [1],
+    }
+    t = {"label": why, "states": [s0, {"step": "s", "duplicates": 0, **s1}]}
+    counts, examples = chk.check([t], self_record=True)
+    assert counts["rejected_traces"] == 1
+    assert any(why in e for e in examples), examples

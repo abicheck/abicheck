@@ -69,6 +69,8 @@ def step_problems(s0: State, s1: State, self_record: bool) -> list[str]:
     out = []
     if s1["duplicates"]:
         out.append(f"changes holds {s1['duplicates']} duplicate object(s)")
+    if A & B:
+        out.append(f"added {sorted(A & B)} to changes and a bucket at once")
     if (A | B) & seen0:
         out.append(f"re-introduced an already seen id {sorted((A | B) & seen0)}")
     if R and not self_record:
@@ -80,6 +82,12 @@ def step_problems(s0: State, s1: State, self_record: bool) -> list[str]:
     exp_changes = (ch0 - (D | M)) | A
     exp_buckets = b0 | M | B
     exp_ledger = l0 | R | (D if trigger(ch0, D, M, A, B) else set())
+    # seen' follows from the state, never from the recorded successor's seen:
+    # a shortened seen would hide a vanished finding from vanished().
+    created = (set(s1["ledger"]) - l0) - seen0 - A - B
+    exp_seen = seen0 | A | B | created
+    if exp_seen != set(s1["seen"]):
+        out.append(f"seen' differs: lost {sorted(seen0 - set(s1['seen']))}")
     if exp_changes != set(s1["changes"]):
         out.append("changes' differs from the spec's successor")
     if exp_buckets != set(s1["buckets"]):
@@ -218,10 +226,24 @@ def trace_module(t: dict[str, Any]) -> str:
     )
 
 
+#: TLC outcomes that mean "the trace is not a behavior of the spec".
+_REJECTIONS = ("Deadlock reached", "is violated")
+
+
 def run_tlc(jar: Path, traces: list[dict[str, Any]]) -> tuple[int, list[str]]:
+    """TLC on each trace; returns (checked, rejected labels).
+
+    Only a deadlock (no StepWith reaches the next recorded state) or a
+    violated invariant counts as a rejection. Any other failure -- a missing
+    jar, a parse error, a crash -- is a tool error and exits, so it can never
+    pass for a rejected mutant.
+    """
     java = shutil.which("java")
     if not java:
         raise SystemExit("java not found")
+    jar = jar.resolve()  # java runs in a temporary directory
+    if not jar.is_file():
+        raise SystemExit(f"tla2tools.jar not found: {jar}")
     bad: list[str] = []
     for t in traces:
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,6 +274,11 @@ def run_tlc(jar: Path, traces: list[dict[str, Any]]) -> tuple[int, list[str]]:
                 check=False,
             )
             ok = r.returncode == 0 and "No error has been found" in r.stdout
+            if not ok and not any(x in r.stdout for x in _REJECTIONS):
+                raise SystemExit(
+                    f"TLC failed on {t['label']} without checking it:\n"
+                    f"{r.stdout[-800:]}{r.stderr[-400:]}"
+                )
             if not ok:
                 tail = [
                     ln
