@@ -115,7 +115,7 @@ class CallSignature:
 #: ([dcl.link]/4). Earlier clang-produced snapshots can carry
 #: ``is_extern_c=True`` (and, with an asm label, an unmangled symbol) for such
 #: a member, so their linkage flag cannot exclude a member.
-CLANG_MEMBER_LINKAGE_GENERATION = 83
+CLANG_MEMBER_LINKAGE_GENERATION = 84
 
 
 def linkage_evidence_reliable(snapshot: AbiSnapshot) -> bool:

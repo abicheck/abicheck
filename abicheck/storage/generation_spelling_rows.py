@@ -738,4 +738,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     83: GenerationSpellingChange(
         'no type or name spelling changes. A headerless PE dump\'s export-table functions take is_extern_c and entity_id from the PE identity function: a MinGW C++ export spelled _Z... is a C++ function, not extern "C", and carries an entity identity where the older extractor left it unset. Export names and return types are unchanged.'
     ),
+    84: GenerationSpellingChange(
+        "ADR-094 call axis (PR #2128): no stored type or name spelling changes. The clang "
+        'header backend no longer records a class member declared inside an extern "C" '
+        "block as C linkage ([dcl.link]/4): is_extern_c is now false for such a member, so "
+        "its EntityId keeps its mangled identity instead of the bare extern_c one. Names, "
+        "symbols and type spellings are unchanged; an older clang snapshot keeps the flag "
+        "as stored (the call axis declines to trust it), and no rewrite applies."
+    ),
 }

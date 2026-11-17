@@ -132,10 +132,10 @@ def test_the_408_call_compatible_cases_are_all_preserved() -> None:
         ("castxml", (CLANG_MEMBER_LINKAGE_GENERATION - 1, 4, 15), True),
     ],
 )
-def test_a_pre_83_clang_snapshot_cannot_vouch_for_c_linkage(
+def test_a_pre_cutoff_clang_snapshot_cannot_vouch_for_c_linkage(
     producer: str, generations: tuple[int, int, int] | None, reliable: bool
 ) -> None:
-    """Before generation 83 clang stored `is_extern_c=True` and an unmangled
+    """Before CLANG_MEMBER_LINKAGE_GENERATION clang stored `is_extern_c=True` and an unmangled
     asm symbol for `extern "C" { struct C { long f(long) asm("plain_f"); }; }`;
     such a stored member looks exactly like a C function."""
     snap = AbiSnapshot(
@@ -150,11 +150,11 @@ def test_a_pre_83_clang_snapshot_cannot_vouch_for_c_linkage(
     assert assess_call_interface(sig, sig, SYSV_AMD64).status is want
 
 
-def test_a_loaded_pre_83_clang_snapshot_cannot_vouch_for_c_linkage(
+def test_a_loaded_pre_cutoff_clang_snapshot_cannot_vouch_for_c_linkage(
     tmp_path: Path,
 ) -> None:
     """The same stored member, through save -> rewrite the stamped extractor
-    generation to 82 -> load_snapshot, the path ADR-094 D9's caller takes."""
+    generation to the one before the cutoff -> load_snapshot, the path ADR-094 D9's caller takes."""
     from abicheck.serialization import load_snapshot
     from abicheck.storage.snapshot_codec import save_snapshot
 
