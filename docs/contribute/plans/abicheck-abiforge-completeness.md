@@ -794,6 +794,8 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 
 **WS-1 binary-only value reader gap (open, G7).** A binary-only dump records an object's section bytes but does not type the object, so `var_value_changed` (a const initializer change) emits only when a header or DWARF supplies the declaration. The kind is declared `{B,D}`, `{B,H}` (not `{B}`) for that reason: the oracle shows a stripped binary alone emits nothing. Closing the gap (typing a data object from the binary) is G7's work; re-decide the declaration then, not before.
 
+**WS-1 dead detector: `FUNC_DELETED_ELF_FALLBACK` (open, detector bug).** `diff_platform._diff_elf_deleted_fallback` is imported by `checker.py` but never called on the compare path: its only callers are unit tests (`tests/test_edge_coverage_readers.py`, `tests/test_symbol_binding_field.py`). So the kind is unreachable from `compare()`. Reproducer: a header pair where the new header still declares `f` and the new library does not export it (`--depth headers`) emits `func_visibility_changed` and `public_not_exported`, not the fallback. Re-decide `func_deleted_elf_fallback`'s `observable_at` when the detector is wired (a behaviour change: new findings on real pipelines, so it needs its own decision), not before. Until then the kind stays UNCLASSIFIED.
+
 ### 11.3 File ownership and conflict hotspots
 
 **Owned paths.** Edit another workstream's paths only through a small,
