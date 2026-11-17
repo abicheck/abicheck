@@ -16,7 +16,7 @@ from abicheck.extract import macho_debug
 from abicheck.extract.extraction_limitations import collecting_extraction_limitations
 from abicheck.model.dwarf_facts import AdvancedExtractionStatus
 
-LIB = Path("/tmp/libq.dylib")
+LIB = Path("libq.dylib")
 
 
 def _patch(monkeypatch, *, status=AdvancedExtractionStatus.COMPLETED, raises=None):
