@@ -11,6 +11,11 @@ pairs in the shape the dumper produces, not the seeder's decision table.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from abicheck.checker import compare
@@ -264,3 +269,45 @@ def test_const_value_change_is_emitted_with_headers_and_not_from_bytes_alone() -
     assert "var_value_changed" in emitted, emitted
     assert _observes_on("var_value_changed", "elf", BINARY_AND_HEADERS)
     assert not _observes_on("var_value_changed", "elf", BINARY)
+
+
+@pytest.mark.integration
+def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle: an exported symbol whose mangled name embeds a lambda
+    # closure (Ul...E_) is visible in the stripped binary's export table, so the
+    # binary alone observes the kind.
+    gxx = shutil.which("g++")
+    if gxx is None:
+        pytest.skip("g++ not available")
+    old_src = tmp_path / "old.cpp"
+    new_src = tmp_path / "new.cpp"
+    old_src.write_text(
+        'auto lam = []{ return 1; };\nextern "C" int keep(int x){return x;}\n'
+    )
+    new_src.write_text(
+        'auto lam = []{ return 1; };\nextern "C" int keep(int x){return x;}\n'
+        "int take(decltype(lam)* p) { return (*p)(); }\n"
+    )
+    dumps = []
+    for name, src in (("old", old_src), ("new", new_src)):
+        so = tmp_path / f"lib{name}.so"
+        subprocess.run(
+            [gxx, "-std=c++17", "-O0", "-fPIC", "-shared", str(src), "-o", str(so)],
+            check=True,
+        )
+        subprocess.run(["strip", "--strip-debug", str(so)], check=True)
+        out = tmp_path / f"{name}.json"
+        subprocess.run(
+            [sys.executable, "-m", "abicheck.cli", "dump", str(so), "-o", str(out)],
+            check=True,
+            capture_output=True,
+        )
+        dumps.append(out)
+    result = subprocess.run(
+        [sys.executable, "-m", "abicheck.cli", "compare", str(dumps[0]), str(dumps[1])],
+        capture_output=True,
+        text=True,
+    )
+    assert "unnamed_type_in_public_abi" in result.stdout, result.stdout

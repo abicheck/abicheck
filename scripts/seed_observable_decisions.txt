@@ -322,3 +322,5 @@ overload_added  B  # diff_types.py:444-461: an overload added to an exported fre
 func_virtual_became_pure  H:PURE  # types_1.py / diff_types.py:1300: fires on a matched pair whose is_pure_virtual flips; a pure member has no symbol, so the DWARF-only surface never contains it (oracle: header pair emits it, DWARF-only pair emits nothing)
 # -- batch 3 (G3): const value -----------------------------------------------
 var_value_changed  DH  # types_2.py: the binary's section bytes are read only for a variable whose type a header or DWARF supplies. Oracle: stripped binary alone emits nothing; stripped binary + headers emits; -g binary without headers emits. Reader gap (binary-only dumps do not type the object): G7 (sec 11.2)
+# -- batch 4 (G3): unnamed types ------------------------------------------------
+unnamed_type_in_public_abi  B  # diff_unnamed_types.py: the mangled name of an exported symbol carries the closure (Ul...E_); a stripped binary alone shows it (oracle: stripped pair with an exported take(decltype(lam)*) emits unnamed_type_in_public_abi)
