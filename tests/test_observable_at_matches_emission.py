@@ -276,8 +276,10 @@ def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
     tmp_path: Path,
 ) -> None:
     # Real-compile oracle: an exported symbol whose mangled name embeds a lambda
-    # closure (Ul...E_) is visible in the stripped binary's export table, so the
-    # binary alone observes the kind.
+    # closure (Ul...E_) is visible in the export table of a build without debug
+    # info (no -g), so the binary alone observes the kind. No strip step: GNU
+    # strip's --strip-debug is absent from macOS strip, and a build without -g
+    # already carries no DWARF.
     gxx = shutil.which("g++")
     if gxx is None:
         pytest.skip("g++ not available")
@@ -297,7 +299,6 @@ def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
             [gxx, "-std=c++17", "-O0", "-fPIC", "-shared", str(src), "-o", str(so)],
             check=True,
         )
-        subprocess.run(["strip", "--strip-debug", str(so)], check=True)
         out = tmp_path / f"{name}.json"
         subprocess.run(
             abicheck_command("dump", str(so), "-o", str(out)),
