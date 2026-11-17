@@ -243,11 +243,11 @@
       "abicheck/workflows/dump/formats.py": "634c897b872e20c7c1579a9f569700a32c1b99b204569e8bb198a4174587b6d2",
       "abicheck/workflows/dump/macho.py": "ee301926fd430c4eed3128e75b07fc494805ff76d0b2acbcd83fa7a8fc9f424e",
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
-      "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
+      "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "9ad5094c5d9699e627ddd1332a2689add6cc18c6e533e05783c655da59837a15",
-    "generation": 81,
-    "reason": "merge origin/main (#2116 memo witness; pure memo change)"
+    "fingerprint": "db720ceeb84125ad5f9fbcacd9fc45baa941a51c525e90592a613f456af2da51",
+    "generation": 82,
+    "reason": "headerless PE export identity: is_extern_c and entity_id from the PE identity function (MinGW C++ exports are not extern C)"
   },
   "resolver": {
     "files": {

@@ -200,6 +200,9 @@ FAMILIES: dict[str, Family] = {
                 # <unnamed-tag>, header Outer::<unnamed-type-u>): the same member
                 # must not read as a type change across readers.
                 "tests/test_anonymous_member_spelling.py",
+                # A headerless PE dump names a MinGW C++ export by its PE
+                # mangling, as the other PE route does (not extern "C").
+                "tests/test_pe_noheader_export_identity.py",
                 # A per-architecture ABI baseline: a version node at the target's
                 # baseline raises no floor (test_version_floor_new_provider.py).
                 "tests/test_version_floor_new_provider.py",
