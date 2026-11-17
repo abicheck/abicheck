@@ -339,3 +339,23 @@ instantiation_missing_from_binary  B  # diff_templates / template_instance_absen
 overload_set_rerouted  B  # diff_types: an overload set rerouted under the same mangled name family; the stripped binary pair emits it (tag oracle), so B
 abi_equivalent_type_changed  DH  # compare/abi_equivalent_retype.py: a retype the compiler passes identically (long -> long long on LP64) needs the declared types (header or DWARF); header and DWARF pairs emit it, a stripped binary does not
 typedef_version_sentinel  H:HEADER  # types_2.py: a typedef name carrying a release version; the header pair emits it, the stripped and DWARF-only pairs do not (the typedef is never exported)
+
+# -- WS-1 domain families: build, numpy, wheel, bundle (ADR-093 batch 6) --
+# Each row: a real-artifact oracle through the public compare (see
+# tests/test_ws1_domain_build_observability.py). Package scope is comparison
+# scope (ADR-065), so those rows carry the :SCOPE forms.
+numpy_capi_consumption_added  B
+numpy_capi_consumption_removed  B
+numpy_target_floor_raised  B
+numpy_metadata_understates_required_version  B:SCOPE
+numpy_abi_major_incompatible  B:SCOPE
+wheel_rpath_not_portable  B:ELF:SCOPE
+wheel_closure_dependency_violation  B:ELF:SCOPE
+wheel_tag_architecture_mismatch  B:ELF:SCOPE
+bundle_intra_dep_removed  B:SCOPE
+bundle_intra_dep_signature_unverified  B:SCOPE
+bundle_intra_dep_signature_changed  BD:DWARF
+bundle_intra_type_changed  BD:DWARF
+bundle_provider_changed  BD:DWARF
+bundle_manifest_instantiation_added  B:SCOPE
+bundle_manifest_instantiation_removed  B:SCOPE
