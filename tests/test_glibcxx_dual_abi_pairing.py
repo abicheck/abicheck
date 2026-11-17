@@ -258,3 +258,16 @@ def test_unreadable_fallback_boundaries(n_removed, n_added, tagged, expected_mas
     assert p.paired == 0
     assert p.un_removed + p.un_added == total
     assert p.mass is expected_mass
+
+
+def test_a_user_namespace_move_with_a_std_string_argument_is_not_a_flip():
+    """Negative control (review): ``api::__cxx11::f(std::list<int>)`` moved to
+    ``api::f(std::__cxx11::list<int>)`` changes the namespace as well as the
+    spelling, so it is not one flipped function."""
+    p = pair_dual_abi_flips(
+        ["m1"],
+        ["m2"],
+        {"m1": "api::__cxx11::f(std::list<int>)"},
+        {"m2": "api::f(std::__cxx11::list<int>)"},
+    )
+    assert p.paired == 0

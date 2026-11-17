@@ -39,6 +39,8 @@ __all__ = ["DualAbiPairing", "is_flip_pair", "pair_dual_abi_flips"]
 
 #: libstdc++'s inline namespace; a user namespace named ``__cxx11`` is not one.
 _STD_CXX11_NS = "std::__cxx11::"
+#: Placeholder for a non-std ``__cxx11::`` during normalisation (not a printable character).
+_USER_CXX11 = "\x03"
 
 
 @dataclass(frozen=True)
@@ -79,7 +81,13 @@ def _cxx11_identity(demangled: str) -> str:
     :func:`normalize_dual_abi_spelling`), so the old and new spellings of one
     function compare equal. The inline-namespace scope is enforced by
     :func:`_has_cxx11_tag`, not here."""
-    return normalize_dual_abi_spelling(demangled)
+    # Only the std:: inline namespace is a dual-ABI spelling: a user namespace's
+    # __cxx11:: names a different function, so it is shielded from the shared
+    # normaliser (which strips __cxx11:: everywhere) and restored after it.
+    shielded = demangled.replace(_STD_CXX11_NS, "std::").replace(
+        "__cxx11::", _USER_CXX11
+    )
+    return normalize_dual_abi_spelling(shielded).replace(_USER_CXX11, "__cxx11::")
 
 
 def pair_dual_abi_flips(
