@@ -334,3 +334,24 @@ def test_a_depth_cut_answer_does_not_leak_into_a_later_query() -> None:
     shared = _Resolver(summaries)
     shared.trait(k(1))
     assert shared.trait(k(40)) is True
+
+
+def test_a_base_with_no_summary_leaves_the_subobject_walk_unknown() -> None:
+    # The base is named by DWARF but its record was never collected, so its
+    # subobjects (and therefore [class.prop]/3.7) cannot be counted.
+    resolver = _Resolver({k(1): summary(bases=[(k(2), False)])})
+    assert resolver._base_multiplicity(k(1)) is None
+    assert resolver.trait(k(1)) is None
+
+
+def test_a_first_member_chain_past_the_depth_limit_is_unknown() -> None:
+    # struct F : E { X2 first; }, where each X_n holds X_(n+1) first, longer than
+    # the depth limit. M(X2) is not bounded within the limit, so [class.prop]/3.6
+    # cannot be decided and the derived class stays unknown (never a clean True).
+    length = _MAX_DEPTH + 8
+    summaries = {k(0): summary()}
+    summaries[k(1)] = summary(bases=[(k(0), False)], members=[rec(2)])
+    for n in range(2, length):
+        summaries[k(n)] = summary(members=[rec(n + 1)])
+    summaries[k(length)] = summary(members=[_SCALAR])
+    assert _Resolver(summaries).trait(k(1)) is None
