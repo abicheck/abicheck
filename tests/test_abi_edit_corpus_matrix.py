@@ -783,13 +783,44 @@ def test_known_entries_record_the_exact_finding() -> None:
         assert not k.matches(k.cls, k.issues, "NOT_A_VERDICT")
 
 
+def _config_satisfying(k) -> Config:
+    """A config inside the entry's ``when`` predicate, built from the entry's seed.
+
+    The entry's own expectation depends on the config it covers (a layout flag
+    changes what the edit's kinds are), so the independent derivation must take
+    the expectation from a config the entry actually matches, not a fixed one.
+    The grid spans both producer families, the layout flags, and the stripped
+    and unstripped headers builds; the first config inside ``when`` is used.
+    """
+    lang = SEED_BY_NAME[next(iter(k.seeds))].lang
+    for producer in (GCC, CLANG):
+        for flags in (
+            Flags(),
+            Flags(pack=1),
+            Flags(short_enums=True),
+        ):
+            for stripped in (False, True):
+                for backend in ("castxml", "clang"):
+                    cfg = replace(
+                        default_config(lang, producer),
+                        flags=flags,
+                        evidence="headers",
+                        stripped=stripped,
+                        header_backend=backend,
+                    )
+                    if k.when(cfg):
+                        return cfg
+    raise AssertionError(f"no grid config satisfies the when of {k.op}")
+
+
 def test_a_false_clean_degrades_to_its_verdict_class_without_execution() -> None:
     # Reconcile the recorded issues with no execution signal and check the
-    # class the registry predicts for that host (independent derivation).
+    # class the registry predicts for that host (independent derivation). The
+    # expectation comes from a config the entry covers, per entry.
     for k in KNOWN:
         if k.cls != "false-clean":
             continue
-        exp = OP_BY_NAME[k.op].expect(_cfg("c++"))
+        exp = OP_BY_NAME[k.op].expect(_config_satisfying(k))
         verdict = next(iter(k.verdicts))
         got = reconcile(_NONE, exp, verdict, frozenset())
         assert got.cls == k.expected_cls(execution_available=False), k.op
