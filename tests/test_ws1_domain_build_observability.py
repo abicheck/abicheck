@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -29,7 +30,15 @@ from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.observability import UNCLASSIFIED
 from tests._abicheck_subprocess import abicheck_command
 
-pytestmark = pytest.mark.integration
+# The oracle builds ELF shared objects with gcc (-Wl,-soname, $ORIGIN RPATH).
+# Windows has no ELF toolchain path here, so it is a platform-missing skip.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="ELF oracle: needs an ELF toolchain (gcc -Wl,-soname)",
+    ),
+]
 
 NUMPY_TARGET_1_20 = (
     b"_ARRAY_API is NULL pointer\0"
