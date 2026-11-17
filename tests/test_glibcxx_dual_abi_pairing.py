@@ -16,17 +16,25 @@ both ways; a library with no ``std::string`` must not be flagged.
 from __future__ import annotations
 
 import json
+import random
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from abicheck.compare.glibcxx_dual_abi_pairs import pair_dual_abi_flips
 from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
 _GXX = shutil.which("g++")
+#: The oracle needs all three: g++ builds, nm lists, c++filt demangles. A missing
+#: tool is a skip; a compiler that runs and fails is a failure.
+_MISSING_TOOLS = [t for t in ("g++", "nm", "c++filt") if shutil.which(t) is None]
+_NEEDS_ORACLE = pytest.mark.skipif(
+    bool(_MISSING_TOOLS), reason=f"oracle tools not on PATH: {_MISSING_TOOLS}"
+)
 _FLIP = "glibcxx_dual_abi_flip_detected"
 _CHANGED = "glibcxx_dual_abi_changed"
 
@@ -109,7 +117,7 @@ def _expected_direction(old_demangled: list[str]) -> str:
     return "CXX11 ABI → legacy ABI" if with_tag else "legacy ABI → CXX11 ABI"
 
 
-@pytest.mark.skipif(_GXX is None, reason="g++ not on PATH")
+@_NEEDS_ORACLE
 @pytest.mark.parametrize("n", [1, 2, 8], ids=["one", "two", "many"])
 @pytest.mark.parametrize("direction", ["legacy_to_cxx11", "cxx11_to_legacy"])
 def test_a_flip_of_n_functions_is_detected_with_its_real_count(tmp_path, n, direction):
@@ -129,7 +137,7 @@ def test_a_flip_of_n_functions_is_detected_with_its_real_count(tmp_path, n, dire
     assert f"({_expected_direction(old_names)})" in description, description
 
 
-@pytest.mark.skipif(_GXX is None, reason="g++ not on PATH")
+@_NEEDS_ORACLE
 @pytest.mark.parametrize(
     "abi_pair", [(0, 1), (1, 0)], ids=["legacy_to_cxx11", "cxx11_to_legacy"]
 )
@@ -142,3 +150,103 @@ def test_a_library_without_std_string_is_not_flagged(tmp_path, abi_pair):
     kinds = {c["kind"] for c in _compare(tmp_path, old, new)}
     assert _FLIP not in kinds
     assert _CHANGED not in kinds
+
+
+# -- The pairing primitive's contract, without a compiler ----------------------
+#
+# ``pair_dual_abi_flips`` takes mangled names and their demangled spellings. The
+# identities below are the demangled forms libstdc++ prints for one function
+# taking ``std::string`` under each ABI.
+
+_LEGACY = "with_string{i}(std::string const&)"
+_CXX11 = (
+    "with_string{i}(std::__cxx11::basic_string<char, std::char_traits<char>, "
+    "std::allocator<char> > const&)"
+)
+
+
+def _flip_churn(
+    n: int, *, legacy_removed: bool
+) -> tuple[list[str], list[str], dict, dict]:
+    """*n* functions re-mangled by a flip, removed under one spelling and added
+    under the other, mangled names ``m<i>`` mapped to their demangled forms."""
+    old_fmt, new_fmt = (_LEGACY, _CXX11) if legacy_removed else (_CXX11, _LEGACY)
+    removed = [f"r{i}" for i in range(n)]
+    added = [f"a{i}" for i in range(n)]
+    rem_dm = {f"r{i}": old_fmt.format(i=i) for i in range(n)}
+    add_dm = {f"a{i}": new_fmt.format(i=i) for i in range(n)}
+    return removed, added, rem_dm, add_dm
+
+
+@pytest.mark.parametrize("legacy_removed", [True, False], ids=["to_cxx11", "to_legacy"])
+@pytest.mark.parametrize("n", [1, 2, 8])
+def test_every_flipped_function_pairs_once_in_either_direction(n, legacy_removed):
+    removed, added, rem_dm, add_dm = _flip_churn(n, legacy_removed=legacy_removed)
+    p = pair_dual_abi_flips(removed, added, rem_dm, add_dm)
+    assert p.paired == n
+    assert p.rem_tagged_paired + p.add_tagged_paired == n
+    assert p.un_removed == 0 and p.un_added == 0
+    assert p.mass is False
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_pairing_is_invariant_under_input_order(seed):
+    removed, added, rem_dm, add_dm = _flip_churn(8, legacy_removed=True)
+    base = pair_dual_abi_flips(removed, added, rem_dm, add_dm)
+    rng = random.Random(seed)
+    shuffled_r, shuffled_a = removed[:], added[:]
+    rng.shuffle(shuffled_r)
+    rng.shuffle(shuffled_a)
+    assert pair_dual_abi_flips(shuffled_r, shuffled_a, rem_dm, add_dm) == base
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_a_removal_pairs_at_most_one_addition(seed):
+    """Each removed export pairs with at most one added export: the paired count
+    is bounded by the smaller side, however the churn is subset."""
+    rng = random.Random(seed)
+    removed, added, rem_dm, add_dm = _flip_churn(8, legacy_removed=bool(seed % 2))
+    keep_r = rng.sample(removed, rng.randint(0, len(removed)))
+    keep_a = rng.sample(added, rng.randint(0, len(added)))
+    p = pair_dual_abi_flips(keep_r, keep_a, rem_dm, add_dm)
+    assert p.paired <= min(len(keep_r), len(keep_a))
+
+
+def test_a_user_namespace_named_like_the_inline_namespace_is_not_a_flip():
+    """Negative control: ``api::__cxx11::f`` moved to ``api::f`` is a namespace
+    change, not a libstdc++ dual-ABI flip, and must not pair."""
+    p = pair_dual_abi_flips(
+        ["m1"],
+        ["m2"],
+        {"m1": "api::__cxx11::f(int)"},
+        {"m2": "api::f(int)"},
+    )
+    assert p.paired == 0
+    assert p.rem_tagged_paired == 0 and p.add_tagged_paired == 0
+
+
+@pytest.mark.parametrize(
+    ("n_removed", "n_added", "tagged", "expected_mass"),
+    [
+        (4, 5, 4, False),  # the five-per-side floor is not met
+        (5, 5, 0, False),  # no marker in any unreadable name
+        (5, 5, 2, False),  # 2 of 10 churned names: under the 30% boundary
+        (5, 5, 3, True),  # 3 of 10 reaches the 30% boundary
+        (5, 5, 10, True),  # every unreadable name tagged
+    ],
+)
+def test_unreadable_fallback_boundaries(n_removed, n_added, tagged, expected_mass):
+    """Unreadable names have no identity, so they never pair; only the raw-marker
+    mass fallback applies, with its floor and 30% boundary."""
+    total = n_removed + n_added
+    removed = [
+        f"_ZN{'7__cxx11' if i < tagged else '3foo'}{i}E" for i in range(n_removed)
+    ]
+    added = [
+        f"_ZN{'7__cxx11' if n_removed + j < tagged else '3foo'}{j}E"
+        for j in range(n_added)
+    ]
+    p = pair_dual_abi_flips(removed, added, {}, {})
+    assert p.paired == 0
+    assert p.un_removed + p.un_added == total
+    assert p.mass is expected_mass

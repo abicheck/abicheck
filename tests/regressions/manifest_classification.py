@@ -998,8 +998,11 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "removed, and whose cxx11 tag differs, is one flipped function; a "
             "library with no std::string reports no flip, in either direction."
         ),
-        fixed_by=(),
-        seed_tests=("tests/test_glibcxx_dual_abi_pairing.py",),
+        fixed_by=(2111,),
+        seed_tests=(
+            "tests/test_glibcxx_dual_abi_pairing.py",
+            "tests/test_family_f3_identity.py",
+        ),
         axes={
             "count": ("1", "2", "8"),
             "direction": ("0to1", "1to0"),

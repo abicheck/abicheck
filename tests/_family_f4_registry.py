@@ -222,7 +222,6 @@ HEURISTICS: dict[str, str] = {
     "abicheck.compare.template_surface::_needs_demangle::affix.startswith:'operator'": "spelling",
     "abicheck.policy.template_default_changes::<module>::re:'(?<![\\\\w:])(::)?((?:\\\\w+::)*\\\\w+)\\\\s*<'": "spelling",
     "abicheck.diff_abi_tags::<module>::re:'B(\\\\d+)([A-Za-z0-9_]+)'": "grammar",
-    "abicheck.diff_abi_tags::<module>::vocab:_CXX11_ABI_MARKERS": "platform",
     "abicheck.diff_atomic::<module>::re:'\\\\b_Atomic\\\\b'": "spelling",
     "abicheck.diff_char8t::<module>::re:'\\\\bchar8_t\\\\b'": "spelling",
     "abicheck.diff_cpp_patterns::<module>::re:'::operator(?![A-Za-z0-9_])'": "spelling",

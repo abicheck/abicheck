@@ -19,8 +19,9 @@ A flip (``_GLIBCXX_USE_CXX11_ABI`` 0 <-> 1) re-mangles every exported function
 that takes or returns ``std::string`` or ``std::list``: the same function is
 removed under one spelling and added under the other. A removed and an added
 export pair when their demangled identities agree once the dual-ABI spellings
-are removed and exactly one of them carries the ``__cxx11`` tag. One flipped
-function is a flip; a library without ``std::string`` has no pair.
+exactly one of them spells the ``std::__cxx11`` namespace. A bare ``[abi:cxx11]``
+tag is not enough: a tag-only change is an ABI-tag finding, not a flip. One
+flipped function is a flip; a library without ``std::string`` has no pair.
 
 A symbol the demangler cannot read has no identity, so it is not paired. For
 those alone the raw-marker mass heuristic remains (at least five removed and
@@ -32,10 +33,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["DualAbiPairing", "pair_dual_abi_flips"]
+__all__ = ["DualAbiPairing", "is_flip_pair", "pair_dual_abi_flips"]
 
 _CXX11_TAG = "[abi:cxx11]"
-_CXX11_INLINE_NS = "__cxx11::"
+#: libstdc++'s inline namespace; a user namespace named ``__cxx11`` is not one.
+_STD_CXX11_NS = "std::__cxx11::"
 #: The compact spelling of libstdc++'s ``std::string`` in the new ABI's
 #: demangled name, with all whitespace removed.
 _NEW_STD_STRING = "std::basic_string<char,std::char_traits<char>,std::allocator<char>>"
@@ -58,7 +60,20 @@ class DualAbiPairing:
 
 
 def _has_cxx11_tag(demangled: str) -> bool:
-    return _CXX11_INLINE_NS in demangled or _CXX11_TAG in demangled
+    """Whether the spelling is libstdc++'s new-ABI ``std::string`` (the
+    ``std::__cxx11`` namespace), not merely an ``[abi:cxx11]`` tag."""
+    return _STD_CXX11_NS in demangled
+
+
+def is_flip_pair(removed_demangled: str, added_demangled: str) -> bool:
+    """Whether one removed and one added demangled export are one flipped
+    function: the same identity once the dual-ABI spellings are removed, with
+    exactly one of them carrying the cxx11 tag. Unreadable names never pair."""
+    if not removed_demangled or not added_demangled:
+        return False
+    if _has_cxx11_tag(removed_demangled) == _has_cxx11_tag(added_demangled):
+        return False
+    return _cxx11_identity(removed_demangled) == _cxx11_identity(added_demangled)
 
 
 def _cxx11_identity(demangled: str) -> str:
@@ -67,7 +82,7 @@ def _cxx11_identity(demangled: str) -> str:
     legacy ``Ss``) and ``std::__cxx11::basic_string<char, ...>``, and the
     ``[abi:cxx11]`` return-type tag, all reduce to one identity."""
     compact = "".join(
-        demangled.replace(_CXX11_TAG, "").replace(_CXX11_INLINE_NS, "").split()
+        demangled.replace(_CXX11_TAG, "").replace(_STD_CXX11_NS, "std::").split()
     )
     return compact.replace(_NEW_STD_STRING, "std::string")
 
@@ -113,8 +128,8 @@ def pair_dual_abi_flips(
 
     un_removed = [n for n in removed if not removed_demangled.get(n)]
     un_added = [n for n in added if not added_demangled.get(n)]
-    un_rem_tag = sum(1 for n in un_removed if _CXX11_INLINE_NS in n or "cxx11" in n)
-    un_add_tag = sum(1 for n in un_added if _CXX11_INLINE_NS in n or "cxx11" in n)
+    un_rem_tag = sum(1 for n in un_removed if _STD_CXX11_NS in n or "cxx11" in n)
+    un_add_tag = sum(1 for n in un_added if _STD_CXX11_NS in n or "cxx11" in n)
     mass = (
         len(un_removed) >= 5
         and len(un_added) >= 5
