@@ -21,7 +21,7 @@
       "abicheck/extract/binary_format.py": "7c5f31dba9fab2884f8e91b5263d871c4cc38c6c56307eb46d782cd76b8ae2f8",
       "abicheck/extract/binary_identity.py": "6e4f7c0e55443ab906c75d67b5ca11629e2e6fcd59ea0f28976b8eb6651a392b",
       "abicheck/extract/build_mode_capture.py": "e4975d7c6e28a64d17550912d2ee40d808c8c8c72a22be9accc89a485ae4262f",
-      "abicheck/extract/builtin_abi.py": "95f12853d788acea6e678ca18c209a3b7c971cfbb1ac41add224c2d4519083a6",
+      "abicheck/extract/builtin_abi.py": "3e1bdb87490b3078d19d172a9cf241d40daee753575714daaf1931e0baf5095d",
       "abicheck/extract/cache_dep_manifest.py": "7542e355161f8f9cb5e6c2c74402064e15e5bcb0ccee67429c99e74122a31080",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
       "abicheck/extract/cache_header_scan.py": "04fc927afed680495c7f8112c230cf4f5d93966dd398a7472533648657eff994",
@@ -100,14 +100,14 @@
       "abicheck/extract/headers/castxml/backend.py": "9993674214e2ec171b7738df4cc5da22b0741a22b2c5352642ed9497bb64aea7",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "e363ac7d1407d679798c84459d376450207e20bfd2c67789052ab0c6ee48a9ca",
-      "abicheck/extract/headers/castxml/clang_semantics_join.py": "cc7ba9cf0468c6cc6d7a57bba212a374f5723bb4b691bd94c2d208d2e514e5aa",
+      "abicheck/extract/headers/castxml/clang_semantics_join.py": "ff93901a6bae843058554ffc10e8ca26f845c4b83f51a95ddfd944148a8444bf",
       "abicheck/extract/headers/castxml/context.py": "9825e80628d568a0ed79a67046aba2b4ecc1ec79c27f32d63ba724c57249e9f2",
       "abicheck/extract/headers/castxml/cxx_header_evidence.py": "1480218726fc8db4dd5aa7bb925920f1427b6571f74dcc8b43a5657d87eedc9c",
       "abicheck/extract/headers/castxml/data_size.py": "f896227368519c1946f5b72b58164d6a6aaf5a7cde74df464ca5f56bc9e15226",
       "abicheck/extract/headers/castxml/dumper.py": "48acb009a9fe78ccac63f0746fb14c35cde518744cc01b86cb40c000cceb8f2e",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
-      "abicheck/extract/headers/castxml/function_type_cc.py": "54b78f155f3500d45cc578501e42ae2af256445bfa9819510e805e60df8c9967",
+      "abicheck/extract/headers/castxml/function_type_cc.py": "629328f9a0e9c3842ef43c05e11ef3f781b9f5c351e3f14638ce54b91e36405a",
       "abicheck/extract/headers/castxml/functions.py": "f50eca555f141a4b8f710fa666f7ecfc9e1fec9429dc79bca6a56855cb6efd9b",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
@@ -245,9 +245,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "a4edc0fa49b2bf1845541990166bb3c2bd7b135304896d100a72fbc61094ccba",
+    "fingerprint": "8d84385a528e7235953914cd5e6ccfc80a7b9acb9f0a8239d2642aad403d9bd8",
     "generation": 81,
-    "reason": "Import-order fix in dwarf_advanced after the merge; no behaviour change"
+    "reason": "File-dependent memos key on the revision they read (content digest for header text, compiler binary revision for probes); every answer on an unchanged input is the same"
   },
   "resolver": {
     "files": {
