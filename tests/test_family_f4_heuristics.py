@@ -142,7 +142,7 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # __sanitizer_cov_ user-callback carve-out) -- names the toolchain defines.
     # 26: plus compare/toolchain_flags' vector-math library selection flags
     # (-mveclibabi=, -fveclib=), the compiler's own flag spelling.
-    "platform": 26,
+    "platform": 25,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.
     "user_rule": 9,
