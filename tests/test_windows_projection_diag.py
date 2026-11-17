@@ -1,12 +1,16 @@
-"""TEMPORARY Windows stress diagnostic for the intermittent depth-projection finding.
+"""TEMPORARY Windows diagnostic for the intermittent depth-projection finding.
 
-Forces the failure instead of waiting for it. For each case it runs the projection
-comparison many times in one process and also in fresh processes, each with an explicit
-PYTHONHASHSEED. It records each side's resolved PDB path, mtime and hash, and, for the
-field ``_TP_CALLBACK_ENVIRON_V3::u``, the spelling each stage gives it: the raw header
-dump, the projected pass, and the binary-only dump. It also records which records of that
-name appear in each snapshot, and in what order. Then it fails on purpose with the
-summary. Removed once the root cause is fixed.
+Two parts, per case:
+
+1. Stress: the projection comparison run many times in one process, and in fresh
+   processes each under an explicit PYTHONHASHSEED. For the field
+   ``_TP_CALLBACK_ENVIRON_V3::u`` it records the spelling each stage gives it (raw header
+   dump, projected, binary-only), and the order of the same-named records.
+2. Rebuild: the case is compiled afresh N times, each into its own build directory. For
+   each side it counts the two spellings in the raw PDB bytes and records the projected
+   spelling, so the projected spelling can be checked against what the PDB contains.
+
+It fails on purpose with the summary. Removed once the question is settled.
 """
 
 from __future__ import annotations
@@ -25,9 +29,11 @@ CASES = [
 ]
 IN_PROCESS = 20
 FRESH = 6
+REBUILDS = 8
 ROOT = Path(__file__).resolve().parent.parent
 RECORD = "_TP_CALLBACK_ENVIRON_V3"
 FIELD = "u"
+SPELLINGS = (b"<unnamed-tag>", b"<unnamed-type-u>")
 
 
 def _pdb_fact(lib: Path) -> str:
@@ -62,6 +68,22 @@ def _field_spelling(snap: object) -> str:
             if getattr(f, "name", None) == FIELD:
                 out.append(f"{r.name}->{f.type}")
     return " | ".join(out) if out else "<absent>"
+
+
+def _pdb_data(lib: Path) -> bytes:
+    """The raw bytes of the side's PDB, or b'' when there is none."""
+    from abicheck.pdb_utils import locate_pdb
+
+    pdb = locate_pdb(lib, allow_network=False)
+    return Path(pdb).read_bytes() if pdb is not None else b""
+
+
+def _byte_counts(lib: Path) -> str:
+    """Occurrences of each spelling in the side's raw PDB bytes."""
+    data = _pdb_data(lib)
+    if not data:
+        return "no-pdb"
+    return " ".join(f"{s.decode()}={data.count(s)}" for s in SPELLINGS)
 
 
 @pytest.mark.integration
@@ -137,6 +159,32 @@ def test_stress_depth_case(case: str, tmp_path: Path, shared_cmake_build_dir) ->
         f"  {stage}: " + " ;; ".join(sorted(spellings))
         for stage, spellings in sorted(stage_seen.items())
     )
+    # Rebuild: fresh compile per run, raw PDB bytes against the projected spelling.
+    rebuild_rows: list[str] = []
+    mismatches: list[str] = []
+    for n in range(REBUILDS):
+        rb = tmp_path / f"rebuild_{n}"
+        rb.mkdir()
+        rv1, rv2, _rh1, _rh2 = _built_case(case, rb, None)
+        bytes_old, bytes_new = _byte_counts(rv1), _byte_counts(rv2)
+        proj_old, proj_new = project_pair_to_depth(
+            dump(rv1, headers=_header_list(h1), version="v1"),
+            dump(rv2, headers=_header_list(h2), version="v2"),
+            "binary",
+        )
+        spell_old, spell_new = _field_spelling(proj_old), _field_spelling(proj_new)
+        rebuild_rows.append(
+            f"rebuild {n}: bytes-old[{bytes_old}] bytes-new[{bytes_new}] "
+            f"projected-old={spell_old} projected-new={spell_new}"
+        )
+        # The projected spelling must be one the side's PDB actually contains.
+        for side, lib, spelled in (("old", rv1, spell_old), ("new", rv2, spell_new)):
+            data = _pdb_data(lib)
+            for token in SPELLINGS:
+                if token.decode() in spelled and token not in data:
+                    mismatches.append(
+                        f"rebuild {n} {side}: projected {token.decode()} not in PDB bytes"
+                    )
     raise AssertionError(
         f"STRESS {case}\n"
         f"pdb-per-side={pdbs}\n"
@@ -145,5 +193,8 @@ def test_stress_depth_case(case: str, tmp_path: Path, shared_cmake_build_dir) ->
         f"fresh-process by hash seed: {' '.join(fresh_rows)}\n"
         f"fresh-process failing {len(fresh_fail)}/{FRESH}\n"
         f"first fresh: {first_fresh}\n"
-        f"field {RECORD}::{FIELD} spelling per stage (distinct values seen):\n{stages}"
+        f"field {RECORD}::{FIELD} spelling per stage (distinct values seen):\n{stages}\n"
+        f"rebuilds ({REBUILDS}, fresh compile each):\n  "
+        + "\n  ".join(rebuild_rows)
+        + f"\nprojected-vs-bytes mismatches: {mismatches or 'none'}"
     )
