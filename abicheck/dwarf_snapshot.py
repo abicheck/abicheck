@@ -57,6 +57,7 @@ from .dwarf_utils import (
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import (
     dwarf_member_functions as _members,
+    dwarf_standard_layout as _sl,
     dwarf_vtable_completeness as _dvc,
 )
 from .extract.dwarf_abi_fact import dwarf_type_abi_fact as _type_abi_fact
@@ -419,6 +420,7 @@ class _DwarfSnapshotBuilder:
             base_edges_by_record=self._base_edges_by_record,
             virtual_base_edges_by_record=self._virtual_base_edges_by_record,
         )
+        _sl.collector_for(self).finalize()  # standard layout: needs every record
         _dvc.finalize_vtable_evidence_completeness(self)  # T9, needs every CU walked
 
         # Third pass: filter types to only those reachable from
@@ -862,11 +864,6 @@ class _DwarfSnapshotBuilder:
 
         # Real vptr offset, read from the compiler's own artificial vptr member when this class introduces one. A class that only extends or overrides an already-inherited vtable (no local vptr member, even when every one of its own declared methods is virtual) is left None here and resolved in a later pass, once every record type in this binary is known — see extract.dwarf_vptr_resolution.finalize_vptr_offsets's docstring for why that can't be done eagerly, here, per-type. Tri-state by design: None also covers genuinely non-polymorphic and "only reachable through a virtual base" (whose offset is dynamic, never a fixed one this model can express), so the diff can tell "gained a vptr" (None → a real offset) from "vptr stayed".
         vptr_offset_bits = own_vptr_offset_bits
-        # is_standard_layout / is_trivially_copyable / data_size_bits stay None:
-        # "not polymorphic, no virtual bases" is no sound standard-layout signal
-        # (access control and member-bearing bases are invisible here: Codex
-        # review #345), and DWARF can't tell a defaulted special member from a
-        # user-provided one.
 
         rec = RecordType(
             name=qualified,
@@ -890,6 +887,7 @@ class _DwarfSnapshotBuilder:
             ),
         )
         self.types.append(rec)
+        _sl.collector_for(self).add(die, children, rec)
         self._record_by_qualified_name[qualified] = rec
         # Registered unconditionally (not just when base_edges is non-empty)
         # so extract.dwarf_vptr_resolution.finalize_vptr_offsets can resolve THIS type as somebody else's
