@@ -46,6 +46,7 @@ from ..model.change_catalog.subsumption import SUBSUMED_BY
 from ..model.identity import EntityId
 from .dedup_key import hashable_value
 from .finding_identity import resolve_change_identity
+from .identity_memo import INPUT_FIELDS, IdentityMemo
 from .source_replay_twins import drop_replay_twins
 from .variable_names import qualified_variable_name
 
@@ -195,7 +196,9 @@ _OCCURRENCE_AWARE_KINDS = frozenset(
 
 
 def _dedup_exact(
-    changes: list[Change], ambiguous: Mapping[EntityId, str] | None = None
+    changes: list[Change],
+    ambiguous: Mapping[EntityId, str] | None = None,
+    identity_memo: IdentityMemo | None = None,
 ) -> list[Change]:
     """Pass 1: collapse entries with the same (kind, description, symbol,
     old_value, new_value), plus (entity_id, disambiguator) for
@@ -237,14 +240,27 @@ def _dedup_exact(
     result: list[Change] = []
     seen: set[tuple[object, ...]] = set()
     ambiguous = ambiguous or {}
+    memo = identity_memo if identity_memo is not None else IdentityMemo()
     for c in changes:
+        # The canonical finding identity (ADR-049 Phase 2) is the authority on
+        # which facts distinguish two findings of one kind: it folds in the
+        # qualified name and, for a finding with no resolvable name, the
+        # source location -- facts a hand-picked field tuple silently drops,
+        # which merged two distinct findings into one (lost break). Its
+        # `primary_id` is deliberately entity-free, so an AST finding and its
+        # DWARF twin (one carrying `entity_id`, the other not) still share a key.
         key: tuple[object, ...] = (
             c.kind.value,
             c.description,
             c.symbol,
             hashable_value(c.old_value),
             hashable_value(c.new_value),
+            memo.primary_id(c),
         )
+        if c.disambiguator is not None:
+            # ODR/multi-TU occurrence discriminator: `primary_id` does not
+            # fold it in, so two occurrences would otherwise collapse.
+            key = key + (c.disambiguator,)
         if c.kind in _OCCURRENCE_AWARE_KINDS:
             key = key + (
                 c.entity_id.key if c.entity_id is not None else None,
@@ -464,6 +480,8 @@ def deduplicate_ast_dwarf(
     old: AbiSnapshot | None = None,
     new: AbiSnapshot | None = None,
     on_subsumed: Callable[[Change, ChangeKind], None] | None = None,
+    *,
+    identity_memo: IdentityMemo | None = None,
 ) -> list[Change]:
     """Remove DWARF findings that duplicate an AST finding for the same symbol.
 
@@ -475,7 +493,7 @@ def deduplicate_ast_dwarf(
     from .type_symbol_disambiguation import ambiguous_type_spellings
 
     ambiguous = ambiguous_type_spellings(old, new).by_entity
-    stage1 = _dedup_exact(changes, ambiguous)
+    stage1 = _dedup_exact(changes, ambiguous, identity_memo)
     stage2 = _dedup_enum_same_kind(stage1, ambiguous)
     record_names = {**record_canonical_names(old), **record_canonical_names(new)}
     return _dedup_cross_kind(stage2, record_names, ambiguous, on_subsumed)
@@ -614,7 +632,9 @@ DEDUP_CATEGORY_BY_KIND: dict[ChangeKind, str] = {
 }
 
 
-def dedup_identity_key(change: Change) -> str | None:
+def dedup_identity_key(
+    change: Change, identity_memo: IdentityMemo | None = None
+) -> str | None:
     """The identity :func:`deduplicate_cross_detector` collapses *change* on.
 
     ``None`` for a kind outside :data:`DEDUP_CATEGORY_BY_KIND`: this pass never
@@ -624,6 +644,26 @@ def dedup_identity_key(change: Change) -> str | None:
     """
     if change.kind not in DEDUP_CATEGORY_BY_KIND:
         return None
+    if identity_memo is not None:
+        # Inline validity check (not a call) so a hit costs one lookup and the
+        # memo's own primary_id runs only on a miss. The snapshot expression
+        # matches IdentityMemo.primary_id's.
+        hit = identity_memo.entries.get(id(change))
+        if (
+            hit is not None
+            and hit[0] is change
+            and hit[1]
+            == tuple(
+                tuple(v)
+                if isinstance(v, list)
+                else frozenset(v)
+                if isinstance(v, set)
+                else v
+                for v in (getattr(change, n) for n in INPUT_FIELDS)
+            )
+        ):
+            return hit[2]
+        return identity_memo.primary_id(change)
     return resolve_change_identity(change).primary_id
 
 
@@ -633,6 +673,7 @@ def deduplicate_cross_detector(
     new: AbiSnapshot | None = None,
     *,
     replay_twin_pairs: list[tuple[Change, Change]] | None = None,
+    identity_memo: IdentityMemo | None = None,
 ) -> list[Change]:
     """Remove cross-detector duplicates that the per-detector guards may miss.
 
@@ -734,7 +775,7 @@ def deduplicate_cross_detector(
     identity_keys: dict[int, str] = {}
     winners: dict[str, tuple[int, int]] = {}
     for i, c in candidates:
-        identity_key = dedup_identity_key(c)
+        identity_key = dedup_identity_key(c, identity_memo)
         if identity_key is None:
             continue
         identity_keys[i] = identity_key
