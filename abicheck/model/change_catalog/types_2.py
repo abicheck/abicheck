@@ -58,6 +58,10 @@ _OBS_B_ELF_MACHO = observable(
         platform=frozenset({Platform.ELF, Platform.MACHO})
     ),
 )
+_OBS_B = observable(("B",))
+_OBS_B_ELF = observable(
+    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
+)
 _OBS_H = observable(
     ("B", "H"), rationale="declaration-only fact: visible in the public header"
 )
@@ -533,6 +537,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "unnamed_type_in_public_abi",
         _R,
+        observable_at=(_OBS_B_ELF,),
         impact="An exported symbol embeds an unnamed type in its mangled name — a "
         "lambda closure (`Ul…E_`) or an unnamed struct/enum (`Ut…_`). The "
         "Itanium mangling of unnamed types is per-translation-unit and "
@@ -589,6 +594,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "var_value_changed",
         _C,
+        observable_at=(_OBS_DH,),
         impact="A global variable's initial/static value changed; this "
         "detector only compares the value itself, not the "
         "variable's type or size, so this fires purely on the "

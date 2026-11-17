@@ -11,6 +11,9 @@ pairs in the shape the dumper produces, not the seeder's decision table.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from abicheck.checker import compare
@@ -19,10 +22,19 @@ from abicheck.dumper import (
     _itanium_export_variable,
     _msvc_export_function,
 )
-from abicheck.model import AbiSnapshot, Function, Param, ScopeOrigin, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    ScopeOrigin,
+    Variable,
+    Visibility,
+)
 from abicheck.model.change_catalog.assembled import REGISTRY
 from abicheck.model.change_catalog.observability import UNCLASSIFIED, Platform
 from abicheck.model.fact import Fact
+from tests._abicheck_subprocess import abicheck_command
+from tests._elf_capability import elf_capability, skip_reason
 
 PLATFORMS = ["elf", "pe", "macho"]
 BINARY = ("B",)
@@ -197,3 +209,108 @@ def test_dwarf_only_inline_pair_emits_neither_twin() -> None:
     old, new = _inline_pair(None, None)
     emitted = {c.kind.value for c in compare(old, new).changes}
     assert not emitted & set(_INLINE_TWINS), emitted
+
+
+def test_exported_free_function_overload_is_emitted_from_the_binary_alone() -> None:
+    # An overload added to an exported free function reads from the export
+    # table alone (the mangled names differ), so the binary observes it.
+    old = _export_snapshot("1", "elf", ["_Z1gi"], [])
+    new = _export_snapshot("2", "elf", ["_Z1gi", "_Z1gd"], [])
+    emitted = {c.kind.value for c in compare(old, new).changes}
+    assert "overload_added" in emitted, emitted
+    assert _observes_on("overload_added", "elf", BINARY)
+
+
+def test_pure_virtual_flip_is_emitted_from_headers_and_observed_by_headers() -> None:
+    # A concrete virtual that became pure: only the public header declares the
+    # member (a pure virtual has no body and no symbol), so the emission is a
+    # header-backed one. The binary alone must not observe it.
+    concrete = _header_function("f", ("int",))
+    concrete.is_virtual = True
+    pure = _header_function("f", ("int",))
+    pure.is_virtual = True
+    pure.is_pure_virtual = True
+    old = _header_snapshot("1", "elf", [concrete])
+    new = _header_snapshot("2", "elf", [pure])
+    emitted = {c.kind.value for c in compare(old, new).changes}
+    assert "func_virtual_became_pure" in emitted, emitted
+    assert (
+        REGISTRY.entries["func_virtual_became_pure"].observable_at is not UNCLASSIFIED
+    )
+    assert _observes_on("func_virtual_became_pure", "elf", BINARY_AND_HEADERS)
+    assert not _observes_on("func_virtual_became_pure", "elf", BINARY)
+
+
+def test_const_value_change_is_emitted_with_headers_and_not_from_bytes_alone() -> None:
+    # The value bytes live in the binary, but a binary-only snapshot has no
+    # type for the object, so the change is observed only when a header (or
+    # DWARF) supplies the declaration. Declared {B,D} and {B,H}, never {B}.
+    old_var = Variable(
+        name="kLimit", mangled="kLimit", type="const int", value="10", is_const=True
+    )
+    new_var = Variable(
+        name="kLimit", mangled="kLimit", type="const int", value="20", is_const=True
+    )
+    old = AbiSnapshot(
+        library="libsynth",
+        version="1",
+        platform="elf",
+        from_headers=True,
+        variables=[old_var],
+    )
+    new = AbiSnapshot(
+        library="libsynth",
+        version="2",
+        platform="elf",
+        from_headers=True,
+        variables=[new_var],
+    )
+    emitted = {c.kind.value for c in compare(old, new).changes}
+    assert "var_value_changed" in emitted, emitted
+    assert _observes_on("var_value_changed", "elf", BINARY_AND_HEADERS)
+    assert not _observes_on("var_value_changed", "elf", BINARY)
+
+
+@pytest.mark.integration
+def test_exported_symbol_with_a_closure_type_is_emitted_from_the_binary_alone(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle: an exported symbol whose mangled name embeds a lambda
+    # closure (Ul...E_) is visible in the export table of a build without debug
+    # info (no -g), so the binary alone observes the kind. No strip step: GNU
+    # strip's --strip-debug is absent from macOS strip, and a build without -g
+    # already carries no DWARF.
+    # The claim is g++'s linkage: clang gives the closure-typed function internal
+    # linkage (not exported), so only a GNU ELF producer exercises it.
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    old_src = tmp_path / "old.cpp"
+    new_src = tmp_path / "new.cpp"
+    old_src.write_text(
+        'auto lam = []{ return 1; };\nextern "C" int keep(int x){return x;}\n'
+    )
+    new_src.write_text(
+        'auto lam = []{ return 1; };\nextern "C" int keep(int x){return x;}\n'
+        "int take(decltype(lam)* p) { return (*p)(); }\n"
+    )
+    dumps = []
+    for name, src in (("old", old_src), ("new", new_src)):
+        so = tmp_path / f"lib{name}.so"
+        subprocess.run(
+            [*prefix, "-std=c++17", "-O0", "-fPIC", "-shared", str(src), "-o", str(so)],
+            check=True,
+        )
+        out = tmp_path / f"{name}.json"
+        subprocess.run(
+            abicheck_command("dump", str(so), "-o", str(out)),
+            check=True,
+            capture_output=True,
+        )
+        dumps.append(out)
+    result = subprocess.run(
+        abicheck_command("compare", str(dumps[0]), str(dumps[1])),
+        capture_output=True,
+        text=True,
+    )
+    assert "unnamed_type_in_public_abi" in result.stdout, result.stdout

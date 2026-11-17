@@ -12,13 +12,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mach-O container magics shared by the format handler.
+"""Mach-O debug information for ``dump``: DWARF from a library's dSYM (ADR-021).
 
-The Mach-O DWARF resolver (dSYM attachment to ``dump``) is not wired yet; it is
-re-landed in a follow-up with its own tests. Only the magic table lives here.
+The Mach-O snapshot builder asks :func:`macho_dwarf_kwargs` for the snapshot's
+``dwarf``/``dwarf_advanced`` inputs. Resolution is the ELF path's: an explicit
+``debug_info_path`` first (a refused bundle fails the dump), then the adjacent
+``<lib>.dSYM`` bundle (a refused bundle is a non-fatal limitation), else absent.
+Absent evidence yields no keyword at all, so a library without DWARF builds the
+same snapshot it did before.
 """
 
 from __future__ import annotations
+
+import logging
+import warnings
+from pathlib import Path
+from typing import Any
+
+from ..dwarf_advanced import AdvancedDwarfMetadata
+from ..errors import SnapshotError
+from ..model.dwarf_facts import AdvancedExtractionStatus, DwarfMetadata
+from .debug_dump import _resolve_debug_metadata
+from .extraction_limitations import record_extraction_limitation
+
+_log = logging.getLogger(__name__)
+
+__all__ = [
+    "ADJACENT_DSYM_UNREADABLE_LIMITATION",
+    "MACHO_MAGICS",
+    "macho_dwarf_kwargs",
+]
+
+#: The fixed limitation recorded when an adjacent dSYM exists but cannot be read.
+#: Fixed text (no path, no exception) so the stored bytes are deterministic, and
+#: so the dump cache can recognise the transient-failure case (it must not store
+#: a snapshot that a retry with a readable dSYM would have answered differently).
+ADJACENT_DSYM_UNREADABLE_LIMITATION = "adjacent dSYM is unreadable and not used"
 
 #: Mach-O and universal (fat) container magics, both byte orders.
 MACHO_MAGICS: tuple[bytes, ...] = (
@@ -31,3 +60,96 @@ MACHO_MAGICS: tuple[bytes, ...] = (
     b"\xca\xfe\xba\xbf",
     b"\xbf\xba\xfe\xca",
 )
+
+
+def macho_dwarf_kwargs(
+    dylib_path: Path, debug_format: str | None, debug_kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """The ``dwarf``/``dwarf_advanced`` snapshot inputs for a Mach-O library.
+
+    ``debug_kwargs`` carries the other debug options the format handler passes
+    (``debug_info_path``, ``symbols_only``, ``debug_presence_only``). Returns
+    ``{}`` when no DWARF was read, so the snapshot is built exactly as it was
+    without this path.
+    """
+    presence_only = bool(
+        debug_kwargs.get("symbols_only") or debug_kwargs.get("debug_presence_only")
+    )
+    explicit = debug_kwargs.get("debug_info_path")
+    if presence_only and debug_format in (None, "dwarf"):
+        return _presence_kwargs(dylib_path, explicit)
+    try:
+        dwarf_meta, dwarf_adv = _resolve_debug_metadata(
+            dylib_path, debug_format, dwarf_source=explicit
+        )
+    except SnapshotError as exc:
+        if explicit is not None:
+            raise  # an explicit bundle stays fail-closed
+        # An adjacent dSYM that cannot be read is absent evidence with a note.
+        _log.debug("adjacent dSYM of %s is unreadable: %s", dylib_path, exc)
+        record_extraction_limitation(ADJACENT_DSYM_UNREADABLE_LIMITATION)
+        return {}
+    if explicit is None and dwarf_adv.extraction is AdvancedExtractionStatus.FAILED:
+        # The adjacent bundle exists but its DWARF could not be read: the same
+        # transient, non-fatal gap as an unreadable dSYM, and recorded the same
+        # way so the snapshot is not cached as if the bundle were absent.
+        record_extraction_limitation(ADJACENT_DSYM_UNREADABLE_LIMITATION)
+        return {}
+    if presence_only:
+        # ELF's contract: presence is recorded, type expansion is not run.
+        if not dwarf_meta.has_dwarf:
+            return {}
+        return {
+            "dwarf": dwarf_meta,
+            "dwarf_advanced": AdvancedDwarfMetadata(
+                has_dwarf=True, extraction=AdvancedExtractionStatus.NOT_RUN
+            ),
+        }
+    if dwarf_adv.extraction is not AdvancedExtractionStatus.COMPLETED:
+        return {}
+    return {"dwarf": dwarf_meta, "dwarf_advanced": dwarf_adv}
+
+
+def _presence_kwargs(dylib_path: Path, explicit: Path | None) -> dict[str, Any]:
+    """Presence-only DWARF of a Mach-O library, with no compile unit parsed.
+
+    ELF's contract: presence is recorded and the advanced type pass does not run.
+    The bundle's ``__DWARF`` section headers answer presence (the same validation
+    as a full read), so no ``DWARFInfo`` is built and no CU is walked. An explicit
+    bundle that is refused stays fail-closed; an adjacent one that is present but
+    refused is absent evidence with a recorded note.
+    """
+    from ..dwarf_unified import _adjacent_dsym_binary
+    from .macho_dsym import DsymAbsent, dsym_debug_info_presence, macho_uuid
+
+    dsym = explicit if explicit is not None else _adjacent_dsym_binary(dylib_path)
+    if dsym is None:
+        return {}
+    present = dsym_debug_info_presence(dsym, dylib_uuid=macho_uuid(dylib_path))
+    if isinstance(present, DsymAbsent):
+        if explicit is not None:
+            raise SnapshotError(
+                f"explicit dSYM {dsym} for {dylib_path} is not used: {present.reason}"
+            )
+        if dsym.is_file():
+            record_extraction_limitation(ADJACENT_DSYM_UNREADABLE_LIMITATION)
+        return {}
+    if not present:
+        return {}
+    return {
+        "dwarf": DwarfMetadata(has_dwarf=True),
+        "dwarf_advanced": AdvancedDwarfMetadata(
+            has_dwarf=True, extraction=AdvancedExtractionStatus.NOT_RUN
+        ),
+    }
+
+
+def warn_dwarf_only(dwarf_only: bool) -> None:
+    """Mach-O has no DWARF-only build: say so and fall back to normal extraction."""
+    if dwarf_only:
+        warnings.warn(
+            "dwarf_only=True is not supported for Mach-O; "
+            "falling back to normal extraction.",
+            UserWarning,
+            stacklevel=3,
+        )

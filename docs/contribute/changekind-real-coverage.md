@@ -18,7 +18,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 - Total kinds: **434**
 - Kinds with at least one real source: **199**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 84
+- Kinds per source: catalog 159, field_shapes 9, integration 85
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -171,7 +171,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `text_relocation_introduced` | RISK | 0 | 0 | 0 |
 | `text_relocation_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `type_visibility_changed` | BREAKING | 0 | 0 | 0 |
-| `unnamed_type_in_public_abi` | RISK | 1 | 0 | 0 |
+| `unnamed_type_in_public_abi` | RISK | 1 | 0 | 1 |
 | `unversioned_exported_symbol` | RISK | 1 | 0 | 0 |
 | `var_added` | COMPATIBLE | 1 | 1 | 1 |
 | `var_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
