@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``dumper._header_ast_parser``'s clang-backend call site (Codex review,
+"""``dumper.header_ast_parser``'s clang-backend call site (Codex review,
 fresh evidence): when a live ``clang -print-target-triple`` probe fails, the
 resulting parser must still carry an explicitly-requested ``--target=``
 triple, or (failing that) a real ``sys.platform``-based fallback string,
@@ -23,7 +23,7 @@ Split out of ``test_dumper_clang.py`` (already at its ADR-061 file-size debt
 cap, see ``architecture/debt.yaml``) rather than added there.
 ``_compiler_options.explicit_target_triple`` itself (the pure recovery
 helper) has its own dedicated coverage in ``test_compiler_options.py``; this
-module covers only the call-site wiring -- that ``dumper._header_ast_parser``'s
+module covers only the call-site wiring -- that ``dumper.header_ast_parser``'s
 clang branch (via ``abicheck.extract.headers.clang.backend.ClangBackend.parse``,
 which now owns the clang header pass and its triple fallback) actually wires
 the fallback in, end to end.
@@ -36,13 +36,13 @@ import sys
 
 import pytest
 
-from abicheck.dumper import _header_ast_parser
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.extract.compiler_driver import (
     clang_bin_is_explicitly_configured,
     default_clang_bin_name,
     is_default_clang_bin,
 )
+from abicheck.extract.header_ast_backend import header_ast_parser
 from abicheck.extract.headers.clang import backend as clang_backend
 
 
@@ -157,7 +157,7 @@ def test_probe_failure_recovers_explicit_target_triple(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -196,7 +196,7 @@ def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -235,7 +235,7 @@ def test_probe_failure_with_a_response_file_does_not_guess_sys_platform(
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -278,7 +278,7 @@ def test_probe_failure_with_a_response_file_alongside_a_target_does_not_recover_
     )
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -332,7 +332,7 @@ def test_probe_failure_with_an_explicit_absolute_path_no_longer_guesses(
     )
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -379,7 +379,7 @@ def test_probe_failure_with_a_resolved_cross_compiler_does_not_guess_sys_platfor
     )
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -419,7 +419,7 @@ def test_probe_failure_with_a_resolved_cross_compiler_still_recovers_explicit_ta
         lambda *a, **k: "aarch64-apple-darwin-clang++",
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -459,7 +459,7 @@ def test_probe_failure_with_an_explicit_config_file_does_not_guess_sys_platform(
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -515,7 +515,7 @@ def test_probe_failure_with_a_custom_renamed_compiler_recovers_via_bare_reprobe(
         clang_backend, "resolve_clang_bin", lambda *a, **k: "company-clang"
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -556,7 +556,7 @@ def test_probe_failure_with_a_custom_renamed_compiler_falls_back_when_bare_repro
     )
     monkeypatch.setattr(sys, "platform", "linux")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -599,7 +599,7 @@ def test_probe_failure_with_a_gcc_path_resolve_ignores_still_guesses_sys_platfor
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -637,7 +637,7 @@ def test_successful_probe_is_never_overridden_by_explicit_target(
         lambda *a, **k: "aarch64-apple-macos11",
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -678,7 +678,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_the_honored_spelling(
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -719,7 +719,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_the_separate_short_spell
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -771,7 +771,7 @@ def test_probe_failure_under_a_cl_style_driver_ignores_unhonored_spellings(
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -827,7 +827,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_via_bare_reprobe(
         lambda *a, **k: "aarch64-apple-darwin-clang-cl",
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -873,7 +873,7 @@ def test_successful_probe_skips_the_bare_reprobe_entirely(
     )
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -913,7 +913,7 @@ def test_successful_probe_still_honored_for_a_cl_style_driver(
     )
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -952,7 +952,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_clang_forwarded_spelling
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -991,7 +991,7 @@ def test_a_cl_style_name_explicitly_overridden_to_gnu_mode_is_not_cl_style(
     )
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -1039,7 +1039,7 @@ def test_probe_failure_bare_reprobe_preserves_the_driver_mode_override(
     )
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -1077,7 +1077,7 @@ def test_probe_failure_with_a_config_user_dir_does_not_guess_sys_platform(
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -1122,7 +1122,7 @@ def test_probe_failure_with_an_explicitly_configured_wrapper_does_not_guess(
     )
     monkeypatch.setattr(sys, "platform", "linux")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",
@@ -1165,7 +1165,7 @@ def test_probe_failure_with_option_selected_cl_mode_recovers_the_honored_spellin
     monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [],
         [],
         backend="clang",

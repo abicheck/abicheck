@@ -675,7 +675,7 @@ def test_castxml_cpp_mode_keeps_gnu_emulation_id():
 
 
 def _ast_parser_kwargs(tmp_path):
-    """Common keyword args for _header_ast_parser in the G16 fallback tests."""
+    """Common keyword args for header_ast_parser in the G16 fallback tests."""
     return dict(
         compiler="c++",
         gcc_path=None,
@@ -697,8 +697,9 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
 ):
     """G16: an auto-selected castxml that fails with a toolchain-version error
     (bundled Clang too old) falls back to the clang backend instead of aborting."""
-    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+    from abicheck.dumper import _ClangAstParser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
@@ -719,7 +720,7 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
     )
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
     )
     assert type(parser) is _ClangAstParser
@@ -729,8 +730,9 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     """An auto-selected castxml that fails on a direct-include #error guard (a
     -H include-dir swept in an internal/detail header) falls back to clang, whose
     path can granularly exclude the offending header and re-parse the rest."""
-    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+    from abicheck.dumper import _ClangAstParser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
@@ -754,7 +756,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     )
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
     )
     assert type(parser) is _ClangAstParser
@@ -763,8 +765,8 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
 def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypatch):
     """An explicit --ast-frontend castxml is honored verbatim — the toolchain
     error surfaces unchanged rather than silently switching to clang."""
-    from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
@@ -777,7 +779,7 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
-        _header_ast_parser(
+        header_ast_parser(
             [Path("a.h")], [], backend="castxml", **_ast_parser_kwargs(tmp_path)
         )
 
@@ -789,15 +791,15 @@ def test_header_ast_parser_explicit_castxml_rejects_device_context(
     non-"host" frontend_context fails immediately -- castxml has no SYCL/
     DPC++ context concept at all, so it must never silently hand back an
     ordinary castxml dump the caller could mistake for device-derived."""
-    from abicheck.dumper import _header_ast_parser
     from abicheck.errors import AstContextMissingError
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     monkeypatch.setattr(
         header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
     )
 
     with pytest.raises(AstContextMissingError, match="castxml"):
-        _header_ast_parser(
+        header_ast_parser(
             [Path("a.h")],
             [],
             backend="castxml",
@@ -819,7 +821,8 @@ def test_header_ast_parser_auto_device_routes_to_clang_not_rejected(
     through plain auto (no --ast-frontend given at all) incorrectly raised
     before ever reaching the clang backend that could actually satisfy it.
     """
-    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+    from abicheck.dumper import _ClangAstParser
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     ast = {"kind": "TranslationUnitDecl", "inner": []}
@@ -828,7 +831,7 @@ def test_header_ast_parser_auto_device_routes_to_clang_not_rejected(
         lambda *a, **k: (ast, "device", False),
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [Path("a.h")],
         [],
         backend="auto",
@@ -852,13 +855,13 @@ def test_header_ast_parser_env_pinned_castxml_rejects_device_context(
     backend="auto" -- so an env pin was silently overridden by a device
     request instead of being honored as the equivalent of an explicit flag.
     """
-    from abicheck.dumper import _header_ast_parser
     from abicheck.errors import AstContextMissingError
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
 
     with pytest.raises(AstContextMissingError, match="castxml"):
-        _header_ast_parser(
+        header_ast_parser(
             [Path("a.h")],
             [],
             backend="auto",
@@ -870,8 +873,8 @@ def test_header_ast_parser_env_pinned_castxml_rejects_device_context(
 def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
     """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
     header) re-raises — fallback is reserved for the recoverable case."""
-    from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
@@ -884,14 +887,15 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
-        _header_ast_parser(
+        header_ast_parser(
             [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
         )
 
 
 def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypatch):
     """When the resolved backend is clang, the clang parser is returned directly."""
-    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+    from abicheck.dumper import _ClangAstParser
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     monkeypatch.setattr(
         header_ast_backend, "_resolve_header_backend", lambda b: "clang"
@@ -901,7 +905,7 @@ def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypa
         lambda *a, **k: ({}, None, False),
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [Path("a.h")], [], backend="clang", **_ast_parser_kwargs(tmp_path)
     )
     assert type(parser) is _ClangAstParser
@@ -913,7 +917,8 @@ def test_header_ast_parser_castxml_success_returns_castxml_parser(
     """A successful castxml dump returns the castxml parser (no fallback)."""
     from xml.etree.ElementTree import Element
 
-    from abicheck.dumper import _CastxmlParser, _header_ast_parser
+    from abicheck.dumper import _CastxmlParser
+    from abicheck.extract.header_ast_backend import header_ast_parser
     from abicheck.extract.headers.castxml import backend as castxml_backend
 
     monkeypatch.setattr(
@@ -923,7 +928,7 @@ def test_header_ast_parser_castxml_success_returns_castxml_parser(
         castxml_backend, "castxml_dump", lambda *a, **k: Element("GCC_XML")
     )
 
-    parser = _header_ast_parser(
+    parser = header_ast_parser(
         [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
     )
     assert type(parser) is _CastxmlParser

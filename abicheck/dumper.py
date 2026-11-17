@@ -155,10 +155,6 @@ from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)
 
-#: The header AST parser lives in its owner (extract/header_ast_backend.py); this
-#: name stays for the callers and tests that reach it through the dumper.
-_header_ast_parser = header_ast_parser
-
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
 
@@ -607,7 +603,7 @@ def _dump_elf(
             dump_manifest=dump_manifest,
             headers=headers,
             extra_includes=extra_includes,
-            header_ast_parser=_header_ast_parser,
+            header_ast_parser=header_ast_parser,
             backend=header_backend,
             compiler=compiler,
             gcc_path=gcc_path,
@@ -807,7 +803,7 @@ def _dump_macho(
     # guaranteeing zero header/export matches for any C++ Mach-O binary and
     # falling back to export-table-only mode (observed on macOS CI; the
     # equivalent ELF path never had this double-strip).
-    parser = timed("header AST parse")(_header_ast_parser)(
+    parser = timed("header AST parse")(header_ast_parser)(
         headers,
         extra_includes,
         backend=header_backend,
@@ -947,7 +943,7 @@ def _dump_pe(
             language_profile=profile_hint,
         )
 
-    parser = timed("header AST parse")(_header_ast_parser)(
+    parser = timed("header AST parse")(header_ast_parser)(
         headers,
         extra_includes,
         backend=header_backend,

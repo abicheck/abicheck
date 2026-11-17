@@ -53,11 +53,11 @@ def _requires_clang() -> None:
 def _run(
     tmp_path: Path, tus: Sequence[TranslationUnit], roots: Sequence[Path]
 ) -> MergedTuFragments:
-    from abicheck.dumper import _header_ast_parser
+    from abicheck.extract.header_ast_backend import header_ast_parser
 
     return run_tu_loop(
         tus,
-        header_ast_parser=_header_ast_parser,
+        header_ast_parser=header_ast_parser,
         roots=roots,
         backend="clang",
         compiler="c++",

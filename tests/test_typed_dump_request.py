@@ -661,7 +661,7 @@ class TestResolveExecuteDumpRequestSplit:
     ):
         """An unpinned ``auto`` backend under a non-"host" ``frontend_context``
         is *always* routed to clang at execution
-        (``dumper._header_ast_parser``: ``if resolved == "clang" or
+        (``dumper.header_ast_parser``: ``if resolved == "clang" or
         frontend_context != "host": return _run_clang()``) -- the reporting
         projection must reflect that instead of naming the backend "auto"
         would otherwise default to (Codex review, fresh evidence)."""
@@ -703,7 +703,7 @@ class TestResolveExecuteDumpRequestSplit:
     ):
         """Codex review, fresh evidence, two rounds -- the first round tried
         making execution consume ``effective_header_backend`` and that was
-        itself a real regression, reverted here: ``dumper._header_ast_parser``'s
+        itself a real regression, reverted here: ``dumper.header_ast_parser``'s
         own ``_auto_ast_fallback_eligible(backend)`` checks whether the
         backend it receives is *literally* the string ``"auto"`` to decide
         whether a CastXML failure may gracefully fall back to Clang --

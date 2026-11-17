@@ -50,7 +50,7 @@ undocumented/unexported.
 
 Fix: ``dumper_toolchain._resolve_force_cpp`` now also checks the binary's
 own already-computed ``exported_dynamic | exported_static`` union
-(threaded through ``dumper._header_ast_parser`` -> ``_clang_header_dump``/
+(threaded through ``dumper.header_ast_parser`` -> ``_clang_header_dump``/
 ``_castxml_dump`` -> ``_resolve_clang_langmode``/``_resolve_force_cpp``)
 via ``dumper_ast_config._exported_symbols_indicate_cpp``: a real Itanium/
 Mach-O-Itanium/MSVC mangled export is direct, unambiguous evidence the
