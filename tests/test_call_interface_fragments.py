@@ -77,6 +77,7 @@ def _function(params: list[tuple[str, str]], ret: str) -> Function:
         return_type=ret,
         params=[_param(n, t) for n, t in params],
         is_variadic=False,
+        contract_attributes=[],
         **kw,
     )
 
@@ -126,7 +127,14 @@ def _one(ty: str, fact: AbiFundamental | None, depth: int = 0) -> Function:
         pointer_depth=depth,
         **({"type_abi_fact": Fact.present(fact)} if fact else {}),
     )
-    return Function(name="f", mangled="f", return_type="void", params=[p], is_variadic=False)
+    return Function(
+        name="f",
+        mangled="f",
+        return_type="void",
+        params=[p],
+        is_variadic=False,
+        contract_attributes=[],
+    )
 
 
 @pytest.mark.parametrize(
@@ -147,18 +155,26 @@ def test_a_slot_outside_the_domain_is_unknown(
     ty: str, fact: AbiFundamental | None, depth: int
 ) -> None:
     old = call_signature_of(_one(ty, fact, depth))
-    new = call_signature_of(Function(name="f", mangled="f", return_type="void", is_variadic=False))
+    new = call_signature_of(_fn())
     assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.UNKNOWN
 
 
 def _fn(**kw) -> Function:  # type: ignore[no-untyped-def]
-    base: dict = {"name": "f", "mangled": "f", "return_type": "void", "is_variadic": False}
+    base: dict = {
+        "name": "f",
+        "mangled": "f",
+        "return_type": "void",
+        "is_variadic": False,
+        "contract_attributes": [],
+    }
     base.update(kw)
     return Function(**base)
 
 
 def test_only_sysv_amd64_is_modelled() -> None:
-    sig = call_signature_of(_fn(params=[Param(name="a", type="int", type_abi_fact=Fact.present(_I))]))
+    sig = call_signature_of(
+        _fn(params=[Param(name="a", type="int", type_abi_fact=Fact.present(_I))])
+    )
     for abi in ("win64", "aapcs64", "x32", ""):
         assert assess_call_interface(sig, sig, abi).status is AxisStatus.UNKNOWN
 
@@ -202,8 +218,46 @@ def test_a_renamed_parameter_errs_towards_broken() -> None:
 
 
 def test_preserved_reason_names_the_removed_parameter() -> None:
-    old = CallSignature((ArgSlot("a", Rep.I32), ArgSlot("b", Rep.F64)), RetShape.VOID, False)
+    old = CallSignature(
+        (ArgSlot("a", Rep.I32), ArgSlot("b", Rep.F64)), RetShape.VOID, False
+    )
     new = CallSignature((ArgSlot("b", Rep.F64),), RetShape.I32, False)
     axis = assess_call_interface(old, new, SYSV_AMD64)
     assert axis.status is AxisStatus.PRESERVED
-    assert "a are ignored" in axis.reason and "never reads the new result" in axis.reason
+    assert (
+        "a are ignored" in axis.reason and "never reads the new result" in axis.reason
+    )
+
+
+def _long_param() -> list[Param]:
+    return [Param(name="a", type="long", type_abi_fact=Fact.present(_FACT["long"]))]
+
+
+@pytest.mark.parametrize(
+    ("old_attrs", "new_attrs"),
+    [(["ms_abi"], ["ms_abi"]), (["sysv_abi"], ["ms_abi"]), (None, [])],
+)
+def test_a_non_default_or_uncaptured_convention_is_unknown(
+    old_attrs: list[str] | None, new_attrs: list[str] | None
+) -> None:
+    old = call_signature_of(_fn(params=_long_param(), contract_attributes=old_attrs))
+    new = call_signature_of(_fn(params=_long_param(), contract_attributes=new_attrs))
+    axis = assess_call_interface(old, new, SYSV_AMD64)
+    assert axis.status is AxisStatus.UNKNOWN, axis
+
+
+def test_explicit_sysv_abi_is_the_default_convention() -> None:
+    old = call_signature_of(
+        _fn(params=_long_param(), contract_attributes=["sysv_abi", "nonnull"])
+    )
+    new = call_signature_of(_fn(params=_long_param()))
+    assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.PRESERVED
+
+
+def test_a_possible_member_function_is_unknown() -> None:
+    """static long C::f(long) -> long C::f(long) adds an implicit this."""
+    old = call_signature_of(_fn(name="C::f", params=_long_param(), is_static=True))
+    new = call_signature_of(_fn(name="C::f", params=_long_param()))
+    assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.UNKNOWN
+    c = call_signature_of(_fn(name="ns::f", params=_long_param(), is_extern_c=True))
+    assert assess_call_interface(c, c, SYSV_AMD64).status is AxisStatus.PRESERVED
