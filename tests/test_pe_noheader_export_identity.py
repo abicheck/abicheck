@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.extract.export_symbol_identity import msvc_export_function
+from abicheck.model.identity import EntityKind
 from abicheck.workflows.dump.pe import extract_pe
 
 pytestmark = pytest.mark.skipif(
@@ -85,12 +86,53 @@ def _identities(dll: Path) -> dict[str, tuple[bool, object]]:
     }
 
 
-# (builder inputs, export-table name as the linker wrote it, expected is_extern_c)
+# (label, target, source, cxx, export-table name as the linker wrote it,
+#  expected is_extern_c, expected entity leaf name or None, expected entity extra).
+# A leaf of None means not asserted: the lld i686 DLL writes its stdcall/fastcall
+# exports without the leading underscore, which the decoder does not strip (see
+# the table below for the underscore spelling, which it does). That is a known
+# gap, recorded in the PR body, not a value to pin here.
 _REAL_ROWS = [
-    ("x64 plain C", "x86_64-windows-gnu", _C_SOURCE, False, "plain_c", True),
-    ("x64 MinGW C++", "x86_64-windows-gnu", _CXX_SOURCE, True, "_Z6cxx_fni", False),
-    ("i686 MinGW C++", "i686-windows-gnu", _CXX_SOURCE, True, "_Z6cxx_fni", False),
-    ("i686 plain C", "i686-windows-gnu", _C_SOURCE, False, "plain_c", True),
+    (
+        "x64 plain C",
+        "x86_64-windows-gnu",
+        _C_SOURCE,
+        False,
+        "plain_c",
+        True,
+        "plain_c",
+        ("extern_c",),
+    ),
+    (
+        "x64 MinGW C++",
+        "x86_64-windows-gnu",
+        _CXX_SOURCE,
+        True,
+        "_Z6cxx_fni",
+        False,
+        "",
+        ("mangled", "_Z6cxx_fni"),
+    ),
+    (
+        "i686 MinGW C++",
+        "i686-windows-gnu",
+        _CXX_SOURCE,
+        True,
+        "_Z6cxx_fni",
+        False,
+        "",
+        ("mangled", "_Z6cxx_fni"),
+    ),
+    (
+        "i686 plain C",
+        "i686-windows-gnu",
+        _C_SOURCE,
+        False,
+        "plain_c",
+        True,
+        "plain_c",
+        ("extern_c",),
+    ),
     (
         "i686 stdcall",
         "i686-windows-gnu",
@@ -98,6 +140,8 @@ _REAL_ROWS = [
         False,
         "stdcall_fn@4",
         True,
+        None,
+        ("extern_c",),
     ),
     (
         "i686 fastcall",
@@ -106,12 +150,22 @@ _REAL_ROWS = [
         False,
         "@fast_fn@4",
         True,
+        None,
+        ("extern_c",),
     ),
 ]
 
 
+def _assert_entity(entity_id: object, *, leaf: str | None, extra: tuple) -> None:
+    assert entity_id.scope == ()
+    assert entity_id.kind is EntityKind.FUNCTION
+    if leaf is not None:
+        assert entity_id.leaf_name == leaf
+    assert entity_id.extra == extra
+
+
 @pytest.mark.parametrize(
-    ("label", "target", "source", "cxx", "export", "expect_extern_c"),
+    ("label", "target", "source", "cxx", "export", "expect_extern_c", "leaf", "extra"),
     _REAL_ROWS,
     ids=[row[0] for row in _REAL_ROWS],
 )
@@ -123,15 +177,16 @@ def test_headerless_export_identity_matches_pe_mangling(
     cxx: bool,
     export: str,
     expect_extern_c: bool,
+    leaf: str | None,
+    extra: tuple,
 ) -> None:
     dll = _build(tmp_path / "lib.dll", source, target, cxx=cxx)
     identities = _identities(dll)
     assert export in identities, (label, sorted(identities))
     is_extern_c, entity_id = identities[export]
     assert is_extern_c is expect_extern_c, label
-    # The identity is set, not left to a default: an unset entity_id is the
-    # gap the legacy route never had.
     assert entity_id is not None, label
+    _assert_entity(entity_id, leaf=leaf, extra=extra)
 
 
 def test_real_mingw_cxx_export_is_not_extern_c(tmp_path: Path) -> None:
@@ -142,22 +197,24 @@ def test_real_mingw_cxx_export_is_not_extern_c(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("symbol", "is_x86_32", "expect_extern_c"),
+    ("symbol", "is_x86_32", "expect_extern_c", "leaf", "extra"),
     [
         # MSVC C++ decoration: the table-only rows, through the identity function.
-        ("?cxx_fn@@YAHH@Z", False, False),
-        ("?cxx_fn@@YAHH@Z", True, False),
+        ("?cxx_fn@@YAHH@Z", False, False, "", ("mangled", "?cxx_fn@@YAHH@Z")),
+        ("?cxx_fn@@YAHH@Z", True, False, "", ("mangled", "?cxx_fn@@YAHH@Z")),
         # Itanium/MinGW C++ on i686 carries one extra leading underscore.
-        ("__Z6cxx_fni", True, False),
-        ("_Z6cxx_fni", False, False),
+        ("__Z6cxx_fni", True, False, "", ("mangled", "_Z6cxx_fni")),
+        ("_Z6cxx_fni", False, False, "", ("mangled", "_Z6cxx_fni")),
         # extern "C" spellings.
-        ("plain_c", False, True),
-        ("_plain_c", True, True),
-        ("_stdcall_fn@4", True, True),
+        ("plain_c", False, True, "plain_c", ("extern_c",)),
+        ("_plain_c", True, True, "plain_c", ("extern_c",)),
+        # i686 stdcall with its leading underscore: the decoder strips @N.
+        ("_stdcall_fn@4", True, True, "stdcall_fn", ("extern_c",)),
     ],
 )
 def test_identity_table_for_pe_spellings(
-    symbol: str, is_x86_32: bool, expect_extern_c: bool
+    symbol: str, is_x86_32: bool, expect_extern_c: bool, leaf: str, extra: tuple
 ) -> None:
     fn = msvc_export_function(symbol, is_x86_32=is_x86_32)
     assert fn.is_extern_c is expect_extern_c, (symbol, is_x86_32)
+    _assert_entity(fn.entity_id, leaf=leaf, extra=extra)
