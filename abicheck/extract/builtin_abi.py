@@ -41,7 +41,7 @@ from pathlib import Path
 
 from ..deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding
-from ..model.execution_cache import memoized
+from ..model.execution_cache import memoized, path_witness
 from ..model.fact import Fact
 
 __all__ = [
@@ -170,7 +170,18 @@ class BuiltinAbi:
     layout: Mapping[str, tuple[int, int]]
 
 
-@memoized
+def _compiler_witness(cc_bin: str, option_tokens: tuple[str, ...]) -> object:
+    """Revision of the compiler that a probe runs.
+
+    The probe reads the answer from the binary, so a replaced compiler at the
+    same name must not return the old answer. ``option_tokens`` do not change
+    what the binary is, so only the binary is witnessed here.
+    """
+    del option_tokens
+    return path_witness(cc_bin)
+
+
+@memoized(witness=_compiler_witness)
 def plain_char_is_unsigned(cc_bin: str, option_tokens: tuple[str, ...]) -> bool | None:
     """Whether a plain ``char`` is unsigned under *cc_bin* with *option_tokens*.
 
@@ -184,7 +195,7 @@ def plain_char_is_unsigned(cc_bin: str, option_tokens: tuple[str, ...]) -> bool 
     return "#define __CHAR_UNSIGNED__" in proc.stdout
 
 
-@memoized
+@memoized(witness=_compiler_witness)
 def probe_builtin_abi(cc_bin: str, option_tokens: tuple[str, ...]) -> BuiltinAbi | None:
     """The builtin layout and plain-char signedness of *cc_bin* under *option_tokens*.
 
