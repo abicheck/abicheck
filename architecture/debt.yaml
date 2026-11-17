@@ -1936,17 +1936,6 @@
       "owner": "tests",
       "rationale": "New entry, 1108 -> 1367, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 1200-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
       "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/storage/generation_spelling_table.py",
-      "baseline_lines": 801,
-      "target": "storage per-generation ledger (docs/contribute/plans/storage-format-v2.md)",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "generation_ledger",
-      "owner": "storage",
-      "rationale": "One row per extractor generation, so it grows with EXTRACTOR_GENERATION; generation 82 takes it one line past its cap. Owned by docs/contribute/plans/storage-format-v2.md: split the rows into a per-generation module there.",
-      "review_by": "2026-12-31"
     }
   ],
   "dependency_direction_exceptions": []
