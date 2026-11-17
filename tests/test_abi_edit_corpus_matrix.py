@@ -73,9 +73,9 @@ from abiforge.run.tiers import (
     DEPENDENCY_PR,
     KIND_REACH_PR,
     SOURCE_EVIDENCE_PR,
+    STRIPPED_HEADERS,
     Cell,
     pairwise,
-    STRIPPED_HEADERS,
     pr_cells,
     pr_consumer_cells,
     pr_consumer_ids,
@@ -948,7 +948,9 @@ def _write_report(cell: Cell, report: str) -> None:
 
 def _pr_row_id(op: str, seed: str, family: str, changes: dict[str, object]) -> str:
     """The row's pytest id; a stripped row says so, since it shares its three names."""
-    stripped = "-headers.stripped" if changes.get("evidence") == STRIPPED_HEADERS else ""
+    stripped = (
+        "-headers.stripped" if changes.get("evidence") == STRIPPED_HEADERS else ""
+    )
     return f"{op}-{seed}-{family}{stripped}"
 
 

@@ -277,7 +277,9 @@ KNOWN: tuple[Known, ...] = (
         "-fpack-struct=1 leaves no hole: the header dump lays out the record without "
         "the flag, so the offset and size changes read as the field removal alone",
         GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset({"none-of:TYPE_FIELD_OFFSET_CHANGED", "none-of:TYPE_SIZE_CHANGED"}),
+        issues=frozenset(
+            {"none-of:TYPE_FIELD_OFFSET_CHANGED", "none-of:TYPE_SIZE_CHANGED"}
+        ),
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(
@@ -288,7 +290,9 @@ KNOWN: tuple[Known, ...] = (
         "-fpack-struct=1 leaves no padding: the grown array reads as a type change, not "
         "an offset or size change, without the layout flag",
         GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset({"none-of:TYPE_FIELD_OFFSET_CHANGED", "none-of:TYPE_SIZE_CHANGED"}),
+        issues=frozenset(
+            {"none-of:TYPE_FIELD_OFFSET_CHANGED", "none-of:TYPE_SIZE_CHANGED"}
+        ),
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(
@@ -300,7 +304,11 @@ KNOWN: tuple[Known, ...] = (
         "the grown record reads COMPATIBLE while the binary breaks (sizeof 5 -> 6)",
         GAP_FLAG_INVISIBLE_LAYOUT,
         issues=frozenset(
-            {"missing:SONAME_BUMP_RECOMMENDED", "none-of:TYPE_SIZE_CHANGED", "weaker-than:BREAKING"}
+            {
+                "missing:SONAME_BUMP_RECOMMENDED",
+                "none-of:TYPE_SIZE_CHANGED",
+                "weaker-than:BREAKING",
+            }
         ),
         verdicts=frozenset({"COMPATIBLE"}),
     ),
