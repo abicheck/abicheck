@@ -20,7 +20,7 @@ import logging
 import shutil as shutil  # noqa: F401  # legacy test patch target
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .dump_manifest import DumpManifest
@@ -82,12 +82,12 @@ from .extract.header_ast_backend import (
     _is_hybrid_request,
     _resolve_effective_ast_backend as _resolve_effective_ast_backend,
     _resolve_single_ast_backend as _resolve_single_ast_backend,
+    header_ast_parser,
     lang_to_profile,
     validate_native_gcc_format,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
 from .extract.header_order_witness import header_order_proof
-from .extract.headers import backend_registry
 from .extract.headers.ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
@@ -96,9 +96,6 @@ from .extract.headers.ast_config import (
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
-from .extract.headers.backend_plan import BackendPlan
-from .extract.headers.backend_protocol import HeaderParseRequest
-from .extract.headers.castxml.backend import CastxmlRunError
 from .extract.headers.castxml.dumper import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
@@ -112,9 +109,7 @@ from .extract.headers.castxml.probe import (
     _parse_castxml_version as _parse_castxml_version,
     _validate_castxml_output as _validate_castxml_output,
 )
-from .extract.headers.castxml_fallback import _castxml_fallback_reason
 from .extract.headers.compile_provenance import _ast_compile_provenance
-from .extract.headers.gcc.backend import NativeGccParser
 from .extract.headers.sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
     _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
@@ -160,93 +155,9 @@ from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)
 
-
-def _header_ast_parser(
-    headers: list[Path],
-    extra_includes: list[Path],
-    *,
-    backend: str,
-    compiler: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    sysroot: Path | None,
-    nostdinc: bool,
-    lang: str | None,
-    exported_dynamic: set[str],
-    exported_static: set[str],
-    public_header_paths: list[str],
-    public_dir_paths: list[str],
-    extra_hash_dirs: tuple[Path, ...] = (),
-    frontend_context: str = "host",
-    pruning_header_roots: tuple[str, ...] | None = None,
-    no_binary_evidence: bool = False,
-) -> _CastxmlParser | _ClangAstParser | NativeGccParser:
-    """Run the resolved L2 backend and return its CastXML/Clang parser.
-
-    Both parser implementations expose the same format-builder interface.
-
-    Frontend context selection and header-only evidence semantics are
-    forwarded unchanged to the selected backend.
-    """
-    effective = _resolve_effective_ast_backend(backend, frontend_context)
-
-    request = HeaderParseRequest(
-        headers=headers,
-        extra_includes=extra_includes,
-        compiler=compiler,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        lang=lang,
-        exported_dynamic=exported_dynamic,
-        exported_static=exported_static,
-        public_header_paths=public_header_paths,
-        public_dir_paths=public_dir_paths,
-        extra_hash_dirs=extra_hash_dirs,
-        frontend_context=frontend_context,
-        pruning_header_roots=pruning_header_roots,
-        no_binary_evidence=no_binary_evidence,
-    )
-
-    def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
-        return cast(
-            _ClangAstParser,
-            backend_registry.HEADER_AST_BACKENDS["clang"].parse(
-                request, fallback_reason=fallback_reason
-            ),
-        )
-
-    if effective == "gcc":
-        return cast(
-            NativeGccParser, backend_registry.HEADER_AST_BACKENDS["gcc"].parse(request)
-        )
-    if effective == "clang":
-        return _run_clang()
-
-    plan = BackendPlan.from_environment()
-    auto_selected = plan.auto_selected(backend)
-    try:
-        return cast(
-            _CastxmlParser,
-            backend_registry.HEADER_AST_BACKENDS["castxml"].parse(request),
-        )
-    except CastxmlRunError as exc:
-        fallback_reason = _castxml_fallback_reason(
-            exc.original,
-            auto_selected=auto_selected,
-            compiler=compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            plan=plan,
-        )
-        if fallback_reason is None:
-            raise exc.original from None
-        return _run_clang(fallback_reason=fallback_reason)
+#: The header AST parser lives in its owner (extract/header_ast_backend.py); this
+#: name stays for the callers and tests that reach it through the dumper.
+_header_ast_parser = header_ast_parser
 
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
