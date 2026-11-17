@@ -192,6 +192,10 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
+                # Two readers spell one anonymous member differently (PDB
+                # <unnamed-tag>, header Outer::<unnamed-type-u>): the same member
+                # must not read as a type change across readers.
+                "tests/test_anonymous_member_spelling.py",
                 # A per-architecture ABI baseline: a version node at the target's
                 # baseline raises no floor (test_version_floor_new_provider.py).
                 "tests/test_version_floor_new_provider.py",

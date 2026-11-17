@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING
 from ....buildsource.source_inputs import extraction_read_source_inputs
 from ....extract import cache_dep_manifest
 from ....extract.binary_identity import stamp_binary_identity
+from ....extract.extraction_limitations import EXTRACTION_LIMITATIONS_KEY
+from ....extract.macho_debug import ADJACENT_DSYM_UNREADABLE_LIMITATION
 from ...cache_probe import refuse_dump_while_probing, take_probed_miss
 from .finished import FINISHED_SUBDIR, take_pending
 from .key import (
@@ -262,7 +264,7 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
     cc_inputs = compile_context_header_inputs(req.compile)
     if cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
         return ""
-    cache_headers = [*cache_headers, *cc_inputs[0], *_pe_debug_sidecar(req)]
+    cache_headers = [*cache_headers, *cc_inputs[0], *_debug_inputs(req)]
     cache_includes = [*cache_includes, *cc_inputs[1]]
 
     base = _dump_cache_extra_key(
@@ -311,12 +313,46 @@ def _pe_debug_sidecar(req: DumpCacheRequest) -> list[Path]:
     (:func:`_dump_is_cacheable`). Hashing it like a header means an edited or
     replaced PDB misses; a DLL with no PDB keeps the key it had.
     """
-    if req.binary_fmt != "pe":
-        return []
     from ....pdb_utils import locate_pdb
 
     found = locate_pdb(req.path, allow_network=False)
     return [found] if found is not None else []
+
+
+def _mach_o_debug_inputs(req: DumpCacheRequest) -> list[Path]:
+    """The ``<lib>.dSYM`` DWARF file a Mach-O dump reads beside the binary
+    (ADR-021 step 5), as :func:`abicheck.dwarf_unified._adjacent_dsym_binary`
+    resolves it: the same enumeration the dump itself performs."""
+    from ....dwarf_unified import _adjacent_dsym_binary
+
+    bundle = _adjacent_dsym_binary(req.path)
+    return [bundle] if bundle is not None else []
+
+
+#: Each binary format's debug inputs that a default dump reads, enumerated by
+#: the resolver the dump itself uses. A format absent here reads no debug input
+#: beyond its own bytes. ELF has none: a default ELF dump reads its own DWARF
+#: sections only, and build-id, ``.gnu_debuglink`` and debuginfod lookup run
+#: only with ``debug_roots``/``enable_debuginfod``, which are gated out of the
+#: cache (:func:`_dump_is_cacheable`). Explicit ``pdb_path`` and
+#: ``debug_format`` are gated out too.
+_DEBUG_INPUT_RESOLVERS: dict[str, Callable[[DumpCacheRequest], list[Path]]] = {
+    "macho": _mach_o_debug_inputs,
+    "pe": _pe_debug_sidecar,
+}
+
+
+def _debug_inputs(req: DumpCacheRequest) -> list[Path]:
+    """Every debug artifact a cacheable dump of *req* reads beside the binary.
+
+    Each path is content-hashed into the whole-snapshot key like a header, so
+    adding, replacing or removing one misses the cache. Anything a dump can read
+    that is not listed here must be gated out of the cache instead
+    (:func:`_dump_is_cacheable`); the regression table in
+    ``tests/test_dump_cache_debug_inputs.py`` holds the two together.
+    """
+    resolver = _DEBUG_INPUT_RESOLVERS.get(req.binary_fmt)
+    return resolver(req) if resolver is not None else []
 
 
 def cached_run_dump(
@@ -450,6 +486,11 @@ def cached_run_dump(
     # ran or was served (ADR-062 D11): the entry's validity beyond its key.
     with cache_dep_manifest.recording() as parses:
         snap = _dump_uncached()
+    # An adjacent dSYM that could not be read is a transient, non-fatal gap: the
+    # snapshot is still returned, but a retry against a readable dSYM must be
+    # able to answer differently, so this dump is never stored (the same rule
+    # the optional-TU path applies).
+    unreadable_debug = _has_unreadable_debug_input(snap)
     deps = parses.manifest() if initial_key else None
     # Re-derive after the dump: a tool that appeared or changed mid-run must
     # miss, not store under the key it was looked up with. Likewise a system
@@ -457,7 +498,12 @@ def cached_run_dump(
     final_key = _cache_key_for(req) if initial_key else ""
     if not cache_dep_manifest.verify(deps):
         deps = None
-    if initial_key and initial_key == final_key and _write_enabled():
+    if (
+        initial_key
+        and initial_key == final_key
+        and not unreadable_debug
+        and _write_enabled()
+    ):
         # Finished requests never read the raw tier: persisting it too
         # serializes an entire snapshot no warm execution of this request uses.
         if finisher is None:
@@ -465,6 +511,14 @@ def cached_run_dump(
     elif finisher is not None:
         finished_key = ""  # unstable key: finish, but never store
     return _finish_and_store(snap, finisher, finished_key, req, deps)
+
+
+def _has_unreadable_debug_input(snap: AbiSnapshot) -> bool:
+    """Whether *snap* records that an adjacent debug bundle could not be read."""
+    recorded = (snap.dump_provenance or {}).get(EXTRACTION_LIMITATIONS_KEY)
+    return isinstance(recorded, list) and (
+        ADJACENT_DSYM_UNREADABLE_LIMITATION in recorded
+    )
 
 
 def _stamp_cache_hit(cached: AbiSnapshot, path: Path) -> None:

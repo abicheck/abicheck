@@ -151,7 +151,6 @@
     "abicheck/diff_type_spellings.py(_match_record_fields)": 28,
     "abicheck/diff_type_spellings.py(_spelling_differ)": 3105,
     "abicheck/diff_type_spellings.py(iter_type_slot_changes)": 28,
-    "abicheck/diff_types.py(_field_type_genuinely_changed)": 189,
     "abicheck/diff_types.py(_is_flexible_array_member)": 68,
     "abicheck/diff_types.py(_overload_group_key)": 204,
     "abicheck/diff_types.py(_removals_are_unconfirmed)": 28,
@@ -271,10 +270,10 @@
     "abicheck/model/type_identifiers.py(type_identifiers)": 4959,
     "abicheck/model/type_indirection.py(unresolved_pair_verdict)": 1595,
     "abicheck/model/type_label.py(qualified_spelling)": 219,
-    "abicheck/name_classification.py(_has_top_level_ptr_or_ref)": 503,
+    "abicheck/name_classification.py(_has_top_level_ptr_or_ref)": 344,
     "abicheck/name_classification.py(_strip_cv_qualifiers)": 686,
     "abicheck/name_classification.py(contains_anonymous_type_marker)": 1191,
-    "abicheck/name_classification.py(cv_qualifiers_only_differ)": 503,
+    "abicheck/name_classification.py(cv_qualifiers_only_differ)": 344,
     "abicheck/name_classification.py(func_signature_cv_only_differ)": 343,
     "abicheck/name_classification.py(is_abi_surface_type_name)": 306,
     "abicheck/name_classification.py(is_compiler_internal_type)": 1191,
@@ -312,5 +311,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 232736
+  "total": 232229
 }

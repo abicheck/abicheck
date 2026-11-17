@@ -125,32 +125,15 @@ def test_length_mismatch_is_not_compared() -> None:
 def test_versioned_alias_pair_has_no_bytes(tmp_path: Path) -> None:
     # g_k@V1 and g_k@@V2 share the bare name, so the bare name cannot pick one
     # value. The variable keeps no bytes rather than the table-order first.
-    src = tmp_path / "alias.c"
-    src.write_text(
+    script = tmp_path / "alias.map"
+    script.write_text("V1 {};\nV2 {};\n", encoding="utf-8")
+    so = build_shared(
         "const int g_k_v1 = 3;\n"
         '__asm__(".symver g_k_v1, g_k@V1");\n'
         "const int g_k_v2 = 4;\n"
         '__asm__(".symver g_k_v2, g_k@@V2");\n',
-        encoding="utf-8",
-    )
-    script = tmp_path / "alias.map"
-    script.write_text("V1 {};\nV2 {};\n", encoding="utf-8")
-    so = tmp_path / "alias.so"
-    import subprocess
-
-    subprocess.run(
-        [
-            "gcc",
-            "-O2",
-            "-shared",
-            "-fPIC",
-            f"-Wl,--version-script={script}",
-            "-o",
-            str(so),
-            str(src),
-        ],
-        check=True,
-        capture_output=True,
+        tmp_path / "alias.so",
+        extra=(f"-Wl,--version-script={script}",),
     )
     snap = dump(so, headers=[])
     (bare,) = [v for v in snap.declarations.variables if v.name == "g_k"]
@@ -164,11 +147,22 @@ def test_versioned_alias_pair_has_no_bytes(tmp_path: Path) -> None:
 def test_relocation_coverage_is_by_overlap_not_by_start() -> None:
     from abicheck.extract.elf_data_initializer import _covered_by_relocation
 
+    # Relocations at 10 and 20 rewrite the 8-byte units [10, 18) and [20, 28).
     relocated = [10, 20]
-    assert _covered_by_relocation(relocated, 10, 1)  # a relocation at the start
-    assert not _covered_by_relocation(relocated, 11, 9)  # ends just before 20
-    assert _covered_by_relocation(relocated, 11, 10)  # reaches 20
-    assert not _covered_by_relocation([], 0, 8)
+    assert _covered_by_relocation(relocated, 10, 1, 8)  # starts on a unit
+    assert _covered_by_relocation(relocated, 11, 9, 8)  # [10, 18) overlaps [11, 20)
+    assert not _covered_by_relocation(relocated, 18, 2, 8)  # [18, 20): clear of both
+    assert _covered_by_relocation(relocated, 18, 3, 8)  # reaches the unit at 20
+    assert not _covered_by_relocation([], 0, 8, 8)
+
+
+def test_a_relocation_starting_before_the_object_still_overlaps_it() -> None:
+    # The relocation at 10 rewrites the unit [10, 18), which covers the object
+    # at 12; the one at 3 rewrites [3, 11), which does not reach 12.
+    from abicheck.extract.elf_data_initializer import _covered_by_relocation
+
+    assert _covered_by_relocation([10], 12, 4, 8)
+    assert not _covered_by_relocation([3], 12, 4, 8)
 
 
 def _bytes_of(tmp_path: Path, name: str, src: str) -> Variable | None:

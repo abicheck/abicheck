@@ -29,13 +29,18 @@ def _need_cc() -> str:
     raise AssertionError("unreachable")
 
 
-def build_shared(src: str, out: Path, *, opt: str = "-O2") -> Path:
-    """Compile *src* into a shared object at *out* and return it."""
+def build_shared(
+    src: str, out: Path, *, opt: str = "-O2", extra: tuple[str, ...] = ()
+) -> Path:
+    """Compile *src* into a shared object at *out* and return it.
+
+    *extra* are further driver or linker flags (e.g. a version script).
+    """
     cc = _need_cc()
     c_file = out.with_suffix(".c")
     c_file.write_text(src, encoding="utf-8")
     subprocess.run(
-        [cc, opt, "-shared", "-fPIC", "-o", str(out), str(c_file)],
+        [cc, opt, "-shared", "-fPIC", *extra, "-o", str(out), str(c_file)],
         check=True,
         capture_output=True,
     )

@@ -765,8 +765,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "recorded alignment fact changes; the variable's name and type spelling do not"
     ),
     80: GenerationSpellingChange(
-        "WS-6 A2.7/A2.9 (fix/ws6-dwarf-cc-stdlayout): no stored type or name spelling "
-        "changes. A DWARF record's is_standard_layout is now derived from its debug "
+        "WS-6 A2.7/A2.9 (fix/ws6-dwarf-cc-stdlayout): no stored type or name spelling changes. A DWARF record's is_standard_layout is now derived from its debug "
         "facts (access uniformity, virtual members and bases, reference members, base "
         "and first-member placement) instead of left unknown, so a standard-layout loss "
         "is a new recorded fact on existing records. The clang DW_AT_calling_convention "
@@ -774,8 +773,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "LLVM_X86RegCall rather than unknown codes. Older snapshots carry no such fact, "
         "which reads as unknown, and no rewrite applies."
     ),
-    81: GenerationSpellingChange("Reserved for #2098 (open); 82 is provisional."),
-    82: GenerationSpellingChange("G7: initializer_hex; no spelling change."),
+    81: GenerationSpellingChange(
+        "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable or unparseable adjacent dSYM stores a fixed limitation, is not cached, and the header-free Mach-O extractor collects it."
+    ),
+    82: GenerationSpellingChange("G7: initializer_hex; no spelling change"),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

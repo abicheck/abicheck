@@ -265,11 +265,11 @@ def _relocation_offsets(elf: ELFFile) -> list[int]:
     A relocated slot's stored bytes are a placeholder or an implicit addend
     (REL), so an object any relocation covers has no byte evidence of its value.
     """
-    from elftools.elf.relocation import RelocationSection
+    from elftools.elf.relocation import RelocationSection, RelrRelocationSection
 
     offsets: list[int] = []
     for section in elf.iter_sections():
-        if isinstance(section, RelocationSection):
+        if isinstance(section, (RelocationSection, RelrRelocationSection)):
             offsets.extend(int(rel["r_offset"]) for rel in section.iter_relocations())
     return sorted(offsets)
 
@@ -297,16 +297,23 @@ def _symbol_bytes(
     if offset_in_section < 0 or offset_in_section + size > int(section["sh_size"]):
         return None
     addr = int(entry["st_value"])
-    if _covered_by_relocation(relocated, addr, size):
+    unit = 8 if int(elf.elfclass) == 64 else 4
+    if _covered_by_relocation(relocated, addr, size, unit):
         return None
     fh.seek(int(section["sh_offset"]) + offset_in_section)
     raw = fh.read(size)
     return raw if len(raw) == size else None
 
 
-def _covered_by_relocation(relocated: list[int], addr: int, size: int) -> bool:
-    """Whether any relocation's ``r_offset`` falls inside ``[addr, addr + size)``."""
+def _covered_by_relocation(
+    relocated: list[int], addr: int, size: int, unit: int
+) -> bool:
+    """Whether a relocated storage unit overlaps ``[addr, addr + size)``.
+
+    A relocation rewrites one pointer-sized unit at its ``r_offset``, so one
+    that starts up to ``unit - 1`` bytes before the object still overlaps it.
+    """
     import bisect
 
-    i = bisect.bisect_left(relocated, addr)
+    i = bisect.bisect_left(relocated, addr - unit + 1)
     return i < len(relocated) and relocated[i] < addr + size
