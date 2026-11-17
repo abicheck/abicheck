@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,7 +24,12 @@ import pytest
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import dump
 
-pytestmark = pytest.mark.integration
+# ELF shared objects and ``readelf --dyn-syms``: Windows builds DLLs, which
+# export nothing under these names, so the module is Linux-only.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(sys.platform != "linux", reason="ELF dynamic-table oracle"),
+]
 
 _CLANG_CANDIDATES = ("clang++-19", "clang++-18", "clang++-17", "clang++")
 _BARE = "kdl_gone"
