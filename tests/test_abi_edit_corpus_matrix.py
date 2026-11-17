@@ -75,6 +75,7 @@ from abiforge.run.tiers import (
     SOURCE_EVIDENCE_PR,
     Cell,
     pairwise,
+    STRIPPED_HEADERS,
     pr_cells,
     pr_consumer_cells,
     pr_consumer_ids,
@@ -661,7 +662,9 @@ def test_pr_tier_guards_every_axis() -> None:
     # (DEPENDENCY_PR) and the rows that reach a corner-only kind
     # (KIND_REACH_PR, each naming its kind).
     extra = len(BUILD_DATA_PR) + len(SOURCE_EVIDENCE_PR) + len(DEPENDENCY_PR)
-    assert len(_PR) - extra - len(KIND_REACH_PR) <= 20
+    # Four stripped {B,H} guards (C and C++, gcc and clang: the primary
+    # configuration is an axis value of its own) sit on top of the 20.
+    assert len(_PR) - extra - len(KIND_REACH_PR) <= 24
     assert len(KIND_REACH_PR) <= 8
     assert {op for op, _, _, _ in BUILD_DATA_PR} == {
         op.name for op in BUILD_DATA_OPERATORS
@@ -912,9 +915,15 @@ def _write_report(cell: Cell, report: str) -> None:
         (Path(out) / f"{safe}.txt").write_text(report + "\n", encoding="utf-8")
 
 
+def _pr_row_id(op: str, seed: str, family: str, changes: dict[str, object]) -> str:
+    """The row's pytest id; a stripped row says so, since it shares its three names."""
+    stripped = "-headers.stripped" if changes.get("evidence") == STRIPPED_HEADERS else ""
+    return f"{op}-{seed}-{family}{stripped}"
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "index", range(len(_PR)), ids=[f"{o}-{s}-{f}" for o, s, f, _ in _PR]
+    "index", range(len(_PR)), ids=[_pr_row_id(o, s, f, c) for o, s, f, c in _PR]
 )
 def test_pr_tier_cell(index: int, cell_ctx: CellContext) -> None:
     cell = pr_cells()[index]

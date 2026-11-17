@@ -173,6 +173,12 @@ KIND_REACH_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("time_bits_64", "c_elf_alt", "gcc", {"flags": Flags(bits=32)}),
 )
 
+#: The evidence axis value of the stripped primary configuration (plan §4 B0):
+#: ``headers`` evidence on a stripped library. A row or factor names it as one
+#: value, so it is one more axis value in every pair draw, not a side flag.
+STRIPPED_HEADERS = "headers.stripped"
+
+
 # (op, seed, producer family, config changes). One guard per axis.
 _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("struct_append_field", "c_core", "gcc", {}),
@@ -186,6 +192,11 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
         {"flags": Flags(visibility="hidden")},
     ),
     ("struct_append_field", "c_core", "gcc", {"evidence": "binary"}),
+    # The primary L2 configuration (stripped, headers only), both families.
+    ("struct_append_field", "c_core", "gcc", {"evidence": STRIPPED_HEADERS}),
+    ("struct_append_field", "c_core", "clang", {"evidence": STRIPPED_HEADERS}),
+    ("virtual_reorder", "cxx_classes", "gcc", {"evidence": STRIPPED_HEADERS}),
+    ("func_param_type_change", "cxx_classes", "clang", {"evidence": STRIPPED_HEADERS}),
     ("enum_change_value", "c_core", "gcc", {"evidence": "dwarf"}),
     ("func_param_type_change", "cxx_classes", "gcc", {"evidence": "binary"}),
     ("no_unique_address_added", "cxx_classes", "gcc", {"std": "c++20"}),
@@ -242,6 +253,13 @@ def _missing(family: str, role: str) -> str:
     return f"no {role} {family} toolchain installed"
 
 
+def evidence_fields(value: object) -> dict[str, object]:
+    """The ``Config`` fields one evidence axis value stands for."""
+    if value == STRIPPED_HEADERS:
+        return {"evidence": "headers", "stripped": True}
+    return {"evidence": value}
+
+
 def pr_cells() -> list[Cell | tuple[str, str]]:
     """The PR tier; a ``(cell id, reason)`` pair where a toolchain is missing."""
     out: list[Cell | tuple[str, str]] = []
@@ -255,6 +273,8 @@ def pr_cells() -> list[Cell | tuple[str, str]]:
         for key, value in changes.items():
             if key == "std":
                 cfg = replace(cfg, std=next(s for s in STANDARDS if s.name == value))
+            elif key == "evidence":
+                cfg = replace(cfg, **evidence_fields(value))
             elif key == "consumer":
                 other = _newest(str(value), consumer_toolchains())
                 if other is None:
@@ -419,7 +439,7 @@ def _factors(
         "cxx11_abi": [None, 0],
         "abi_version": [None, 11],
         "consumer_flags": ["same", "flip_short_enums"],
-        "evidence": list(EVIDENCE),
+        "evidence": [*EVIDENCE, STRIPPED_HEADERS],
         # Read only when evidence is headers (Config normalizes it otherwise).
         "header_backend": list(HEADER_BACKENDS),
     }
@@ -568,8 +588,8 @@ def row_to_cell(
         flags=flags,
         # The build's own consumer and the drawn one: one library pair, two checks.
         consumers=(Consumer(), drawn) if drawn != Consumer() else (),
-        evidence=str(row["evidence"]),
         header_backend=str(row.get("header_backend", "castxml")),
+        **evidence_fields(row["evidence"]),  # type: ignore[arg-type]
     )
     return Cell(op, seed, cfg)
 
@@ -644,6 +664,9 @@ def _weekly_configs(
     base = Config(std=newest_std, producer=tc)
     out = [
         replace(base, consumers=consumers),
+        # The stripped primary configuration ({B,H}): the weekly tier's own
+        # base build, with the consumer cross, so every operator meets it.
+        replace(base, consumers=consumers, evidence="headers", stripped=True),
         replace(base, flags=Flags(bits=32)),
         replace(base, flags=Flags(opt="O2", visibility="hidden")),
         replace(base, flags=Flags(short_enums=True, pack=1)),
