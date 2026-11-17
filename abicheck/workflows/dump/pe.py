@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...dwarf_advanced import AdvancedDwarfMetadata
 from ...errors import SnapshotError, ValidationError
+from ...extract.export_symbol_identity import msvc_export_function
 from ...extract.surface_fact_producers import export_table_surface_facts
 from ...model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from ...model.dwarf_facts import AdvancedExtractionStatus
@@ -187,19 +188,28 @@ def extract_pe(
                 scoped.declarations.debug_advanced = dwarf_adv
             return scoped
 
-    funcs = [
-        Function(
-            name=(exp.name or f"ordinal:{exp.ordinal}"),
-            mangled=(exp.name or f"ordinal:{exp.ordinal}"),
-            return_type="?",
-            visibility=Visibility.PUBLIC,
-            # An export-table entry: (c) confirmed, (a)/(b) never looked at
-            # on this path -- see model/surface_facts.py.
-            **export_table_surface_facts(),
-            is_extern_c=not (exp.name or "").startswith("?"),
+    # The identity of each export is the PE one ``_dump_pe`` gives: MinGW's
+    # Itanium ``_Z``/``__Z`` C++ names are C++ (not extern "C"), and i686
+    # decoration is undone for the leaf name. Only the identity fields are
+    # taken from it; this route keeps its own return type and visibility.
+    is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
+    funcs = []
+    for exp in pe_meta.exports:
+        sym = exp.name or f"ordinal:{exp.ordinal}"
+        identity = msvc_export_function(sym, is_x86_32=is_x86_32)
+        funcs.append(
+            Function(
+                name=sym,
+                mangled=sym,
+                return_type="?",
+                visibility=Visibility.PUBLIC,
+                # An export-table entry: (c) confirmed, (a)/(b) never looked at
+                # on this path -- see model/surface_facts.py.
+                **export_table_surface_facts(),
+                is_extern_c=identity.is_extern_c,
+                entity_id=identity.entity_id,
+            )
         )
-        for exp in pe_meta.exports
-    ]
 
     # ADR-024 Phase 1 (PDB provenance): when header scoping was requested but
     # the header parse failed (``header-backend-unavailable``), recover

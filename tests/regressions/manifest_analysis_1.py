@@ -914,6 +914,9 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_tu_merge_darwin_linkage.py",
             "tests/test_manifest_semantic_ir_locality.py",
+            # The same shape on PE: a headerless dump's `is_extern_c` read a
+            # MinGW `_Z...` C++ export as extern "C" (real clang/lld DLLs).
+            "tests/test_pe_noheader_export_identity.py",
         ),
         # Both seed-test files build fake Function/Variable/TuFragment
         # objects reproducing the exact Darwin-decorated mangled-name
