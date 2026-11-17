@@ -286,7 +286,7 @@ def test_a_possible_member_function_is_unknown() -> None:
 _MEMBER_HEADER = """struct C { long f(long a); static long g(long a); };
 template <class T> struct A { virtual void t(); long u(long a); };
 extern "C" {
-struct E { long k(long a); };
+struct E { long k(long a); long q(long a) asm("plain_q"); };
 long h(long a);
 }
 """
@@ -294,6 +294,7 @@ _MEMBER_SOURCE = """#include "a.h"
 long C::f(long a) { return a; }
 long C::g(long a) { return a; }
 long E::k(long a) { return a; }
+long E::q(long a) { return a; }
 long h(long a) { return a; }
 """
 
@@ -335,8 +336,11 @@ def test_extractor_members_are_unknown_and_c_linkage_is_modelled(
             assess_call_interface(sig, sig, SYSV_AMD64).status
         )
     assert status["h"] == {AxisStatus.PRESERVED}
-    # `k` is a member declared inside an extern "C" block.
-    assert status["f"] == status["g"] == status["k"] == {AxisStatus.UNKNOWN}
+    # `k` and `q` are members declared inside an extern "C" block; `q`'s asm
+    # label gives it an unmangled symbol ([dcl.link]/4: still C++ linkage).
+    assert (
+        status["f"] == status["g"] == status["k"] == status["q"] == {AxisStatus.UNKNOWN}
+    )
     if frontend == "clang":
         # clang records the uninstantiated template's methods, with their bare
         # names as symbols (castxml does not record them at all).

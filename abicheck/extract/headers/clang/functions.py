@@ -510,6 +510,14 @@ def parse_functions(
             has_asm_label=has_asm_label,
             is_cxx=is_cxx,
         )
+        # [dcl.link]/4: a record member never has C linkage, even inside an
+        # `extern "C"` block or with an asm label (castxml agrees).
+        if (
+            is_extern_c
+            and not entry.in_friend
+            and strip_record_scopes(entry.scope_path) != entry.scope_path
+        ):
+            is_extern_c = False
         mangled = _strip_darwin_itanium_decoration(
             raw_mangled,
             raw_mangled or name,

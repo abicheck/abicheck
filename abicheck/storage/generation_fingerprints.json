@@ -146,7 +146,7 @@
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "ea6bffb6e5a2c12c7dead503d5e5c617f2270012a2c04734c45ed71601b97b52",
+      "abicheck/extract/headers/clang/functions.py": "da0a5bd5878befebcc334845d203b4042402e5b502742cce610c7f772a89b376",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "03490daf8db2a1d1711c9b8a67f8a78b3479dfef54cce9baffbb98ba8f49420c",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -245,9 +245,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
     },
-    "fingerprint": "1ae14da51f2649413d047e202a1169ce8945dfdb52a00ce80d1bbb3f05468a24",
-    "generation": 82,
-    "reason": "G7 initializer_hex (generation 82, unreleased): a file-scope static no longer takes an exported same-name object's bytes; the fix lands inside this unreleased generation, so no released snapshot carries the old answer"
+    "fingerprint": "3ff069ee18d7f083c09d34675091fafe57802608723f969bc855713a22a1fe82",
+    "generation": 83,
+    "reason": "condensed the comment of the generation-83 change to keep the file under its size cap"
   },
   "resolver": {
     "files": {
