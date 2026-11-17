@@ -106,6 +106,8 @@ does not pay.
 | **E8** ✅ | TLA+ spec of scope completeness (unselected / expected-not-produced / failed / retired; zero comparisons) | Can any path report a clean pass after zero comparisons, or a removal without inventory? | Same as E7. Result: I1 and I2 hold on the real code; **I3 is violated** under `warn` by degraded members (`formal/EXPERIMENTS.md` § E8) |
 | **E9** ✅ | Generalize E0's "unknown never creates a finding" into a Lean property over the tri-state `Fact` layer (ADR-063), with a Python conformance sweep over detectors | Does the property hold across detectors, not just one? | Sweep lists violating detectors (expect a few; F1 history) |
 | **E10** ✅ | Close one fragment end to end: insert one scalar field (size = alignment ∈ {1,2,4,8}) into a 1–4 field scalar struct, LP64 SysV (`formal/FRAGMENT.md`) | Is "the generator is complete" provable for an explicitly given space, at what cost? | Yes: enumeration = space and generator bijection **proved**; oracle per case; gcc + clang + abicheck agree on all 6368 cases; same observable ⇔ same key **proved**; reduced set of 32 covers every class (tested). The reduction's transfer to the implementation is an assumption, stated there |
+| **E11** ✅ | TLA+ trace validation: record every real disposition-pipeline run of abiforge's corpus and check it against `DispositionPipeline.tla` (Python and TLC) | Are real runs, not only a transcription of the spec, accepted by it? | The recorded corpus runs (358 of 360 default cells) are, after modelling in-step ledger records (`formal/EXPERIMENTS.md` § E11); CI job `trace-validation` |
+| **E12** ✅ | Close the enum fragment end to end: one insert/remove/re-initialization of a 1–4 enumerator C11 enum (`formal/ENUM_FRAGMENT.md`) | Does the E10 recipe carry to a second fragment? | Yes: 11372 cases, bijection and interval/equivalence theorems proved, gcc + clang + abicheck agree on every case |
 
 **Order:** E1 → E2 → E3 → E4 → E5 is the main line toward a complete
 generator. E6 runs alongside, from E1 on. E7–E8 are independent of it and
@@ -132,7 +134,7 @@ vptr, templates). Each fragment is one Lean module on a shared core
 4. ✅ (offset; `byte_size` narrowed in known-gaps) **DWARF layout channel:** make `FieldInfo.byte_offset` optional (schema
    change), and audit `byte_size == 0` as "unknown" (E9).
 5. ✅ **E8**, then the next fragments in the stated order: function signatures,
-   enums, ELF versioning, C++ layout.
+   enums (✅ E12), ELF versioning, C++ layout.
 
 6. **Outside the proved fragments:** the evidence-level model (`observable_at`),
    the stripped binary + headers cell, configuration-space coverage and

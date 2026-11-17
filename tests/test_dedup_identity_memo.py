@@ -184,3 +184,64 @@ def test_an_in_place_list_mutation_is_seen_by_the_next_lookup() -> None:
     after = memo.primary_id(change)
     assert after == resolve_change_identity(change).primary_id
     assert after != before
+
+
+def test_a_cached_identity_is_read_without_a_memo_call(monkeypatch) -> None:
+    """The cross-detector pass takes a cached key straight from the memo's
+    entries: a hit makes no ``IdentityMemo.primary_id`` call, and the first
+    lookup of a change makes exactly one."""
+    from abicheck.compare.finding_dedup import dedup_identity_key
+    from abicheck.compare.finding_identity import resolve_change_identity
+
+    calls: list[int] = []
+    real = IdentityMemo.primary_id
+
+    def counting(self, change: Change) -> str:
+        calls.append(id(change))
+        return real(self, change)
+
+    monkeypatch.setattr(IdentityMemo, "primary_id", counting)
+    memo = IdentityMemo()
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="gone")
+    expected = resolve_change_identity(change).primary_id
+
+    assert dedup_identity_key(change, memo) == expected
+    assert calls == [id(change)]
+    calls.clear()
+    assert dedup_identity_key(change, memo) == expected
+    assert calls == []
+
+
+def test_a_list_valued_input_gives_the_fresh_key_on_the_cross_pass() -> None:
+    """A list-valued field is frozen into the cross pass's validity snapshot
+    without crashing, and the key it yields is the fresh canonical one."""
+    from abicheck.compare.finding_dedup import dedup_identity_key
+    from abicheck.compare.finding_identity import resolve_change_identity
+
+    memo = IdentityMemo()
+    change = Change(
+        kind=ChangeKind.FUNC_REMOVED,
+        symbol="foo",
+        description="gone",
+        old_value=["a", "b"],
+    )
+    assert (
+        dedup_identity_key(change, memo) == resolve_change_identity(change).primary_id
+    )
+
+
+def test_a_set_valued_input_gives_the_fresh_key_on_the_cross_pass() -> None:
+    """The same for a set-valued field."""
+    from abicheck.compare.finding_dedup import dedup_identity_key
+    from abicheck.compare.finding_identity import resolve_change_identity
+
+    memo = IdentityMemo()
+    change = Change(
+        kind=ChangeKind.FUNC_REMOVED,
+        symbol="foo",
+        description="gone",
+        old_value={"a", "b"},  # type: ignore[arg-type]
+    )
+    assert (
+        dedup_identity_key(change, memo) == resolve_change_identity(change).primary_id
+    )

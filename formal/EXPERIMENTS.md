@@ -1,4 +1,4 @@
-# Formal-methods experiments E1–E10: results
+# Formal-methods experiments E1–E12: results
 
 Roadmap and rationale: [`docs/contribute/plans/formal-methods-and-generator-completeness.md`](../docs/contribute/plans/formal-methods-and-generator-completeness.md).
 E0 (the `TYPE_FIELD_OFFSET_CHANGED` rule) is in [`README.md`](README.md).
@@ -16,6 +16,8 @@ Run date 2026-11-12. Tools: Lean 4.15.0 (core only), gcc 13.3.0, castxml 0.7.0, 
 | E8 | Can a path report a clean pass after zero comparisons, or a removal without inventory? | **I1 and I2 hold** on the real aggregation over all ≤3-member releases. **I3 was violated** under the default `warn` policy (a degraded `failed` member beside a completed one exited `0`); **fixed**, now 0 violations ([§ E8](#e8-scope-completeness-adr-065)) |
 | E10 | Can one layout fragment be closed end to end: explicit space, generator proved to cover it, oracle, compiler and abicheck run on every case, proved reduction? | **Yes**, for "insert one scalar field into a 1–4 field scalar struct", LP64 SysV: 6368 cases, generator bijection **proved**, gcc and clang = model on 12736/12736 layouts each, abicheck = oracle on 6368/6368 per compiler; same observable ⇔ same key **proved**, 32 classes, reduced set 199× smaller ([`FRAGMENT.md`](FRAGMENT.md)) |
 | E9 | Does unknown evidence create findings? | Header channel: no manufactured or changed-value claim in 12 erasure sweeps. The DWARF channel **cannot be swept**: it has no "unknown" value. Two latent "unknown → 0" encodings found there (not reachable from valid DWARF or from snapshots abicheck wrote) |
+| E11 | Are recorded real pipeline runs accepted by `DispositionPipeline.tla`? | **Yes for the recorded runs, after one spec extension.** 363 runs (358 of abiforge's 360 default cells with gcc + castxml; the 2 `-m32`/`-mx32` rebuilds need multilib and were not built; 10164 step transitions): 361 refined the E7 spec as written; 2 left it because `detect_cpp_patterns` records into the ledger itself, once for an object it creates and never shows. With that step shape modelled (`StepWith`'s `R`, `C`), all 363 are accepted by Python and by TLC (81 distinct traces), no state violates `NothingVanishes`, and no step drops and adds in one call. Four seeded-wrong trace shapes are rejected by both ([§ E11](#e11-trace-validation-of-the-disposition-pipeline)) |
+| E12 | Can a second fragment, C enum edits, be closed the same way? | **Yes**, for one insert/remove/re-initialization in a 1–4 enumerator C11 enum with initializers in {none, 0, 2, -1}: 11372 cases, generator bijection **proved**, gcc and clang values = model on 22744/22744 sides each, abicheck = oracle on 11372/11372 per compiler; revalued enumerators form an interval and same observable ⇔ same key **proved**, 32 classes, reduced set 355× smaller ([`ENUM_FRAGMENT.md`](ENUM_FRAGMENT.md)) |
 
 ## E1. The record-layout space
 
@@ -337,6 +339,58 @@ with the glue transcribed; it does not run `abicheck compare` on a directory).
 | Extraction = gcc (E6b) | **tested** on the same fragment, two backends |
 | abicheck = model (E5) | **tested** exhaustively on the fragment; nothing outside it |
 | Disposition trigger precondition (E7) | **model-checked** (TLC and BFS, graphs equal, small bounds); implementation **observed** on 3 pairs |
+| Real pipeline runs refine the disposition spec (E11) | **trace-validated** (Python and TLC) on the 358 of 360 abiforge default cells that built with gcc + castxml (not the 2 multilib rebuilds); *not* a proof for inputs outside the corpus |
 | No manufactured findings (E9) | **tested** for 3 layout fact families on the fragment |
 | Scope completeness I1 (zero comparisons never pass), I2 (removal needs proof) (E8) | **model-checked** (TLC and BFS, graphs equal, 3 members, faithful spec) and **tested** on the real aggregation (≤3 members, all settings) |
 | Scope completeness I3 (failed never clean) (E8) | **model-checked** on the spec; **fixed** on the real code (0 violations over 46848 combinations ≤3 members, all settings) |
+
+## E11. Trace validation of the disposition pipeline
+
+E7 checked `DispositionPipeline.tla` against a hand transcription of itself.
+E11 checks it against the implementation.
+
+**Recording.** `tla/disposition_trace.py` wraps every step of a real
+`DispositionPipeline.run` in a delegating proxy and reads the context after
+`_record_dropped_duplicates`, so one run becomes a sequence of abstract
+states (`changes`, `buckets`, `ledger`, `seen`), one per step boundary. A
+finding's id is its first-appearance position; objects are held alive for
+the run so `id()` is never reused. The recorder does not change the result
+(`test_e11_recorder_observes_without_changing_the_result`).
+`tla/trace_corpus.py` records while abiforge runs its default edit corpus.
+
+**Checking.** Each transition must be `StepWith(D, M, A, B, R, C)` with the
+witnesses read off the two states, and its successor must equal the
+recorded one. `tla/check_trace.py` does this in Python, and with `--tlc`
+generates `TraceData.tla` per distinct trace for `DispositionTrace.tla`,
+which TLC accepts only by reaching the last state (a mismatch is a deadlock,
+a vanish an invariant violation).
+
+**Results (2026-11-17, gcc 13, castxml 0.7.0).** 360 cells, 358 built (the
+`-m32`/`-mx32` rebuilds need multilib), 363 pipeline runs, 10164
+transitions.
+
+| Check | Result |
+|---|---|
+| E7 spec as written (`--strict-v1`) | 361 accepted, **2 rejected**: `detect_cpp_patterns` ledger records outside the count trigger (`cpu_dispatch_variants_dropped/cxx_more`, `exported_instantiation_default_changed/cxx_more`); in the second, one id is created and recorded but never visible |
+| E11 spec (`R`, `C` modelled) | 363 accepted (Python); 81 distinct traces accepted by TLC |
+| `NothingVanishes` on every recorded state | holds |
+| E7 precondition (no step drops and adds in one call) | holds on all 10164 transitions |
+| Seeded-wrong traces: unrecorded drop, count-masked drop (the E7 counterexample), lost ledger record, resurrected finding | each rejected by Python **and** TLC |
+
+**Finding (spec gap, not a defect).** The E7 spec let a step touch the
+ledger only through the count trigger. The real pipeline also records from
+inside steps: `record_collapsed_findings` for grouped children moved to
+`suppressed`, and `merge_late_findings` for a late duplicate it builds and
+folds in the same call. Both only add records, so they cannot make a finding
+vanish, but a spec that omits them is not a model of the code. They are now
+`R` (records of seen or newly added ids) and `C` (ids created and recorded
+without being shown); the model-checked `Step` fixes both to `{}`, so the
+E7 state graphs and `compare_tlc.py`'s TLC = Python equality are unchanged.
+
+**Boundaries.** The corpus is abiforge's default matrix with one compiler
+and one header backend; other configs, and late findings `compare()` adds
+after the pipeline, are not traced. A trace accepted by the spec is
+evidence for those inputs, not a proof for all inputs. CI: job
+`trace-validation` in `.github/workflows/formal-lean.yml`, which now also
+runs when `abicheck/policy/finding_disposition/**` or `abiforge/**` change.
+

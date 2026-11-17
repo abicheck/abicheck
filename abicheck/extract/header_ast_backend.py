@@ -46,8 +46,20 @@ directly; :mod:`abicheck.dumper` does not re-export it.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
 from ..errors import AstContextMissingError, ValidationError
-from .headers.backend_plan import ast_frontend_pin
+from .headers import backend_registry
+from .headers.backend_plan import BackendPlan, ast_frontend_pin
+from .headers.backend_protocol import HeaderParseRequest
+from .headers.castxml.backend import CastxmlRunError
+from .headers.castxml_fallback import _castxml_fallback_reason
+
+if TYPE_CHECKING:
+    from ..dumper_clang import _ClangAstParser
+    from .headers.castxml.dumper import _CastxmlParser
+    from .headers.gcc.backend import NativeGccParser
 
 __all__ = [
     "HEADER_BACKENDS",
@@ -218,3 +230,92 @@ def lang_to_profile(lang: str | None) -> str | None:
     if lu in ("C++", "CPP"):
         return "cpp"
     return None
+
+
+def header_ast_parser(
+    headers: list[Path],
+    extra_includes: list[Path],
+    *,
+    backend: str,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    sysroot: Path | None,
+    nostdinc: bool,
+    lang: str | None,
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    public_header_paths: list[str],
+    public_dir_paths: list[str],
+    extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
+    pruning_header_roots: tuple[str, ...] | None = None,
+    no_binary_evidence: bool = False,
+) -> _CastxmlParser | _ClangAstParser | NativeGccParser:
+    """Run the resolved L2 backend and return its CastXML/Clang parser.
+
+    Both parser implementations expose the same format-builder interface.
+
+    Frontend context selection and header-only evidence semantics are
+    forwarded unchanged to the selected backend.
+    """
+    effective = _resolve_effective_ast_backend(backend, frontend_context)
+
+    request = HeaderParseRequest(
+        headers=headers,
+        extra_includes=extra_includes,
+        compiler=compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        exported_dynamic=exported_dynamic,
+        exported_static=exported_static,
+        public_header_paths=public_header_paths,
+        public_dir_paths=public_dir_paths,
+        extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
+        pruning_header_roots=pruning_header_roots,
+        no_binary_evidence=no_binary_evidence,
+    )
+
+    def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
+        return cast(
+            "_ClangAstParser",
+            backend_registry.HEADER_AST_BACKENDS["clang"].parse(
+                request, fallback_reason=fallback_reason
+            ),
+        )
+
+    if effective == "gcc":
+        return cast(
+            "NativeGccParser",
+            backend_registry.HEADER_AST_BACKENDS["gcc"].parse(request),
+        )
+    if effective == "clang":
+        return _run_clang()
+
+    plan = BackendPlan.from_environment()
+    auto_selected = plan.auto_selected(backend)
+    try:
+        return cast(
+            "_CastxmlParser",
+            backend_registry.HEADER_AST_BACKENDS["castxml"].parse(request),
+        )
+    except CastxmlRunError as exc:
+        fallback_reason = _castxml_fallback_reason(
+            exc.original,
+            auto_selected=auto_selected,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            plan=plan,
+        )
+        if fallback_reason is None:
+            raise exc.original from None
+        return _run_clang(fallback_reason=fallback_reason)
