@@ -26,6 +26,10 @@ on:
     paths:
       - 'abicheck/policy/finding_disposition/**'
       - 'abiforge/**'
+      - '.github/actions/install-system-deps/action.yml'
+      - '.github/actions/setup-castxml/action.yml'
+      - 'action/install-castxml.sh'
+      - 'pyproject.toml'
       - 'formal/**'
       - 'tests/test_lean_field_offset_rule.py'
       - 'tests/test_formal_experiments.py'
@@ -36,6 +40,10 @@ on:
     paths:
       - 'abicheck/policy/finding_disposition/**'
       - 'abiforge/**'
+      - '.github/actions/install-system-deps/action.yml'
+      - '.github/actions/setup-castxml/action.yml'
+      - 'action/install-castxml.sh'
+      - 'pyproject.toml'
       - 'formal/**'
       - 'tests/test_lean_field_offset_rule.py'
       - 'tests/test_formal_experiments.py'
