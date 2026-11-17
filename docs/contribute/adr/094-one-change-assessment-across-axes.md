@@ -37,7 +37,7 @@ Each was right where it was added. None of them is part of a model of what the c
 
 1. **One edit becomes several unrelated findings, each with its own verdict.** For example, `long f(long)` → `void *f(void *)` yields `func_params_changed`, `param_pointer_level_changed`, `func_return_changed` and `return_pointer_level_changed`, all breaking, from header and DWARF detectors that never compare notes. Nothing states the edit's effect once.
 2. **A kind's verdict stands in for a question nobody asked.** `func_params_changed` is breaking because parameter edits *usually* break the call. The fragments measured how often they do not.
-   - E13 ([`formal/FUNC_FRAGMENT.md`](../../../formal/FUNC_FRAGMENT.md)) and E14 (`formal/RET_FRAGMENT.md`, in review) are closed spaces of 2160 and 1176 cases, with the register model proved in Lean and confirmed by execution on gcc and clang.
+   - E13 (`formal/FUNC_FRAGMENT.md`) and E14 (`formal/RET_FRAGMENT.md`, in review) are closed spaces of 2160 and 1176 cases, with the register model proved in Lean and confirmed by execution on gcc and clang.
    - In them, 408 parameter and return-type edits keep the binary call interface and are still reported `BREAKING` (exit 4).
    - All 408 break source, so the accurate verdict is `API_BREAK`.
    - The opposite also happens. ADR-084 exists because a source-level kind kept `API_BREAK` from binary evidence that could not support it.
