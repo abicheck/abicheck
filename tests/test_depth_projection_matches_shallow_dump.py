@@ -44,7 +44,7 @@ own bookkeeping:
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -341,6 +341,8 @@ class Run:
     grouped: frozenset[str] = frozenset()
     #: Each finding folded into a root type's change, with that root.
     folded: tuple[tuple[Finding, str], ...] = ()
+    #: The full change behind each finding, so a failure names the values.
+    details: dict[Finding, str] = field(default_factory=dict)
 
     @classmethod
     def of(cls, old: AbiSnapshot, new: AbiSnapshot) -> Run:
@@ -361,6 +363,14 @@ class Run:
                 for c in result.redundant_changes
                 if c.caused_by_type
             ),
+            {
+                (c.kind.value, c.symbol): (
+                    f"{c.description!r} old={c.old_value!r} new={c.new_value!r} "
+                    f"field={c.field_name!r} caused_by={c.caused_by_type!r} "
+                    f"provenance={c.evidence_provenance!r}"
+                )
+                for c in result.changes
+            },
         )
 
     def folded_under_typedef(self, finding: Finding) -> bool:
@@ -527,8 +537,14 @@ def test_binary_projection_matches_binary_only_dump(
     p_old, p_new = project_pair_to_depth(rich_old, rich_new, "binary")
     bin_old = dump(v1_lib, headers=[], version="v1")
     bin_new = dump(v2_lib, headers=[], version="v2")
-    unexplained = _unexplained(Run.of(p_old, p_new), Run.of(bin_old, bin_new))
-    assert unexplained == {"only_binary_dump": [], "only_projected": []}, unexplained
+    projected_run, oracle_run = Run.of(p_old, p_new), Run.of(bin_old, bin_new)
+    unexplained = _unexplained(projected_run, oracle_run)
+    if unexplained != {"only_binary_dump": [], "only_projected": []}:
+        detail = {
+            key: projected_run.details.get(key) or oracle_run.details.get(key)
+            for key in unexplained["only_projected"] + unexplained["only_binary_dump"]
+        }
+        raise AssertionError(f"{unexplained}\nfull changes: {detail}")
 
 
 # ── the residual rules excuse only the finding their evidence names ─────────
