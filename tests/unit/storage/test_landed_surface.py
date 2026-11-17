@@ -91,7 +91,6 @@ _INTERNAL_MODULES = (
     "abicheck.storage.dwarf_layout_facts",
     "abicheck.storage.generation_scope",
     "abicheck.storage.generation_migrations",
-    "abicheck.storage.generation_spelling_table",
     "abicheck.storage.generation_spelling_types",
     "abicheck.storage.generation_spelling_rows",
     "abicheck.storage.castxml_array_migration",

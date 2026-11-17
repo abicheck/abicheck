@@ -17,7 +17,8 @@
 One :class:`GenerationSpellingChange` row per extractor generation in
 :data:`SPELLING_MIGRATIONS`. ``scripts/generation_corpus_gate.py`` reads this
 file's literal by AST, so the table stays a dict literal and every reason a
-literal string. :mod:`.generation_spelling_table` re-exports the names.
+literal string; the row record and placeholder rule are in
+:mod:`.generation_spelling_types`.
 """
 
 from __future__ import annotations

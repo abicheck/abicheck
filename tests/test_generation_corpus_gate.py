@@ -124,7 +124,7 @@ def test_gate_placeholders_agree_with_the_runtime_predicate() -> None:
     helper must refuse the same set."""
     import ast
 
-    from abicheck.storage.generation_spelling_table import (
+    from abicheck.storage.generation_spelling_types import (
         PLACEHOLDER_REASONS,
         is_placeholder_reason,
     )
