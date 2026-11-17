@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from ...compare.identity_memo import IdentityMemo
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model import AbiSnapshot
     from ...model.change import Change
@@ -197,6 +199,11 @@ class PipelineContext:
     #: handed in by the caller -- this policy-layer context never constructs
     #: a snapshot itself. See :attr:`baseline_or_empty`.
     absent_baseline: AbiSnapshot | None = None
+    #: Canonical finding identity, computed once per change for this run and
+    #: shared by the two adjacent dedup steps (``DeduplicateAstDwarf`` then
+    #: ``DeduplicateCrossDetector``). Owned by this run, so it lives exactly as
+    #: long as the pipeline does; see ``compare.identity_memo.IdentityMemo``.
+    identity_memo: IdentityMemo = field(default_factory=IdentityMemo)
 
     @property
     def scope_resolved(self) -> bool:

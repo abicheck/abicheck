@@ -34,6 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
+from .observability import observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -42,6 +43,9 @@ from .registry import (
     Verdict,
 )
 
+_OBS_H = observable(
+    ("B", "H"), rationale="declaration-only fact: visible in the public header"
+)
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
@@ -335,6 +339,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "serialization_tag_changed",
         _B,
+        observable_at=(_OBS_H,),
         impact="A serialization tag ID (or equivalent constant identifying a class "
         "for persistence) changed value or was swapped with another class's "
         "tag. Symbol table, types, and layout are all unchanged — every "

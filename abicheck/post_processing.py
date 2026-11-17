@@ -134,22 +134,6 @@ class DowngradeOpaqueStructChanges:
         return kept
 
 
-class DeduplicateAstDwarf:
-    """Collapse AST/DWARF duplicate findings."""
-
-    name = "deduplicate_ast_dwarf"
-
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        # An evolution step: no baseline, no OLD->NEW delta to read
-        # (see PipelineContext.baseline_present for why not a self-compare).
-        if ctx.old is None:
-            return changes
-
-        from .compare.finding_dedup import deduplicate_ast_dwarf
-
-        return deduplicate_ast_dwarf(changes, ctx.old, ctx.new)
-
-
 class DeduplicateCrossDetector:
     """Collapse overlapping reports from different detectors."""
 

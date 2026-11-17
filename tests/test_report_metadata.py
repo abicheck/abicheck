@@ -566,7 +566,7 @@ class TestDeduplication:
     def test_a_kind_carrying_list_valued_old_new_does_not_crash(self):
         """Regression: `_dedup_cross_kind` used to index every change's
         `cross_tier_transition()` unconditionally, including kinds outside
-        `_DWARF_TO_AST_EQUIV` entirely (e.g. `PYTHON_STABLE_ABI_VIOLATION`,
+        `_SUBSUMED_AST_KINDS` entirely (e.g. `PYTHON_STABLE_ABI_VIOLATION`,
         whose `new_value` is a `list[str]` despite `Change.old_value`/
         `new_value`'s declared `str | None` type) -- a list is unhashable,
         so building the lookup set raised `TypeError: unhashable type:
