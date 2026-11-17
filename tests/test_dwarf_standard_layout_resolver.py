@@ -355,3 +355,29 @@ def test_a_first_member_chain_past_the_depth_limit_is_unknown() -> None:
         summaries[k(n)] = summary(members=[rec(n + 1)])
     summaries[k(length)] = summary(members=[_SCALAR])
     assert _Resolver(summaries).trait(k(1)) is None
+
+
+def test_a_missing_or_too_deep_type_is_unknown_not_a_record() -> None:
+    from types import SimpleNamespace as NS
+
+    from abicheck.extract import dwarf_standard_layout as sl
+
+    # No type DIE, or a type nested past the depth limit: neither names a record.
+    assert sl._ref_of(None) == sl._UNKNOWN
+    record = NS(tag="DW_TAG_structure_type", offset=5, cu=NS(cu_offset=0))
+    assert sl._ref_of(record, sl._MAX_DEPTH + 1) == sl._UNKNOWN
+
+
+def test_a_base_whose_type_is_not_a_record_has_no_key(monkeypatch) -> None:
+    from types import SimpleNamespace as NS
+
+    from abicheck.extract import dwarf_standard_layout as sl
+
+    inheritance = NS(cu=NS(cu_offset=0))
+    scalar = NS(tag="DW_TAG_base_type", offset=9, cu=NS(cu_offset=0))
+    monkeypatch.setattr(sl, "resolve_type_die", lambda die, cu: scalar)
+    monkeypatch.setattr(sl, "unwrap_cv_typedef", lambda die, cu: die)
+    assert sl._base_key(inheritance) is None
+    record = NS(tag="DW_TAG_class_type", offset=7, cu=NS(cu_offset=0))
+    monkeypatch.setattr(sl, "resolve_type_die", lambda die, cu: record)
+    assert sl._base_key(inheritance) == (0, 7)
