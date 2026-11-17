@@ -62,6 +62,7 @@ from ..model.call_interface import (
 from ..model.cc_attributes import is_cc_attribute
 from ..model.declarations import Function
 from ..model.owner_recovery import is_mangled_identity
+from ..model.snapshot import AbiSnapshot
 
 __all__ = [
     "AxisStatus",
@@ -69,6 +70,7 @@ __all__ = [
     "CallSignature",
     "assess_call_interface",
     "call_signature_of",
+    "linkage_evidence_reliable",
 ]
 
 
@@ -108,12 +110,38 @@ class CallSignature:
     maybe_member: bool = False
 
 
-def call_signature_of(fn: Function, ret: RetShape | None = None) -> CallSignature:
+#: The extractor generation from which the clang header backend records a
+#: class member declared inside an ``extern "C"`` block as C++ linkage
+#: ([dcl.link]/4). Earlier clang-produced snapshots can carry
+#: ``is_extern_c=True`` (and, with an asm label, an unmangled symbol) for such
+#: a member, so their linkage flag cannot exclude a member.
+CLANG_MEMBER_LINKAGE_GENERATION = 83
+
+
+def linkage_evidence_reliable(snapshot: AbiSnapshot) -> bool:
+    """Whether *snapshot*'s ``is_extern_c`` flags reliably exclude members.
+
+    True for a snapshot extracted by this process (``fact_generations`` is
+    ``None``), for one extracted at or after
+    :data:`CLANG_MEMBER_LINKAGE_GENERATION`, and for a castxml snapshot (never
+    affected). A caller passes the result to :func:`call_signature_of`.
+    """
+    gens = snapshot.fact_generations
+    if gens is None or gens[0] >= CLANG_MEMBER_LINKAGE_GENERATION:
+        return True
+    return snapshot.ast_producer == "castxml"
+
+
+def call_signature_of(
+    fn: Function, ret: RetShape | None = None, *, linkage_reliable: bool = True
+) -> CallSignature:
     """Reduce *fn* to a :class:`CallSignature` from its recorded facts.
 
     *ret* overrides the return shape for a struct return whose classification
     the caller knows; otherwise a scalar or ``void`` return is read from the
-    return slot's ABI fact.
+    return slot's ABI fact. *linkage_reliable* is
+    :func:`linkage_evidence_reliable` of the snapshot *fn* came from; when it
+    is false, no function is taken to have C linkage.
     """
     convention = _convention(fn.contract_attributes)
     # A non-static member function receives an implicit `this` that `params`
@@ -126,7 +154,9 @@ def call_signature_of(fn: Function, ret: RetShape | None = None) -> CallSignatur
     # `is_extern_c` AND has an unmangled symbol, because a linkage
     # specification never changes a member's `_Z` symbol. Only those
     # functions are modelled.
-    c_linkage = fn.is_extern_c and not is_mangled_identity(fn.mangled)
+    c_linkage = (
+        linkage_reliable and fn.is_extern_c and not is_mangled_identity(fn.mangled)
+    )
     maybe_member = not c_linkage
     if ret is None:
         ret = ret_shape_of(

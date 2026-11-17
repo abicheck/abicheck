@@ -21,15 +21,18 @@ from pathlib import Path
 import pytest
 
 from abicheck.compare.call_interface import (
+    CLANG_MEMBER_LINKAGE_GENERATION,
     AxisStatus,
     CallSignature,
     assess_call_interface,
     call_signature_of,
+    linkage_evidence_reliable,
 )
 from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
 from abicheck.model.call_interface import SYSV_AMD64, ArgSlot, Rep, RetShape
 from abicheck.model.declarations import Function, Param
 from abicheck.model.fact import Fact
+from abicheck.model.snapshot import AbiSnapshot
 
 FORMAL = Path(__file__).resolve().parent.parent / "formal"
 
@@ -114,6 +117,34 @@ def test_the_408_call_compatible_cases_are_all_preserved() -> None:
     n = sum(r["call"] for r in FUNC.load_export()["rows"])
     n += sum(r["call"] for r in RET.load_export()["rows"])
     assert n == 408
+
+
+@pytest.mark.parametrize(
+    ("producer", "generations", "reliable"),
+    [
+        ("clang", None, True),  # extracted by this process
+        ("clang", (CLANG_MEMBER_LINKAGE_GENERATION, 4, 15), True),
+        ("clang", (CLANG_MEMBER_LINKAGE_GENERATION - 1, 4, 15), False),
+        ("hybrid", (CLANG_MEMBER_LINKAGE_GENERATION - 1, 4, 15), False),
+        ("castxml", (CLANG_MEMBER_LINKAGE_GENERATION - 1, 4, 15), True),
+    ],
+)
+def test_a_pre_83_clang_snapshot_cannot_vouch_for_c_linkage(
+    producer: str, generations: tuple[int, int, int] | None, reliable: bool
+) -> None:
+    """Before generation 83 clang stored `is_extern_c=True` and an unmangled
+    asm symbol for `extern "C" { struct C { long f(long) asm("plain_f"); }; }`;
+    such a stored member looks exactly like a C function."""
+    snap = AbiSnapshot(
+        library="l", version="1", ast_producer=producer, fact_generations=generations
+    )
+    assert linkage_evidence_reliable(snap) is reliable
+    stored_member = _fn(name="f", mangled="plain_f", params=_long_param())
+    sig = call_signature_of(
+        stored_member, linkage_reliable=linkage_evidence_reliable(snap)
+    )
+    want = AxisStatus.PRESERVED if reliable else AxisStatus.UNKNOWN
+    assert assess_call_interface(sig, sig, SYSV_AMD64).status is want
 
 
 # ----------------------------------------------- outside the modelled domain
