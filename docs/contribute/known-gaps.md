@@ -612,10 +612,10 @@ per-item status in the
 
 ### False-positive risk
 
-#### A C parameter edit that keeps the call interface gates as an ABI break (2026-11-17)
+#### A C parameter or return-type edit that keeps the call interface gates as an ABI break (2026-11-17)
 
-**Status (2026-11-17): OPEN.** `func_params_changed` is `BREAKING` whatever the platform calling convention says, so a C parameter edit after which every old binary still calls the function correctly gates as an ABI break (exit 4) rather than a source break (exit 2). The closed function-signature fragment (`formal/FUNC_FRAGMENT.md`, E13) proves when an x86-64 System V edit keeps the call interface (`set_compatible_iff`, `rem_compatible_iff`) and confirms it by execution on gcc and clang: in its 2160-case space, 240 such edits are reported `breaking`. They are removing the last parameter (84), removing a parameter with no later one of its register class, e.g. the `int` in `f(int, double)` (42), and `long` ↔ `void *` (114). All of them still break callers' source, so the accurate verdict is `API_BREAK`. Changing it makes a parameter edit's verdict depend on the target ABI's register assignment (per-platform: SysV, AAPCS64 and Windows x64 differ), so it is a default/exit-code change and needs an ADR. `false-positive` (over-severity: ABI break for a source-only break). Owner: `compare/` function-signature detectors and `policy/` classification.
-<!-- no-canary: pinned by tests/test_formal_func_fragment.py, whose integration run requires abicheck's verdict to equal the report contract's `breaking` on every case, so it fails once the answer changes -->
+**Status (2026-11-17): OPEN.** `func_params_changed` is `BREAKING` whatever the platform calling convention says, so a C parameter edit after which every old binary still calls the function correctly gates as an ABI break (exit 4) rather than a source break (exit 2). The closed function-signature fragment (`formal/FUNC_FRAGMENT.md`, E13) proves when an x86-64 System V edit keeps the call interface (`set_compatible_iff`, `rem_compatible_iff`) and confirms it by execution on gcc and clang: in its 2160-case space, 240 such edits are reported `breaking`. They are removing the last parameter (84), removing a parameter with no later one of its register class, e.g. the `int` in `f(int, double)` (42), and `long` ↔ `void *` (114). All of them still break callers' source, so the accurate verdict is `API_BREAK`. Changing it makes a parameter edit's verdict depend on the target ABI's register assignment (per-platform: SysV, AAPCS64 and Windows x64 differ), so it is a default/exit-code change and needs an ADR. `false-positive` (over-severity: ABI break for a source-only break). The closed return-type fragment (`formal/RET_FRAGMENT.md`, E14) finds the same for `func_return_changed`: in its 1176-case space, 168 return-type changes keep the call interface (`call_compatible_iff`, confirmed by execution) and are reported `breaking`. They are a `void` function starting to return a value in registers (126), whose callers' source breaks only where the function's type is used (`void (*fp)(int) = f;`), and `long` ↔ `void *` (42). Owner: `compare/` function-signature detectors and `policy/` classification.
+<!-- no-canary: pinned by tests/test_formal_func_fragment.py and tests/test_formal_ret_fragment.py, whose integration run requires abicheck's verdict to equal the report contract's `breaking` on every case, so it fails once the answer changes -->
 
 #### Affected-symbol attribution ignores identifier boundaries (2026-11-12)
 
@@ -952,6 +952,12 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 `hygiene` — The test named "exists in history" does not check that a task's `base_commit` is reachable from the default branch. [Full write-up](known-gaps/agent-eval-base-commit-test-checks-presence-not-ancestry.md)
 <!-- no-canary: test-tooling gap in the agent-eval harness; needs an unmerged-commit git fixture -->
 
+
+### PE i686 decorated exports without the leading underscore (2026-11-17)
+
+**Status (2026-11-17): OPEN, narrow.** The PE identity decoder (`extract/export_symbol_identity.py`, `msvc_export_function`) strips i686 stdcall/fastcall decoration only from the `_`-prefixed export spelling (`_stdcall_fn@4`). lld writes the same exports without the leading underscore (`stdcall_fn@4`, `@fast_fn@4`), so the leaf name keeps its `@N` and the extern-C reading and entity identity are not decoded for them. Reproducer: a `clang --target=i686-windows-gnu -shared -fuse-ld=lld` DLL exporting a `__stdcall` function; `extract_pe` returns the export as `stdcall_fn@4` with leaf `stdcall_fn@4`. The headerless and header-built PE routes share this decoder, so the fix lands there once. Out of the current Linux focus (i686/PE). Owner: `extract/export_symbol_identity.py`.
+
+<!-- canary: tests/test_pe_noheader_export_identity.py::test_canary_lld_undecorated_i686_stdcall_leaf_is_not_decoded -->
 
 ## Do not re-attempt
 

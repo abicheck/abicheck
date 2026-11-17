@@ -109,15 +109,17 @@ _SHORT_STRING_RE = re.compile(
 
 def normalize_dual_abi_spelling(spelling: str) -> str:
     """``spelling`` (a demangled name or type) with the dual-ABI distinction
-    removed: no ``__cxx11::``, no ``[abi:cxx11]``, and every
+    removed: no ``std::__cxx11::`` (libstdc++'s inline namespace), no
+    ``[abi:cxx11]`` tag, and every
     ``std::basic_string<C, std::char_traits<C>, std::allocator<C> >`` written
-    as its ``std::string`` alias, the form the old ABI demangles to.
+    as its ``std::string`` alias, the form the old ABI demangles to. A user
+    namespace's ``__cxx11::`` names a different function and is kept.
 
     The matching key of :func:`pair_remangled_exports`: two exports whose
     spellings differ but normalize equal are one declaration built under
     the two ABIs.
     """
-    out = spelling.replace("[abi:cxx11]", "").replace("__cxx11::", "")
+    out = spelling.replace("[abi:cxx11]", "").replace("std::__cxx11::", "std::")
     out = _FULL_STRING_RE.sub(lambda m: _STRING_ALIAS[m.group("ch")], out)
     out = _SHORT_STRING_RE.sub(lambda m: _STRING_ALIAS[m.group("ch")], out)
     return re.sub(r"\s+", " ", out).strip()

@@ -32,6 +32,26 @@ __all__ = ["EXTRACTION_BUG_CLASSES"]
 
 EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="extraction.binary_only_const_initializer_not_read",
+        invariant=(
+            "A binary-only snapshot's exported read-only object carries its section "
+            "bytes; two sides of equal length whose bytes differ report "
+            "VAR_VALUE_CHANGED. A side without bytes is unknown, never a change, and "
+            "a header value is never compared against raw bytes."
+        ),
+        fixed_by=(2115,),
+        seed_tests=(
+            "tests/test_var_value_initializer_bytes.py",
+            "tests/test_var_initializer_hex_codec.py",
+        ),
+        public_surfaces=("abicheck.dumper.dump", "abicheck.checker.compare"),
+        axes={
+            "object": ("integer", "array", "relocated pointer", "static"),
+            "change": ("initializer", "same value", "size", "relocation-only"),
+            "snapshot": ("fresh", "legacy without the key"),
+        },
+    ),
+    BugClass(
         id="extraction.castxml_vector_element_not_modelled",
         invariant=(
             "A castxml vector node, and a complex (float _Complex) or bit-precise "

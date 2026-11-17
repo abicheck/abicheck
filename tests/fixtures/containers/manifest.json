@@ -30,6 +30,36 @@
         "snapshot_schema_version": 69
       }
     },
+    "clang_snapshot/2": {
+      "commit": "46ec32187ea8",
+      "generations": {
+        "extractor": 82,
+        "resolver": 4
+      },
+      "path": "clang/2/libcorpus.json.gz",
+      "sample": "clang_snapshot",
+      "sha256": "e36111d0bc376bc9b6ebe7c5ca04bd1da50adffa73eb9edb2434344e541104ff",
+      "toolchain": {
+        "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+      },
+      "versions": {
+        "section_schema_versions": {
+          "baseline_set_metadata": 1,
+          "binary": 1,
+          "build": 1,
+          "bundle_composition": 2,
+          "debug": 1,
+          "declarations": 2,
+          "graph": 1,
+          "layout": 1,
+          "provenance": 1,
+          "semantic_ir": 2,
+          "types": 1
+        },
+        "snapshot_schema_version": 69
+      }
+    },
     "g38_document/1": {
       "commit": "570d74291ddf",
       "generations": {
@@ -53,6 +83,38 @@
           "bundle_composition": 2,
           "debug": 1,
           "declarations": 1,
+          "graph": 1,
+          "layout": 1,
+          "provenance": 1,
+          "semantic_ir": 2,
+          "types": 1
+        },
+        "snapshot_schema_version": 69
+      }
+    },
+    "g38_document/2": {
+      "commit": "46ec32187ea8",
+      "generations": {
+        "extractor": 82,
+        "resolver": 4
+      },
+      "path": "g38/2/release.json.gz",
+      "sample": "g38_document",
+      "sha256": "ba451d01450e5ce56018209bffde68cfc863cd9d510fb2b57fb5e0bb27fac3bf",
+      "toolchain": {
+        "castxml": "castxml version 0.7.0",
+        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+      },
+      "versions": {
+        "bundle_facts_schema_version": 5,
+        "section_schema_versions": {
+          "baseline_set_metadata": 1,
+          "binary": 1,
+          "build": 1,
+          "bundle_composition": 2,
+          "debug": 1,
+          "declarations": 2,
           "graph": 1,
           "layout": 1,
           "provenance": 1,
@@ -95,6 +157,39 @@
         "snapshot_schema_version": 69
       }
     },
+    "g40_archive/2": {
+      "commit": "46ec32187ea8",
+      "generations": {
+        "extractor": 82,
+        "resolver": 4
+      },
+      "path": "g40/2/release.zip",
+      "sample": "g40_archive",
+      "sha256": "7c93611f1e4d391b1871c72b2e37c54a82a5a0fee22cb025b9d86393fd349fac",
+      "toolchain": {
+        "castxml": "castxml version 0.7.0",
+        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+      },
+      "versions": {
+        "bundle_archive_schema_version": 1,
+        "bundle_facts_schema_version": 5,
+        "section_schema_versions": {
+          "baseline_set_metadata": 1,
+          "binary": 1,
+          "build": 1,
+          "bundle_composition": 2,
+          "debug": 1,
+          "declarations": 2,
+          "graph": 1,
+          "layout": 1,
+          "provenance": 1,
+          "semantic_ir": 2,
+          "types": 1
+        },
+        "snapshot_schema_version": 69
+      }
+    },
     "macho_snapshot/1": {
       "commit": "570d74291ddf",
       "generations": {
@@ -113,6 +208,33 @@
           "bundle_composition": 2,
           "debug": 1,
           "declarations": 1,
+          "graph": 1,
+          "layout": 1,
+          "provenance": 1,
+          "semantic_ir": 2,
+          "types": 1
+        },
+        "snapshot_schema_version": 69
+      }
+    },
+    "macho_snapshot/2": {
+      "commit": "46ec32187ea8",
+      "generations": {
+        "extractor": 82,
+        "resolver": 4
+      },
+      "path": "macho/2/libcorpus.json.gz",
+      "sample": "macho_snapshot",
+      "sha256": "369d2e1b9027ed1e25cbacac6f7c628b7f6953e59e15370f6a2e52b76a274439",
+      "toolchain": {},
+      "versions": {
+        "section_schema_versions": {
+          "baseline_set_metadata": 1,
+          "binary": 1,
+          "build": 1,
+          "bundle_composition": 2,
+          "debug": 1,
+          "declarations": 2,
           "graph": 1,
           "layout": 1,
           "provenance": 1,
@@ -156,6 +278,40 @@
         "snapshot_schema_version": 69
       }
     },
+    "package/2": {
+      "commit": "46ec32187ea8",
+      "generations": {
+        "extractor": 82,
+        "resolver": 4
+      },
+      "path": "package/2",
+      "sample": "package",
+      "sha256": "6209e7e120f0a51855de8632ca19b681616883e8b6456244605e9bb6c1ab8422",
+      "toolchain": {
+        "castxml": "castxml version 0.7.0",
+        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+      },
+      "versions": {
+        "bundle_variant_spec_schema_version": 1,
+        "package_format_version": 2,
+        "ref_schema_version": 2,
+        "section_schema_versions": {
+          "baseline_set_metadata": 1,
+          "binary": 1,
+          "build": 1,
+          "bundle_composition": 2,
+          "debug": 1,
+          "declarations": 2,
+          "graph": 1,
+          "layout": 1,
+          "provenance": 1,
+          "semantic_ir": 2,
+          "types": 1
+        },
+        "snapshot_schema_version": 69
+      }
+    },
     "pe_snapshot/1": {
       "commit": "570d74291ddf",
       "generations": {
@@ -174,6 +330,33 @@
           "bundle_composition": 2,
           "debug": 1,
           "declarations": 1,
+          "graph": 1,
+          "layout": 1,
+          "provenance": 1,
+          "semantic_ir": 2,
+          "types": 1
+        },
+        "snapshot_schema_version": 69
+      }
+    },
+    "pe_snapshot/2": {
+      "commit": "46ec32187ea8",
+      "generations": {
+        "extractor": 82,
+        "resolver": 4
+      },
+      "path": "pe/2/corpus_pe.json.gz",
+      "sample": "pe_snapshot",
+      "sha256": "896b0cac1b11721a539af99246baec992b54319aadf5ce1429d02f3e49da4c37",
+      "toolchain": {},
+      "versions": {
+        "section_schema_versions": {
+          "baseline_set_metadata": 1,
+          "binary": 1,
+          "build": 1,
+          "bundle_composition": 2,
+          "debug": 1,
+          "declarations": 2,
           "graph": 1,
           "layout": 1,
           "provenance": 1,
