@@ -1,0 +1,3 @@
+### Changed
+
+- **Ten more kinds declare where they are observable (ADR-093).** Type-level kinds (`template_return_type_changed`, `template_param_type_changed`, `tag_type_renamed`, `used_reserved_field`, `abi_equivalent_type_changed`) need the header or DWARF and are declared `{B,D}`, `{B,H}`. Header-level facts (`opaque_invariant_broken`, `handle_type_changed`, `typedef_version_sentinel`) are declared `{B,H}`. `instantiation_missing_from_binary` and `overload_set_rerouted` are emitted from the stripped binary alone and are declared `{B}`. Each declaration is backed by a real-compile oracle. They leave the UNCLASSIFIED baseline (129 -> 119).
