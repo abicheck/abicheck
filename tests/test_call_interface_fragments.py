@@ -258,21 +258,26 @@ def test_explicit_sysv_abi_is_the_default_convention() -> None:
 
 
 def test_a_possible_member_function_is_unknown() -> None:
-    """static long C::f(long) -> long C::f(long) adds an implicit this. The
-    extractors store the leaf name (`f`), and clang may give an uninstantiated
-    template method its bare name as symbol; only the C-linkage flag decides."""
-    for mangled in ("_ZN1C1fEl", "f"):
+    """static long C::f(long) -> long C::f(long) adds an implicit this. A
+    member keeps its `_Z` symbol even under extern "C", and a non-extern-C
+    function with a bare symbol may be an uninstantiated template method."""
+    for mangled, extern_c in (("_ZN1C1fEl", False), ("f", False), ("_ZN1C1fEl", True)):
         old = call_signature_of(
             _fn(
-                mangled=mangled, params=_long_param(), is_static=True, is_extern_c=False
+                mangled=mangled,
+                params=_long_param(),
+                is_static=True,
+                is_extern_c=extern_c,
             )
         )
         new = call_signature_of(
-            _fn(mangled=mangled, params=_long_param(), is_extern_c=False)
+            _fn(mangled=mangled, params=_long_param(), is_extern_c=extern_c)
         )
         axis = assess_call_interface(old, new, SYSV_AMD64)
-        assert axis.status is AxisStatus.UNKNOWN and "implicit this" in axis.reason
-    c = call_signature_of(_fn(name="ns::f", mangled="_ZN2ns1fEl", params=_long_param()))
+        assert axis.status is AxisStatus.UNKNOWN and "implicit this" in axis.reason, (
+            mangled
+        )
+    c = call_signature_of(_fn(params=_long_param()))
     assert assess_call_interface(c, c, SYSV_AMD64).status is AxisStatus.PRESERVED
 
 
@@ -280,11 +285,15 @@ def test_a_possible_member_function_is_unknown() -> None:
 
 _MEMBER_HEADER = """struct C { long f(long a); static long g(long a); };
 template <class T> struct A { virtual void t(); long u(long a); };
-extern "C" long h(long a);
+extern "C" {
+struct E { long k(long a); };
+long h(long a);
+}
 """
 _MEMBER_SOURCE = """#include "a.h"
 long C::f(long a) { return a; }
 long C::g(long a) { return a; }
+long E::k(long a) { return a; }
 long h(long a) { return a; }
 """
 
@@ -326,8 +335,10 @@ def test_extractor_members_are_unknown_and_c_linkage_is_modelled(
             assess_call_interface(sig, sig, SYSV_AMD64).status
         )
     assert status["h"] == {AxisStatus.PRESERVED}
-    assert status["f"] == status["g"] == {AxisStatus.UNKNOWN}
-    # clang records the uninstantiated template's methods (castxml does not).
-    for name in ("t", "u"):
-        assert status.get(name, {AxisStatus.UNKNOWN}) == {AxisStatus.UNKNOWN}, status
+    # `k` is a member declared inside an extern "C" block.
+    assert status["f"] == status["g"] == status["k"] == {AxisStatus.UNKNOWN}
+    if frontend == "clang":
+        # clang records the uninstantiated template's methods, with their bare
+        # names as symbols (castxml does not record them at all).
+        assert status["t"] == status["u"] == {AxisStatus.UNKNOWN}, status
     assert all(v == {AxisStatus.UNKNOWN} for k, v in status.items() if k != "h"), status

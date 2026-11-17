@@ -116,14 +116,17 @@ def call_signature_of(fn: Function, ret: RetShape | None = None) -> CallSignatur
     """
     convention = _convention(fn.contract_attributes)
     # A non-static member function receives an implicit `this` that `params`
-    # does not list. Neither `is_static` (for a free function it means
-    # internal linkage), the name (extractors store the leaf, `f`) nor the
-    # symbol (clang gives an uninstantiated template method its bare name as
-    # a fallback symbol) tells a member reliably. The extractors' C-linkage
-    # flag does: both header backends set `is_extern_c` for every function of
-    # a C header and every `extern "C"` declaration, and never for a member.
-    # Only those functions are modelled.
-    maybe_member = not fn.is_extern_c
+    # does not list, and no single recorded fact identifies a member: not
+    # `is_static` (for a free function it means internal linkage), not the
+    # name (extractors store the leaf, `f`), not the symbol alone (clang gives
+    # an uninstantiated template method its bare name), and not `is_extern_c`
+    # alone (clang propagates an `extern "C" { struct ... }` block into the
+    # record's members). Two together do: a C-linkage function is flagged
+    # `is_extern_c` AND has an unmangled symbol, because a linkage
+    # specification never changes a member's `_Z` symbol. Only those
+    # functions are modelled.
+    c_linkage = fn.is_extern_c and not fn.mangled.startswith("_Z")
+    maybe_member = not c_linkage
     if ret is None:
         ret = ret_shape_of(
             fn.return_type_abi_fact, fn.return_pointer_depth, fn.return_type
