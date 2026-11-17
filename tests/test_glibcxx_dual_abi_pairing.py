@@ -25,16 +25,24 @@ import pytest
 
 from abicheck.compare.glibcxx_dual_abi_pairs import pair_dual_abi_flips
 from tests._abicheck_subprocess import abicheck_command
+from tests._elf_capability import elf_capability
 
 pytestmark = pytest.mark.integration
 
-_GXX = shutil.which("g++")
-#: The oracle needs all three: g++ builds, nm lists, c++filt demangles. A missing
-#: tool is a skip; a compiler that runs and fails is a failure.
-_MISSING_TOOLS = [t for t in ("g++", "nm", "c++filt") if shutil.which(t) is None]
-_NEEDS_ORACLE = pytest.mark.skipif(
-    bool(_MISSING_TOOLS), reason=f"oracle tools not on PATH: {_MISSING_TOOLS}"
+#: The oracle reads ELF (``nm -D``) and builds the flip with the libstdc++ dual
+#: ABI, so it needs an ELF-writing g++ (the probe names the missing capability)
+#: plus nm and c++filt. A host without them is a skip; a compiler that runs and
+#: fails is a failure.
+_ELF_GXX = elf_capability("gcc", "shared", std_headers=True)
+_MISSING_TOOLS = [t for t in ("nm", "c++filt") if shutil.which(t) is None]
+_ORACLE_SKIP = (
+    "no ELF-capable g++ on this host"
+    if _ELF_GXX is None
+    else f"oracle tools not on PATH: {_MISSING_TOOLS}"
+    if _MISSING_TOOLS
+    else None
 )
+_NEEDS_ORACLE = pytest.mark.skipif(_ORACLE_SKIP is not None, reason=_ORACLE_SKIP or "")
 _FLIP = "glibcxx_dual_abi_flip_detected"
 _CHANGED = "glibcxx_dual_abi_changed"
 
@@ -60,7 +68,7 @@ def _build(work: Path, tag: str, n_string: int, abi: int, n_plain: int = 1) -> P
     so = work / f"lib{tag}_abi{abi}.so"
     subprocess.run(
         [
-            _GXX,
+            *_ELF_GXX,
             "-shared",
             "-fPIC",
             "-O2",
