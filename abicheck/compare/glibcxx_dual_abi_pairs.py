@@ -33,14 +33,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .glibcxx_dual_abi import normalize_dual_abi_spelling
+
 __all__ = ["DualAbiPairing", "is_flip_pair", "pair_dual_abi_flips"]
 
-_CXX11_TAG = "[abi:cxx11]"
 #: libstdc++'s inline namespace; a user namespace named ``__cxx11`` is not one.
 _STD_CXX11_NS = "std::__cxx11::"
-#: The compact spelling of libstdc++'s ``std::string`` in the new ABI's
-#: demangled name, with all whitespace removed.
-_NEW_STD_STRING = "std::basic_string<char,std::char_traits<char>,std::allocator<char>>"
 
 
 @dataclass(frozen=True)
@@ -77,22 +75,11 @@ def is_flip_pair(removed_demangled: str, added_demangled: str) -> bool:
 
 
 def _cxx11_identity(demangled: str) -> str:
-    """The demangled name with the libstdc++ dual-ABI spellings removed, so the
-    old and new spellings of one function compare equal: ``std::string`` (the
-    legacy ``Ss``) and ``std::__cxx11::basic_string<char, ...>``, and the
-    ``[abi:cxx11]`` return-type tag, all reduce to one identity."""
-    compact = "".join(
-        demangled.replace(_CXX11_TAG, "").replace(_STD_CXX11_NS, "std::").split()
-    )
-    return compact.replace(_NEW_STD_STRING, "std::string")
-
-
-def _direction(removed_tagged: int, added_tagged: int) -> str:
-    return (
-        "CXX11 ABI → legacy ABI"
-        if removed_tagged >= added_tagged
-        else "legacy ABI → CXX11 ABI"
-    )
+    """The demangled name with the dual-ABI spellings removed (the shared
+    :func:`normalize_dual_abi_spelling`), so the old and new spellings of one
+    function compare equal. The inline-namespace scope is enforced by
+    :func:`_has_cxx11_tag`, not here."""
+    return normalize_dual_abi_spelling(demangled)
 
 
 def pair_dual_abi_flips(
@@ -140,11 +127,19 @@ def pair_dual_abi_flips(
         paired=paired,
         rem_tagged_paired=rem_tagged,
         add_tagged_paired=add_tagged,
-        direction=_direction(rem_tagged, add_tagged),
+        direction=(
+            "CXX11 ABI → legacy ABI"
+            if rem_tagged >= add_tagged
+            else "legacy ABI → CXX11 ABI"
+        ),
         un_removed=len(un_removed),
         un_added=len(un_added),
         un_rem_tag=un_rem_tag,
         un_add_tag=un_add_tag,
-        un_direction=_direction(un_rem_tag, un_add_tag),
+        un_direction=(
+            "CXX11 ABI → legacy ABI"
+            if un_rem_tag >= un_add_tag
+            else "legacy ABI → CXX11 ABI"
+        ),
         mass=mass,
     )

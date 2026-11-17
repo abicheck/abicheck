@@ -54,7 +54,6 @@
     "abicheck/compare/function_signature.py(_param_differs)": 450,
     "abicheck/compare/function_signature.py(_return_spellings_differ)": 345,
     "abicheck/compare/function_signature.py(signature_of.<locals>.value)": 660,
-    "abicheck/compare/glibcxx_dual_abi_pairs.py(_direction)": 2,
     "abicheck/compare/implicit_member_surface.py(_is_orphan_implicit_member)": 164,
     "abicheck/compare/implicit_member_surface.py(is_unexported_implicit_member)": 328,
     "abicheck/compare/internal_leak_names.py(_internal_subject)": 687,
@@ -112,7 +111,6 @@
     "abicheck/compare/typedef_spelling_keys.py(typedef_spelling_index)": 2,
     "abicheck/deadline.py(_registration_window_depth)": 13,
     "abicheck/deadline.py(remaining)": 13,
-    "abicheck/demangle.py(_is_itanium_mangled)": 8923,
     "abicheck/demangle.py(demangle_one_batched)": 1350,
     "abicheck/demangle.py(strip_signature)": 308,
     "abicheck/diff_atomic.py(_has_atomic)": 1004,
@@ -313,5 +311,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 232848
+  "total": 223923
 }
