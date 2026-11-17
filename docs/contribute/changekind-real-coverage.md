@@ -16,9 +16,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **203**
+- Kinds with at least one real source: **204**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 90
+- Kinds per source: catalog 159, field_shapes 9, integration 92
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 101 |
+| unmapped | 120 | 100 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -146,7 +146,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_floor_raised` | RISK | 1 | 0 | 0 |
 | `runtime_symbol_provider_changed` | RISK | 0 | 0 | 0 |
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
-| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 3 |
+| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 5 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
 | `stack_canary_removed` | RISK | 1 | 0 | 3 |
@@ -356,7 +356,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `float_abi_changed` | RISK | 0 | 0 | 0 |
 | `header_build_context_mismatch` | API_BREAK | 1 | 0 | 0 |
 | `lto_mode_changed` | RISK | 1 | 0 | 0 |
-| `rtti_mode_changed` | RISK | 1 | 0 | 0 |
+| `rtti_mode_changed` | RISK | 1 | 0 | 2 |
 | `sanitizer_mode_changed` | RISK | 0 | 0 | 0 |
 | `stdlib_debug_mode_changed` | RISK | 0 | 0 | 0 |
 | `struct_packing_mode_changed` | RISK | 1 | 0 | 0 |
@@ -509,7 +509,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_field_removed` | BREAKING | 0 | 0 | 0 |
 | `type_lost_final` | RISK | 0 | 0 | 0 |
 | `typedef_version_sentinel` | COMPATIBLE | 0 | 0 | 0 |
-| `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 0 |
+| `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 2 |
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |
 | `union_field_type_changed` | BREAKING | 0 | 0 | 0 |
 | `unspecified_return_now_named` | COMPATIBLE | 0 | 0 | 1 |
