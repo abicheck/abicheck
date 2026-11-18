@@ -668,8 +668,8 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
         * len(STANDARDS)
         * n_cfg
         * len(FAMILIES) ** 2
-        # headers counts once per header backend.
-        * (len(EVIDENCE) - 1 + len(HEADER_BACKENDS))
+        # headers counts once per header backend, unstripped and stripped.
+        * (len(EVIDENCE) - 1 + 2 * len(HEADER_BACKENDS))
     )
 
 
