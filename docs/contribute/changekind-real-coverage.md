@@ -16,19 +16,19 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **204**
+- Kinds with at least one real source: **214**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 93
+- Kinds per source: catalog 159, field_shapes 9, integration 105
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 73 |
+| L0 | 129 | 65 |
 | L1 | 66 | 7 |
 | L2 | 79 | 38 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 100 |
+| unmapped | 120 | 98 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -43,7 +43,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `macho_cpu_type_changed` | BREAKING | L0 |
 | `macho_filetype_changed` | BREAKING | L0 |
 | `musllinux_glibc_dependency_detected` | BREAKING | L0 |
-| `numpy_abi_major_incompatible` | BREAKING | L0 |
 | `pe_forwarder_changed` | BREAKING | L0 |
 | `pe_machine_changed` | BREAKING | L0 |
 | `pe_ordinal_retargeted` | BREAKING | L0 |
@@ -52,8 +51,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_visibility_changed` | BREAKING | L0 |
 | `var_visibility_changed` | BREAKING | L0 |
 | `vtable_thunk_set_changed` | BREAKING | L0 |
-| `wheel_closure_dependency_violation` | BREAKING | L0 |
-| `wheel_tag_architecture_mismatch` | BREAKING | L0 |
+| `func_pure_virtual_added` | BREAKING | L1 |
+| `struct_field_type_changed` | BREAKING | L1 |
+| `time64_abi_changed` | BREAKING | L1 |
 
 ## Tier L0
 
@@ -66,12 +66,12 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `branch_protection_improved` | COMPATIBLE | 0 | 0 | 0 |
 | `branch_protection_weakened` | RISK | 0 | 0 | 0 |
 | `bundle_duplicate_provider` | RISK | 0 | 0 | 0 |
-| `bundle_intra_dep_removed` | BREAKING | 1 | 0 | 3 |
-| `bundle_intra_dep_signature_changed` | BREAKING | 1 | 0 | 0 |
-| `bundle_intra_dep_signature_unverified` | RISK | 0 | 0 | 1 |
+| `bundle_intra_dep_removed` | BREAKING | 1 | 0 | 4 |
+| `bundle_intra_dep_signature_changed` | BREAKING | 1 | 0 | 2 |
+| `bundle_intra_dep_signature_unverified` | RISK | 0 | 0 | 2 |
 | `bundle_manifest_entry_unsatisfied` | RISK | 0 | 0 | 0 |
-| `bundle_manifest_instantiation_removed` | BREAKING | 1 | 0 | 1 |
-| `bundle_provider_changed` | RISK | 1 | 0 | 0 |
+| `bundle_manifest_instantiation_removed` | BREAKING | 1 | 0 | 2 |
+| `bundle_provider_changed` | RISK | 1 | 0 | 1 |
 | `bundle_soname_skew` | BREAKING | 1 | 0 | 3 |
 | `bundle_unresolved_intra_dependency` | RISK | 0 | 0 | 0 |
 | `cet_protection_improved` | COMPATIBLE | 0 | 0 | 0 |
@@ -121,11 +121,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `needed_added` | COMPATIBLE | 1 | 0 | 0 |
 | `needed_order_changed` | RISK | 0 | 0 | 0 |
 | `needed_removed` | COMPATIBLE | 0 | 0 | 0 |
-| `numpy_abi_major_incompatible` | BREAKING | 0 | 0 | 0 |
-| `numpy_capi_consumption_added` | RISK | 0 | 0 | 0 |
-| `numpy_capi_consumption_removed` | COMPATIBLE | 0 | 0 | 0 |
-| `numpy_metadata_understates_required_version` | RISK | 0 | 0 | 0 |
-| `numpy_target_floor_raised` | RISK | 0 | 0 | 0 |
+| `numpy_abi_major_incompatible` | BREAKING | 0 | 0 | 1 |
+| `numpy_capi_consumption_added` | RISK | 0 | 0 | 1 |
+| `numpy_capi_consumption_removed` | COMPATIBLE | 0 | 0 | 1 |
+| `numpy_metadata_understates_required_version` | RISK | 0 | 0 | 1 |
+| `numpy_target_floor_raised` | RISK | 0 | 0 | 1 |
 | `os_deployment_floor_raised` | RISK | 0 | 0 | 0 |
 | `overload_added` | RISK | 1 | 0 | 0 |
 | `pe_forwarder_changed` | BREAKING | 0 | 0 | 0 |
@@ -184,9 +184,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `vtable_thunk_offset_changed` | BREAKING | 1 | 0 | 1 |
 | `vtable_thunk_set_changed` | BREAKING | 0 | 0 | 0 |
 | `vtt_slot_count_changed` | BREAKING | 1 | 0 | 0 |
-| `wheel_closure_dependency_violation` | BREAKING | 0 | 0 | 0 |
-| `wheel_rpath_not_portable` | RISK | 0 | 0 | 0 |
-| `wheel_tag_architecture_mismatch` | BREAKING | 0 | 0 | 0 |
+| `wheel_closure_dependency_violation` | BREAKING | 0 | 0 | 1 |
+| `wheel_rpath_not_portable` | RISK | 0 | 0 | 1 |
+| `wheel_tag_architecture_mismatch` | BREAKING | 0 | 0 | 1 |
 | `x86_isa_baseline_raised` | RISK | 0 | 0 | 0 |
 
 ## Tier L1
@@ -410,10 +410,10 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `build_context_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `build_option_reaches_public_symbol` | RISK | 0 | 0 | 0 |
 | `bundle_intra_dep_resolved_to_different_version` | RISK | 0 | 0 | 0 |
-| `bundle_intra_type_changed` | BREAKING | 0 | 0 | 0 |
+| `bundle_intra_type_changed` | BREAKING | 0 | 0 | 1 |
 | `bundle_library_added` | COMPATIBLE | 0 | 0 | 0 |
 | `bundle_library_removed` | BREAKING | 0 | 0 | 0 |
-| `bundle_manifest_instantiation_added` | COMPATIBLE | 0 | 0 | 0 |
+| `bundle_manifest_instantiation_added` | COMPATIBLE | 0 | 0 | 1 |
 | `call_graph_public_entry_reachability_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `common_symbol_risk` | COMPATIBLE | 0 | 0 | 0 |
 | `compat_version_changed` | BREAKING | 0 | 0 | 0 |
