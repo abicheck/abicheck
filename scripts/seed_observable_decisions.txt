@@ -363,3 +363,11 @@ bundle_manifest_instantiation_removed  B:SCOPE
 sanitizer_runtime_required  B:ELF  # compare/runtime_requirements.py:134-170: DT_NEEDED on a sanitizer runtime and reserved __asan_/__ubsan_ imports, both binary facts. Real-compile oracle (g++ -shared -fPIC -fsanitize=address vs none, binary-only dumps): the sanitized build emits it; the uninstrumented pair does not
 rtti_mode_changed  BBD  # buildsource/build_diff.py:57: the -frtti/-fno-rtti compile flag comes from the compile database only. Real-compile oracle: compare with --build-info dumps at --depth build emits it; binary-only dumps and same-flag build-info dumps do not
 undocumented_export_ratio_increased  BHDOC  # diff_surface_metrics.py:109-120: the ratio counts exports against public-header declarations. Real-compile oracle: with -H headers on both sides and an undocumented export added, emitted; binary-only dumps emit nothing
+
+# -- WS-1 Linux batch (ADR-093): namesake, alignment, inline-namespace, surface growth --
+# Each row: a real-artifact oracle through the public compare (g++/gcc builds, stripped and -g,
+# with and without --header). func_deleted_elf_fallback needs the header on both sides.
+func_deleted_elf_fallback  BH:ELF
+exported_object_alignment_reduced  B:ELF
+inline_namespace_moved  B:ELF
+abi_surface_explosion  B:ELF

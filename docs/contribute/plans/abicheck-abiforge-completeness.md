@@ -829,6 +829,8 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 - **Header observability of the D-declared bundle kinds is unproven.** Passing `-H` to a directory compare did not surface `bundle_intra_dep_signature_changed`, so `{B,D}` is a lower bound; `{B,H}` may also observe it.
 - **Mach-O branch of `wheel_tag_architecture_mismatch`** is not declared: no Mach-O producer exists on Linux CI. The ELF branch is proven.
 
+**WS-1 Linux platform batch (branch `fix/ws1-platform-linux-batch`).** Declared, each with a real-ELF oracle in `tests/test_ws1_platform_linux_observability.py`: `func_deleted_elf_fallback` is `{B,H}` (the namesake; binary-only and DWARF-only runs do not emit it, the header on both sides does); `exported_object_alignment_reduced`, `inline_namespace_moved` and `abi_surface_explosion` are `{B}` with the ELF condition. Mach-O and kABI are skipped for this batch. Open rows: the `{B,H}` lower bound for `func_deleted_elf_fallback` on Mach-O and PE is unprobed; the four kinds' ELF-only restriction is a verified scope, not a claim about other platforms.
+
 
 ### 11.3 File ownership and conflict hotspots
 

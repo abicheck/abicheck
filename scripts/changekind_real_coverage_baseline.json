@@ -1,6 +1,5 @@
 {
   "zero_source_kinds": [
-    "abi_surface_explosion",
     "allocator_replacement_added",
     "allocator_replacement_removed",
     "anon_field_changed",
