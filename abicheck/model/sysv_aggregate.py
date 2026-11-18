@@ -61,7 +61,11 @@ from .entities import RecordType, TypeField
 from .fact import Fact
 from .snapshot import AbiSnapshot
 
-__all__ = ["StructReturn", "classify_record", "struct_return_of"]
+__all__ = [
+    "StructReturn",
+    "classify_record",
+    "struct_returns_in",
+]
 
 #: A 16-byte struct is the largest returned in registers.
 _MAX_REGISTER_BITS = 128
@@ -262,8 +266,9 @@ def classify_record(
 
 def _resolver(snapshot: AbiSnapshot) -> Resolve:
     typedefs = snapshot.declarations.typedefs
+    memo: dict[str, RecordType | None] = {}
 
-    def resolve(spelling: str) -> RecordType | None:
+    def lookup(spelling: str) -> RecordType | None:
         name = spelling.strip()
         for _ in range(8):
             if _TAG.match(name):
@@ -278,21 +283,42 @@ def _resolver(snapshot: AbiSnapshot) -> Resolve:
             name = target.strip()
         return None
 
+    def resolve(spelling: str) -> RecordType | None:
+        if spelling not in memo:
+            memo[spelling] = lookup(spelling)
+        return memo[spelling]
+
     return resolve
 
 
-def struct_return_of(fn: Function, snapshot: AbiSnapshot) -> StructReturn | None:
-    """The classified struct return of *fn* (from *snapshot*), or ``None``
-    when the return is not a by-value record or is outside the domain."""
-    if fn.return_pointer_depth or _is_object_pointer(fn.return_type):
-        return None
+def struct_returns_in(
+    snapshot: AbiSnapshot,
+) -> Callable[[Function], StructReturn | None]:
+    """The classified struct return of each function of *snapshot*, or
+    ``None`` when a return is not a by-value record or is outside the domain.
+    One memoized type resolver and one classification per return spelling are
+    shared across the snapshot's functions."""
     resolve = _resolver(snapshot)
-    record = resolve(fn.return_type)
-    if record is None:
-        return None
-    return classify_record(
-        record,
-        resolve,
-        c_language=snapshot.language_profile == "c",
-        trivial_for_calls_proved=snapshot.ast_producer == "castxml",
-    )
+    c_language = snapshot.language_profile == "c"
+    proved = snapshot.ast_producer == "castxml"
+    by_spelling: dict[str, StructReturn | None] = {}
+
+    def of(fn: Function) -> StructReturn | None:
+        if fn.return_pointer_depth:
+            return None
+        spelling = fn.return_type
+        if spelling not in by_spelling:
+            record = None if _is_object_pointer(spelling) else resolve(spelling)
+            by_spelling[spelling] = (
+                None
+                if record is None
+                else classify_record(
+                    record,
+                    resolve,
+                    c_language=c_language,
+                    trivial_for_calls_proved=proved,
+                )
+            )
+        return by_spelling[spelling]
+
+    return of

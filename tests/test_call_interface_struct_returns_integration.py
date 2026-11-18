@@ -33,7 +33,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.model.call_interface import RetShape
-from abicheck.model.sysv_aggregate import struct_return_of
+from abicheck.model.sysv_aggregate import struct_returns_in
 from abicheck.serialization import load_snapshot
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
@@ -125,7 +125,7 @@ def test_c_struct_returns_are_classified_from_the_header(
     snap = _dump(tmp_path, _C_HEADER, _C_SOURCE, "c", frontend)
     got = {}
     for fn in snap.declarations.functions:  # type: ignore[attr-defined]
-        r = struct_return_of(fn, snap)  # type: ignore[arg-type]
+        r = struct_returns_in(snap)(fn)  # type: ignore[arg-type]
         got[fn.name] = None if r is None else r.shape
     assert got == _C_EXPECTED
 
@@ -166,15 +166,15 @@ def test_a_non_trivial_cxx_record_is_never_given_a_register_shape(
     _require("g++", frontend)
     snap = _dump(tmp_path, _CXX_HEADER, _CXX_SOURCE, "c++", frontend)
     fns = {f.name: f for f in snap.declarations.functions}  # type: ignore[attr-defined]
-    plain = struct_return_of(fns["g_plain"], snap)  # type: ignore[arg-type]
+    plain = struct_returns_in(snap)(fns["g_plain"])  # type: ignore[arg-type]
     if frontend == "castxml":
         assert plain is not None and plain.shape is RetShape.INT2
     else:
         assert plain is None
-    assert struct_return_of(fns["g_nocopy"], snap) is None  # type: ignore[arg-type]
-    assert struct_return_of(fns["g_owning"], snap) is None  # type: ignore[arg-type]
+    assert struct_returns_in(snap)(fns["g_nocopy"]) is None  # type: ignore[arg-type]
+    assert struct_returns_in(snap)(fns["g_owning"]) is None  # type: ignore[arg-type]
     # A base class is outside the modelled layout.
-    assert struct_return_of(fns["g_derived"], snap) is None  # type: ignore[arg-type]
+    assert struct_returns_in(snap)(fns["g_derived"]) is None  # type: ignore[arg-type]
 
 
 def test_every_member_layout_change_agrees_with_execution(tmp_path: Path) -> None:

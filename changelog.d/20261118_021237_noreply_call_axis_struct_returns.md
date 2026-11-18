@@ -1,7 +1,7 @@
 ### Added
 
 - **The ADR-094 `call` axis classifies struct returns from header layout** —
-  `abicheck.model.sysv_aggregate.struct_return_of` derives a struct return's
+  `abicheck.model.sysv_aggregate.struct_returns_in` derives a struct return's
   x86-64 SysV shape (one or two INTEGER or SSE eightbytes, or caller memory)
   and its flattened member layout from the L2 record facts (no DWARF), and
   `assess_call_interface` now compares two struct returns of the same class

@@ -191,7 +191,7 @@ def call_signature_of(
 
     *ret* overrides the return shape for a struct return whose classification
     the caller knows -- a bare :class:`RetShape`, or a
-    :class:`StructReturn` (``sysv_aggregate.struct_return_of``) that also
+    :class:`StructReturn` (``sysv_aggregate.struct_returns_in``) that also
     carries the member layout; otherwise a scalar or ``void`` return is read from the
     return slot's ABI fact. *linkage_reliable* is required, and is
     :func:`linkage_evidence_reliable` of the snapshot *fn* came from: there is

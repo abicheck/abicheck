@@ -21,7 +21,7 @@ from abicheck.model.snapshot import AbiSnapshot
 from abicheck.model.sysv_aggregate import (
     StructReturn,
     classify_record,
-    struct_return_of,
+    struct_returns_in,
 )
 
 _S = FundamentalEncoding.SIGNED
@@ -288,11 +288,11 @@ _POINT = _rec([_f("long", 0, _LONG), _f("long", 64, _LONG)], 128, 64, name="poin
         ("struct point", {"point": "int"}),
     ],
 )
-def test_struct_return_of_resolves_tags_and_typedef_chains(
+def test_struct_returns_in_resolves_tags_and_typedef_chains(
     spelling: str, typedefs: dict[str, str]
 ) -> None:
     snap = _snapshot(_POINT, typedefs=typedefs, lang="c")
-    got = struct_return_of(Function("f", "f", spelling), snap)
+    got = struct_returns_in(snap)(Function("f", "f", spelling))
     assert got is not None and got.shape is RetShape.INT2 and got.size == 128
 
 
@@ -306,10 +306,10 @@ def test_struct_return_of_resolves_tags_and_typedef_chains(
         (Function("f", "f", "struct other"), "c"),  # tag absent, no typedef hop
     ],
 )
-def test_struct_return_of_declines_non_record_and_unproved_returns(
+def test_struct_returns_in_declines_non_record_and_unproved_returns(
     fn: Function, lang: str
 ) -> None:
-    assert struct_return_of(fn, _snapshot(_POINT, typedefs={}, lang=lang)) is None
+    assert struct_returns_in(_snapshot(_POINT, typedefs={}, lang=lang))(fn) is None
 
 
 @pytest.mark.parametrize(
@@ -335,5 +335,5 @@ def test_a_cxx_record_needs_the_castxml_trait(
     )
     snap = _snapshot(rec, typedefs={}, lang="cpp")
     snap.ast_producer = producer
-    got = struct_return_of(Function("f", "_Z1fv", "point"), snap)
+    got = struct_returns_in(snap)(Function("f", "_Z1fv", "point"))
     assert (got is not None and got.shape is RetShape.INT2) is classified

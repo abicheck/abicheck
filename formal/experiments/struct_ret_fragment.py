@@ -24,7 +24,7 @@ Two independent answers per case:
   the same name;
 * **abicheck**: both libraries are dumped with their header (``-H``, no
   DWARF) through each header backend (castxml, clang), each return is
-  classified by ``abicheck.model.sysv_aggregate.struct_return_of`` and the
+  classified by ``abicheck.model.sysv_aggregate.struct_returns_in`` and the
   pair is judged by ``abicheck.compare.call_interface.assess_call_interface``.
   It must answer PRESERVED or BROKEN (never UNKNOWN) and agree with the
   oracle on every case, on gcc- and clang-built libraries.
@@ -263,7 +263,7 @@ def abicheck_answers(out: Path, cc: str, frontend: str) -> dict[int, str]:
         linkage_evidence_reliable,
     )
     from abicheck.model.call_interface import SYSV_AMD64
-    from abicheck.model.sysv_aggregate import struct_return_of
+    from abicheck.model.sysv_aggregate import struct_returns_in
     from abicheck.serialization import load_snapshot
 
     cfg = out / f"{frontend}.yml"
@@ -298,12 +298,12 @@ def abicheck_answers(out: Path, cc: str, frontend: str) -> dict[int, str]:
         o = old_fns[f.name]
         sig_o = call_signature_of(
             o,
-            struct_return_of(o, old_s),
+            struct_returns_in(old_s)(o),
             linkage_reliable=linkage_evidence_reliable(old_s),
         )
         sig_n = call_signature_of(
             f,
-            struct_return_of(f, new_s),
+            struct_returns_in(new_s)(f),
             linkage_reliable=linkage_evidence_reliable(new_s),
         )
         answers[int(f.name[1:])] = assess_call_interface(
