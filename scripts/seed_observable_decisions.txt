@@ -341,6 +341,26 @@ abi_equivalent_type_changed  DH  # compare/abi_equivalent_retype.py: a retype th
 typedef_version_sentinel  H:HEADER  # types_2.py: a typedef name carrying a release version; the header pair emits it, the stripped and DWARF-only pairs do not (the typedef is never exported)
 secondary_vtable_group_changed  DH  # diff_vtable_layout.py: fires when a direct base's polymorphism flips (first virtual added) and the class's base list is unchanged; needs base and vtable facts (castxml/clang headers or DWARF); the header pair and the gcc DWARF-only pair emit it, a stripped binary does not
 cpo_kind_changed  B  # diff_templates.py:789-808: a public name that is a function in one side and a variable (function object) in the other, from the export table's symbol types; the stripped binary pair emits it in both directions
+
+# -- WS-1 domain families: build, numpy, wheel, bundle (ADR-093 batch 6) --
+# Each row: a real-artifact oracle through the public compare (see
+# tests/test_ws1_domain_build_observability.py). Package scope is comparison
+# scope (ADR-065), so those rows carry the :SCOPE forms.
+numpy_capi_consumption_added  B
+numpy_capi_consumption_removed  B
+numpy_target_floor_raised  B
+numpy_metadata_understates_required_version  B:SCOPE
+numpy_abi_major_incompatible  B:SCOPE
+wheel_rpath_not_portable  B:ELF:SCOPE
+wheel_closure_dependency_violation  B:ELF:SCOPE
+wheel_tag_architecture_mismatch  B:ELF:SCOPE
+bundle_intra_dep_removed  B:SCOPE
+bundle_intra_dep_signature_unverified  B:SCOPE
+bundle_intra_dep_signature_changed  BD:DWARF
+bundle_intra_type_changed  BD:DWARF
+bundle_provider_changed  BD:DWARF
+bundle_manifest_instantiation_added  B:SCOPE
+bundle_manifest_instantiation_removed  B:SCOPE
 # -- WS-1 batch 6 (source/platform): sanitizer, RTTI, undocumented exports -------
 sanitizer_runtime_required  B:ELF  # compare/runtime_requirements.py:134-170: DT_NEEDED on a sanitizer runtime and reserved __asan_/__ubsan_ imports, both binary facts. Real-compile oracle (g++ -shared -fPIC -fsanitize=address vs none, binary-only dumps): the sanitized build emits it; the uninstrumented pair does not
 rtti_mode_changed  BBD  # buildsource/build_diff.py:57: the -frtti/-fno-rtti compile flag comes from the compile database only. Real-compile oracle: compare with --build-info dumps at --depth build emits it; binary-only dumps and same-flag build-info dumps do not
