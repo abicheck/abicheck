@@ -207,7 +207,7 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     BASELINE_SET_SECTION_KIND: 1,
     # Generation 82: each variable may carry ``initializer_hex`` (the section
     # bytes of an exported read-only object). Absent reads as not-read.
-    DECLARATIONS_SECTION_KIND: 4,
+    DECLARATIONS_SECTION_KIND: 3,
 }
 
 

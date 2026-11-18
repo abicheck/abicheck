@@ -74,8 +74,8 @@
         "typedefs_qualified",
         "variables"
       ],
-      "section_schema_version": 4,
-      "sha256": "176bcb6686a1feb7cbf2ba9ff9ac3b375d9bfc8447bc86ba0a216b305a55d2c7"
+      "section_schema_version": 3,
+      "sha256": "d15b5502086877d2a5a766e02e559fbc35c58ed93b43c11ff8596b0151d0d0ea"
     },
     "layout": {
       "fields": [
