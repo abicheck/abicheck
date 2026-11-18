@@ -330,7 +330,7 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Function",
         "explicit_instantiation_fact",
-        _NONE,
+        _PARTIAL,
         _PARTIAL,
         note=(
             "Schema v65. clang reads how the header declared an instance "
@@ -339,8 +339,10 @@ LEADING_ROWS: tuple[FactRow, ...] = (
             "prefilter (`extract/headers/clang/explicit_instantiation.py`); "
             "PARTIAL because a class-template scope is spelled by its bare name, "
             "so two instances of one template in a translation unit read "
-            "UNSUPPORTED. castxml does not record the declaration kind, so its "
-            "side is NOT_COLLECTED."
+            "UNSUPPORTED. castxml records only an explicit specialization (its "
+            "template<> line, `castxml/explicit_instantiation.py`); an explicit "
+            "instantiation carries the primary template's line in castxml, so it "
+            "reads as NOT_COLLECTED there."
         ),
     ),
     FactRow(
