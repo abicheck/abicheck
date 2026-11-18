@@ -752,7 +752,43 @@ def _run_compare_and_parse(
     kinds = tuple(
         c.get("kind", "") for c in data.get("changes", []) if isinstance(c, dict)
     )
-    return data.get("verdict", "UNKNOWN"), kinds, None
+    verdict = data.get("verdict", "UNKNOWN")
+    unconfirmed = data.get("unconfirmed")
+    if verdict == UNCONFIRMED and isinstance(unconfirmed, dict):
+        observed = unconfirmed.get("observed_verdict")
+        if isinstance(observed, str):
+            # Keep the observed verdict next to ADR-090's floor; run_case
+            # decides whether this lane may judge it (`_resolve_unconfirmed`).
+            verdict = f"{UNCONFIRMED}{_OBSERVED_SEP}{observed}"
+    return verdict, kinds, None
+
+
+#: ADR-090's report value for a compatibility claim without type evidence.
+UNCONFIRMED = "UNCONFIRMED"
+_OBSERVED_SEP = ":"
+
+
+def _resolve_unconfirmed(
+    got: str, variant: str, v1_hdr: Path | None, v2_hdr: Path | None
+) -> tuple[str, str]:
+    """``(verdict to judge, note)`` for a compare's raw *got* value.
+
+    ADR-090 floors a compatibility claim made without type-level evidence to
+    ``UNCONFIRMED``. The ``stripped-headers`` lane strips DWARF, so a case that
+    ships no public header has none by construction: there ``UNCONFIRMED`` is
+    the honest answer and the ground truth is judged against the observed
+    verdict. Everywhere else type evidence exists, so ``UNCONFIRMED`` means
+    evidence was lost and stays the judged value (a FAIL).
+    """
+    if not got.startswith(UNCONFIRMED + _OBSERVED_SEP):
+        return got, ""
+    observed = got.split(_OBSERVED_SEP, 1)[1]
+    has_headers = any(h is not None and h.exists() for h in (v1_hdr, v2_hdr))
+    if variant == "stripped-headers" and not has_headers:
+        return observed, (
+            f"{UNCONFIRMED} (ADR-090: stripped, no public header); observed {observed}"
+        )
+    return UNCONFIRMED, ""
 
 
 def _build_compare_direct_cmd(
@@ -1513,6 +1549,7 @@ def run_case(
         sources=sources_present,
         build_info=build_info_present,
     )
+    got, unconfirmed_note = _resolve_unconfirmed(got, variant, v1_hdr, v2_hdr)
     family = _toolchain_family(v1_src.suffix == ".cpp")
     na = example_applicability.outcome(entry, family, got)
     result = (
@@ -1520,6 +1557,14 @@ def run_case(
         if na
         else _evaluate_verdict(name, expected_raw, got, known_gap, known_gap_observed)
     )._replace(variant=variant, source_layers=source_layers)
+    if unconfirmed_note:
+        result = result._replace(
+            message=(
+                unconfirmed_note
+                if not result.message
+                else f"{unconfirmed_note} | {result.message}"
+            )
+        )
     if smoke_proof:
         combined = (
             smoke_proof if not result.message else f"{smoke_proof} | {result.message}"

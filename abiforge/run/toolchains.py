@@ -98,6 +98,24 @@ def _identify(cc: str) -> tuple[str, int] | None:
     return family, int(m.group(1))
 
 
+_ARCH_ALIASES = {"amd64": "x86_64", "arm64": "aarch64"}
+
+
+def arch_of_triple(triple: str) -> str:
+    """Target CPU of a ``-dumpmachine`` triple (``x86_64-linux-gnu`` -> ``x86_64``)."""
+    cpu = triple.strip().split("-", 1)[0].lower()
+    return _ARCH_ALIASES.get(cpu, cpu)
+
+
+def _machine_arch(cc: str) -> str | None:
+    """Target CPU the C driver emits code for, read from ``cc -dumpmachine``."""
+    try:
+        out = _run([cc, "-dumpmachine"]).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return arch_of_triple(out) if out.strip() else None
+
+
 def _candidates() -> list[tuple[str, str]]:
     pairs = [("gcc", "g++"), ("clang", "clang++")]
     for n in range(4, 31):
@@ -109,7 +127,7 @@ def _candidates() -> list[tuple[str, str]]:
 @functools.lru_cache(maxsize=1)
 def discover() -> tuple[Toolchain, ...]:
     """Every distinct installed toolchain, sorted by (family, version)."""
-    found: dict[tuple[str, int], Toolchain] = {}
+    found: dict[tuple[str, int, str], Toolchain] = {}
     seen_bins: set[str] = set()
     for cc, cxx in _candidates():
         cc_path, cxx_path = shutil.which(cc), shutil.which(cxx)
@@ -127,9 +145,16 @@ def discover() -> tuple[Toolchain, ...]:
         # Only a validated pair claims its C driver: `gcc` (13) with a
         # mismatched `g++` must not hide `gcc-13`/`g++-13`, the same binary.
         seen_bins.add(real)
-        found.setdefault(ident, Toolchain(ident[0], ident[1], cc_path, cxx_path))
+        # The C++ driver must target the same CPU: a cell builds through `cxx`
+        # but its observability is judged by the one arch the Toolchain carries.
+        arch = _machine_arch(cc_path)
+        if arch is None or _machine_arch(cxx_path) != arch:
+            continue
+        found.setdefault(
+            (*ident, arch), Toolchain(ident[0], ident[1], cc_path, cxx_path, arch=arch)
+        )
     if sys.platform == "win32" and shutil.which("cl"):
-        found.setdefault(("msvc", 0), Toolchain("msvc", 0, "cl", "cl"))
+        found.setdefault(("msvc", 0, "x86_64"), Toolchain("msvc", 0, "cl", "cl"))
     return tuple(sorted(found.values()))
 
 

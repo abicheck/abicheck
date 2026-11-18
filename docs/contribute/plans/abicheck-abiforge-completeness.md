@@ -810,6 +810,8 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 - `library_version_downgraded` (PE `VS_FIXEDFILEINFO`) and `compat_version_changed` (Mach-O) have platform-only emitters. This container has no MinGW or macOS toolchain, so no oracle can run here; declare from the Windows or macOS lane.
 - `rtti_mode_changed` and `sanitizer_mode_changed` fire from build data (`buildsource/build_diff.py`, compile flags), so their oracle needs a compile-commands input, not a binary pair. Next batch.
 - `undocumented_export_ratio_increased` and the `source_*` / `declaration_*` L4-L5 kinds need the header or source pipeline; not probed in this batch.
+**WS-1 arch axis (ADR-093 D7, amendment).** `ObservabilityCondition` gained `arch` (`x86_64`, `aarch64`). `struct_return_convention_changed` is conditioned on ELF x86-64 (`DH:ELF_X86_64`). `struct_packing_changed` is not arch-conditioned: its detector (`dwarf_advanced._diff_struct_packing`) has no architecture gate, so it stays `DH` in `types_2.py` unconditioned, owned by the types session.
+
 **WS-1 batch 6 (source/platform, Linux first).** Declared with real-build oracles (`tests/test_observable_ws1_source_platform_2.py`): `sanitizer_runtime_required` `{B:ELF}`; `rtti_mode_changed` `{B,BD}` (the `-frtti`/`-fno-rtti` flag is compile data, visible only through a compile database); `undocumented_export_ratio_increased` `{B,H}` (the ratio needs public-header declarations on the new side).
 
 **Correction to the batch-5 row.** The batch-5 row above that `sanitizer_runtime_required` has a reader gap (a `-fsanitize=address` shared object dumps with no ELF identity, so the detector never runs) was **wrong**. The probe read the wrong JSON key (`elf`); a binary-only pair of an ASan-instrumented and a plain build does emit the kind. The batch-6 oracle is the evidence; there is no reader gap for this kind.
@@ -830,6 +832,8 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 - **Not probed:** `bundle_intra_dep_resolved_to_different_version` (needs a version-script construction), `bundle_manifest_entry_unsatisfied` (audit-only manifest path), `bundle_soname_skew` (cohort configuration).
 - **Header observability of the D-declared bundle kinds is unproven.** Passing `-H` to a directory compare did not surface `bundle_intra_dep_signature_changed`, so `{B,D}` is a lower bound; `{B,H}` may also observe it.
 - **Mach-O branch of `wheel_tag_architecture_mismatch`** is not declared: no Mach-O producer exists on Linux CI. The ELF branch is proven.
+
+**WS-1 Linux platform batch (branch `fix/ws1-platform-linux-batch`).** Declared, each with a real-ELF oracle in `tests/test_ws1_platform_linux_observability.py`: `func_deleted_elf_fallback` is `{B,H}` (the namesake; binary-only and DWARF-only runs do not emit it, the header on both sides does); `exported_object_alignment_reduced`, `inline_namespace_moved` and `abi_surface_explosion` are `{B}` with the ELF condition. Mach-O and kABI are skipped for this batch. Open rows: the `{B,H}` lower bound for `func_deleted_elf_fallback` on Mach-O and PE is unprobed; the four kinds' ELF-only restriction is a verified scope, not a claim about other platforms.
 
 
 ### 11.3 File ownership and conflict hotspots
