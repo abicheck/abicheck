@@ -757,3 +757,72 @@ def test_bundle_soname_skew_is_observed_from_the_set_of_dt_sonames(
     kinds = {f.kind.value for f in _soname_skew_findings(old, new, ["libfoo_"])}
     assert "bundle_soname_skew" in kinds, kinds
     assert _observes_on("bundle_soname_skew", "elf", ("B",))
+
+
+@pytest.mark.integration
+def test_sycl_overload_family_removal_needs_the_header_not_the_binary(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle (GNU ELF producer): two algorithm families each lose
+    # their sycl::queue& overload while a non-SYCL sibling survives. The
+    # family is named by the queue parameter type, which only the public
+    # header carries, so the header pair emits sycl_overload_set_removed and
+    # the binary-only pair does not (func_removed instead). Declared {B,H}.
+    from abicheck.checker import compare
+    from abicheck.dumper import dump
+
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    old_h = (
+        "namespace sycl { struct queue { int id; }; }\n"
+        "void run(sycl::queue& q);\nvoid run(sycl::queue& q, int n);\nvoid run(int x);\n"
+        "void compute(sycl::queue& q);\nvoid compute(int x);\n"
+    )
+    new_h = (
+        "namespace sycl { struct queue { int id; }; }\n"
+        "void run(int x);\nvoid compute(int x);\n"
+    )
+    old_cpp = (
+        '#include "old.h"\n'
+        "void run(sycl::queue& q){(void)q;}\n"
+        "void run(sycl::queue& q, int n){(void)q;(void)n;}\n"
+        "void run(int x){(void)x;}\n"
+        "void compute(sycl::queue& q){(void)q;}\n"
+        "void compute(int x){(void)x;}\n"
+    )
+    new_cpp = (
+        '#include "new.h"\nvoid run(int x){(void)x;}\nvoid compute(int x){(void)x;}\n'
+    )
+    (tmp_path / "old.h").write_text(old_h)
+    (tmp_path / "new.h").write_text(new_h)
+    (tmp_path / "old.cpp").write_text(old_cpp)
+    (tmp_path / "new.cpp").write_text(new_cpp)
+    for name in ("old", "new"):
+        so = tmp_path / f"{name}.so"
+        subprocess.run(
+            [
+                *prefix,
+                "-g",
+                "-O0",
+                "-fPIC",
+                "-shared",
+                f"-I{tmp_path}",
+                str(tmp_path / f"{name}.cpp"),
+                "-o",
+                str(so),
+            ],
+            check=True,
+        )
+    with_header = compare(
+        dump(tmp_path / "old.so", [tmp_path / "old.h"]),
+        dump(tmp_path / "new.so", [tmp_path / "new.h"]),
+    )
+    kinds = {c.kind.value for c in with_header.changes}
+    assert "sycl_overload_set_removed" in kinds, kinds
+    assert _observes_on("sycl_overload_set_removed", "elf", ("B", "H"))
+    binary_only = compare(dump(tmp_path / "old.so", []), dump(tmp_path / "new.so", []))
+    assert "sycl_overload_set_removed" not in {
+        c.kind.value for c in binary_only.changes
+    }
+    assert not _observes_on("sycl_overload_set_removed", "elf", BINARY)

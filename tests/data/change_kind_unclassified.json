@@ -83,7 +83,6 @@
     "suppression_would_hide_public_break",
     "sycl_backend_driver_req_changed",
     "sycl_implementation_changed",
-    "sycl_overload_set_removed",
     "sycl_pi_entrypoint_added",
     "sycl_pi_entrypoint_removed",
     "sycl_pi_version_changed",

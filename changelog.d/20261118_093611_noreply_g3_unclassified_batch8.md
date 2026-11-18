@@ -73,4 +73,5 @@ it should read in CHANGELOG.md. Delete the other sections.
 
 ### Changed
 
+- **ADR-093 observability for `sycl_overload_set_removed`** — declared `{B,H}`: the family is named by the `sycl::queue&` parameter type, which only the public header carries; the binary pair alone does not emit it.
 - **ADR-093 observability for `bundle_soname_skew`** — declared `{B:SCOPE}`: the cohort's SONAME majors are each library's DT_SONAME across a package-scope set, verified with a real-library oracle through `_soname_skew_findings`.

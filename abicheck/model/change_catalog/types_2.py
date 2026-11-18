@@ -141,6 +141,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_H,),
     ),
     _E(
         "tag_type_renamed",
