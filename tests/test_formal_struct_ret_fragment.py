@@ -1,10 +1,13 @@
 """Same-class struct returns (E14b, ``formal/RET_FRAGMENT.md`` "Struct member
 layouts").
 
-``formal/lean/AbiLean/StructRetFragment.lean`` proves the general statements
-(abicheck's image comparison is the oracle for any member list; intact iff
-the old member layout is a sub-layout of the new one, both or neither in
-memory, memory not grown) and enumerates the 1190 pairs. These tests check
+``formal/lean/AbiLean/StructRetFragment.lean`` proves, within its own model of
+``int``/``long``/``double`` struct layouts and for every nonempty old member
+list, that the model's image comparison equals the member-read oracle and
+that intact holds iff the old member layout is a sub-layout of the new one,
+both or neither in memory, memory not grown; it also enumerates the 1190
+pairs. The Python implementation is not proved: these tests check it, and
+the export, against independent oracles. These tests check
 what Lean cannot reach, each against an oracle that is not the code under
 test:
 

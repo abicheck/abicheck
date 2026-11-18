@@ -210,6 +210,27 @@ def test_named_bitfields_align_the_record_to_their_type(
     ]
 
 
+@pytest.mark.parametrize(
+    ("align", "classified"),
+    [(8, True), (32, False)],
+)
+def test_an_unnamed_bitfield_does_not_align_the_record(
+    align: int, classified: bool
+) -> None:
+    """``struct { char c; unsigned :1; }`` is byte-aligned: the unnamed
+    bitfield adds no alignment, so a record claiming 32-bit alignment from it
+    alone is outside the model (it would need padding the members do not
+    explain)."""
+    c = _named_bit("c", 0, 8, _fact(_S, 1))
+    c.is_bitfield, c.bitfield_bits = False, None
+    pad = _named_bit("", 8, 1, _fact(_U, 4))
+    got = _classify(_rec([c, pad], max(16, align), align))
+    assert (got is not None) is classified
+    if got is not None:
+        assert got.shape is RetShape.INT1
+        assert [(m.offset, m.size) for m in got.members or ()] == [(0, 8), (8, 1)]
+
+
 def _snapshot(*types: RecordType, typedefs: dict[str, str], lang: str) -> AbiSnapshot:
     snap = AbiSnapshot(
         library="libs.so", version="1", types=list(types), typedefs=typedefs
