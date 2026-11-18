@@ -164,12 +164,11 @@ processor, not on the binary format or language. The first is the x86-64
 System V struct-return convention (`struct_return_convention_changed`): the
 rule that decides whether an aggregate is returned in registers or through a
 hidden pointer is an x86-64 psABI fact, so an aarch64 cell does not expect the
-kind. The second is struct layout packing (`struct_packing_changed`): its
-detector emits only for LP64 x86-64 records, so the same condition applies to
-it, applied by the types batch after this amendment merges (follow-up in the
-types batch). A kind is conditioned on `arch` only with an oracle that shows it
-is absent on the other architecture, and a new `Arch` value is added only when
-a kind first needs it.
+kind. `struct_packing_changed` is not conditioned on `arch` here: its detector
+(`dwarf_advanced._diff_struct_packing`) has no architecture gate, so no
+processor-specific claim is made for it. A kind is conditioned on `arch` only
+with an oracle that shows it is absent on the other architecture, and a new
+`Arch` value is added only when a kind first needs it.
 
 ## Consequences
 

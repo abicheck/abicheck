@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 """Seed ``observable_at`` on the ChangeKind taxonomy (ADR-093, WS-1 slice 3).
 
-``DECISIONS`` is the reviewable record of how each kind's observability was
-derived. One row per kind: ``kind  CODE  # note``. A kind with no row, or with
-code ``U``, stays ``UNCLASSIFIED``: when the evidence is ambiguous or absent
-the sentinel is the answer, because a wrong value creates a false-clean
-obligation that no run can discharge.
+``DECISIONS`` is the reviewable record of each kind's observability: one row per
+kind, ``kind  CODE  # note``. No row, or code ``U``, stays ``UNCLASSIFIED``: a
+wrong value creates a false-clean obligation no run can discharge.
 
-Evidence collected per kind (``--table`` renders it as Markdown):
-
-* abiforge operators whose ``expected`` or ``any_of`` names the kind, with the
-  operator's ``min_evidence`` (``fn`` = computed per config);
-* the designed evidence tier of ``scripts/evidence_tiers.py``
-  (``EVIDENCE_TIER_BY_KIND``, a chain assumption: a hint, not a rule);
-* the modules outside the taxonomy that emit ``ChangeKind.<NAME>``.
+Evidence per kind (``--table``): abiforge operators naming it (with
+``min_evidence``), its designed tier in ``scripts/evidence_tiers.py`` (a hint),
+and the modules outside the taxonomy that emit ``ChangeKind.<NAME>``.
 
 Rules applied (plan ``abicheck-abiforge-completeness.md`` §1.2, §2):
 
@@ -50,8 +44,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "abicheck" / "model" / "change_catalog"
 BASELINE = REPO / "tests" / "data" / "change_kind_unclassified.json"
-# architecture/modules.yaml `limits.production`.
-PRODUCTION_LINE_CAP = 800
+PRODUCTION_LINE_CAP = 800  # architecture/modules.yaml `limits.production`
 
 # Ordered form codes. ``form`` is (alternatives, rationale, platforms, const).
 # ``const`` is the module-level name the taxonomy file defines and reuses.
@@ -469,11 +462,13 @@ def _constants_block(codes: set[str]) -> list[str]:
         ]
         if rationale:
             parts.append(f'rationale="{rationale}"')
-        if platforms:
-            plat = ", ".join(f"Platform.{p.upper()}" for p in platforms)
-            parts.append(
-                f"condition=ObservabilityCondition(platform=frozenset({{{plat}}}))"
-            )
+        pl = ", ".join(f"Platform.{v.upper()}" for v in platforms)
+        ar = ", ".join(f"Arch.{v.upper()}" for v in FORM_ARCHES.get(code, ()))
+        cond = [
+            f"{k}=frozenset({{{v}}})" for k, v in (("platform", pl), ("arch", ar)) if v
+        ]
+        if cond:
+            parts.append(f"condition=ObservabilityCondition({', '.join(cond)})")
         block.append(f"{const} = observable({', '.join(parts)})")
     return block
 
@@ -626,6 +621,8 @@ def _split_owner(
     used = {"observable"}
     if any(FORMS[c][2] for c in codes):
         used |= {"ObservabilityCondition", "Platform"}
+    if any(FORM_ARCHES.get(c) for c in codes):
+        used.add("Arch")
     if any(FORM_LANGUAGES.get(c) for c in codes):
         used |= {"Language", "ObservabilityCondition"}
     header = _header_for_sibling(lines, head, family, path.stem, number)
@@ -709,6 +706,8 @@ def apply_decisions(dry_run: bool) -> dict[str, int]:
         used = {"observable"}
         if any(FORMS[c][2] for d in decs for c in d.codes):
             used |= {"ObservabilityCondition", "Platform"}
+        if any(FORM_ARCHES.get(c) for d in decs for c in d.codes):
+            used.add("Arch")
         lines.insert(imp, f"from .observability import {', '.join(sorted(used))}\n")
         text = _ruff_format(path, "".join(lines))
         if text.count("\n") <= PRODUCTION_LINE_CAP:

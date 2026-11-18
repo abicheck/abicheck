@@ -100,7 +100,7 @@ class ObservabilityCondition:
 
     platform: frozenset[Platform] | None = None
     language: frozenset[Language] | None = None
-    arch: frozenset[Arch] | None = None
+    arch: frozenset[Arch] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if self.platform is None and self.language is None and self.arch is None:

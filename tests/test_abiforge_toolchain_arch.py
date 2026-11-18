@@ -8,6 +8,7 @@ arch-conditioned kind is not expected on its cell (ADR-093 D7).
 from __future__ import annotations
 
 import shutil
+import subprocess
 
 import pytest
 
@@ -41,14 +42,28 @@ def test_discovered_non_x86_64_toolchain_carries_its_arch_in_its_id() -> None:
     assert tc.id == "gcc13-aarch64"
 
 
-@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs a host gcc")
-def test_host_gcc_arch_is_read_from_its_own_triple() -> None:
-    import platform
+def test_machine_arch_reads_the_drivers_target_not_the_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
 
-    expected = {
-        "x86_64": "x86_64",
-        "amd64": "x86_64",
-        "aarch64": "aarch64",
-        "arm64": "aarch64",
-    }[platform.machine().lower()]
-    assert toolchains._machine_arch(shutil.which("gcc")) == expected
+    def fake_run(
+        cmd: list[str], cwd: object = None
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "aarch64-linux-gnu\n", "")
+
+    monkeypatch.setattr(toolchains, "_run", fake_run)
+    assert toolchains._machine_arch("/opt/cross/aarch64-gcc") == "aarch64"
+    assert calls == [["/opt/cross/aarch64-gcc", "-dumpmachine"]]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs a host gcc")
+def test_real_gcc_arch_matches_its_own_dumpmachine_triple() -> None:
+    gcc = shutil.which("gcc")
+    assert gcc is not None
+    triple = subprocess.run(
+        [gcc, "-dumpmachine"], capture_output=True, text=True, check=True
+    ).stdout
+    assert toolchains._machine_arch(gcc) == toolchains.arch_of_triple(triple)
