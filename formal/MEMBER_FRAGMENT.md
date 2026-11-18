@@ -23,26 +23,32 @@ function `R f(K *this, P1, ..., Pn)`:
   (Microsoft x64 does the opposite; it is not modelled.)
 
 That is `FuncFragment.locAt` / `RetFragment.argLoc` applied to the parameter
-list `ptr :: P`. No Lean statement is added, because nothing new needs proving
-for the cases the axis decides:
+list `ptr :: P` (`withThis`); `this_loc` / `this_after_sret` state where `this`
+lands. `formal/lean/AbiLean/MemberFragment.lean` proves, with no `sorry` and
+only Lean's standard axioms:
 
-* **Member to member** (both sides have `this`). `locAt` gives a slot the index
-  of its class among the arguments before it. Prepending one INTEGER argument to
-  both the old and the new list adds exactly one to every INTEGER index on both
-  sides and changes no SSE index, so two slots are at the same location after
-  the prepend iff they were before it; `this` itself is at index 0 (1 with
-  sret) on both sides. The return location does not depend on the arguments.
-  So `callCompatible (ptr :: old) (ptr :: new) = callCompatible old new`
-  whenever both lists still fit the registers. They do on the whole fragment
-  space: E13 has at most 3 parameters, E14 at most 2 plus the sret pointer, so
-  at most 4 of the 6 INTEGER registers are used.
-* **Static to non-static and back**. One side has `this` and the other does
-  not, which is an inserted or removed leading pointer parameter: E13's
-  `ins`/`rem` at position 0 with type `void *`, already in the proved model.
-
-A Lean lemma for the shift would mechanise the first bullet; it is a follow-up,
-not a precondition, because the execution oracle below checks every case it
-would cover.
+* **The shift lemma.** `locAt_this` / `argLoc_this`: declared argument `k` of a
+  member is at its free-function location mapped by `shiftLoc` (INTEGER index
+  plus one, SSE unchanged), which is injective. Hence, for **every** parameter
+  list and every E13 edit, `member_call_compatible : callCompatible (member c)
+  = callCompatible c` (the edit moved past `this`); and for E14,
+  `member_ret_call_compatible` (same answer) and `member_argLoc_eq_iff` (each
+  declared argument is placed alike iff it was in the free function, whatever
+  the sret statuses). `this` itself moves (`rdi` <-> `rsi`) exactly when the
+  sret status changes (`this_intact_iff`), so `member_args_intact_iff`: a
+  member's arguments survive a return change iff the sret status is unchanged
+  (a free function with only `double` parameters survives it anyway). The
+  model places no register limit, so these hold for any length; register
+  exhaustion is outside the model (E13/E14 use at most 4 INTEGER registers).
+* **Static <-> non-static.** `transition` is E13's `ins 0 void*` / `rem 0`.
+  `static_to_instance_incompatible`: never compatible.
+  `instance_to_static_compatible_iff`: compatible iff every declared parameter
+  is SSE (`double`); the stray `this` in `rdi` is ignored.
+  `compatible_transitions` lists the 4 compatible transitions among the 170,
+  and `MemberFragmentExport.lean` writes the table
+  (`lean/member_fragment_cases.json`), which
+  `tests/test_formal_member_fragment.py` compares case by case with
+  `member_fragment_observed.json`.
 
 ## Execution oracle
 
