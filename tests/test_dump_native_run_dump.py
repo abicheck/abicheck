@@ -161,7 +161,9 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
         # And the two sub-dump attaches ran with the graph explicitly
         # disabled, not simply omitted.
         false_calls = [c for c in calls if c[1] is False]
-        assert len(false_calls) == 2
+        # The legs run under the owner's suppression scope, so they never reach
+        # the attach; the single attach is the merged snapshot's (asserted above).
+        assert false_calls == []
 
 
 class TestRunDumpHybridDoesNotDoubleEnrichLayout:

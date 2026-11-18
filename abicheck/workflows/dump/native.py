@@ -67,7 +67,7 @@ from ..run_dump_scope import (
     run_dump_header_roots,
     wrap_run_dump_with_dependency_scope,
 )
-from .default_header_graph import attach_default_header_graph
+from .default_header_graph import attach_default_header_graph, header_graph_suppressed
 from .formats import (
     DEFAULT_ADAPTERS,
     BinaryFormatAdapter,
@@ -375,6 +375,8 @@ def _extract_and_finish(
             ast_memoize_scope() if _headers and _graph_wanted else nullcontext(),
             closure_identity.defer_closure_identity_renumbering(),
             prefetch_settled_on_failure(_prefetched_graph),
+            # The native tail below owns the one graph attach for this request.
+            header_graph_suppressed(),
         ):
             snap = adapter.extract(request)
         try_attach_sycl_metadata(snap, path)
@@ -413,6 +415,7 @@ def _extract_and_finish(
     with (
         ast_memoize_scope(),
         closure_identity.defer_closure_identity_renumbering(),
+        header_graph_suppressed(),  # the native tail below owns the graph attach
     ):
         snap = adapter.extract(request)
     return _finish_native_snapshot(

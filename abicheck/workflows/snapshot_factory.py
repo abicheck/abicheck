@@ -200,22 +200,17 @@ def finish_binary_dump(
     )
     if graph_inputs is None:
         return snapshot
-    from .dump.default_header_graph import attach_default_header_graph
+    from .dump.default_header_graph import attach_typed_header_graph
 
     headers, includes, lang, suppressed = graph_inputs
-    return attach_default_header_graph(
+    return attach_typed_header_graph(
         snapshot,
         headers=headers,
         includes=includes,
         lang=lang,
-        compile=None,
-        public_headers=list(public_headers or headers),
-        public_header_dirs=(
-            list(public_header_dirs) if public_header_dirs is not None else None
-        ),
-        include_search_dirs=(
-            list(include_search_dirs) if include_search_dirs is not None else None
-        ),
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        include_search_dirs=include_search_dirs,
         enabled=not suppressed,
     )
 
