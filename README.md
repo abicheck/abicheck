@@ -182,16 +182,21 @@ This is a discoverability floor, not an accuracy score; the [tool comparison pag
 
 ## How it compares to other tools
 
-`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs each pass its input supports: a symbol-table pass on every comparison, a header-AST pass when you supply headers, a DWARF/PDB cross-check when the binaries carry debug info (Linux and Windows; Mach-O has none yet), and build and source evidence layered on top when given, feeding **434 change types** of detection. A bare stripped binary gets only the first pass, and the report says so. That is where the gap comes from.
+![Comparison of libabigail, ABICC and abicheck inputs and reports](docs/assets/readme/tool-comparison.svg)
 
-| | abicheck | libabigail `abidiff` | ABICC |
-|---|:---:|:---:|:---:|
-| Symbol-table pass (SONAME, visibility, versions) | ✅ | ✅ | ❌ |
-| Header AST pass (`noexcept`, `static`, `const`, access, pure-virtual) | ✅ | ❌ | ✅ |
-| Debug-info layouts, vtable slots, cross-checked against the AST | ✅ | ✅ (no AST to cross-check) | abi-dumper mode only |
-| Build-flag and toolchain drift detection (L3) | ✅ | ❌ | ❌ |
-| Distinct `API_BREAK` verdict (source break, binary still works) | ✅ | ❌ | ❌ |
-| Reports which checks it could *not* run | ✅ | ❌ | ❌ |
+| Workflow | Inputs and result |
+|---|---|
+| **libabigail / abidiff** | Builds a typed ABI corpus from ELF and available DWARF, CTF or BTF debug information; explains ABI changes through types reachable from exported interfaces. Header paths can filter that corpus. |
+| **ABICC** | Supports headers and libraries via XML descriptors, or ABI dumps from ABI Dumper; reports binary and source compatibility separately, including type, signature and vtable changes. |
+| **abicheck** | Combines binaries with available debug info, public headers, build context and sources; distinguishes ABI and source-only breaks, checks dependencies and declared deployment requirements, and reports evidence limitations. |
+
+This is a workflow comparison, not an accuracy ranking. Results depend on the
+inputs and backend; compatible interfaces do not establish behavioral equivalence.
+Sources: [abidiff manual](https://sourceware.org/libabigail/manual/abidiff.html),
+[ABICC documentation](https://lvc.github.io/abi-compliance-checker/), and
+[abicheck evidence model](docs/learn/evidence-and-detectability.md).
+See the [detailed comparison and benchmark methodology](docs/reference/tool-comparison.md)
+for measured results and their scope.
 
 Full-catalog benchmark from 2026-07-18, when the catalog held 193 cases, every tool pointed at the whole catalog blind. A crash, hang, or "no mode for this case" counts as a miss, same as a wrong verdict.
 

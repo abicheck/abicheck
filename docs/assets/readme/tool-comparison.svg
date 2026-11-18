@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-labelledby="title desc">
+<title id="title">Three workflows for C/C++ compatibility analysis</title>
+<desc id="desc">libabigail builds typed ABI corpora from ELF and debug information. ABICC supports header and ABI Dumper workflows with binary and source reports. abicheck combines available evidence with dependency and deployment contracts. Capability summary, not an accuracy ranking.</desc>
+<rect width="1200" height="590" rx="20" fill="#0e1729"/>
+<text x="32" y="49" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="29" font-weight="700">C/C++ compatibility: what each workflow explains</text>
+<text x="32" y="80" fill="#9fb1ca" font-family="DejaVu Sans,Arial,sans-serif" font-size="18" font-weight="400">Available inputs determine what can be established.</text>
+<rect x="30" y="110" width="360" height="400" rx="14" fill="#19263b"/>
+<text x="50" y="151" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="27" font-weight="700">libabigail</text>
+<text x="50" y="179" fill="#a9c6d9" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">abidiff</text>
+<text x="50" y="219" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">INPUTS</text>
+<text x="50" y="246" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ELF + debug information</text>
+<text x="50" y="289" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Typed ABI corpus</text>
+<text x="50" y="317" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">DWARF / CTF / BTF types</text>
+<text x="50" y="345" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Types reachable from exports</text>
+<text x="50" y="397" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">RESULT</text>
+<text x="50" y="429" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ABI changes and affected interfaces</text>
+<text x="50" y="457" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Header paths can filter the corpus</text>
+<rect x="420" y="110" width="360" height="400" rx="14" fill="#19263b"/>
+<text x="440" y="151" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="27" font-weight="700">ABICC</text>
+<text x="440" y="179" fill="#a9c6d9" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ABI Compliance Checker</text>
+<text x="440" y="219" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">INPUTS</text>
+<text x="440" y="246" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Headers + libraries, or ABI dumps</text>
+<text x="440" y="289" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Header / XML descriptor workflow</text>
+<text x="440" y="317" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">ABI Dumper workflow with debug info</text>
+<text x="440" y="345" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Binary and source compatibility</text>
+<text x="440" y="397" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">RESULT</text>
+<text x="440" y="429" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Separate binary and source reports</text>
+<text x="440" y="457" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Type, signature and vtable changes</text>
+<rect x="810" y="110" width="360" height="400" rx="14" fill="#123c40"/>
+<text x="830" y="151" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="27" font-weight="700">abicheck</text>
+<text x="830" y="179" fill="#a9c6d9" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Evidence + declared contract</text>
+<text x="830" y="219" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">INPUTS</text>
+<text x="830" y="246" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Binaries + optional supporting inputs</text>
+<text x="830" y="289" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Debug info and public header AST</text>
+<text x="830" y="317" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Build context and source evidence</text>
+<text x="830" y="345" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Dependencies and deployment target</text>
+<text x="830" y="397" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">RESULT</text>
+<text x="830" y="429" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ABI vs source-only break verdicts</text>
+<text x="830" y="457" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Evidence limits and contract context</text>
+<text x="32" y="546" fill="#bdcbe0" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400">Capability summary, not a benchmark. All three analyze types; none proves behavioral compatibility.</text>
+<text x="32" y="574" fill="#8ea3bf" font-family="DejaVu Sans,Arial,sans-serif" font-size="14" font-weight="400">Workflows and primary documentation linked in the README. Reviewed 2026-11-18.</text>
+</svg>
