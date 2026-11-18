@@ -160,11 +160,11 @@ allowed to import abicheck).
 value of it, and an unknown run arch (`None`) matches, as for the other axes.
 
 A kind takes an `arch` condition only when its emission depends on the
-processor, not on the binary format or language. The first two are the
-x86-64 System V struct-return convention and LP64 struct layout
-(`struct_return_convention_changed`, `struct_packing_changed`): the rule that
-decides whether an aggregate is returned in registers or through a hidden
-pointer is an x86-64 psABI fact, so an aarch64 cell does not expect the kind.
+processor, not on the binary format or language. The first is the x86-64
+System V struct-return convention (`struct_return_convention_changed`): the
+rule that decides whether an aggregate is returned in registers or through a
+hidden pointer is an x86-64 psABI fact, so an aarch64 cell does not expect the
+kind. (A second kind's arch dependence is held until its owner confirms it.)
 A kind is conditioned on `arch` only with an oracle that shows it is absent on
 the other architecture, and a new `Arch` value is added only when a kind first
 needs it.

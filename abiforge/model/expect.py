@@ -145,6 +145,8 @@ def kind_observable(kind: str, config: Config) -> bool:
             continue
         if cond.language is not None and language not in cond.language:
             continue
+        if cond.arch is not None and config.arch not in cond.arch:
+            continue
         if any(
             alt <= atoms
             and ("D" not in alt or dwarf_witness_present(kind, config.producer))
