@@ -67,3 +67,22 @@ def test_real_gcc_arch_matches_its_own_dumpmachine_triple() -> None:
         [gcc, "-dumpmachine"], capture_output=True, text=True, check=True
     ).stdout
     assert toolchains._machine_arch(gcc) == toolchains.arch_of_triple(triple)
+
+
+def test_discovery_drops_a_pair_whose_drivers_target_different_cpus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abiforge.run import toolchains as tcs
+
+    paths = {"gcc": "/x/gcc", "g++": "/x/gxx"}
+    arch = {"/x/gcc": "x86_64", "/x/gxx": "aarch64"}
+    monkeypatch.setattr(tcs.shutil, "which", lambda name: paths.get(name))
+    monkeypatch.setattr(tcs.os.path, "realpath", lambda p: p)
+    monkeypatch.setattr(tcs, "_identify", lambda path: ("gcc", 13))
+    monkeypatch.setattr(tcs, "_machine_arch", lambda path: arch.get(path))
+    monkeypatch.setattr(tcs.sys, "platform", "linux")
+    tcs.discover.cache_clear()
+    try:
+        assert tcs.discover() == ()
+    finally:
+        tcs.discover.cache_clear()
