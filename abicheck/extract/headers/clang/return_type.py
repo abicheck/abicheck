@@ -26,10 +26,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from typing import Any, TypedDict
 
 from abicheck.model import Fact
 from abicheck.model.abi_fundamental import AbiFundamental
 from abicheck.model.identity_literals import quoted_literal_spans
+
+from ...builtin_abi import BuiltinAbi, builtin_type_fact
+from .context import qualtype_desugared
+from .type_identity import TypeIdentityIndex
 
 __all__ = ["return_type", "typedef_return_fact"]
 
@@ -471,3 +476,44 @@ def typedef_return_fact(
         if key in typedef_abi_facts:
             return typedef_abi_facts[key]
     return None
+
+
+class ReturnTypeFacts(TypedDict):
+    """The three facts a function declaration carries about its return type."""
+
+    return_type_identities_fact: Fact[tuple[str, ...]] | None
+    return_type_abi_fact: Fact[AbiFundamental] | None
+    return_by_value_fact: Fact[bool] | None
+
+
+def return_type_facts(
+    node: dict[str, Any],
+    ret_type: str,
+    scope: tuple[str, ...],
+    builtin_abi: BuiltinAbi | None,
+    typedef_abi_facts: Mapping[str, Fact[AbiFundamental] | None] | None,
+    template_type_param_names: Sequence[str],
+    type_identities: TypeIdentityIndex | None,
+) -> ReturnTypeFacts:
+    """The return type's identity, ABI and by-value facts, from one clang node.
+
+    The desugared return type is read once and feeds the ABI and by-value
+    facts. Each fact is ``None`` (not collected) when there is no type
+    identity index to answer it.
+    """
+    desugared = return_type(qualtype_desugared(node))
+    return ReturnTypeFacts(
+        return_type_identities_fact=type_identities.resolve(ret_type, scope)
+        if type_identities
+        else None,
+        return_type_abi_fact=typedef_return_fact(
+            builtin_type_fact(desugared, builtin_abi),
+            ret_type,
+            scope,
+            typedef_abi_facts,
+            template_type_param_names,
+        ),
+        return_by_value_fact=type_identities.by_value_fact(desugared, scope)
+        if type_identities
+        else None,
+    )

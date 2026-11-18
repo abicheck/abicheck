@@ -739,6 +739,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         'no type or name spelling changes. A headerless PE dump\'s export-table functions take is_extern_c and entity_id from the PE identity function: a MinGW C++ export spelled _Z... is a C++ function, not extern "C", and carries an entity identity where the older extractor left it unset. Export names and return types are unchanged.'
     ),
     84: GenerationSpellingChange(
-        "no type or name spelling changes: Function.return_by_value_fact is a new fact on the declaration (castxml's type graph; clang's desugared return QualType resolved through the TU's record/enum declarations). Export names, return types and parameter spellings are unchanged. Provisional generation number, taken from the parent's assignment."
+        "Call-interface evaluator: no stored type or name spelling changes. The clang "
+        'header backend no longer records a class member declared inside an extern "C" '
+        "block as C linkage ([dcl.link]/4): is_extern_c is now false for such a member, so "
+        "its EntityId keeps its mangled identity instead of the bare extern_c one. Names, "
+        "symbols and type spellings are unchanged; an older clang snapshot keeps the flag "
+        "as stored (the call axis declines to trust it), and no rewrite applies."
+    ),
+    85: GenerationSpellingChange(
+        "Return-by-value and pointer facts: no stored type or name spelling changes. Function.return_by_value_fact is a new fact (castxml's type graph; clang's desugared return type resolved through the record and enum declarations), and a pointer member now carries an ABI fact (castxml's PointerType size; clang's probed void * size). Names, symbols and type spellings are unchanged; the return-convention and packing checks read these facts instead of spellings."
     ),
 }

@@ -107,7 +107,7 @@ from .qualifiers import (
 )
 from .redeclarations import RedeclarationIdentity
 from .restrict_spelling import without_top_level_restrict
-from .return_type import return_type as _return_type, typedef_return_fact
+from .return_type import return_type as _return_type, return_type_facts
 from .type_identity import TypeIdentityIndex
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -510,6 +510,14 @@ def parse_functions(
             has_asm_label=has_asm_label,
             is_cxx=is_cxx,
         )
+        # [dcl.link]/4: a record member never has C linkage, even inside an
+        # `extern "C"` block or with an asm label (castxml agrees).
+        if (
+            is_extern_c
+            and not entry.in_friend
+            and strip_record_scopes(entry.scope_path) != entry.scope_path
+        ):
+            is_extern_c = False
         mangled = _strip_darwin_itanium_decoration(
             raw_mangled,
             raw_mangled or name,
@@ -588,26 +596,14 @@ def parse_functions(
                 name=name,
                 mangled=mangled,
                 return_type=ret_type,
-                return_type_identities_fact=type_identities.resolve(
-                    ret_type, entry.scope
-                )
-                if type_identities
-                else None,
-                return_type_abi_fact=typedef_return_fact(
-                    builtin_type_fact(
-                        _return_type(_qualtype_desugared(entry.node)), builtin_abi
-                    ),
+                **return_type_facts(
+                    entry.node,
                     ret_type,
                     entry.scope,
+                    builtin_abi,
                     typedef_abi_facts,
                     entry.template_type_param_names,
-                ),
-                return_by_value_fact=(
-                    type_identities.by_value_fact(
-                        _return_type(_qualtype_desugared(entry.node)), entry.scope
-                    )
-                    if type_identities
-                    else None
+                    type_identities,
                 ),
                 params=params,
                 visibility=vis,
