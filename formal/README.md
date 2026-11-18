@@ -18,6 +18,7 @@ tested, and what is assumed are kept separate in [§ Boundaries](#boundaries).
 | `lean/AbiLean/EnumFragment.lean`, `lean/AbiLean/EnumFragmentExport.lean`, `lean/enum_fragment_cases.json`, `experiments/enum_fragment.py`, `ENUM_FRAGMENT.md` | the closed enum fragment (E12): 11372 cases, generator bijection, value oracle, gcc/clang/abicheck run, proved interval and reduction |
 | `lean/AbiLean/FuncFragment.lean`, `lean/AbiLean/FuncFragmentExport.lean`, `lean/func_fragment_cases.json`, `experiments/func_fragment.py`, `FUNC_FRAGMENT.md` | the closed function-signature fragment (E13): 2160 cases, report contract and SysV call-interface oracle, execution and abicheck runs |
 | `lean/AbiLean/RetFragment.lean`, `lean/AbiLean/RetFragmentExport.lean`, `lean/ret_fragment_cases.json`, `experiments/ret_fragment.py`, `RET_FRAGMENT.md` | the closed return-type fragment (E14): 1176 cases, report contract and SysV return/sret oracle, execution and abicheck runs |
+| `experiments/struct_ret_fragment.py`, `struct_ret_fragment_observed.json` | E14b: same-class struct returns compared by member layout, 1190 cases, execution oracle on gcc and clang (not yet in Lean) |
 | `tla/`, `experiments/`, `EXPERIMENTS.md` | experiments E1–E14 and their results |
 | `tla/disposition_trace.py`, `tla/trace_corpus.py`, `tla/check_trace.py`, `tla/DispositionTrace.tla` | E11: real pipeline runs recorded and checked against the disposition spec |
 | `lean/fires_truth_table.json` | the rule's truth table as computed by Lean (test oracle) |

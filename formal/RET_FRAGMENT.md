@@ -190,6 +190,56 @@ The 21 that do not write into the sentinel.
   (ret:trivial → ret:trivial)`. Both structs are trivial; what changed is
   registers → memory, which the text does not say.
 
+## Struct member layouts (E14b)
+
+E14 compares struct returns of *different* classes only. A change that keeps
+the class -- `{long, long}` to `{int, int, long}`, both `rax:rdx` -- needs the
+member layout, which `abicheck.model.sysv_aggregate` derives from the header's
+record layout (L2: size, alignment, field offsets, field ABI facts, nested
+records, pointer arrays, bitfields; no DWARF).
+
+**Space.** Every struct of one to three `int`/`long`/`double` members under
+natural layout whose SysV return class is one of INT1, INT2, SSE1, SSE2 or
+MEMORY (mixed INTEGER/SSE structs are outside), plus two 32-byte structs so a
+memory result can grow: 35 structs, 1190 ordered pairs, returned from
+`struct R f(void)`. A member's name is its type and byte offset (`l8`), so it
+keeps its name exactly when it keeps its place and type.
+
+**Model** (`ret_image`, `_result_broken`). A result is intact iff every piece
+the old caller reads sits in the same register bits, as the same kind of
+value, in the new result -- a struct's eightbytes take `rax`, `rdx` or `xmm0`,
+`xmm1` in order -- and, for a result in caller memory, the new struct is no
+larger than the old caller's buffer. A scalar is never the same value as a
+struct member. Members the old caller does not read do not matter.
+
+**Oracle.** `formal/experiments/struct_ret_fragment.py`: a caller built
+against the old header calls the new library in a forked child, each call in
+its own frame under `-fstack-protector-all` (a new function writing past the
+old buffer trips the canary; AddressSanitizer does not see it, because gcc
+leaves the sret store uninstrumented). Intact iff the child exits cleanly and
+every member it reads holds the marker of the new member of the same name.
+
+**Result.** 1190/1190 agreement for gcc- and clang-built libraries, dumped
+through both header backends (castxml, clang), with no UNKNOWN; 12 pairs are
+intact, the same 12 on both compilers -- a struct growing within its register
+class or into a second register (`{int}` to `{int, long}`), never a memory
+result. The observed set is committed as `formal/struct_ret_fragment_observed.json`
+and every pair is re-checked in the unit lane
+(`tests/test_call_interface_struct_returns.py`); the integration lane re-runs
+the execution for gcc (`tests/test_call_interface_struct_returns_integration.py`).
+
+**Not yet proved.** This extension has no Lean counterpart yet: the model is
+tested on every case of the space, not proved for it.
+
+**Outside the domain** (`None`, the axis reads UNKNOWN): unions, mixed
+INTEGER/SSE eightbytes, `float`, `long double` and vector members, arrays of
+fundamental types (the element's ABI fact is not stored), enum fields with no
+ABI fact (the clang backend records none), base classes, packed or
+over-aligned records, and a C++ record not proved trivially copyable (Itanium
+returns a record that is non-trivial for calls in memory; the register rules
+are applied only to a C parse or a proved-trivial record). Struct parameters
+are not modelled.
+
 ## What is and is not proved
 
 | Claim | Status |
@@ -200,6 +250,7 @@ The 21 that do not write into the sentinel.
 | abicheck meets the report contract | **tested** on every case, both builds |
 | The SysV return rules themselves | **assumed** from the psABI (§3.2.3): classification of the three structs, `rdi` for the hidden pointer |
 | Same observable ⇔ same key; reduced set covers every class | **proved** / **tested** |
+| Same-class struct returns compared by member layout (E14b) | **tested** by execution on 1190 cases, both compilers, both header backends; not proved |
 
 ## Reproduce
 
