@@ -1051,6 +1051,10 @@ def test_header_backend_is_part_of_the_build_only_for_headers(
     assert cfg.id.endswith("headers" if backend == "castxml" else f"headers.{backend}")
     assert cfg.space_evidence == f"headers.{backend}"
     assert cfg.space_evidence in space.SPACE_EVIDENCE
+    # The stripped primary configuration is a registered header-evidence value too.
+    stripped = base.with_(header_backend=backend, stripped=True)
+    assert stripped.space_evidence == f"headers.stripped.{backend}"
+    assert stripped.space_evidence in space.SPACE_EVIDENCE
 
 
 def test_an_unknown_header_backend_is_refused() -> None:
