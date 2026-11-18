@@ -158,21 +158,23 @@ def test_real_record_matches_the_shipped_entries(gate):
     assert gate.known_when_widening(current, load_baseline(BASELINE_PATH)) == []
 
 
-def test_widening_the_real_std_string_entry_is_caught(gate):
-    """Dropping its gcc restriction makes the shipped std_string entry cover clang."""
+def test_widening_a_real_gcc_only_entry_is_caught(gate):
+    """Dropping its gcc restriction makes a shipped gcc-only entry cover clang."""
     import dataclasses
 
     from abiforge.known import KNOWN
 
-    entry = next(e for e in KNOWN if e.op == "std_string_abi_flipped")
-    widened = dataclasses.replace(entry, when=lambda c: c.std.year >= 2020)
+    entry = next(e for e in KNOWN if e.op == "gnu_unique_static_added")
+    widened = dataclasses.replace(
+        entry, when=lambda c: c.flags.opt == "O2" and c.evidence == "dwarf"
+    )
     current = known_record(
         [widened if e is entry else e for e in KNOWN], gate.known_entry_key
     )
     problems = gate.known_when_widening(current, load_baseline(BASELINE_PATH))
     assert len(problems) == 1
     assert problems[0].startswith("widening, needs review")
-    assert "std_string_abi_flipped" in problems[0]
+    assert "gnu_unique_static_added" in problems[0]
     assert "clang" in problems[0]
 
 

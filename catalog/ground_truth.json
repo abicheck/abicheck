@@ -233,15 +233,6 @@
    ]
   },
   "case104_glibcxx_dual_abi_flip": {
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "func_added_elf_only",
-      "func_removed_elf_only"
-     ],
-     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
-    }
-   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": true,
@@ -561,12 +552,6 @@
       "symbol_version_required_added"
      ],
      "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). The optimized build calls different libstdc++/libc entry points, so its imports, NEEDED entries and required symbol versions differ"
-    },
-    {
-     "kinds": [
-      "func_added_elf_only"
-     ],
-     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
     }
    ],
    "abi_break": true,
@@ -615,6 +600,8 @@
      "kinds": [
       "imported_symbol_added",
       "needed_added",
+      "runtime_floor_raised",
+      "symbol_version_required_added",
       "symbol_version_required_added_compat"
      ],
      "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). The optimized build calls different libstdc++/libc entry points, so its imports, NEEDED entries and required symbol versions differ"
@@ -1902,8 +1889,7 @@
     {
      "kinds": [
       "func_added",
-      "public_surface_grew",
-      "standard_layout_lost"
+      "public_surface_grew"
      ],
      "only_in": "clang",
      "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
@@ -2538,14 +2524,6 @@
    "frontend_kind_differences": [
     {
      "kinds": [
-      "abi_equivalent_type_changed"
-     ],
-     "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    },
-    {
-     "kinds": [
       "inline_function_removed",
       "public_surface_shrank"
      ],
@@ -2554,14 +2532,6 @@
       "debug-headers"
      ],
      "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    },
-    {
-     "kinds": [
-      "func_return_changed"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -2905,16 +2875,6 @@
    ]
   },
   "case43_base_class_member_added": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "tail_padding_reuse_changed"
-     ],
-     "only_in": "clang",
-     "reason": "TRACED: the detector compares a record's data size (dsize) at stable sizeof; castxml's XML records size and field offsets but no data size, so castxml snapshots leave data_size_bits unset and the check cannot run. Clang's verdict is correct: clang -fdump-record-layouts shows v1 Derived::value at byte 12, inside Base's tail padding (Base dsize 12, sizeof 16), and v2 at byte 16 (Base dsize 16)",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3403,8 +3363,7 @@
     {
      "kinds": [
       "func_added",
-      "public_surface_grew",
-      "standard_layout_lost"
+      "public_surface_grew"
      ],
      "only_in": "clang",
      "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
@@ -3530,14 +3489,6 @@
       "build-source"
      ],
      "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    },
-    {
-     "kinds": [
-      "tail_padding_reuse_changed"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -3672,7 +3623,6 @@
    "frontend_kind_differences": [
     {
      "kinds": [
-      "overload_set_rerouted",
       "public_surface_grew"
      ],
      "only_in": "castxml",
@@ -3739,7 +3689,6 @@
     },
     {
      "kinds": [
-      "standard_layout_lost",
       "type_removed",
       "typedef_base_changed"
      ],
@@ -4500,16 +4449,6 @@
    ]
   },
   "case203_class_gained_vtable_pointer": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "standard_layout_lost"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -5012,7 +4951,17 @@
       ]
      ]
     }
-   }
+   },
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "mandatory_template_param_added"
+     ],
+     "only_in": "clang",
+     "reason": "TRACED backend limit: detect_mandatory_template_param_added compares a template pattern's count of parameters without a default; castxml omits uninstantiated templates, so it records no pattern defaults for this header-only template and has no comparable arity evidence (template_param_default_changed still fires), while clang's AST records the default U = int being removed",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ]
   },
   "case226_header_only_template_default_unchanged": {
    "abi_break": false,
