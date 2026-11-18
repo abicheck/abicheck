@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -91,10 +93,7 @@ def test_cli_l2_compare_reports_the_call_axis(tmp_path: Path, case: str) -> None
     new_lib, new_h = _build(tmp_path / "v2", new_decl, new_body)
     out_json, out_md = tmp_path / "r.json", tmp_path / "r.md"
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "compare",
             str(old_lib),
             str(new_lib),
@@ -106,7 +105,7 @@ def test_cli_l2_compare_reports_the_call_axis(tmp_path: Path, case: str) -> None
             f"json={out_json}",
             "-o",
             f"markdown={out_md}",
-        ],
+        ),
         capture_output=True,
         text=True,
         check=False,
@@ -123,6 +122,6 @@ def test_cli_l2_compare_reports_the_call_axis(tmp_path: Path, case: str) -> None
     assert entry["existing_verdict"] == "BREAKING"
     assert entry["disagreement"] == disagreement
     md = out_md.read_text()
-    assert "## Call axis (shadow, ADR-094)" in md
+    assert "## Call axis (shadow)" in md
     (row,) = [line for line in md.splitlines() if line.startswith("| `f` |")]
     assert f"| {status} |" in row

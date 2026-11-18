@@ -215,7 +215,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_renamed` | API_BREAK | 1 | 0 | 0 |
 | `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 0 |
 | `func_cv_changed` | BREAKING | 1 | 0 | 0 |
-| `func_params_changed` | BREAKING | 5 | 1 | 15 |
+| `func_params_changed` | BREAKING | 5 | 1 | 16 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
 | `func_return_changed` | BREAKING | 5 | 0 | 6 |
 | `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |

@@ -52,7 +52,7 @@ def render_call_axis_shadow_from_mapping(entries: Any) -> list[str]:
     if not rows:
         return []
     lines = [
-        "## Call axis (shadow, ADR-094)",
+        "## Call axis (shadow)",
         "",
         "> Advisory only: does not change the verdict or the exit code.",
         "",

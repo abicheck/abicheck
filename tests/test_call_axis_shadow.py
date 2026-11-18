@@ -230,7 +230,7 @@ def test_markdown_report_renders_the_disagreement() -> None:
 
     old, new = _three_function_pair()
     text = to_markdown(compare(old, new))
-    assert "## Call axis (shadow, ADR-094)" in text
+    assert "## Call axis (shadow)" in text
     (trim_row,) = [line for line in text.splitlines() if line.startswith("| `trim`")]
     assert "old callers still call it correctly" in trim_row
 
