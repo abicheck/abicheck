@@ -182,6 +182,11 @@ UNCOVERED: dict[str, str] = {
         "declaration, definition, specialization and absent instances; no stored "
         "corpus pair records an explicit instantiation on both sides yet"
     ),
+    "Function.member_kind_fact": (
+        "read only by the ADR-094 call axis (compare/call_interface._implicit_this), "
+        "which decides no finding yet (D9 shadow mode); covered by "
+        "test_call_interface_members.py against Lean and execution observations"
+    ),
     "Variable.explicit_instantiation_fact": (
         "read only by compare/template_instance_absence's variable path through "
         "_declared_explicitly, covered by test_explicit_instantiation_removal.py; "

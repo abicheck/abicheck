@@ -54,6 +54,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ..model.availability import FactStatus
 from ..model.call_interface import (
     MAX_INTEGER_ARGS,
     MAX_SSE_ARGS,
@@ -69,7 +70,6 @@ from ..model.call_interface import (
 )
 from ..model.cc_attributes import is_cc_attribute
 from ..model.declarations import Function
-from ..model.availability import FactStatus
 from ..model.member_kind import MemberKind
 from ..model.owner_recovery import is_mangled_identity
 from ..model.snapshot import AbiSnapshot
