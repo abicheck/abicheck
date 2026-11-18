@@ -46,6 +46,13 @@ from .registry import (
 _OBS_B_ELF = observable(
     ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
 )
+_OBS_BH_ELF = observable(
+    ("B", "H"),
+    rationale="declared in the public header on both sides; the bare-name export is "
+    "visible only in the dynamic table (B), so binary-only or DWARF-only runs see a "
+    "weaker finding",
+    condition=ObservabilityCondition(platform=frozenset({Platform.ELF})),
+)
 _OBS_D_PRESENCE = observable(
     ("B", "D"),
     rationale="DWARF presence on the old side: only a debug-info read sees it",
@@ -72,6 +79,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.ANALYSIS,
         contract_subject=_CS.ANALYSIS,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "common_symbol_risk",
@@ -130,6 +138,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.VARIABLE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "func_deleted_elf_fallback",
@@ -143,6 +152,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_BH_ELF,),
     ),
     _E(
         "inline_namespace_moved",
@@ -153,6 +163,7 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "kabi_crc_changed",
