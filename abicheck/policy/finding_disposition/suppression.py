@@ -50,7 +50,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..disposition_ledger import record_suppressed_change
+from ..disposition_suppression import record_suppressed_change
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model.change import Change

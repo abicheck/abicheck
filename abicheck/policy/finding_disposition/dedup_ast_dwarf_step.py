@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from ...model.change import Change
 from ...model.change_catalog.kinds import ChangeKind
 from ...model.change_catalog.subsumption import subsumptions_of
-from ..disposition_types import Disposition
+from ..disposition_types import Disposition, RelatedFinding
 
 if TYPE_CHECKING:
     from .run_state import PipelineContext
@@ -47,10 +47,11 @@ class DeduplicateAstDwarf:
 
         ledger = ctx.disposition_ledger
 
-        def _record_subsumed(dropped: Change, kept_kind: ChangeKind) -> None:
-            # The subsumption's declared key names the relation (ADR-093 D4).
-            # The kept finding's identity is not recorded: that is the ADR-093
-            # D5 gap tracked in the WS-5 plan row (PR 3).
+        def _record_subsumed(
+            dropped: Change, kept_kind: ChangeKind, kept: Change
+        ) -> None:
+            # The subsumption's declared key names the relation (ADR-093 D4);
+            # the retained finding is the one that kept this one (ADR-093 D5).
             if ledger is None:
                 return
             key = next(
@@ -63,6 +64,12 @@ class DeduplicateAstDwarf:
                 Disposition.DEDUPLICATED,
                 application_point=self.name,
                 reason_code=f"subsumed_by:{kept_kind.value}:{key}",
+                related=RelatedFinding(
+                    kind=kept.kind.value,
+                    symbol=kept.symbol,
+                    field_name=kept.field_name,
+                ),
+                relation="subsumed_by",
             )
 
         return deduplicate_ast_dwarf(

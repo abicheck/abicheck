@@ -72,6 +72,7 @@ from .disposition_types import (
     CONSUMER_ONLY_APPLICATION_POINTS as _CONSUMER_ONLY,
     Disposition as Disposition,
     DispositionRecord as DispositionRecord,
+    RelatedFinding as RelatedFinding,
     verdict_class_of,
 )
 from .rule_inventory import RuleRef
@@ -155,6 +156,8 @@ class DispositionLedger:
         reclassify_hits: tuple[RuleRef, ...] = (),
         acknowledgment_rule: RuleRef | None = None,
         reason_code: str | None = None,
+        related: RelatedFinding | None = None,
+        relation: str | None = None,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
@@ -235,6 +238,8 @@ class DispositionLedger:
                 reclassify_rule=reclassify_rule,
                 reclassify_hits=tuple(reclassify_hits),
                 acknowledgment_rule=acknowledgment_rule,
+                related=related,
+                relation=relation,
             )
         )
 
@@ -739,71 +744,3 @@ class DispositionLedger:
                 for rule, count in self.rules()
             ],
         }
-
-
-def record_suppressed_change(
-    ledger: DispositionLedger | None,
-    change: Change,
-    *,
-    rule: Suppression | None,
-    application_point: str,
-    suppression: object | None = None,
-    dedupe_key: str | None = None,
-) -> None:
-    """The single call every suppression application point makes.
-
-    A module-level function rather than only a method so the five call sites
-    — three of which hold no ``PipelineContext`` and one of which lives in
-    ``appcompat`` with a differently-shaped input — share *one* recording
-    path, ledger-absence handling included: a ``None`` *ledger* is a caller
-    that never opted into the audit, which is skipped, never faked.
-
-    *suppression* is the ``SuppressionList`` the rule came from; its
-    ``source_path`` is what puts D3's suppression-document path in the audit.
-    """
-    if ledger is None:
-        return
-    source_file, entry_index, shadowed = _suppression_position(
-        suppression, change, rule
-    )
-    ledger.record_suppression(
-        change,
-        rule=rule,
-        application_point=application_point,
-        source_file=source_file,
-        dedupe_key=dedupe_key,
-        entry_index=entry_index,
-        shadowed_refs=shadowed,
-    )
-
-
-def _suppression_position(
-    suppression: object | None, change: Change, rule: Suppression | None
-) -> tuple[str | None, int | None, tuple[RuleRef, ...]]:
-    """*rule*'s document, its index there, and which other rules also matched.
-
-    P1 (ADR-067 D3): the winning rule is first-match, so every other rule that
-    matches *change* is *shadowed*. Computed here, at the one recording
-    primitive, because the list is in hand and the winner is known. Positions
-    come from :func:`~abicheck.policy.suppression.merge.rule_origin`, so a
-    rule merged from one of several ``--suppress`` files keeps that file and
-    its index in it. A rule not in the list (a synthetic decision, or a caller
-    that passed no list) gets the list's own ``source_path`` and no position.
-    """
-    from .rule_inventory import KIND_SUPPRESSION
-    from .suppression.merge import rule_origin
-
-    source_path = getattr(suppression, "source_path", None)
-    fallback = str(source_path) if source_path is not None else None
-    rules = getattr(suppression, "rules", None) if suppression is not None else None
-    if rule is None or not rules:
-        return fallback, None, ()
-    winner = next((i for i, r in enumerate(rules) if r is rule), None)
-    if winner is None:
-        return fallback, None, ()
-    shadowed = tuple(
-        RuleRef(KIND_SUPPRESSION, *rule_origin(suppression, i))
-        for i, other in enumerate(rules)
-        if i != winner and other.matches(change)
-    )
-    return (*rule_origin(suppression, winner), shadowed)
