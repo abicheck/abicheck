@@ -103,3 +103,20 @@ def test_a_function_pointer_member_is_a_word_too(
 
 def test_the_two_backends_agree_on_every_member(built: tuple[Path, Path]) -> None:
     assert _member_facts("castxml", built) == _member_facts("clang", built)
+
+
+def test_the_indirection_kind_survives_the_snapshot_codec(
+    built: tuple[Path, Path],
+) -> None:
+    """A real dump's pointer fact keeps its kind through the snapshot's own codec."""
+    import json
+
+    from abicheck.serialization import snapshot_from_dict, snapshot_to_json
+
+    header, lib = built
+    snap = dump(lib, headers=[header], header_backend="castxml", compiler=_gxx())
+    back = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
+    record = next(r for r in back.declarations.types if r.name == "P")
+    fact = next(f for f in record.fields if f.name == "v").type_abi_fact
+    assert fact is not None and fact.is_present
+    assert fact.value.indirection is Indirection.POINTER

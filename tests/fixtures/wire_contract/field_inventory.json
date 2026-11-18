@@ -354,7 +354,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 3
+      "section_schema_version": 4
     },
     "graph": {
       "fields": {

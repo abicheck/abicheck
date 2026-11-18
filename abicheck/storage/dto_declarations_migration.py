@@ -7,7 +7,7 @@ registered there in ``_MIGRATIONS`` like every other step.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 __all__ = ["declarations_v1_to_v2"]
@@ -41,3 +41,35 @@ def declarations_v2_to_v3(payload: Mapping[str, Any]) -> Mapping[str, Any]:
                 "which only a v3 writer emits"
             )
     return payload
+
+
+def declarations_v3_to_v4(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Declarations v3 -> v4: every ABI fact carries an ``indirection`` kind
+    (none, pointer or reference). A v3 writer never wrote the key, so the
+    payload is unchanged and a fact without it reads as ``none``, the
+    pre-kind meaning. A v3 payload that already carries the key was not written
+    by a v3 writer, so it is refused rather than migrated."""
+
+    def carries_kind(node: Any) -> bool:
+        if isinstance(node, Mapping):
+            if "indirection" in node and "encoding" in node:
+                return True
+            return any(carries_kind(v) for v in node.values())
+        if isinstance(node, list):
+            return any(carries_kind(v) for v in node)
+        return False
+
+    if carries_kind(payload):
+        raise ValueError(
+            "'declarations' section v3 carries an ABI fact 'indirection' kind, "
+            "which only a v4 writer emits"
+        )
+    return payload
+
+
+#: The ``"declarations"`` section's migration steps, from each version it reads.
+DECLARATIONS_MIGRATIONS: dict[int, Callable[[Mapping[str, Any]], Mapping[str, Any]]] = {
+    1: declarations_v1_to_v2,
+    2: declarations_v2_to_v3,
+    3: declarations_v3_to_v4,
+}

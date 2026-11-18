@@ -47,7 +47,7 @@ from typing import Any, Protocol, TypeVar
 
 from ..model.semantic_ir import SemanticIR
 from .canonical import canonical_form, canonical_input_trusted
-from .dto_declarations_migration import declarations_v1_to_v2, declarations_v2_to_v3
+from .dto_declarations_migration import DECLARATIONS_MIGRATIONS
 from .graph_section_codec import GraphSection
 from .guards import (
     identity_text as _identity_text,
@@ -207,7 +207,7 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     BASELINE_SET_SECTION_KIND: 1,
     # Generation 82: each variable may carry ``initializer_hex`` (the section
     # bytes of an exported read-only object). Absent reads as not-read.
-    DECLARATIONS_SECTION_KIND: 3,
+    DECLARATIONS_SECTION_KIND: 4,
 }
 
 
@@ -256,7 +256,7 @@ _MIGRATIONS: Mapping[
     **{kind: {} for kind in SECTION_SCHEMA_VERSIONS},
     BUNDLE_COMPOSITION_SECTION_KIND: {1: _bundle_composition_v1_to_v2},
     SEMANTIC_IR_SECTION_KIND: {1: _semantic_ir_v1_to_v2},
-    DECLARATIONS_SECTION_KIND: {1: declarations_v1_to_v2, 2: declarations_v2_to_v3},
+    DECLARATIONS_SECTION_KIND: DECLARATIONS_MIGRATIONS,
 }
 
 
