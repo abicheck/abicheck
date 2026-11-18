@@ -91,6 +91,7 @@ _UNREAD_DEFAULT: AbiFundamental = cast(AbiFundamental, None)
 _INDIRECT_TAIL = re.compile(r"[*&]\s*(?:const\s*|volatile\s*)*$")
 
 
+@memoized(maxsize=4096)
 def _is_indirect(spelling: str) -> bool:
     """Whether a slot's spelling is a pointer or reference (any cv on it).
 
