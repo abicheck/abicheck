@@ -11,7 +11,6 @@
     "bundle_library_added",
     "bundle_library_removed",
     "bundle_manifest_entry_unsatisfied",
-    "bundle_soname_skew",
     "bundle_unresolved_intra_dependency",
     "compat_version_changed",
     "compile_context_conflict",

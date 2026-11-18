@@ -72,7 +72,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `bundle_manifest_entry_unsatisfied` | RISK | 0 | 0 | 0 |
 | `bundle_manifest_instantiation_removed` | BREAKING | 1 | 0 | 2 |
 | `bundle_provider_changed` | RISK | 1 | 0 | 1 |
-| `bundle_soname_skew` | BREAKING | 1 | 0 | 3 |
+| `bundle_soname_skew` | BREAKING | 1 | 0 | 4 |
 | `bundle_unresolved_intra_dependency` | RISK | 0 | 0 | 0 |
 | `cet_protection_improved` | COMPATIBLE | 0 | 0 | 0 |
 | `cet_protection_weakened` | RISK | 1 | 0 | 0 |

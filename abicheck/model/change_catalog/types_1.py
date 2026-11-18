@@ -44,6 +44,12 @@ from .registry import (
 )
 
 _OBS_B = observable(("B",))
+_SCOPE_RATIONALE_B = (
+    "requires package/set scope: the wheel archive, bundle artifact "
+    "set or instantiation manifest is the comparison scope, orthogonal to "
+    "per-artifact evidence; the fact itself is read from the binary (B)"
+)
+_OBS_B_SCOPE = observable(("B",), rationale=_SCOPE_RATIONALE_B)
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
@@ -99,6 +105,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_SCOPE,),
     ),
     _E(
         "cpo_kind_changed",

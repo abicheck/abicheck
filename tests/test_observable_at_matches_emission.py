@@ -696,3 +696,64 @@ def test_removed_isa_tier_is_observed_from_the_export_table_alone(
     kinds = {c.kind.value for c in compare(snaps["old"], snaps["new"]).changes}
     assert "cpu_dispatch_isa_dropped" in kinds, kinds
     assert _observes_on("cpu_dispatch_isa_dropped", "elf", BINARY)
+
+
+@pytest.mark.integration
+def test_bundle_soname_skew_is_observed_from_the_set_of_dt_sonames(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle (GNU ELF producer): a cohort whose libfoo_core moves
+    # SONAME major 1 -> 2 while libfoo_thread stays at 1. The detector reads
+    # only each library's DT_SONAME across a package-scope set, so the binary
+    # facts alone emit bundle_soname_skew. Declared B:SCOPE.
+    from abicheck.bundle_detector_heuristics import _soname_skew_findings
+    from abicheck.diff_cpp_patterns import BundleMember, _extract_soname_major
+
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    (tmp_path / "core.c").write_text("int f_core(void) { return 1; }\n")
+    (tmp_path / "thread.c").write_text("int f_thread(void) { return 1; }\n")
+
+    def _build(
+        version: str, core_soname: str, thread_soname: str
+    ) -> list[BundleMember]:
+        out = tmp_path / version
+        out.mkdir()
+        for lib, src, soname in (
+            ("libfoo_core", "core.c", core_soname),
+            ("libfoo_thread", "thread.c", thread_soname),
+        ):
+            subprocess.run(
+                [
+                    *prefix,
+                    "-O0",
+                    "-fPIC",
+                    "-shared",
+                    f"-Wl,-soname,{soname}",
+                    str(tmp_path / src),
+                    "-o",
+                    str(out / soname),
+                ],
+                check=True,
+            )
+        members = []
+        for path in sorted(out.iterdir()):
+            dynamic = subprocess.run(
+                ["readelf", "-d", str(path)], capture_output=True, text=True, check=True
+            ).stdout
+            name = dynamic.split("SONAME", 1)[1].split("[", 1)[1].split("]", 1)[0]
+            members.append(
+                BundleMember(
+                    library=path.name,
+                    soname=name,
+                    soname_major=_extract_soname_major(name),
+                )
+            )
+        return members
+
+    old = _build("old", "libfoo_core.so.1", "libfoo_thread.so.1")
+    new = _build("new", "libfoo_core.so.2", "libfoo_thread.so.1")
+    kinds = {f.kind.value for f in _soname_skew_findings(old, new, ["libfoo_"])}
+    assert "bundle_soname_skew" in kinds, kinds
+    assert _observes_on("bundle_soname_skew", "elf", ("B",))
