@@ -56,7 +56,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import cast
 
-from ..model.abi_fundamental import AbiFundamental, abi_equivalent
+from ..model.abi_fundamental import AbiFundamental, Indirection, abi_equivalent
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.declarations import Function, Param, Variable
@@ -88,34 +88,26 @@ _RETYPE_KINDS = frozenset(
 _UNREAD_DEFAULT: AbiFundamental = cast(AbiFundamental, None)
 
 
-_INDIRECT = re.compile(
-    r"[*&]\s*(?:const\s*|volatile\s*)*$|\(\s*[*&]\s*(?:const\s*|volatile\s*)*\)"
-)
+def _comparable_equal(comparison: FactComparison[AbiFundamental]) -> bool:
+    """Whether a comparable, fully PRESENT pair of slots is ABI-equal.
 
-
-@memoized(maxsize=4096)
-def _is_indirect(spelling: str) -> bool:
-    """Whether a slot's spelling is a pointer or reference (any cv on it).
-
-    A pointer slot carries an ABI fact (one unsigned word) so that the return-
-    convention and packing checks can read it, but a retype between two pointer
-    types is a source-level change, never an ABI-equivalent one: this module
-    keeps such a slot's break, as its contract states.
+    A pointer or reference slot is never equal by fact: its fact records the
+    word it occupies, not the type it points to, so two indirect slots can
+    prove only their size, not their meaning. The check reads the fact's
+    ``indirection`` kind, which the header backend sets from the type's
+    structure, so it needs no spelling.
     """
-    return bool(_INDIRECT.search(" ".join(spelling.split())))
-
-
-def _comparable_equal(
-    comparison: FactComparison[AbiFundamental], old_spelling: str, new_spelling: str
-) -> bool:
-    """Whether a comparable, fully PRESENT pair of slots is ABI-equal."""
-    if _is_indirect(old_spelling) or _is_indirect(new_spelling):
-        return False
     if not comparison.is_comparable or comparison.degraded:
         return False
-    if comparison.old_value is None or comparison.new_value is None:
+    old, new = comparison.old_value, comparison.new_value
+    if old is None or new is None:
         return False
-    return abi_equivalent(comparison.old_value, comparison.new_value)
+    if (
+        old.indirection is not Indirection.NONE
+        or new.indirection is not Indirection.NONE
+    ):
+        return False
+    return abi_equivalent(old, new)
 
 
 def _params_retyped_only(
@@ -136,8 +128,6 @@ def _params_retyped_only(
             continue
         if not _comparable_equal(
             compare_facts(old_p.type_abi_fact, new_p.type_abi_fact, _UNREAD_DEFAULT),
-            old_p.type,
-            new_p.type,
         ):
             return False
         differing = True
@@ -156,8 +146,6 @@ def _function_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
                 new_fn.return_type_abi_fact,
                 _UNREAD_DEFAULT,
             ),
-            old_fn.return_type,
-            new_fn.return_type,
         )
     return _params_retyped_only(old_fn.params, new_fn.params)
 
@@ -182,8 +170,6 @@ def _field_retype(
         return True
     return _comparable_equal(
         compare_facts(old_f.type_abi_fact, new_f.type_abi_fact, _UNREAD_DEFAULT),
-        old_f.type,
-        new_f.type,
     )
 
 
@@ -296,8 +282,6 @@ def _variable_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
         return False
     return _comparable_equal(
         compare_facts(old_var.type_abi_fact, new_var.type_abi_fact, _UNREAD_DEFAULT),
-        old_var.type,
-        new_var.type,
     )
 
 
@@ -325,8 +309,6 @@ def _typedef_retype(
             _typedef_fact(new, change.symbol, index),
             _UNREAD_DEFAULT,
         ),
-        change.old_value or "",
-        change.new_value or "",
     )
 
 

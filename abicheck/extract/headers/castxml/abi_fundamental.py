@@ -38,7 +38,7 @@ import shutil
 from typing import Any
 from xml.etree.ElementTree import Element
 
-from ....model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from ....model.abi_fundamental import AbiFundamental, FundamentalEncoding, Indirection
 from ....model.execution_cache import memoized
 from ....model.fact import Fact
 from ...builtin_abi import BUILTIN_ENCODING as _BUILTIN_ENCODING, plain_char_is_unsigned
@@ -88,13 +88,17 @@ def _bytes(bits: str | None) -> int | None:
 
 
 def _fact(
-    el: Element, *, encoding: FundamentalEncoding | None, align_bits: str | None
+    el: Element,
+    *,
+    encoding: FundamentalEncoding | None,
+    align_bits: str | None,
+    indirection: Indirection = Indirection.NONE,
 ) -> AbiFundamental | None:
     size = _bytes(el.get("size"))
     align = _bytes(align_bits)
     if encoding is None or size is None or align is None:
         return None
-    return AbiFundamental(encoding, size, align)
+    return AbiFundamental(encoding, size, align, 0, indirection)
 
 
 def castxml_abi_fundamental(ctx: Any, type_id: str) -> AbiFundamental | None:
@@ -139,7 +143,12 @@ def _fact_of(ctx: Any, type_id: str, depth: int) -> AbiFundamental | None:
     # bits); a member of pointer type carries this fact, so a pointer-bearing
     # record is classified by its layout rather than left undecided.
     if tag == "PointerType":
-        return _fact(el, encoding=_UNSIGNED, align_bits=el.get("align"))
+        return _fact(
+            el,
+            encoding=_UNSIGNED,
+            align_bits=el.get("align"),
+            indirection=Indirection.POINTER,
+        )
     if tag == "Unimplemented" and el.get("type_class") == "Vector":
         return _vector_fact(ctx.vector_spellings.get(type_id), plain_char)
     return None

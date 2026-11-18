@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..deadline import PROBE_HANG_TIMEOUT_S, run_bounded
-from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding, Indirection
 from ..model.execution_cache import memoized, path_witness
 from ..model.fact import Fact
 
@@ -323,7 +323,7 @@ def _vector(spelling: str, abi: BuiltinAbi) -> AbiFundamental | None:
     )
 
 
-_POINTER_DECLARATOR = re.compile(r"^(?:[^()]*\*|[^()]*\(\*\)\(.*\))$")
+_POINTER_DECLARATOR = re.compile(r"^(?:[^()]*\*|[^()]*\(\*\)[(\[].*)$")
 
 
 def builtin_type_fact(
@@ -355,7 +355,11 @@ def builtin_type_fact(
         fact = (
             None
             if layout is None
-            else AbiFundamental(FundamentalEncoding.UNSIGNED, *layout)
+            else AbiFundamental(
+                FundamentalEncoding.UNSIGNED,
+                *layout,
+                indirection=Indirection.POINTER,
+            )
         )
     else:
         fact = _scalar(text, abi)

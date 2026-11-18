@@ -28,7 +28,7 @@ from dataclasses import replace
 from typing import Any
 
 from ..model import Fact, FactStatus
-from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding, Indirection
 from .decode_memo import memo_fact
 from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
@@ -122,6 +122,7 @@ def abi_fundamental_from_json(value: Any) -> AbiFundamental:
         int(value["size"]),
         int(value["align"]),
         int(value.get("lanes", 0)),
+        Indirection(value.get("indirection", "none")),
     )
 
 

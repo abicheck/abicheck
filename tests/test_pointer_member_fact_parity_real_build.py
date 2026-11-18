@@ -17,7 +17,11 @@ from pathlib import Path
 import pytest
 
 from abicheck.dumper import dump
-from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from abicheck.model.abi_fundamental import (
+    AbiFundamental,
+    FundamentalEncoding,
+    Indirection,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -35,7 +39,7 @@ _SOURCE = """\
 #include "pp.h"
 struct P mkp(long a) { struct P p; p.a = a; p.v = 0; p.i = 0; p.fp = 0; return p; }
 """
-_POINTER = AbiFundamental(FundamentalEncoding.UNSIGNED, 8, 8)
+_POINTER = AbiFundamental(FundamentalEncoding.UNSIGNED, 8, 8, 0, Indirection.POINTER)
 
 
 def _gxx() -> str:
