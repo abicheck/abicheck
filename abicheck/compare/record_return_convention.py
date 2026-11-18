@@ -32,11 +32,11 @@ the table is written for.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from typing import Protocol
 
 from ..diff_helpers import make_change
+from ..model.abi_fundamental import FundamentalEncoding
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.declarations import Function
@@ -48,26 +48,8 @@ __all__ = [
     "record_return_convention_changes",
     "returned_by_value_records",
     "return_convention",
-    "scalar_class",
+    "member_class",
 ]
-
-#: Scalars by spelling: (size in bytes, SysV class). Pointers are handled apart.
-_SCALARS: dict[str, tuple[int, str]] = {
-    "bool": (1, "INTEGER"),
-    "char": (1, "INTEGER"),
-    "signed char": (1, "INTEGER"),
-    "unsigned char": (1, "INTEGER"),
-    "short": (2, "INTEGER"),
-    "unsigned short": (2, "INTEGER"),
-    "int": (4, "INTEGER"),
-    "unsigned int": (4, "INTEGER"),
-    "long": (8, "INTEGER"),
-    "unsigned long": (8, "INTEGER"),
-    "long long": (8, "INTEGER"),
-    "unsigned long long": (8, "INTEGER"),
-    "float": (4, "SSE"),
-    "double": (8, "SSE"),
-}
 
 
 class LayoutIndex(Protocol):
@@ -82,27 +64,23 @@ class LayoutIndex(Protocol):
     def entity_for(self, record: RecordType) -> CanonicalEntity | None: ...
 
 
-_KEYWORDS = re.compile(r"\b(struct|class|union|const|volatile)\b")
+def member_class(member: TypeField) -> tuple[int, str] | None:
+    """``(size_bytes, class)`` of a scalar member from its ABI fact, or ``None``.
 
-
-def scalar_class(spelling: str) -> tuple[int, str] | None:
-    """``(size_bytes, class)`` of a scalar member, or ``None`` if undecided."""
-    text = _KEYWORDS.sub("", spelling)
-    text = re.sub(r"\s+", " ", text).strip()
-    if text.endswith(("*", "&")):
-        return 8, "INTEGER"
-    if text in _SCALARS:
-        return _SCALARS[text]
-    # Spellings with an explicit ``int``/``signed`` ('long int', 'unsigned long int').
-    words = [w for w in text.split() if w not in ("signed", "int")]
-    key = " ".join(words) if words else "int"
-    if key.startswith("unsigned "):
-        key = key[len("unsigned ") :]
-    if key in ("", "int"):
-        return _SCALARS["int"]
-    if key in _SCALARS:
-        return _SCALARS[key]
-    return None
+    The fact (``TypeField.type_abi_fact``) is the header backend's reading of
+    the declared type: a fundamental, an enumeration, or a pointer. A vector,
+    a float wider than eight bytes (``long double``, x87), or a member with no
+    fact is undecided.
+    """
+    fact = member.type_abi_fact
+    if fact is None or not fact.is_present or fact.value is None:
+        return None
+    abi = fact.value
+    if abi.lanes:
+        return None
+    if abi.encoding is FundamentalEncoding.FLOAT:
+        return (abi.size, "SSE") if abi.size <= 8 else None
+    return abi.size, "INTEGER"
 
 
 def _merge(current: str | None, new: str) -> str:
@@ -127,10 +105,10 @@ def return_convention(
     for member in fields:
         if member.is_bitfield or member.offset_bits is None:
             return None
-        decided = scalar_class(member.type)
+        decided = member_class(member)
         if decided is None:
             return None
-        member_size, member_class = decided
+        member_size, eight_class = decided
         # A scalar's natural alignment equals its size on LP64 x86_64.
         if member.offset_bits % (member_size * 8):
             return ("memory",)
@@ -138,7 +116,7 @@ def return_convention(
         for index in range(start // 8, (start + member_size - 1) // 8 + 1):
             if index >= len(eightbytes):
                 return None
-            eightbytes[index] = _merge(eightbytes[index], member_class)
+            eightbytes[index] = _merge(eightbytes[index], eight_class)
     if any(c is None for c in eightbytes):
         # A padding-only eightbyte has no class of its own; not decided here.
         return None

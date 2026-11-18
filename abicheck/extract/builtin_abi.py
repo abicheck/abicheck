@@ -128,6 +128,7 @@ _PROBED = (
     "double",
     "long double",
     "_Bool",
+    "void *",
     "__int128",
     "unsigned __int128",
 )
@@ -322,6 +323,9 @@ def _vector(spelling: str, abi: BuiltinAbi) -> AbiFundamental | None:
     )
 
 
+_POINTER_DECLARATOR = re.compile(r"^(?:[^()]*\*|[^()]*\(\*\)\(.*\))$")
+
+
 def builtin_type_fact(
     spelling: str, abi: BuiltinAbi | None
 ) -> Fact[AbiFundamental] | None:
@@ -344,6 +348,15 @@ def builtin_type_fact(
         fact = AbiFundamental(inner_fact.encoding, inner_fact.size, inner_fact.size)
     elif "__attribute__" in text:
         fact = _vector(text, abi)
+    elif _POINTER_DECLARATOR.match(text):
+        # A data or function pointer is one unsigned word of the probed ``void *``
+        # size. A pointer with a trailing qualifier is undecided.
+        layout = abi.layout.get("void *")
+        fact = (
+            None
+            if layout is None
+            else AbiFundamental(FundamentalEncoding.UNSIGNED, *layout)
+        )
     else:
         fact = _scalar(text, abi)
     return None if fact is None else Fact.present(fact)
