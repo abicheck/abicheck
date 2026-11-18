@@ -64,18 +64,22 @@ def test_a_refreeze_under_the_new_version_satisfies_the_gate(tmp_path: Path) -> 
     manifest = copy.deepcopy(_MANIFEST)
     key = "bundle_archive_schema_version"
     bumped = {**_DECLARED, key: _DECLARED[key] + 1}
-    old_key = "g40_archive/1"
+    newest = max(
+        int(k.split("/")[1])
+        for k in manifest["entries"]
+        if k.startswith("g40_archive/")
+    )
+    old_key = f"g40_archive/{newest}"
+    old_path = manifest["entries"][old_key]["path"]
     new_entry = copy.deepcopy(manifest["entries"][old_key])
-    new_entry["path"] = "g40/2/release.zip"
+    new_entry["path"] = f"g40/{newest + 1}/release.zip"
     new_entry["versions"][key] = bumped[key]
-    # The committed corpus already holds g40/2 (the refreeze for this
-    # generation), so the copy in tmp_path may exist; overwrite it.
-    (corpus / "g40" / "2").mkdir(exist_ok=True)
-    shutil.copyfile(corpus / "g40/1/release.zip", corpus / "g40/2/release.zip")
-    manifest["entries"]["g40_archive/2"] = new_entry
+    (corpus / "g40" / str(newest + 1)).mkdir(exist_ok=True)
+    shutil.copyfile(corpus / old_path, corpus / new_entry["path"])
+    manifest["entries"][f"g40_archive/{newest + 1}"] = new_entry
     assert gate.evaluate(manifest, corpus, bumped) == []
-    (corpus / "g40/1/release.zip").unlink()
-    assert any("g40_archive/1" in p for p in gate.evaluate(manifest, corpus, bumped))
+    (corpus / old_path).unlink()
+    assert any(old_key in p for p in gate.evaluate(manifest, corpus, bumped))
 
 
 def test_numbering_is_numeric_not_lexicographic(tmp_path: Path) -> None:
