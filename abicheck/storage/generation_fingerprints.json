@@ -147,7 +147,7 @@
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "6c77875de558a649c3a0b3af94d8eaa8a41403548624af9a3ec5e9a7cd206fe9",
+      "abicheck/extract/headers/clang/functions.py": "d7a313c47507f4c68119bdac8c048d689a88228b58f7c03042d892665e554681",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "03490daf8db2a1d1711c9b8a67f8a78b3479dfef54cce9baffbb98ba8f49420c",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -246,9 +246,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "1404c88ff656c925fabd8d855a04215fe6d03896d05e24ffa65e6dfa5899f77c",
+    "fingerprint": "e9aaa99243e07a9aca36c24d5dc03a2bbb7aa2bd442f76db87c0447b0c3d672e",
     "generation": 85,
-    "reason": "structural Indirection kind on the ABI fact (generation 85 is unshipped; origin/main ships 84)"
+    "reason": "clang/functions.py now passes the return-type facts as explicit keywords (a refactor from a spread of the same facts); no recorded fact changes"
   },
   "resolver": {
     "files": {

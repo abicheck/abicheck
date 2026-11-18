@@ -237,6 +237,12 @@ UNCOVERED: dict[str, str] = {
     "TypeField.type_abi_fact": _ABI_FACT_UNCOVERED,
     "Variable.type_abi_fact": _ABI_FACT_UNCOVERED,
     "Function.return_type_abi_fact": _ABI_FACT_UNCOVERED,
+    "Function.return_by_value_fact": (
+        "persisted Fact[bool] sibling added in schema v70; the H1 corpus has no "
+        "record-returning function pair whose ABI differs only in its return "
+        "convention. Covered by tests/test_struct_return_convention_real_build.py "
+        "and tests/test_return_by_value_backend_parity_real_build.py"
+    ),
     "AbiSnapshot.cxx_template_defaults": (
         "header-level template-parameter default table (extractor generation 47); "
         "the H1 corpus has no header-only template whose default differs across "
