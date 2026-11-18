@@ -42,7 +42,7 @@ from ..diff_helpers import (
 from ..model import AbiSnapshot
 from ..model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.change_catalog.subsumption import SUBSUMED_BY
+from ..model.change_catalog.subsumption import SAME_EVENT_AS, SUBSUMED_BY
 from ..model.identity import EntityId
 from .dedup_key import hashable_value
 from .finding_identity import resolve_change_identity
@@ -522,12 +522,6 @@ def deduplicate_ast_dwarf(
 #: header-scoped diff without reading it. One event at two evidence tiers: the
 #: header-aware finding is kept, since it also carries the declaration's
 #: surface facts. The pair is keyed on the mangled symbol both producers share.
-_EXPORT_LOSS_ELF_ONLY_PARTNER: dict[ChangeKind, ChangeKind] = {
-    ChangeKind.FUNC_VISIBILITY_CHANGED: ChangeKind.FUNC_REMOVED_ELF_ONLY,
-    ChangeKind.VAR_VISIBILITY_CHANGED: ChangeKind.VAR_REMOVED_ELF_ONLY,
-}
-
-
 def _drop_elf_only_duplicates_of_visibility(changes: list[Change]) -> list[Change]:
     """Drop an ELF-only removal whose symbol a visibility finding already reports.
 
@@ -538,14 +532,21 @@ def _drop_elf_only_duplicates_of_visibility(changes: list[Change]) -> list[Chang
     ``deduplicated`` by the disposition pipeline, so it stays auditable
     (``AGENTS.md``: record before disposing).
     """
+    # The pairs are declared on the registry (``same_event_as``, ADR-093 D4):
+    # the ELF-only kind names the visibility kind it reports the same event as.
+    visibility_kinds = set(SAME_EVENT_AS.values())
     covered = {
-        (_EXPORT_LOSS_ELF_ONLY_PARTNER[c.kind], c.symbol)
+        (c.kind.value, c.symbol)
         for c in changes
-        if c.kind in _EXPORT_LOSS_ELF_ONLY_PARTNER and c.symbol
+        if c.symbol and c.kind.value in visibility_kinds
     }
     if not covered:
         return changes
-    return [c for c in changes if (c.kind, c.symbol) not in covered]
+    return [
+        c
+        for c in changes
+        if not (c.symbol and (SAME_EVENT_AS.get(c.kind.value), c.symbol) in covered)
+    ]
 
 
 def _drop_constant_value_restatements(changes: list[Change]) -> list[Change]:

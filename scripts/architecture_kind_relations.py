@@ -20,9 +20,7 @@ KIND_RELATION_TABLE_ALLOWED_PREFIXES = (
     "abicheck/model/change_catalog/",
     "abicheck/policy/kind_relations.py",
 )
-KIND_RELATION_TABLE_BASELINE: frozenset[str] = frozenset(
-    {"abicheck/compare/finding_dedup.py:_EXPORT_LOSS_ELF_ONLY_PARTNER"}
-)
+KIND_RELATION_TABLE_BASELINE: frozenset[str] = frozenset()
 
 
 def _is_change_kind_member(node: ast.expr) -> bool:

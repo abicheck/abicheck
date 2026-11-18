@@ -49,3 +49,15 @@ SUBSUMED_BY: Mapping[str, tuple[Subsumption, ...]] = _subsumption_index()
 def subsumptions_of(kind: str) -> tuple[Subsumption, ...]:
     """The ``(kind, key)`` pairs *kind* declares it is subsumed by, or ``()``."""
     return SUBSUMED_BY.get(kind, ())
+
+
+#: ``{kind value: the kind it reports the same event as}`` (ADR-093 D4
+#: ``same_event_as``): an ELF-only export loss and the header-aware visibility
+#: finding that names the same event. Computed once from the registry.
+SAME_EVENT_AS: Mapping[str, str] = MappingProxyType(
+    {
+        kind: meta.relations.same_event_as
+        for kind, meta in REGISTRY.entries.items()
+        if meta.relations.same_event_as
+    }
+)

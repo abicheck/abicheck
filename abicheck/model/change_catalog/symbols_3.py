@@ -433,7 +433,9 @@ SYMBOLS_ENTRIES_3: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
         observable_at=(_OBS_B,),
-        relations=KindRelations(variant_of="var_removed"),
+        relations=KindRelations(
+            variant_of="var_removed", same_event_as="var_visibility_changed"
+        ),
     ),
     _E(
         "var_removed",
@@ -573,6 +575,8 @@ SYMBOLS_ENTRIES_3: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
         observable_at=(_OBS_B,),
-        relations=KindRelations(variant_of="func_removed"),
+        relations=KindRelations(
+            variant_of="func_removed", same_event_as="func_visibility_changed"
+        ),
     ),
 ]
