@@ -241,34 +241,42 @@ def test_pure_virtual_flip_is_emitted_from_headers_and_observed_by_headers() -> 
     assert not _observes_on("func_virtual_became_pure", "elf", BINARY)
 
 
-def test_const_value_change_is_emitted_with_headers_and_not_from_bytes_alone() -> None:
-    # The value bytes live in the binary, but a binary-only snapshot has no
-    # type for the object, so the change is observed only when a header (or
-    # DWARF) supplies the declaration. Declared {B,D} and {B,H}, never {B}.
-    old_var = Variable(
-        name="kLimit", mangled="kLimit", type="const int", value="10", is_const=True
-    )
-    new_var = Variable(
-        name="kLimit", mangled="kLimit", type="const int", value="20", is_const=True
-    )
+def test_const_value_change_is_emitted_from_section_bytes_alone() -> None:
+    # G7: a binary-only dump records an exported read-only object's own section
+    # bytes (Variable.initializer_hex), so a changed initializer is observed
+    # without any header or DWARF. Declared {B}; the header-backed value path
+    # is unchanged and still emits as well.
     old = AbiSnapshot(
         library="libsynth",
         version="1",
         platform="elf",
-        from_headers=True,
-        variables=[old_var],
+        variables=[
+            Variable(
+                name="kLimit",
+                mangled="kLimit",
+                type="?",
+                is_const=True,
+                initializer_hex="0a000000",
+            )
+        ],
     )
     new = AbiSnapshot(
         library="libsynth",
         version="2",
         platform="elf",
-        from_headers=True,
-        variables=[new_var],
+        variables=[
+            Variable(
+                name="kLimit",
+                mangled="kLimit",
+                type="?",
+                is_const=True,
+                initializer_hex="14000000",
+            )
+        ],
     )
     emitted = {c.kind.value for c in compare(old, new).changes}
     assert "var_value_changed" in emitted, emitted
-    assert _observes_on("var_value_changed", "elf", BINARY_AND_HEADERS)
-    assert not _observes_on("var_value_changed", "elf", BINARY)
+    assert _observes_on("var_value_changed", "elf", BINARY)
 
 
 @pytest.mark.integration
@@ -334,6 +342,12 @@ _HEADER_PAIRS = {
         'typedef int lib_version_1_6_47;\nextern "C" int api(int x);\n',
         'extern "C" int api(int x){ return x; }\n',
         'extern "C" int api(int x){ return x; }\n',
+    ),
+    "secondary_vtable_group_changed": (
+        'struct Base1 { virtual int a() const; };\nstruct Base2 { int b() const; };\nstruct D : Base1, Base2 { int a() const override; };\nextern "C" D* make_d();\n',
+        'struct Base1 { virtual int a() const; };\nstruct Base2 { virtual int b() const; };\nstruct D : Base1, Base2 { int a() const override; };\nextern "C" D* make_d();\n',
+        'int Base1::a() const {return 1;}\nint Base2::b() const {return 2;}\nint D::a() const {return 1;}\nextern "C" D* make_d(){ return new D; }\n',
+        'int Base1::a() const {return 1;}\nint Base2::b() const {return 2;}\nint D::a() const {return 1;}\nextern "C" D* make_d(){ return new D; }\n',
     ),
     "template_return_type_changed": (
         "template <class T> struct Box { T v; };\nBox<int> g(int x);\n",
@@ -412,27 +426,24 @@ def test_header_backed_kind_is_not_observed_from_a_stripped_binary(
         subprocess.run(abicheck_command(*args), check=True, capture_output=True)
         return out
 
+    def report(a: Path, b: Path) -> str:
+        # Text and JSON: a kind the text summary describes only as a group line
+        # (secondary_vtable_group_changed) is still named in the JSON report.
+        out = tmp_path / f"{a.stem}-{b.stem}.json"
+        text = subprocess.run(
+            abicheck_command("compare", str(a), str(b), "-o", f"json={out}"),
+            capture_output=True,
+            text=True,
+        ).stdout
+        return text + (out.read_text() if out.exists() else "")
+
     hdr = [
         build("ho", "old.cpp", "h_old.h", False),
         build("hn", "new.cpp", "h_new.h", False),
     ]
-    assert (
-        kind
-        in subprocess.run(
-            abicheck_command("compare", str(hdr[0]), str(hdr[1])),
-            capture_output=True,
-            text=True,
-        ).stdout
-    )
+    assert kind in report(hdr[0], hdr[1])
     bin_ = [build("bo", "old.cpp", "", True), build("bn", "new.cpp", "", True)]
-    assert (
-        kind
-        not in subprocess.run(
-            abicheck_command("compare", str(bin_[0]), str(bin_[1])),
-            capture_output=True,
-            text=True,
-        ).stdout
-    )
+    assert kind not in report(bin_[0], bin_[1])
 
 
 @pytest.mark.integration
@@ -489,3 +500,45 @@ def test_template_instance_removal_and_overload_reroute_are_binary_observable(
     ).stdout
     assert "instantiation_missing_from_binary" in stdout, stdout
     assert "overload_set_rerouted" in stdout, stdout
+
+
+@pytest.mark.integration
+def test_function_becoming_variable_is_observed_from_the_stripped_binary(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle (GNU ELF producer): a public name that is an exported
+    # function on one side and an exported variable on the other is named by the
+    # export table's symbol types alone, so the stripped binary pair emits it.
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    (tmp_path / "old.cpp").write_text('extern "C" int cpo(int x){ return x; }\n')
+    (tmp_path / "new.cpp").write_text('extern "C" int cpo = 1;\n')
+    dumps = []
+    for name in ("old", "new"):
+        so = tmp_path / f"lib{name}.so"
+        subprocess.run(
+            [
+                *prefix,
+                "-O0",
+                "-fPIC",
+                "-shared",
+                str(tmp_path / f"{name}.cpp"),
+                "-o",
+                str(so),
+            ],
+            check=True,
+        )
+        out = tmp_path / f"{name}.json"
+        subprocess.run(
+            abicheck_command("dump", str(so), "-o", str(out)),
+            check=True,
+            capture_output=True,
+        )
+        dumps.append(out)
+    stdout = subprocess.run(
+        abicheck_command("compare", str(dumps[0]), str(dumps[1])),
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "cpo_kind_changed" in stdout, stdout

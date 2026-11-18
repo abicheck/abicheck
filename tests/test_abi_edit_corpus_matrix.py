@@ -847,6 +847,7 @@ def test_discovery_rejects_a_c_and_cxx_driver_pair_of_different_versions(
     monkeypatch.setattr(tcs.shutil, "which", lambda name: paths.get(name))
     monkeypatch.setattr(tcs.os.path, "realpath", lambda p: p)
     monkeypatch.setattr(tcs, "_identify", lambda path: idents.get(path))
+    monkeypatch.setattr(tcs, "_machine_arch", lambda path: "x86_64")
     monkeypatch.setattr(tcs.sys, "platform", "linux")
     tcs.discover.cache_clear()
     try:

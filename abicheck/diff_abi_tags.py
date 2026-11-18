@@ -21,9 +21,11 @@ different *set* of ABI tags are distinct symbols at the binary level: the
 mangled names differ, so an old binary referencing one will not resolve the
 other.
 
-This is the per-symbol analogue of the libstdc++ dual-ABI mass-flip diagnostic
-(``glibcxx_dual_abi_flip_detected``). When that mass flip already fired we stay
-quiet to avoid duplicate noise.
+This is the per-symbol analogue of the libstdc++ dual-ABI flip diagnostic
+(``glibcxx_dual_abi_flip_detected``). A tag change is reported here whatever the
+churn around it: a flip of a ``std::string`` function changes the mangled base
+(the ``__cxx11`` namespace is part of it), so it never reaches this detector as
+a tag change, and the two findings never describe the same symbol.
 """
 
 from __future__ import annotations
@@ -40,10 +42,6 @@ from .model.change_catalog.kinds import ChangeKind
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.
 # e.g. 'B5cxx11' -> tag 'cxx11'. Tags may repeat (a name can carry several).
 _ABI_TAG_RE = re.compile(r"B(\d+)([A-Za-z0-9_]+)")
-
-# Markers used by the glibcxx dual-ABI mass-flip detector. We mirror its
-# trigger conditions so we can suppress per-symbol noise when that fired.
-_CXX11_ABI_MARKERS = ("__cxx11", "cxx11")
 
 
 def _extract_abi_tags(mangled: str) -> tuple[frozenset[str], str]:
@@ -70,21 +68,6 @@ def _extract_abi_tags(mangled: str) -> tuple[frozenset[str], str]:
     return frozenset(tag_list), base
 
 
-def _glibcxx_flip_active(removed: set[str], added: set[str]) -> bool:
-    """True if the glibcxx dual-ABI mass-flip diagnostic would fire.
-
-    Mirrors the threshold logic in ``diff_platform._diff_glibcxx_dual_abi`` so
-    that per-symbol abi_tag findings are suppressed under a detected mass flip.
-    """
-    if len(removed) < 5 or len(added) < 5:
-        return False
-    removed_marker = sum(1 for s in removed if any(m in s for m in _CXX11_ABI_MARKERS))
-    added_marker = sum(1 for s in added if any(m in s for m in _CXX11_ABI_MARKERS))
-    total = len(removed) + len(added)
-    marker = removed_marker + added_marker
-    return marker > 0 and marker >= total * 0.3
-
-
 @registry.detector("abi_tag")
 def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect per-symbol Itanium ABI-tag set changes (e.g. gained/lost cxx11)."""
@@ -108,10 +91,6 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     removed = set(old_map) - set(new_map)
     added = set(new_map) - set(old_map)
     if not removed or not added:
-        return changes
-
-    # Suppress when the mass dual-ABI flip diagnostic already covers this churn.
-    if _glibcxx_flip_active(removed, added):
         return changes
 
     # Pair removed<->added by their tag-stripped base mangled name.

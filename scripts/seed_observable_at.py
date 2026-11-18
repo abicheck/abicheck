@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 """Seed ``observable_at`` on the ChangeKind taxonomy (ADR-093, WS-1 slice 3).
 
-``DECISIONS`` is the reviewable record of how each kind's observability was
-derived. One row per kind: ``kind  CODE  # note``. A kind with no row, or with
-code ``U``, stays ``UNCLASSIFIED``: when the evidence is ambiguous or absent
-the sentinel is the answer, because a wrong value creates a false-clean
-obligation that no run can discharge.
+``DECISIONS`` is the reviewable record of each kind's observability: one row per
+kind, ``kind  CODE  # note``. No row, or code ``U``, stays ``UNCLASSIFIED``: a
+wrong value creates a false-clean obligation no run can discharge.
 
-Evidence collected per kind (``--table`` renders it as Markdown):
-
-* abiforge operators whose ``expected`` or ``any_of`` names the kind, with the
-  operator's ``min_evidence`` (``fn`` = computed per config);
-* the designed evidence tier of ``scripts/evidence_tiers.py``
-  (``EVIDENCE_TIER_BY_KIND``, a chain assumption: a hint, not a rule);
-* the modules outside the taxonomy that emit ``ChangeKind.<NAME>``.
+Evidence per kind (``--table``): abiforge operators naming it (with
+``min_evidence``), its designed tier in ``scripts/evidence_tiers.py`` (a hint),
+and the modules outside the taxonomy that emit ``ChangeKind.<NAME>``.
 
 Rules applied (plan ``abicheck-abiforge-completeness.md`` §1.2, §2):
 
@@ -47,11 +41,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from seed_observable_forms_ws1 import WS1_FORMS
+
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "abicheck" / "model" / "change_catalog"
 BASELINE = REPO / "tests" / "data" / "change_kind_unclassified.json"
-# architecture/modules.yaml `limits.production`.
-PRODUCTION_LINE_CAP = 800
+PRODUCTION_LINE_CAP = 800  # architecture/modules.yaml `limits.production`
 
 # Ordered form codes. ``form`` is (alternatives, rationale, platforms, const).
 # ``const`` is the module-level name the taxonomy file defines and reuses.
@@ -66,6 +61,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         "declared in the public header and present in the export table",
         (),
         "_OBS_BH",
+    ),
+    "BHDOC": (
+        (("B", "H"),),
+        "the ratio counts exports against public-header declarations; a binary alone has no header records to compare with",
+        (),
+        "_OBS_BH_DOC",
     ),
     "H": (
         (("B", "H"),),
@@ -115,6 +116,18 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_DBD",
     ),
+    "DH:ELF_X86_64": (
+        (("B", "D"), ("B", "H")),
+        "layout or type fact: DWARF and the public header both carry it",
+        ("elf",),
+        "_OBS_DH_ELF_X86_64",
+    ),
+    "BBD": (
+        (("B", "BD"),),
+        "compiler-flag fact: the header never carries it and the binary does not; build data (a compile database) does",
+        (),
+        "_OBS_BBD",
+    ),
     "BHSG": (
         (("B", "H", "S", "G"),),
         "call edges across translation units: needs sources and the graph",
@@ -138,6 +151,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         "record alignment is a header layout fact; DWARF records it only when explicit",
         (),
         "_OBS_BH_ALIGN",
+    ),
+    "DH:PEMACHO": (
+        (("B", "D"), ("B", "H")),
+        "layout or type fact: DWARF and the public header both carry it",
+        ("pe", "macho"),
+        "_OBS_DH_PEMACHO",
     ),
     "DH:ELFPE": (
         (("B", "D"), ("B", "H")),
@@ -189,6 +208,8 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
     ),
 }
 
+FORMS.update(WS1_FORMS)  # domain + Linux batches; see seed_observable_forms_ws1.py
+
 # kind  CODE  [# note].  Kinds absent here (or coded U) stay UNCLASSIFIED.
 DECISIONS_FILE = Path(__file__).with_name("seed_observable_decisions.txt")
 DECISIONS_TEXT = DECISIONS_FILE.read_text()
@@ -215,6 +236,7 @@ FORM_CODES = frozenset(FORMS)
 #: The language a form's condition is scoped to (``DH:C``, ``B:CXX``). Forms
 #: absent here are language-free.
 FORM_LANGUAGES: dict[str, tuple[str, ...]] = {"DH:C": ("c",), "B:CXX": ("cxx",)}
+FORM_ARCHES: dict[str, tuple[str, ...]] = {"DH:ELF_X86_64": ("x86_64",)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,12 +270,13 @@ def form_observability(code: str) -> tuple[Any, ...]:
     alts, rationale, platforms, _const = FORMS[code]
     languages = FORM_LANGUAGES.get(code, ())
     condition = None
-    if platforms or languages:
+    if platforms or languages or FORM_ARCHES.get(code):
         condition = ObservabilityCondition(
             platform=frozenset(Platform(p) for p in platforms) if platforms else None,
             language=frozenset(Language(lang) for lang in languages)
             if languages
             else None,
+            arch=frozenset(FORM_ARCHES.get(code, ())) or None,
         )
     return (observable(*alts, rationale=rationale, condition=condition),)
 
@@ -371,7 +394,7 @@ def _shape(dec: Decision) -> str:
     for code in dec.codes:
         alts, _rat, platforms, _const = FORMS[code]
         text = _spell(alts)
-        scope = [*platforms, *FORM_LANGUAGES.get(code, ())]
+        scope = [*platforms, *FORM_LANGUAGES.get(code, ()), *FORM_ARCHES.get(code, ())]
         if scope:
             text += " on " + ",".join(scope)
         parts.append(text)
@@ -443,11 +466,10 @@ def _constants_block(codes: set[str]) -> list[str]:
         ]
         if rationale:
             parts.append(f'rationale="{rationale}"')
-        if platforms:
-            plat = ", ".join(f"Platform.{p.upper()}" for p in platforms)
-            parts.append(
-                f"condition=ObservabilityCondition(platform=frozenset({{{plat}}}))"
-            )
+        axes = (("platform", ", ".join(f"Platform.{x.upper()}" for x in platforms)), ("arch", ", ".join(f"Arch.{x.upper()}" for x in FORM_ARCHES.get(code, ()))))
+        cond = [f"{k}=frozenset({{{v}}})" for k, v in axes if v]
+        if cond:
+            parts.append(f"condition=ObservabilityCondition({', '.join(cond)})")
         block.append(f"{const} = observable({', '.join(parts)})")
     return block
 
@@ -600,6 +622,7 @@ def _split_owner(
     used = {"observable"}
     if any(FORMS[c][2] for c in codes):
         used |= {"ObservabilityCondition", "Platform"}
+    used |= {"Arch"} if any(FORM_ARCHES.get(c) for c in codes) else set()
     if any(FORM_LANGUAGES.get(c) for c in codes):
         used |= {"Language", "ObservabilityCondition"}
     header = _header_for_sibling(lines, head, family, path.stem, number)
@@ -683,6 +706,7 @@ def apply_decisions(dry_run: bool) -> dict[str, int]:
         used = {"observable"}
         if any(FORMS[c][2] for d in decs for c in d.codes):
             used |= {"ObservabilityCondition", "Platform"}
+        used |= {"Arch"} if any(FORM_ARCHES.get(c) for d in decs for c in d.codes) else set()
         lines.insert(imp, f"from .observability import {', '.join(sorted(used))}\n")
         text = _ruff_format(path, "".join(lines))
         if text.count("\n") <= PRODUCTION_LINE_CAP:

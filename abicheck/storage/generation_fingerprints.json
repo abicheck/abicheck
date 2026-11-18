@@ -64,13 +64,13 @@
       "abicheck/extract/dwarf_vtable_completeness.py": "dc79514f133a5368be0b04bb31e3863337b876c1ba017c4b3023eb1609e1a4c2",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
       "abicheck/extract/elf_code_hash.py": "99cfa984364e0345077bf7bf960337a41f5a8eff887f6f7eb1138ec305e74258",
-      "abicheck/extract/elf_data_initializer.py": "adc4a4dfac61e35334e81e2ac000f173c049fb06bfc87a31ec40b29eb50dd42f",
+      "abicheck/extract/elf_data_initializer.py": "642faaa77b490a82635b011d96ad0506d9695e218803c0a10e25d3ea21a1f6c4",
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_pure_virtual_slots.py": "c583305033c551840e206f28600400e6e01929e7a383284fb8261a644c76c191",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
       "abicheck/extract/elf_string_table.py": "8348fa460902944419d2f9fe0918d05d232dc0a6ebce3d606e1b1fcb68c69337",
-      "abicheck/extract/elf_symbol_classify.py": "da6f10854228923bf08adfce3fa82f5b8ca265e5f834ac2fbdd349243e514728",
+      "abicheck/extract/elf_symbol_classify.py": "e7e4d0eb3bd5fab47da591e7c6180edee612adde5ab5eda2522f8d782cd368e9",
       "abicheck/extract/elf_symbol_fastpath.py": "9731dd43e2a99edd25f70a77c3c1fa02612d0de537cc73a98ea90b79167b1c21",
       "abicheck/extract/elf_symbol_origin.py": "3408f0fdb9d3ce98eff14007012ac4bf844256f6628d127c4853ef8b6c20dac4",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
@@ -108,7 +108,7 @@
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/function_type_cc.py": "629328f9a0e9c3842ef43c05e11ef3f781b9f5c351e3f14638ce54b91e36405a",
-      "abicheck/extract/headers/castxml/functions.py": "f50eca555f141a4b8f710fa666f7ecfc9e1fec9429dc79bca6a56855cb6efd9b",
+      "abicheck/extract/headers/castxml/functions.py": "b49358d564982264ed3de293713b60f0b69042b4fcce4107228b1e98bba9d529",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -146,7 +146,7 @@
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "ea6bffb6e5a2c12c7dead503d5e5c617f2270012a2c04734c45ed71601b97b52",
+      "abicheck/extract/headers/clang/functions.py": "3b58af18249fa8ae51dd3dd9fdf4a624ae361a79481d131d2c5f75291457f31a",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "03490daf8db2a1d1711c9b8a67f8a78b3479dfef54cce9baffbb98ba8f49420c",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -183,6 +183,7 @@
       "abicheck/extract/headers/gcc/gcc_facts.cc": "bf2cfffa18bcde2253bc79f59b69d92e2fee5b87d773989dfc82aa70048900e5",
       "abicheck/extract/headers/gcc/projection.py": "8b323a4e70e35ea81aa06a859712b250b6107283d8da1028d923490a67054569",
       "abicheck/extract/headers/manifest.py": "f5e7421de9ecfc09bac00bfae8e8f0cd0cb8c5dc34d8dcaeebf13327bd35b585",
+      "abicheck/extract/headers/member_kind.py": "267fa542378721738093df55a47fca5081f54b4da24cd7fc30e9a2fc4e7e5ff3",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/std_reexports.py": "fc9a3aa7123707b327837a06ee3e6ba461f007b734b0a745446ad9e26ac3aac4",
@@ -243,11 +244,11 @@
       "abicheck/workflows/dump/formats.py": "634c897b872e20c7c1579a9f569700a32c1b99b204569e8bb198a4174587b6d2",
       "abicheck/workflows/dump/macho.py": "ee301926fd430c4eed3128e75b07fc494805ff76d0b2acbcd83fa7a8fc9f424e",
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
-      "abicheck/workflows/dump/pe.py": "f3da8f38f43cfc947d32713b1fa07667140f360fc34a7a45771de6b1aea598f8"
+      "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "9ad5094c5d9699e627ddd1332a2689add6cc18c6e533e05783c655da59837a15",
-    "generation": 81,
-    "reason": "merge origin/main (#2116 memo witness; pure memo change)"
+    "fingerprint": "d2c437c833f4ed2b147b7585164c822a7c2457418deb61126cb573d3c64e92a0",
+    "generation": 85,
+    "reason": "member_kind.py was added in generation 85 (#2135) but the fingerprint was recorded before its final edit; the generation-85 bump already covers it"
   },
   "resolver": {
     "files": {

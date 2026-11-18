@@ -150,6 +150,12 @@ SOURCE_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.ANALYSIS,
         contract_subject=_CS.ANALYSIS,
         operation=_OP.MODIFIED,
+        observable_at=(
+            observable(
+                ("B", "H"),
+                rationale="the ratio counts exports against public-header declarations; a binary alone has no header records to compare with",
+            ),
+        ),
     ),
     _E(
         "uninstantiated_template_removed",

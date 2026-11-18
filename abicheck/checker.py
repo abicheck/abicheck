@@ -1354,16 +1354,16 @@ def compare(
     # P0.4 — computed last, from data the pipeline above already produced
     # (evidence tiers, comparability outcome, contract context, whatever
     # BuildSourcePack either side already carries). A pure rollup over the
-    # just-built `result`, never a new probe; see policy/analysis_assurance/__init__.py's
-    # module docstring for the full rationale and what is deferred.
-    #
+    # just-built `result`, never a new probe; see policy/analysis_assurance/__init__.py.
     # `checker.compare()` sees only each snapshot's *embedded* BuildSourcePack
     # (`old/new.build_source`), never an out-of-band `--old/new-build-info`/
     # `--old/new-sources` pack the CLI resolved (`_resolve_side_pack`); a
     # caller holding one recomputes with it explicitly (P1 review; see
     # `frontends/cli/compare_result.py (_report_compare_result)`).
     from .workflows.analysis_assurance_attach import attach_analysis_assurance
+    from .workflows.call_axis_shadow import attach_call_axis_shadow  # ADR-094 D9
 
+    attach_call_axis_shadow(result, old, new)  # shadow only: verdict is final
     attach_coverage_reports(result, old, new, census)  # I4 + H5, before the rollup
     attach_analysis_assurance(result, old, new)
     memory_trace.mark("compare.rollup:done")

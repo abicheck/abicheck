@@ -274,7 +274,14 @@ def test_a_declared_field_moves_exactly_its_sections_inventory(
     )
     after = declared_field_inventory()["sections"]
     assert {k for k in before if before[k] != after[k]} == {"declarations"}
-    assert not _migrates("declarations", 1, SECTION_SCHEMA_VERSIONS["declarations"])
+    # The pinned version, read from the checked-in inventory: the probe moves a
+    # field without a bump, so no migration may lead from the pinned version to
+    # the current one. (A hard-coded version here would go stale on every bump.)
+    pinned = json.loads(_INVENTORY.read_text(encoding="utf-8"))
+    pinned_version = pinned["sections"]["declarations"]["section_schema_version"]
+    assert not _migrates(
+        "declarations", pinned_version, SECTION_SCHEMA_VERSIONS["declarations"]
+    )
 
 
 def test_section_bytes_are_pinned_while_their_versions_hold() -> None:

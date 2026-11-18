@@ -46,7 +46,7 @@ from .diff_types_surface import (
     RESERVED_FIELD,
     surface_type_maps,
 )
-from .model import AbiSnapshot, Function, TypeField
+from .model import AbiSnapshot, Function, TypeField, Variable
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
@@ -92,7 +92,38 @@ def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     new_value=v_new.value,
                 )
             )
+        elif _initializer_bytes_changed(v_old, v_new):
+            # Generation 82: both sides read the object's own section bytes.
+            # Same length only -- a size change is SYMBOL_SIZE_CHANGED's
+            # finding -- and never a header ``value`` compared to raw bytes.
+            changes.append(
+                make_change(
+                    ChangeKind.VAR_VALUE_CHANGED,
+                    symbol=mangled,
+                    name=qualified_variable_name(
+                        v_old.entity_id, v_old.name, mangled=mangled
+                    ),
+                    entity_id=v_old.entity_id,
+                    old=v_old.initializer_hex,
+                    new=v_new.initializer_hex,
+                    old_value=v_old.initializer_hex,
+                    new_value=v_new.initializer_hex,
+                )
+            )
     return changes
+
+
+def _initializer_bytes_changed(v_old: Variable, v_new: Variable) -> bool:
+    """Both sides carry section-read bytes of one length, and they differ.
+
+    ``None`` on either side is *not read*, so no comparison happens: a
+    castxml-only side (a source-text ``init``) against a binary side (raw
+    bytes) is never compared, because those two spellings are not comparable.
+    """
+    old_hex, new_hex = v_old.initializer_hex, v_new.initializer_hex
+    if old_hex is None or new_hex is None:
+        return False
+    return len(old_hex) == len(new_hex) and old_hex != new_hex
 
 
 @registry.detector("type_kind_changes")

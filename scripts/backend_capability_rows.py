@@ -345,6 +345,20 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "member_kind_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "Both backends read it from the declaration's AST node "
+            "kind (`extract/headers/member_kind.py`): clang's FunctionDecl / "
+            "CXXMethodDecl / CXXConversionDecl / CXXConstructorDecl / "
+            "CXXDestructorDecl, castxml's Function / OperatorFunction / Method / "
+            "OperatorMethod / Converter / Constructor / Destructor, with `static` "
+            "splitting static from non-static members."
+        ),
+    ),
+    FactRow(
+        "Function",
         "is_compiler_generated",
         _FULL,
         _NONE,
@@ -541,6 +555,16 @@ LEADING_ROWS: tuple[FactRow, ...] = (
         note=("Same shape as Function.deprecated_fact -- see that row's own note."),
     ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Variable",
+        "initializer_hex",
+        _OTHER,
+        _OTHER,
+        note=(
+            "Generation 82: read from the exported object's own file-backed, "
+            "non-writable section by the ELF path, not from a header backend."
+        ),
+    ),
     FactRow(
         "Variable",
         "declared_in_headers_fact",

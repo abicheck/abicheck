@@ -17,7 +17,9 @@ tested, and what is assumed are kept separate in [§ Boundaries](#boundaries).
 | `lean/AbiLean/Fragment.lean`, `lean/AbiLean/FragmentExport.lean`, `lean/fragment_cases.json`, `experiments/layout_fragment.py`, `FRAGMENT.md` | the closed layout fragment (E10): explicit 6368-case space, generator bijection, oracle, gcc/clang/abicheck run, proved reduction |
 | `lean/AbiLean/EnumFragment.lean`, `lean/AbiLean/EnumFragmentExport.lean`, `lean/enum_fragment_cases.json`, `experiments/enum_fragment.py`, `ENUM_FRAGMENT.md` | the closed enum fragment (E12): 11372 cases, generator bijection, value oracle, gcc/clang/abicheck run, proved interval and reduction |
 | `lean/AbiLean/FuncFragment.lean`, `lean/AbiLean/FuncFragmentExport.lean`, `lean/func_fragment_cases.json`, `experiments/func_fragment.py`, `FUNC_FRAGMENT.md` | the closed function-signature fragment (E13): 2160 cases, report contract and SysV call-interface oracle, execution and abicheck runs |
-| `tla/`, `experiments/`, `EXPERIMENTS.md` | experiments E1–E13 and their results |
+| `lean/AbiLean/RetFragment.lean`, `lean/AbiLean/RetFragmentExport.lean`, `lean/ret_fragment_cases.json`, `experiments/ret_fragment.py`, `RET_FRAGMENT.md` | the closed return-type fragment (E14): 1176 cases, report contract and SysV return/sret oracle, execution and abicheck runs |
+| `experiments/member_fragment.py`, `member_fragment_observed.json`, `MEMBER_FRAGMENT.md` | the implicit-`this` extension of E13/E14 (E15): every E13/E14 case as a C++ member, plus static/non-static transitions, by execution on g++ and clang++ |
+| `tla/`, `experiments/`, `EXPERIMENTS.md` | experiments E1–E15 and their results |
 | `tla/disposition_trace.py`, `tla/trace_corpus.py`, `tla/check_trace.py`, `tla/DispositionTrace.tla` | E11: real pipeline runs recorded and checked against the disposition spec |
 | `lean/fires_truth_table.json` | the rule's truth table as computed by Lean (test oracle) |
 | `fixtures/` | old/new C library (exposed and opaque record), four old consumers, `run_experiment.sh` |
@@ -292,7 +294,7 @@ are paths in both graphs, and both are the E7 count-balancing shape.
 
 ## Next steps
 
-The roadmap (generator completeness, Lean/TLA+ roles, experiments E1–E13) is
+The roadmap (generator completeness, Lean/TLA+ roles, experiments E1–E14) is
 [`docs/contribute/plans/formal-methods-and-generator-completeness.md`](../docs/contribute/plans/formal-methods-and-generator-completeness.md).
 Candidate rules if the per-rule line is ever resumed:
 

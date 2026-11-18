@@ -34,7 +34,6 @@ GAP_O2_STD = (
 GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
-GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
 GAP_FLAG_INVISIBLE_LAYOUT = (
     "A config-level layout flag a public header cannot carry: stripped {B,H} reads the "
     "layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)"
@@ -207,18 +206,6 @@ _PLATFORM: tuple[Known, ...] = (
         GAP_NEW_LIB_TAGS,
         issues=frozenset({"missing:SYMBOL_VERSION_REQUIRED_ADDED"}),
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
-    ),
-    Known(
-        "std_string_abi_flipped",
-        _XA,
-        "wrong-kind",
-        lambda c: c.std.year >= 2020 and c.producer.family == "gcc",
-        "from C++20 the new-ABI std::string is constexpr and exports nothing, "
-        "while the old COW string exports ~37 weak members (_ZNSs...): they "
-        "dilute the __cxx11 marker share below the flip threshold",
-        GAP_DUAL_ABI_COW_CHURN,
-        issues=frozenset({"missing:GLIBCXX_DUAL_ABI_FLIP_DETECTED"}),
-        verdicts=_BREAKING,
     ),
     Known(
         "gnu_unique_static_added",

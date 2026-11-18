@@ -476,6 +476,13 @@ def _snapshot_to_dict(
     )
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
+    # Generation 82: an unread initializer is *absent*, not ``null``, so a
+    # snapshot that never read section bytes encodes exactly as it did before
+    # (the wire pins hold, and no section-version bump is owed). A read value
+    # is written; the reader treats a missing key as not-read.
+    for var in d.get("variables", ()):
+        if isinstance(var, dict) and var.get("initializer_hex") is None:
+            var.pop("initializer_hex", None)
     d = _expand_stale_fact_families(d, snap)
     # Runtime-only source-read licence — never persisted, by design. Writing it
     # would let a stored snapshot grant itself permission to re-read whatever

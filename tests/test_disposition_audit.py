@@ -57,8 +57,8 @@ from abicheck.policy.disposition_close import (
 from abicheck.policy.disposition_ledger import (
     Disposition,
     DispositionLedger,
-    record_suppressed_change,
 )
+from abicheck.policy.disposition_suppression import record_suppressed_change
 from abicheck.policy.finding_disposition import dispose_findings
 from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.report.disposition_audit import compute_disposition_audit
@@ -365,7 +365,7 @@ def test_consumer_overlay_suppression_records_into_the_same_ledger() -> None:
         description="required by consumer",
     )
     rule = Suppression(symbol="_ZN3foo4goneEv", reason="consumer retired")
-    from abicheck.policy.disposition_ledger import record_suppressed_change
+    from abicheck.policy.disposition_suppression import record_suppressed_change
 
     record_suppressed_change(
         ledger_for(result),

@@ -12,64 +12,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""The audited per-generation spelling table (ADR-062 D2).
+"""The audited per-generation spelling rows (ADR-062 D2).
 
 One :class:`GenerationSpellingChange` row per extractor generation in
-:data:`SPELLING_MIGRATIONS`, and the placeholder rule its reasons are held to.
-:mod:`.generation_migrations` applies the rows on load;
-``scripts/generation_corpus_gate.py`` reads this file's literals by AST, so
-the table stays a dict literal and every reason a literal string.
+:data:`SPELLING_MIGRATIONS`. ``scripts/generation_corpus_gate.py`` reads this
+file's literal by AST, so the table stays a dict literal and every reason a
+literal string; the row record and placeholder rule are in
+:mod:`.generation_spelling_types`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 
-__all__ = [
-    "PLACEHOLDER_REASONS",
-    "SPELLING_MIGRATIONS",
-    "GenerationSpellingChange",
-    "is_placeholder_reason",
-]
+from .generation_spelling_types import GenerationSpellingChange
 
-
-@dataclass(frozen=True)
-class GenerationSpellingChange:
-    """What one extractor generation changed about stored type spellings.
-
-    *rewrites* maps an old whole-word spelling to the spelling this
-    generation writes instead; empty means the generation changed no
-    spelling, and *reason* then says why (it must be non-empty either way).
-
-    *extent_shift* is a respelling no load-time rewrite can apply soundly:
-    this generation spells every array extent the older extractor wrote as
-    ``N`` as ``N + extent_shift`` for some, but not all, arrays (a stored
-    snapshot does not say which backend wrote an extent). Comparison demotes
-    a finding whose spellings differ only by that shift instead.
-
-    *restores_erased_extents* says this generation spells an array bound the
-    older DWARF extractor erased (``char[8]`` where it wrote ``char[]``). A
-    stored ``T[]`` does not say what the bound was, so no rewrite is sound;
-    comparison demotes a finding whose spellings differ only by that erasure.
-    """
-
-    reason: str
-    rewrites: tuple[tuple[str, str], ...] = ()
-    extent_shift: int = 0
-    #: This generation also declares a load-time rewrite of stored *facts*
-    #: (not spellings), such as ``castxml_noexcept_migration.py``: a document
-    #: from before it re-encodes to different bytes by design.
-    migrates_facts: bool = False
-    restores_erased_extents: bool = False
-    #: Name prefixes of functions an older generation recorded and this one
-    #: no longer does (an extractor artifact, never a library entity), such
-    #: as castxml's compiler-declared ``__builtin_*``. No load-time rewrite
-    #: can recover the dropped entity soundly, so comparison demotes a
-    #: finding on such a function between operands that straddle this
-    #: generation instead (``policy/retired_function_drift.py``).
-    retires_function_prefixes: tuple[str, ...] = ()
+__all__ = ["SPELLING_MIGRATIONS"]
 
 
 #: Every row's reason cites the commit that introduced the generation and what
@@ -776,25 +734,24 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     81: GenerationSpellingChange(
         "no type or name spelling changes. The alignment walk no longer skips a misaligned sibling under a cyclic type; an unreadable or unparseable adjacent dSYM stores a fixed limitation, is not cached, and the header-free Mach-O extractor collects it."
     ),
+    82: GenerationSpellingChange("G7: initializer_hex; no spelling change"),
+    83: GenerationSpellingChange(
+        'no type or name spelling changes. A headerless PE dump\'s export-table functions take is_extern_c and entity_id from the PE identity function: a MinGW C++ export spelled _Z... is a C++ function, not extern "C", and carries an entity identity where the older extractor left it unset. Export names and return types are unchanged.'
+    ),
+    84: GenerationSpellingChange(
+        "Call-interface evaluator: no stored type or name spelling changes. The clang "
+        'header backend no longer records a class member declared inside an extern "C" '
+        "block as C linkage ([dcl.link]/4): is_extern_c is now false for such a member, so "
+        "its EntityId keeps its mangled identity instead of the bare extern_c one. Names, "
+        "symbols and type spellings are unchanged; an older clang snapshot keeps the flag "
+        "as stored (the call axis declines to trust it), and no rewrite applies."
+    ),
+    85: GenerationSpellingChange(
+        "Member kind: no stored type or name spelling changes. The clang and castxml "
+        "header backends record Function.member_kind_fact (free, instance, static, "
+        "constructor, destructor) from the declaration's AST node kind. "
+        "An older snapshot carries no such fact, which reads as not collected, and the "
+        "call axis keeps a function that is not provably C linkage UNKNOWN; no rewrite "
+        "applies."
+    ),
 }
-
-#: Reasons that say nothing about what was audited; the bump gate refuses them.
-PLACEHOLDER_REASONS = frozenset(
-    {
-        "",
-        "tbd",
-        "todo",
-        "none",
-        "n/a",
-        "no change",
-        "no spelling change",
-        "no stored type spelling changed",
-        "no stored type spelling changed in this generation",
-        "bumped for a semantic change",
-    }
-)
-
-
-def is_placeholder_reason(reason: str) -> bool:
-    """Whether *reason* is empty or a bare "no change" placeholder."""
-    return reason.strip().lower().rstrip(".") in PLACEHOLDER_REASONS

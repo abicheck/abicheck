@@ -74,7 +74,7 @@ def _sweep_case(bucket, relevance, promote, scoped, severity, restore):
     recording, closing, scoping and gate-projection path."""
     from abicheck.checker_types import DiffResult
     from abicheck.policy.disposition_close import finalize_ledger
-    from abicheck.policy.disposition_ledger import record_suppressed_change
+    from abicheck.policy.disposition_suppression import record_suppressed_change
 
     result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="s", description="d")

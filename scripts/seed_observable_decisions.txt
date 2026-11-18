@@ -259,7 +259,7 @@ integer_model_changed            DBD
 long_double_abi_changed          DBD  # plan A3
 lto_mode_changed                 DBD
 struct_packing_mode_changed      DBD
-struct_return_convention_changed DH   # plan: STRUCT_RETURN_CONVENTION
+struct_return_convention_changed  DH:ELF_X86_64  # plan: STRUCT_RETURN_CONVENTION
 stdlib_debug_mode_changed        DBD
 target_isa_changed               DBD  # plan A3
 threadsafe_statics_mode_changed  DBD
@@ -321,7 +321,7 @@ overload_added  B  # diff_types.py:444-461: an overload added to an exported fre
 # -- batch 3 (G3): pure virtual -----------------------------------------------
 func_virtual_became_pure  H:PURE  # types_1.py / diff_types.py:1300: fires on a matched pair whose is_pure_virtual flips; a pure member has no symbol, so the DWARF-only surface never contains it (oracle: header pair emits it, DWARF-only pair emits nothing)
 # -- batch 3 (G3): const value -----------------------------------------------
-var_value_changed  DH  # types_2.py: the binary's section bytes are read only for a variable whose type a header or DWARF supplies. Oracle: stripped binary alone emits nothing; stripped binary + headers emits; -g binary without headers emits. Reader gap (binary-only dumps do not type the object): G7 (sec 11.2)
+var_value_changed  B:ELF+DH:PEMACHO  # types_2.py (G7, #2115): an exported read-only ELF object's section bytes are recorded on a binary-only dump (Variable.initializer_hex), so a changed initializer is emitted from the ELF binary alone. PE and Mach-O keep the declaration-backed alternatives. Oracle: tests/test_var_value_initializer_bytes.py
 # -- batch 4 (G3): unnamed types ------------------------------------------------
 unnamed_type_in_public_abi  B:ELF  # diff_unnamed_types.py: the closure's mangled name is read from the ELF export table; the real-compile oracle uses a GNU ELF producer (g++): clang gives the closure-typed function internal linkage, so it is not exported and the kind does not fire. Mach-O: the binary-only surface does not show the exported closure function at all (macOS run: only LC_ID_DYLIB), so no Mach-O claim (sec 11.2)
 # -- WS-1 batch 5 (source/platform): SONAME and export surface -----------------
@@ -339,3 +339,37 @@ instantiation_missing_from_binary  B  # diff_templates / template_instance_absen
 overload_set_rerouted  B  # diff_types: an overload set rerouted under the same mangled name family; the stripped binary pair emits it (tag oracle), so B
 abi_equivalent_type_changed  DH  # compare/abi_equivalent_retype.py: a retype the compiler passes identically (long -> long long on LP64) needs the declared types (header or DWARF); header and DWARF pairs emit it, a stripped binary does not
 typedef_version_sentinel  H:HEADER  # types_2.py: a typedef name carrying a release version; the header pair emits it, the stripped and DWARF-only pairs do not (the typedef is never exported)
+secondary_vtable_group_changed  DH  # diff_vtable_layout.py: fires when a direct base's polymorphism flips (first virtual added) and the class's base list is unchanged; needs base and vtable facts (castxml/clang headers or DWARF); the header pair and the gcc DWARF-only pair emit it, a stripped binary does not
+cpo_kind_changed  B  # diff_templates.py:789-808: a public name that is a function in one side and a variable (function object) in the other, from the export table's symbol types; the stripped binary pair emits it in both directions
+
+# -- WS-1 domain families: build, numpy, wheel, bundle (ADR-093 batch 6) --
+# Each row: a real-artifact oracle through the public compare (see
+# tests/test_ws1_domain_build_observability.py). Package scope is comparison
+# scope (ADR-065), so those rows carry the :SCOPE forms.
+numpy_capi_consumption_added  B
+numpy_capi_consumption_removed  B
+numpy_target_floor_raised  B
+numpy_metadata_understates_required_version  B:SCOPE
+numpy_abi_major_incompatible  B:SCOPE
+wheel_rpath_not_portable  B:ELF:SCOPE
+wheel_closure_dependency_violation  B:ELF:SCOPE
+wheel_tag_architecture_mismatch  B:ELF:SCOPE
+bundle_intra_dep_removed  B:SCOPE
+bundle_intra_dep_signature_unverified  B:SCOPE
+bundle_intra_dep_signature_changed  BD:DWARF
+bundle_intra_type_changed  BD:DWARF
+bundle_provider_changed  BD:DWARF
+bundle_manifest_instantiation_added  B:SCOPE
+bundle_manifest_instantiation_removed  B:SCOPE
+# -- WS-1 batch 6 (source/platform): sanitizer, RTTI, undocumented exports -------
+sanitizer_runtime_required  B:ELF  # compare/runtime_requirements.py:134-170: DT_NEEDED on a sanitizer runtime and reserved __asan_/__ubsan_ imports, both binary facts. Real-compile oracle (g++ -shared -fPIC -fsanitize=address vs none, binary-only dumps): the sanitized build emits it; the uninstrumented pair does not
+rtti_mode_changed  BBD  # buildsource/build_diff.py:57: the -frtti/-fno-rtti compile flag comes from the compile database only. Real-compile oracle: compare with --build-info dumps at --depth build emits it; binary-only dumps and same-flag build-info dumps do not
+undocumented_export_ratio_increased  BHDOC  # diff_surface_metrics.py:109-120: the ratio counts exports against public-header declarations. Real-compile oracle: with -H headers on both sides and an undocumented export added, emitted; binary-only dumps emit nothing
+
+# -- WS-1 Linux batch (ADR-093): namesake, alignment, inline-namespace, surface growth --
+# Each row: a real-artifact oracle through the public compare (g++/gcc builds, stripped and -g,
+# with and without --header). func_deleted_elf_fallback needs the header on both sides.
+func_deleted_elf_fallback  BH:ELF
+exported_object_alignment_reduced  B:ELF
+inline_namespace_moved  B:ELF
+abi_surface_explosion  B:ELF

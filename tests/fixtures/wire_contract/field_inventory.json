@@ -284,6 +284,7 @@
           "is_virtual",
           "is_volatile",
           "mangled",
+          "member_kind_fact",
           "name",
           "origin",
           "ownership_fact",
@@ -329,6 +330,7 @@
           "entity_id",
           "explicit_instantiation_fact",
           "in_public_contract_fact",
+          "initializer_hex",
           "is_const",
           "is_static",
           "mangled",
@@ -352,7 +354,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 1
+      "section_schema_version": 3
     },
     "graph": {
       "fields": {

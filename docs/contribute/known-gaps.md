@@ -130,12 +130,6 @@ dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 
-#### A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported (2026-11-12)
-
-**Status (2026-11-15): NARROWED to gcc producers.** Disproven for clang: the edit corpus's `std_string_abi_flipped` cells built by clang 18 pass (c++17 `headers.clang`, c++23 `dwarf`), see the [nightly status comment on #2082](https://github.com/abicheck/abicheck/pull/2082#issuecomment-6896801053). Still unverified for gcc: every gcc `std_string_abi_flipped` cell is skipped as not-applicable under `-fshort-enums`, so the gcc side of this entry has no run to confirm or refute it. The entry's `when` clause now applies to gcc producers only. `glibcxx_dual_abi_flip_detected` needs `__cxx11` names to be at least 30% of the removed and added exports. From C++20 the new-ABI `std::string` is `constexpr` and an `-O0` library exports none of its members, while a `-D_GLIBCXX_USE_CXX11_ABI=0` rebuild exports the copy-on-write string's members as weak symbols (`_ZNSs...`, `_ZNKSs...`). Those count as added churn, and `elf_symbol_filter._STDLIB_PREFIXES` does not recognize the `Ss` substitution as the C++ runtime's, so six re-mangled functions fall below the threshold. `glibcxx_dual_abi_changed` and the removals still make it `BREAKING`. Found by the edit corpus (`std_string_abi_flipped` on `cxx_alt`, C++20 and later). Owner: `diff_platform.py`, `elf_symbol_filter.py`.
-`wrong-kind` — the flip is reported as individual changes, not named as a flip.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `std_string_abi_flipped` entry in abiforge/known.py, which fails once the answer changes -->
-
 #### A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth (2026-11-12)
 
 **Status (2026-11-12): OPEN.** At `-O2` gcc inlines a header inline function into its only caller, and the function's static local stays exported as `STB_GNU_UNIQUE`. The binary-only and header-depth compares report the binding change (`symbol_binding_became_unique` when it first appears, `symbol_binding_lost_unique` under `-fno-gnu-unique`); the DWARF-depth compare of the same pair reports `func_added` or nothing. At `-O0`, where the owner is emitted, DWARF depth reports it too. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, `gnu_unique_disabled` on `cxx_alt`, gcc `-O2`). Owner: `diff_platform_elf_symbols.py` / the DWARF-depth symbol view.
@@ -620,10 +614,10 @@ per-item status in the
 
 ### False-positive risk
 
-#### A C parameter edit that keeps the call interface gates as an ABI break (2026-11-17)
+#### A C parameter or return-type edit that keeps the call interface gates as an ABI break (2026-11-17)
 
-**Status (2026-11-17): OPEN.** `func_params_changed` is `BREAKING` whatever the platform calling convention says, so a C parameter edit after which every old binary still calls the function correctly gates as an ABI break (exit 4) rather than a source break (exit 2). The closed function-signature fragment (`formal/FUNC_FRAGMENT.md`, E13) proves when an x86-64 System V edit keeps the call interface (`set_compatible_iff`, `rem_compatible_iff`) and confirms it by execution on gcc and clang: in its 2160-case space, 240 such edits are reported `breaking`. They are removing the last parameter (84), removing a parameter with no later one of its register class, e.g. the `int` in `f(int, double)` (42), and `long` ↔ `void *` (114). All of them still break callers' source, so the accurate verdict is `API_BREAK`. Changing it makes a parameter edit's verdict depend on the target ABI's register assignment (per-platform: SysV, AAPCS64 and Windows x64 differ), so it is a default/exit-code change and needs an ADR. `false-positive` (over-severity: ABI break for a source-only break). Owner: `compare/` function-signature detectors and `policy/` classification.
-<!-- no-canary: pinned by tests/test_formal_func_fragment.py, whose integration run requires abicheck's verdict to equal the report contract's `breaking` on every case, so it fails once the answer changes -->
+**Status (2026-11-17): OPEN.** `func_params_changed` is `BREAKING` whatever the platform calling convention says, so a C parameter edit after which every old binary still calls the function correctly gates as an ABI break (exit 4) rather than a source break (exit 2). The closed function-signature fragment (`formal/FUNC_FRAGMENT.md`, E13) proves when an x86-64 System V edit keeps the call interface (`set_compatible_iff`, `rem_compatible_iff`) and confirms it by execution on gcc and clang: in its 2160-case space, 240 such edits are reported `breaking`. They are removing the last parameter (84), removing a parameter with no later one of its register class, e.g. the `int` in `f(int, double)` (42), and `long` ↔ `void *` (114). All of them still break callers' source, so the accurate verdict is `API_BREAK`. Changing it makes a parameter edit's verdict depend on the target ABI's register assignment (per-platform: SysV, AAPCS64 and Windows x64 differ), so it is a default/exit-code change and needs an ADR. `false-positive` (over-severity: ABI break for a source-only break). The closed return-type fragment (`formal/RET_FRAGMENT.md`, E14) finds the same for `func_return_changed`: in its 1176-case space, 168 return-type changes keep the call interface (`call_compatible_iff`, confirmed by execution) and are reported `breaking`. They are a `void` function starting to return a value in registers (126), whose callers' source breaks only where the function's type is used (`void (*fp)(int) = f;`), and `long` ↔ `void *` (42). Owner: `compare/` function-signature detectors and `policy/` classification.
+<!-- no-canary: pinned by tests/test_formal_func_fragment.py and tests/test_formal_ret_fragment.py, whose integration run requires abicheck's verdict to equal the report contract's `breaking` on every case, so it fails once the answer changes -->
 
 #### Affected-symbol attribution ignores identifier boundaries (2026-11-12)
 
@@ -960,6 +954,12 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 `hygiene` — The test named "exists in history" does not check that a task's `base_commit` is reachable from the default branch. [Full write-up](known-gaps/agent-eval-base-commit-test-checks-presence-not-ancestry.md)
 <!-- no-canary: test-tooling gap in the agent-eval harness; needs an unmerged-commit git fixture -->
 
+
+### PE i686 decorated exports without the leading underscore (2026-11-17)
+
+**Status (2026-11-17): OPEN, narrow.** The PE identity decoder (`extract/export_symbol_identity.py`, `msvc_export_function`) strips i686 stdcall/fastcall decoration only from the `_`-prefixed export spelling (`_stdcall_fn@4`). lld writes the same exports without the leading underscore (`stdcall_fn@4`, `@fast_fn@4`), so the leaf name keeps its `@N` and the extern-C reading and entity identity are not decoded for them. Reproducer: a `clang --target=i686-windows-gnu -shared -fuse-ld=lld` DLL exporting a `__stdcall` function; `extract_pe` returns the export as `stdcall_fn@4` with leaf `stdcall_fn@4`. The headerless and header-built PE routes share this decoder, so the fix lands there once. Out of the current Linux focus (i686/PE). Owner: `extract/export_symbol_identity.py`.
+
+<!-- canary: tests/test_pe_noheader_export_identity.py::test_canary_lld_undecorated_i686_stdcall_leaf_is_not_decoded -->
 
 ## Do not re-attempt
 

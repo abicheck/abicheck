@@ -16,19 +16,19 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **202**
+- Kinds with at least one real source: **215**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 89
+- Kinds per source: catalog 159, field_shapes 9, integration 107
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 73 |
+| L0 | 129 | 65 |
 | L1 | 66 | 7 |
 | L2 | 79 | 38 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 102 |
+| unmapped | 120 | 97 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -43,7 +43,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `macho_cpu_type_changed` | BREAKING | L0 |
 | `macho_filetype_changed` | BREAKING | L0 |
 | `musllinux_glibc_dependency_detected` | BREAKING | L0 |
-| `numpy_abi_major_incompatible` | BREAKING | L0 |
 | `pe_forwarder_changed` | BREAKING | L0 |
 | `pe_machine_changed` | BREAKING | L0 |
 | `pe_ordinal_retargeted` | BREAKING | L0 |
@@ -52,8 +51,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_visibility_changed` | BREAKING | L0 |
 | `var_visibility_changed` | BREAKING | L0 |
 | `vtable_thunk_set_changed` | BREAKING | L0 |
-| `wheel_closure_dependency_violation` | BREAKING | L0 |
-| `wheel_tag_architecture_mismatch` | BREAKING | L0 |
+| `func_pure_virtual_added` | BREAKING | L1 |
+| `struct_field_type_changed` | BREAKING | L1 |
+| `time64_abi_changed` | BREAKING | L1 |
 
 ## Tier L0
 
@@ -66,12 +66,12 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `branch_protection_improved` | COMPATIBLE | 0 | 0 | 0 |
 | `branch_protection_weakened` | RISK | 0 | 0 | 0 |
 | `bundle_duplicate_provider` | RISK | 0 | 0 | 0 |
-| `bundle_intra_dep_removed` | BREAKING | 1 | 0 | 3 |
-| `bundle_intra_dep_signature_changed` | BREAKING | 1 | 0 | 0 |
-| `bundle_intra_dep_signature_unverified` | RISK | 0 | 0 | 1 |
+| `bundle_intra_dep_removed` | BREAKING | 1 | 0 | 4 |
+| `bundle_intra_dep_signature_changed` | BREAKING | 1 | 0 | 2 |
+| `bundle_intra_dep_signature_unverified` | RISK | 0 | 0 | 2 |
 | `bundle_manifest_entry_unsatisfied` | RISK | 0 | 0 | 0 |
-| `bundle_manifest_instantiation_removed` | BREAKING | 1 | 0 | 1 |
-| `bundle_provider_changed` | RISK | 1 | 0 | 0 |
+| `bundle_manifest_instantiation_removed` | BREAKING | 1 | 0 | 2 |
+| `bundle_provider_changed` | RISK | 1 | 0 | 1 |
 | `bundle_soname_skew` | BREAKING | 1 | 0 | 3 |
 | `bundle_unresolved_intra_dependency` | RISK | 0 | 0 | 0 |
 | `cet_protection_improved` | COMPATIBLE | 0 | 0 | 0 |
@@ -87,14 +87,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `elf_machine_changed` | BREAKING | 0 | 0 | 0 |
 | `elf_osabi_changed` | RISK | 0 | 0 | 0 |
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
-| `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
+| `exported_object_alignment_reduced` | RISK | 0 | 0 | 6 |
 | `func_added` | COMPATIBLE | 9 | 0 | 9 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
 | `func_removed` | BREAKING | 15 | 1 | 23 |
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 7 |
-| `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
+| `func_visibility_changed` | BREAKING | 2 | 0 | 3 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
 | `glibcxx_dual_abi_changed` | BREAKING | 0 | 0 | 3 |
 | `glibcxx_dual_abi_flip_detected` | COMPATIBLE | 1 | 0 | 0 |
@@ -103,7 +103,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `imported_symbol_added` | RISK | 0 | 0 | 0 |
 | `imported_symbol_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `imported_symbol_unprovided` | BREAKING | 0 | 0 | 1 |
-| `inline_namespace_moved` | BREAKING | 1 | 0 | 0 |
+| `inline_namespace_moved` | BREAKING | 1 | 0 | 1 |
 | `interpreter_changed` | RISK | 0 | 0 | 0 |
 | `kabi_crc_changed` | BREAKING | 1 | 0 | 0 |
 | `kabi_export_type_changed` | API_BREAK | 0 | 0 | 0 |
@@ -121,11 +121,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `needed_added` | COMPATIBLE | 1 | 0 | 0 |
 | `needed_order_changed` | RISK | 0 | 0 | 0 |
 | `needed_removed` | COMPATIBLE | 0 | 0 | 0 |
-| `numpy_abi_major_incompatible` | BREAKING | 0 | 0 | 0 |
-| `numpy_capi_consumption_added` | RISK | 0 | 0 | 0 |
-| `numpy_capi_consumption_removed` | COMPATIBLE | 0 | 0 | 0 |
-| `numpy_metadata_understates_required_version` | RISK | 0 | 0 | 0 |
-| `numpy_target_floor_raised` | RISK | 0 | 0 | 0 |
+| `numpy_abi_major_incompatible` | BREAKING | 0 | 0 | 1 |
+| `numpy_capi_consumption_added` | RISK | 0 | 0 | 1 |
+| `numpy_capi_consumption_removed` | COMPATIBLE | 0 | 0 | 1 |
+| `numpy_metadata_understates_required_version` | RISK | 0 | 0 | 1 |
+| `numpy_target_floor_raised` | RISK | 0 | 0 | 1 |
 | `os_deployment_floor_raised` | RISK | 0 | 0 | 0 |
 | `overload_added` | RISK | 1 | 0 | 0 |
 | `pe_forwarder_changed` | BREAKING | 0 | 0 | 0 |
@@ -146,7 +146,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_floor_raised` | RISK | 1 | 0 | 0 |
 | `runtime_symbol_provider_changed` | RISK | 0 | 0 | 0 |
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
-| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 3 |
+| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 5 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
 | `stack_canary_removed` | RISK | 1 | 0 | 3 |
@@ -184,9 +184,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `vtable_thunk_offset_changed` | BREAKING | 1 | 0 | 1 |
 | `vtable_thunk_set_changed` | BREAKING | 0 | 0 | 0 |
 | `vtt_slot_count_changed` | BREAKING | 1 | 0 | 0 |
-| `wheel_closure_dependency_violation` | BREAKING | 0 | 0 | 0 |
-| `wheel_rpath_not_portable` | RISK | 0 | 0 | 0 |
-| `wheel_tag_architecture_mismatch` | BREAKING | 0 | 0 | 0 |
+| `wheel_closure_dependency_violation` | BREAKING | 0 | 0 | 1 |
+| `wheel_rpath_not_portable` | RISK | 0 | 0 | 1 |
+| `wheel_tag_architecture_mismatch` | BREAKING | 0 | 0 | 1 |
 | `x86_isa_baseline_raised` | RISK | 0 | 0 | 0 |
 
 ## Tier L1
@@ -215,7 +215,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_renamed` | API_BREAK | 1 | 0 | 0 |
 | `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 0 |
 | `func_cv_changed` | BREAKING | 1 | 0 | 0 |
-| `func_params_changed` | BREAKING | 5 | 1 | 15 |
+| `func_params_changed` | BREAKING | 5 | 1 | 16 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
 | `func_return_changed` | BREAKING | 5 | 0 | 6 |
 | `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |
@@ -266,7 +266,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 |---|---|---:|---:|---:|
 | `base_class_access_narrowed` | API_BREAK | 0 | 0 | 2 |
 | `constant_changed` | API_BREAK | 1 | 0 | 2 |
-| `cpo_kind_changed` | BREAKING | 1 | 0 | 0 |
+| `cpo_kind_changed` | BREAKING | 1 | 0 | 1 |
 | `cpu_dispatch_isa_dropped` | RISK | 1 | 0 | 0 |
 | `ctor_explicit_added` | API_BREAK | 1 | 0 | 0 |
 | `ctor_overload_ambiguity_risk` | RISK | 0 | 0 | 0 |
@@ -356,7 +356,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `float_abi_changed` | RISK | 0 | 0 | 0 |
 | `header_build_context_mismatch` | API_BREAK | 1 | 0 | 0 |
 | `lto_mode_changed` | RISK | 1 | 0 | 0 |
-| `rtti_mode_changed` | RISK | 1 | 0 | 0 |
+| `rtti_mode_changed` | RISK | 1 | 0 | 2 |
 | `sanitizer_mode_changed` | RISK | 0 | 0 | 0 |
 | `stdlib_debug_mode_changed` | RISK | 0 | 0 | 0 |
 | `struct_packing_mode_changed` | RISK | 1 | 0 | 0 |
@@ -403,17 +403,17 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
-| `abi_surface_explosion` | COMPATIBLE | 0 | 0 | 0 |
+| `abi_surface_explosion` | COMPATIBLE | 0 | 0 | 1 |
 | `anon_field_changed` | BREAKING | 0 | 0 | 0 |
 | `api_depends_on_consumer_env` | RISK | 0 | 0 | 0 |
 | `behavioural_default_changed` | RISK | 0 | 0 | 0 |
 | `build_context_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `build_option_reaches_public_symbol` | RISK | 0 | 0 | 0 |
 | `bundle_intra_dep_resolved_to_different_version` | RISK | 0 | 0 | 0 |
-| `bundle_intra_type_changed` | BREAKING | 0 | 0 | 0 |
+| `bundle_intra_type_changed` | BREAKING | 0 | 0 | 1 |
 | `bundle_library_added` | COMPATIBLE | 0 | 0 | 0 |
 | `bundle_library_removed` | BREAKING | 0 | 0 | 0 |
-| `bundle_manifest_instantiation_added` | COMPATIBLE | 0 | 0 | 0 |
+| `bundle_manifest_instantiation_added` | COMPATIBLE | 0 | 0 | 1 |
 | `call_graph_public_entry_reachability_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `common_symbol_risk` | COMPATIBLE | 0 | 0 | 0 |
 | `compat_version_changed` | BREAKING | 0 | 0 | 0 |
@@ -435,7 +435,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_became_inline` | RISK | 0 | 0 | 0 |
 | `func_deleted` | BREAKING | 0 | 0 | 1 |
 | `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
-| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 0 |
+| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 3 |
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |
@@ -509,7 +509,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_field_removed` | BREAKING | 0 | 0 | 0 |
 | `type_lost_final` | RISK | 0 | 0 | 0 |
 | `typedef_version_sentinel` | COMPATIBLE | 0 | 0 | 0 |
-| `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 0 |
+| `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 2 |
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |
 | `union_field_type_changed` | BREAKING | 0 | 0 | 0 |
 | `unspecified_return_now_named` | COMPATIBLE | 0 | 0 | 1 |

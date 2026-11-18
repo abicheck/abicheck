@@ -47,6 +47,7 @@ from typing import Any, Protocol, TypeVar
 
 from ..model.semantic_ir import SemanticIR
 from .canonical import canonical_form, canonical_input_trusted
+from .dto_declarations_migration import DECLARATIONS_MIGRATIONS
 from .graph_section_codec import GraphSection
 from .guards import (
     identity_text as _identity_text,
@@ -204,6 +205,9 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     # `bundle_composition_to_dto`) so a pre-S2 reader keeps opening it.
     BUNDLE_COMPOSITION_SECTION_KIND: 2,
     BASELINE_SET_SECTION_KIND: 1,
+    # Gen 82: ``Variable.initializer_hex``; gen 85: ``Function.member_kind_fact``
+    # (dto_declarations_migration.py). Absent reads as not read/collected.
+    DECLARATIONS_SECTION_KIND: 3,
 }
 
 
@@ -252,6 +256,7 @@ _MIGRATIONS: Mapping[
     **{kind: {} for kind in SECTION_SCHEMA_VERSIONS},
     BUNDLE_COMPOSITION_SECTION_KIND: {1: _bundle_composition_v1_to_v2},
     SEMANTIC_IR_SECTION_KIND: {1: _semantic_ir_v1_to_v2},
+    DECLARATIONS_SECTION_KIND: DECLARATIONS_MIGRATIONS,
 }
 
 
