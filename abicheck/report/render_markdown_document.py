@@ -87,6 +87,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from .call_axis_section import render_call_axis_shadow_from_mapping
+
 # ADR-063 T10: static now that `reporter_markdown.py` no longer imports
 # anything from this module (see this module's own docstring) -- the
 # `_reporter_markdown()` importlib indirection this file used to need is
@@ -593,6 +595,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         lines.append(d["empty_message"])
     lines += _render_disposition_audit_from_mapping(d.get("disposition_audit"))
     lines += render_pattern_modulations_from_mapping(d.get("pattern_modulations"))
+    lines += render_call_axis_shadow_from_mapping(d.get("call_axis_shadow"))
     lines += _render_review_groups_from_mapping(d.get("review_groups"))
     if not d.get("review_groups"):
         lines += _render_surface_changes_from_mapping(d.get("surface_changes"))
