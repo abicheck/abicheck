@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _field_shapes import shape_sources
 
 from abicheck.checker import compare
 from abicheck.dumper import dump
@@ -113,15 +114,16 @@ def test_typed_and_cli_agree_on_a_plain_removal_without_the_graph(
         "old": 'extern "C" int keep(int);\nextern "C" int gone(int);\n',
         "new": 'extern "C" int keep(int);\n',
     }
+    corpus_cpp = shape_sources("policy_without_ids", "v2")["api.cpp"]
     pairs: dict[str, tuple[Path, Path]] = {}
     for name, header in headers.items():
         src = tmp_path / name
         src.mkdir()
         (src / "api.h").write_text(header)
         cpp = src / f"{name}.cpp"
+        # The shared body comes from the field-shapes corpus, never an inline copy.
         cpp.write_text(
-            '#include "api.h"\nint keep(int x) { return x; }\n'
-            + ("int gone(int x) { return x; }\n" if name == "old" else "")
+            corpus_cpp + ("int gone(int x) { return x; }\n" if name == "old" else "")
         )
         so = tmp_path / f"{name}.so"
         subprocess.run(
