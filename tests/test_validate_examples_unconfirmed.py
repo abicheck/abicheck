@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import tests.validate_examples as ve  # noqa: E402
+from tests._abicheck_subprocess import abicheck_command  # noqa: E402
 
 CLAIMS = ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK")
 
@@ -35,7 +36,7 @@ def _parse(stdout: str, monkeypatch) -> str:
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(ve.subprocess, "run", fake_run)
-    got, kinds, err = ve._run_compare_and_parse(["abicheck", "compare"])
+    got, kinds, err = ve._run_compare_and_parse(abicheck_command("compare"))
     assert err is None and kinds == ("k",)
     return got
 
@@ -64,7 +65,7 @@ def test_unconfirmed_is_judged_on_the_observed_verdict_only_without_evidence(
 
 @pytest.mark.parametrize(
     ("verdict", "variant"),
-    product(("BREAKING", "API_BREAK", *CLAIMS), ve.ARTIFACT_VARIANTS),
+    list(product(("BREAKING", "API_BREAK", *CLAIMS), ve.ARTIFACT_VARIANTS)),
 )
 def test_a_confirmed_verdict_passes_through_unchanged(
     verdict: str, variant: str, monkeypatch
