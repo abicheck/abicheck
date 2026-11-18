@@ -16,9 +16,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **216**
+- Kinds with at least one real source: **215**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 108
+- Kinds per source: catalog 159, field_shapes 9, integration 107
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 96 |
+| unmapped | 120 | 97 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -87,13 +87,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `elf_machine_changed` | BREAKING | 0 | 0 | 0 |
 | `elf_osabi_changed` | RISK | 0 | 0 | 0 |
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
-| `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
+| `exported_object_alignment_reduced` | RISK | 0 | 0 | 6 |
 | `func_added` | COMPATIBLE | 9 | 0 | 9 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
 | `func_removed` | BREAKING | 15 | 1 | 23 |
-| `func_removed_elf_only` | BREAKING | 5 | 0 | 8 |
+| `func_removed_elf_only` | BREAKING | 5 | 0 | 7 |
 | `func_visibility_changed` | BREAKING | 2 | 0 | 3 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
 | `glibcxx_dual_abi_changed` | BREAKING | 0 | 0 | 3 |
@@ -103,7 +103,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `imported_symbol_added` | RISK | 0 | 0 | 0 |
 | `imported_symbol_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `imported_symbol_unprovided` | BREAKING | 0 | 0 | 1 |
-| `inline_namespace_moved` | BREAKING | 1 | 0 | 0 |
+| `inline_namespace_moved` | BREAKING | 1 | 0 | 1 |
 | `interpreter_changed` | RISK | 0 | 0 | 0 |
 | `kabi_crc_changed` | BREAKING | 1 | 0 | 0 |
 | `kabi_export_type_changed` | API_BREAK | 0 | 0 | 0 |
@@ -267,7 +267,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `base_class_access_narrowed` | API_BREAK | 0 | 0 | 2 |
 | `constant_changed` | API_BREAK | 1 | 0 | 2 |
 | `cpo_kind_changed` | BREAKING | 1 | 0 | 1 |
-| `cpu_dispatch_isa_dropped` | RISK | 1 | 0 | 1 |
+| `cpu_dispatch_isa_dropped` | RISK | 1 | 0 | 0 |
 | `ctor_explicit_added` | API_BREAK | 1 | 0 | 0 |
 | `ctor_overload_ambiguity_risk` | RISK | 0 | 0 | 0 |
 | `default_template_arg_changed` | BREAKING | 2 | 0 | 0 |
@@ -403,7 +403,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
-| `abi_surface_explosion` | COMPATIBLE | 0 | 0 | 0 |
+| `abi_surface_explosion` | COMPATIBLE | 0 | 0 | 1 |
 | `anon_field_changed` | BREAKING | 0 | 0 | 0 |
 | `api_depends_on_consumer_env` | RISK | 0 | 0 | 0 |
 | `behavioural_default_changed` | RISK | 0 | 0 | 0 |
@@ -434,8 +434,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `fortify_source_weakened` | RISK | 0 | 0 | 0 |
 | `func_became_inline` | RISK | 0 | 0 | 0 |
 | `func_deleted` | BREAKING | 0 | 0 | 1 |
-| `func_deleted_dwarf` | BREAKING | 0 | 0 | 1 |
-| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 1 |
+| `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
+| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 3 |
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |
@@ -478,7 +478,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `source_to_binary_mapping_changed` | RISK | 0 | 0 | 0 |
 | `standard_layout_lost` | RISK | 0 | 0 | 0 |
 | `std_reexport_removed` | API_BREAK | 0 | 0 | 0 |
-| `stdlib_implementation_changed` | RISK | 0 | 0 | 1 |
+| `stdlib_implementation_changed` | RISK | 0 | 0 | 0 |
 | `struct_alignment_changed` | BREAKING | 0 | 0 | 0 |
 | `struct_field_offset_changed` | BREAKING | 0 | 0 | 0 |
 | `struct_field_removed` | BREAKING | 0 | 0 | 0 |
