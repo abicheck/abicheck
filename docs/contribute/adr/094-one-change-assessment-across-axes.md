@@ -1,7 +1,7 @@
 # ADR-094: One Assessment per Change, on Independent Compatibility Axes, from All the Evidence That Observes It
 
 **Date:** 2026-11-17
-**Status:** Proposed — roadmap ADR, not implemented. It changes how a verdict is derived, adds a report field and changes some exit codes (D9), so it needs maintainer acceptance. Its first slice (D8, the call axis) is backed by the closed fragments E13 and E14. The open questions are at the end.
+**Status:** Proposed — roadmap ADR, partially implemented: D8's `call` evaluator exists and is checked against E13/E14 (D7), but decides no verdict yet. It changes how a verdict is derived, adds a report field and changes some exit codes (D9), so it needs maintainer acceptance. Its first slice (D8, the call axis) is backed by the closed fragments E13 and E14. The open questions are at the end.
 
 Governed by and extending:
 
@@ -37,7 +37,7 @@ Each was right where it was added. None of them is part of a model of what the c
 
 1. **One edit becomes several unrelated findings, each with its own verdict.** For example, `long f(long)` → `void *f(void *)` yields `func_params_changed`, `param_pointer_level_changed`, `func_return_changed` and `return_pointer_level_changed`, all breaking, from header and DWARF detectors that never compare notes. Nothing states the edit's effect once.
 2. **A kind's verdict stands in for a question nobody asked.** `func_params_changed` is breaking because parameter edits *usually* break the call. The fragments measured how often they do not.
-   - E13 (`formal/FUNC_FRAGMENT.md`) and E14 (`formal/RET_FRAGMENT.md`, in review) are closed spaces of 2160 and 1176 cases, with the register model proved in Lean and confirmed by execution on gcc and clang.
+   - E13 (`formal/FUNC_FRAGMENT.md`) and E14 (`formal/RET_FRAGMENT.md`) are closed spaces of 2160 and 1176 cases, with the register model proved in Lean and confirmed by execution on gcc and clang.
    - In them, 408 parameter and return-type edits keep the binary call interface and are still reported `BREAKING` (exit 4).
    - All 408 break source, so the accurate verdict is `API_BREAK`.
    - The opposite also happens. ADR-084 exists because a source-level kind kept `API_BREAK` from binary evidence that could not support it.
@@ -157,11 +157,11 @@ Evaluators without a fragment stay `Unknown(out_of_model)`, so the prior stands.
 
 ### D8. First slice: the `call` axis on x86-64 System V
 
-`abicheck/model/call_interface/` answers:
+The evaluator is split by ADR-061's layering. `abicheck/model/call_interface.py` holds the platform fact: each slot's representation, read from its recorded `AbiFundamental` fact or its pointer depth; the return shapes; and the argument-register assignment with the sret shift. `abicheck/compare/call_interface.py` compares an old and a new signature. Old and new parameters correspond by name, and an unmatched new name counts as an insertion. Its entry point answers:
 
 ```text
-call_interface_preserved(old_sig, new_sig, abi)
-  -> Preserved(reason) | Broken(reason) | Unknown(out_of_model)
+assess_call_interface(old_sig, new_sig, abi)
+  -> CallAxis(PRESERVED | BROKEN | UNKNOWN, reason)
 ```
 
 It may answer `Preserved` only when all of these hold:
@@ -187,7 +187,7 @@ The event's `call` axis becomes `Preserved` and `source` stays `Broken`, so D4 d
 
 The axis is per ABI by construction. `long` ↔ `void *` is not preserved on Windows x64 (LLP64) or x32. Windows x64 also assigns positional slots, so removing a middle `int` moves a later `double`. Those ABIs return `Unknown(out_of_model)` until each has its fragment.
 
-The test `tests/test_call_interface_fragments.py` asserts `call_interface_preserved` equals the exported `call_compatible` on all 3336 fragment cases.
+The test `tests/test_call_interface_fragments.py` asserts `assess_call_interface` equals the exported `call_compatible` on all 3336 fragment cases.
 
 ### D9. Report, migration and rollout
 
@@ -222,7 +222,7 @@ The test `tests/test_call_interface_fragments.py` asserts `call_interface_preser
 - **Q1. The `behavior` axis.** Should `Broken` ever be claimed there without a declared contract? A pointer ↔ integer reinterpretation is a strong signal; a unit change is invisible. The proposal is that it starts at `Unknown` everywhere except for declared contracts (ADR-049).
 - **Q2. Consumer evidence.** With `--used-by`, may an axis be judged *for that consumer*? For example, `void` → value is source-compatible for a consumer that never takes the function's address. The proposal is per-consumer assessments under the consumer workflow, not in the default verdict.
 - **Q3. DWARF-only signatures.** Should the `call` axis be claimed from `D` without `H`? The fragments supplied headers. It needs a DWARF-only fragment lane first.
-- **Q4. `struct_return_convention_changed`.** It fires only when both sides return a struct, and its description shows the triviality trait instead of the mechanism (E14's `RET_FRAGMENT.md`, "Observations"). Under D8 the `call` axis states the mechanism for scalar ↔ sret as well. Should the kind be widened, or left as a sub-observation?
+- **Q4. `struct_return_convention_changed`.** It fires only when both sides return a struct, and its description shows the triviality trait instead of the mechanism (`formal/RET_FRAGMENT.md`, "Observations"). Under D8 the `call` axis states the mechanism for scalar ↔ sret as well. Should the kind be widened, or left as a sub-observation?
 
 ## Not done
 
