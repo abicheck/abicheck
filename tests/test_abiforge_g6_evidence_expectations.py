@@ -50,6 +50,8 @@ def _cfg(std: str, evidence: str):
         std=STANDARD_BY_NAME[std],
         evidence=evidence,
         stripped=evidence == "headers",
+        # A gcc/ELF build, whatever the host: binary-depth kinds differ on PE.
+        platform=("linux", "elf"),
     )
 
 
