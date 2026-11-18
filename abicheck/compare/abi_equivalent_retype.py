@@ -88,7 +88,9 @@ _RETYPE_KINDS = frozenset(
 _UNREAD_DEFAULT: AbiFundamental = cast(AbiFundamental, None)
 
 
-_INDIRECT_TAIL = re.compile(r"[*&]\s*(?:const\s*|volatile\s*)*$")
+_INDIRECT = re.compile(
+    r"[*&]\s*(?:const\s*|volatile\s*)*$|\(\s*[*&]\s*(?:const\s*|volatile\s*)*\)"
+)
 
 
 @memoized(maxsize=4096)
@@ -100,7 +102,7 @@ def _is_indirect(spelling: str) -> bool:
     types is a source-level change, never an ABI-equivalent one: this module
     keeps such a slot's break, as its contract states.
     """
-    return bool(_INDIRECT_TAIL.search(" ".join(spelling.split())))
+    return bool(_INDIRECT.search(" ".join(spelling.split())))
 
 
 def _comparable_equal(
