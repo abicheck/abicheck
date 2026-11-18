@@ -11,6 +11,7 @@ pairs in the shape the dumper produces, not the seeder's decision table.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -566,6 +567,36 @@ def test_deleted_member_is_emitted_as_dwarf_deletion_only_with_debug_info(
         "struct S { int f(int x) = delete; int g(int x); };\n"
         "int S::g(int x) { return x * 2; }\n"
     )
+    # Some compilers mark only special members as deleted in DWARF; the
+    # assertions below need the ordinary-member marker, so probe for it.
+    readelf = shutil.which("readelf")
+    if readelf is None:
+        pytest.skip("missing capability: readelf (DWARF deleted-member probe)")
+    probe = tmp_path / "deleted-probe.so"
+    subprocess.run(
+        [
+            *prefix,
+            "-g",
+            "-O0",
+            "-fPIC",
+            "-shared",
+            str(tmp_path / "new.cpp"),
+            "-o",
+            str(probe),
+        ],
+        check=True,
+    )
+    dwarf = subprocess.run(
+        [readelf, "--debug-dump=info", str(probe)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    if "DW_AT_deleted" not in dwarf:
+        pytest.skip(
+            f"missing capability: {family} emits no DW_AT_deleted for an "
+            "ordinary deleted member (DWARF deleted-member marker)"
+        )
 
     def _emitted(debug: bool) -> str:
         dumps = []
