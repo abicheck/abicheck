@@ -164,10 +164,15 @@ class Toolchain:
     version: int  # major
     cc: str = field(compare=False)
     cxx: str = field(compare=False)
+    # The CPU the compiler builds for (ADR-093 D7). The corpus is x86-64; a
+    # toolchain that targets another CPU says so here, so a Config's arch comes
+    # from the toolchain it builds with, never from the host.
+    arch: str = "x86_64"
 
     @property
     def id(self) -> str:
-        return f"{self.family}{self.version}"
+        base = f"{self.family}{self.version}"
+        return base if self.arch == "x86_64" else f"{base}-{self.arch}"
 
     def driver(self, lang: str) -> str:
         return self.cxx if lang == "c++" else self.cc
@@ -451,6 +456,11 @@ class Config:
     @property
     def objfmt(self) -> str:
         return self.platform[1]
+
+    @property
+    def arch(self) -> str:
+        """The target CPU: the producer toolchain's, not the host's (ADR-093 D7)."""
+        return self.producer.arch
 
     def has(self, feature: str) -> bool:
         return has_feature(self.std, feature)

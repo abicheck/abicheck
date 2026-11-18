@@ -316,6 +316,19 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "exported function",
         expected=frozenset({"UNSPECIFIED_RETURN_NOW_NAMED", "FUNC_RETURN_CHANGED"}),
         features=("deduced_return",),
+        rules=(
+            Rule(
+                lambda c: c.flags.opt == "O2" and c.evidence != "headers",
+                {
+                    "expected": frozenset(),
+                    "verdict_min": "NO_CHANGE",
+                    "observable": False,
+                },
+                "-O2 inlines kmake into kurt_use, so neither library emits the "
+                "weak copy (nm -D: no kmake); without headers nothing records "
+                "kmake at all",
+            ),
+        ),
         verdict_min="COMPATIBLE",
         verdict_max=None,
         **_HEADERS,

@@ -259,7 +259,7 @@ integer_model_changed            DBD
 long_double_abi_changed          DBD  # plan A3
 lto_mode_changed                 DBD
 struct_packing_mode_changed      DBD
-struct_return_convention_changed DH   # plan: STRUCT_RETURN_CONVENTION
+struct_return_convention_changed  DH:ELF_X86_64  # plan: STRUCT_RETURN_CONVENTION
 stdlib_debug_mode_changed        DBD
 target_isa_changed               DBD  # plan A3
 threadsafe_statics_mode_changed  DBD
