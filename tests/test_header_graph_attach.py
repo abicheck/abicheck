@@ -367,7 +367,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
@@ -395,7 +395,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
@@ -431,7 +431,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             fake_format_adapter("elf", side_effect=_fake_dump_elf),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=_fake_attach,
             ),
         ):
@@ -463,7 +463,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
@@ -528,7 +528,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
@@ -557,7 +557,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             fake_format_adapter("macho", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(

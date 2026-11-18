@@ -151,7 +151,7 @@ from .workflows.dump.elf_fallback import (
     _try_dwarf_snapshot as _try_dwarf_snapshot,
 )
 from .workflows.dump.pe import pe_pdb_debug_kwargs
-from .workflows.snapshot_factory import new_snapshot
+from .workflows.snapshot_factory import finish_binary_dump, new_snapshot
 
 log = logging.getLogger(__name__)
 
@@ -461,8 +461,6 @@ def dump(
     # underneath. An `-I` a library passes purely so a dependency's
     # `#include <dep.h>` resolves stays compile context -- see
     # `extract.public_root_ownership` for the rule and the MKL/MPI case that forced it.
-    from .workflows.snapshot_factory import finish_binary_dump
-
     return finish_binary_dump(
         snapshot,
         effective_public_headers,
@@ -470,6 +468,7 @@ def dump(
         include_search_dirs=public_include_search_dirs,
         read_dwarf=not (symbols_only or debug_presence_only),  # shallow: .comment only
         debug_info_path=debug_info_path,
+        graph_inputs=(headers, extra_includes or [], lang, dwarf_only or symbols_only),
     )
 
 

@@ -16,13 +16,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **214**
+- Kinds with at least one real source: **215**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 105
+- Kinds per source: catalog 159, field_shapes 9, integration 107
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 65 |
+| L0 | 129 | 64 |
 | L1 | 66 | 7 |
 | L2 | 79 | 38 |
 | L3 | 15 | 5 |
@@ -49,11 +49,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `support_promise_component_retired` | BREAKING | L0 |
 | `symbol_version_defined_removed` | BREAKING | L0 |
 | `type_visibility_changed` | BREAKING | L0 |
-| `var_visibility_changed` | BREAKING | L0 |
 | `vtable_thunk_set_changed` | BREAKING | L0 |
 | `func_pure_virtual_added` | BREAKING | L1 |
 | `struct_field_type_changed` | BREAKING | L1 |
 | `time64_abi_changed` | BREAKING | L1 |
+| `virtual_base_offset_changed` | BREAKING | L1 |
 
 ## Tier L0
 
@@ -176,9 +176,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `var_added` | COMPATIBLE | 1 | 1 | 1 |
 | `var_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `var_export_added` | COMPATIBLE | 0 | 0 | 0 |
-| `var_removed` | BREAKING | 1 | 0 | 0 |
+| `var_removed` | BREAKING | 1 | 0 | 1 |
 | `var_removed_elf_only` | BREAKING | 0 | 0 | 1 |
-| `var_visibility_changed` | BREAKING | 0 | 0 | 0 |
+| `var_visibility_changed` | BREAKING | 0 | 0 | 1 |
 | `versioned_symbol_scheme_detected` | RISK | 1 | 0 | 0 |
 | `vtable_slot_count_changed` | BREAKING | 1 | 0 | 3 |
 | `vtable_thunk_offset_changed` | BREAKING | 1 | 0 | 1 |

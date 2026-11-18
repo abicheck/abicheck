@@ -142,7 +142,7 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
                 side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
             ),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=_fake_attach,
             ),
         ):

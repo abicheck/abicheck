@@ -179,20 +179,44 @@ def finish_binary_dump(
     include_search_dirs: Sequence[Path] | None = None,
     read_dwarf: bool = True,
     debug_info_path: Path | None = None,
+    graph_inputs: tuple[list[Path], list[Path], str | None, bool] | None = None,
 ) -> AbiSnapshot:
     """``dumper.dump``'s shared tail for every binary format: record the
     image's own build mode (ELF ``DW_AT_producer``/``DW_AT_language``/
     ``.comment``, falling back to the detached *debug_info_path*; Mach-O
     dSYM/``__DWARF``; see :mod:`abicheck.extract.build_mode_capture`), then
-    :func:`finish_provenance`."""
+    :func:`finish_provenance`, then the default header-only graph when
+    *graph_inputs* is ``(headers, includes, lang, suppressed)``. The -H headers
+    are the public surface for the graph when no narrower set is given, as the
+    CLI's dump treats them."""
     from ..extract.build_mode_capture import capture_build_mode
 
     capture_build_mode(snapshot, read_dwarf=read_dwarf, debug_info_path=debug_info_path)
-    return finish_provenance(
+    snapshot = finish_provenance(
         snapshot,
         public_headers,
         public_header_dirs,
         include_search_dirs=include_search_dirs,
+    )
+    if graph_inputs is None:
+        return snapshot
+    from .dump.default_header_graph import attach_default_header_graph
+
+    headers, includes, lang, suppressed = graph_inputs
+    return attach_default_header_graph(
+        snapshot,
+        headers=headers,
+        includes=includes,
+        lang=lang,
+        compile=None,
+        public_headers=list(public_headers or headers),
+        public_header_dirs=(
+            list(public_header_dirs) if public_header_dirs is not None else None
+        ),
+        include_search_dirs=(
+            list(include_search_dirs) if include_search_dirs is not None else None
+        ),
+        enabled=not suppressed,
     )
 
 

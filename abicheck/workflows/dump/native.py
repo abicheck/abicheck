@@ -61,16 +61,13 @@ from ...header_utils import (
     resolve_inferred_header_roots,
 )
 from ...model import AbiSnapshot
-from ...service_header_graph_attach import (
-    _HEADER_GRAPH_ENABLED,
-    _HEADER_GRAPH_INCLUDES_ENABLED,
-    _attach_header_graph,
-)
+from ...service_header_graph_attach import _HEADER_GRAPH_ENABLED
 from ...storage import closure_identity
 from ..run_dump_scope import (
     run_dump_header_roots,
     wrap_run_dump_with_dependency_scope,
 )
+from .default_header_graph import attach_default_header_graph
 from .formats import (
     DEFAULT_ADAPTERS,
     BinaryFormatAdapter,
@@ -294,17 +291,16 @@ def _run_dump_uncached(
         )
         # dwarf_only/symbols_only mean "ignore headers entirely", same as the
         # ELF tail's own _attach_header_graph call (Codex review).
-        snap = _attach_header_graph(
+        snap = attach_default_header_graph(
             merged,
-            _HEADER_GRAPH_ENABLED and not dwarf_only and not symbols_only,
-            _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only and not symbols_only,
-            _headers,
-            _includes,
-            _header_graph_lang,
-            compile,
-            public_headers,
-            public_header_dirs,
+            headers=_headers,
+            includes=_includes,
+            lang=_header_graph_lang,
+            compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
             include_search_dirs=_public_include_search_dirs,
+            enabled=not dwarf_only and not symbols_only,
         )
         return record_implied_options(snap, implied)
 
@@ -390,23 +386,16 @@ def _extract_and_finish(
         # silently re-parse those headers and attach L2 build_source evidence
         # to what the caller explicitly requested as DWARF-only/symbols-only
         # (Codex review).
-        snap = _attach_header_graph(
+        snap = attach_default_header_graph(
             snap,
-            _HEADER_GRAPH_ENABLED and _graph_wanted,
-            _HEADER_GRAPH_INCLUDES_ENABLED and _graph_wanted,
-            _headers,
-            _includes,
-            _header_graph_lang,
-            compile,
-            public_headers,
-            public_header_dirs,
-            # `_public_include_search_dirs`, not `_includes` (Codex review,
-            # fresh evidence): `_includes` can already be build/source-
-            # evidence-widened, and this graph attach's own node-visibility
-            # classification must agree with the primary parse's
-            # declaration-provenance classification above, not silently
-            # re-widen it.
+            headers=_headers,
+            includes=_includes,
+            lang=_header_graph_lang,
+            compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
             include_search_dirs=_public_include_search_dirs,
+            enabled=_graph_wanted,
             prefetched=(
                 _prefetched_graph.future if _prefetched_graph is not None else None
             ),
@@ -491,17 +480,16 @@ def _finish_native_snapshot(
     try_attach_python_ext_metadata(snap)
     try_attach_python_api_surface(snap)
     try_attach_numpy_capi_surface(snap, path)
-    snap = _attach_header_graph(
+    snap = attach_default_header_graph(
         snap,
-        _HEADER_GRAPH_ENABLED and not skip_header_graph,
-        _HEADER_GRAPH_INCLUDES_ENABLED and not skip_header_graph,
-        headers,
-        includes,
-        header_graph_lang,
-        compile,
-        public_headers,
-        public_header_dirs,
+        headers=headers,
+        includes=includes,
+        lang=header_graph_lang,
+        compile=compile,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
         include_search_dirs=_public_dirs,
+        enabled=not skip_header_graph,
     )
     snap = attach_clang_layout(
         snap, headers, includes, lang=header_graph_lang, compile=compile

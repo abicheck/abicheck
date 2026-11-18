@@ -210,7 +210,6 @@
     "var_deprecated_removed",
     "var_export_added",
     "var_lost_const",
-    "var_visibility_changed",
     "vector_abi_changed",
     "version_script_missing",
     "virtual_base_offset_changed",

@@ -136,7 +136,7 @@ class TestCliHybridLegsKeepTheFullSurface:
         with (
             fake_format_adapter("elf", side_effect=_fake_dump_elf),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=lambda snap, *_a, **_k: snap,
             ),
         ):
