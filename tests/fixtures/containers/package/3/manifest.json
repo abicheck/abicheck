@@ -1,0 +1,38 @@
+{
+  "artifact_refs": [
+    {
+      "id": "linux-x86_64-gcc.libcorpus.so",
+      "ref_digest": "sha256:a38670cd670c0ffaffbdc4d71942a2c76783553901af39451aaf43a770d00156"
+    },
+    {
+      "id": "linux-x86_64-gcc.libextra.so",
+      "ref_digest": "sha256:61d18ab909e020d1ae7b9e40d8cbf354fafe71ddb97237aeb7ab4a40cbeb646a"
+    }
+  ],
+  "variant_refs": [
+    {
+      "id": "linux-x86_64-gcc",
+      "ref_digest": "sha256:0f03b2080ed3ab0ed4ea9bc69792371a93d5ff08677159eaafa538f044a89caf"
+    }
+  ],
+  "versions": {
+    "comparison_contract_version": 1,
+    "extractor_generation": 84,
+    "package_format_version": 2,
+    "resolver_generation": 4,
+    "section_schema_versions": {
+      "binary": 1,
+      "build": 1,
+      "bundle_composition": 1,
+      "bundle_variant_spec": 1,
+      "debug": 1,
+      "declarations": 3,
+      "graph": 1,
+      "layout": 1,
+      "provenance": 1,
+      "semantic_ir": 2,
+      "types": 1
+    },
+    "source_schema_version": 70
+  }
+}

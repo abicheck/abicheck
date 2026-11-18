@@ -34,7 +34,6 @@ the recorded field spellings.
 
 from __future__ import annotations
 
-import re
 from typing import Protocol
 
 from ..diff_helpers import make_change
@@ -44,8 +43,9 @@ from ..model.entities import RecordType, TypeField
 from ..model.semantic_ir import CanonicalEntity
 from ..model.semantic_ir_record_layout import entity_layout
 from .declined_comparisons import record_declined
+from .record_member_abi import member_abi
 
-__all__ = ["packing_state", "record_packing_changes", "scalar_natural_align_bits"]
+__all__ = ["member_align_bits", "packing_state", "record_packing_changes"]
 
 
 class LayoutIndex(Protocol):
@@ -58,65 +58,14 @@ class LayoutIndex(Protocol):
     def entity_for(self, record: RecordType) -> CanonicalEntity | None: ...
 
 
-_CV = re.compile(r"\b(const|volatile)\b")
-_WORDS = {
-    "unsigned",
-    "signed",
-    "int",
-    "short",
-    "long",
-    "char",
-    "bool",
-    "float",
-    "double",
-    "__int128",
-    "wchar_t",
-    "char8_t",
-    "char16_t",
-    "char32_t",
-}
+def member_align_bits(member: TypeField) -> int | None:
+    """The member's natural alignment in bits, from its ABI fact.
 
-
-def scalar_natural_align_bits(spelling: str) -> int | None:
-    """The natural alignment, in bits, of a member spelled *spelling* on LP64.
-
-    ``None`` for any spelling this table does not decide (a record, an enum, a
-    typedef, a template): the caller treats that as unknown, not as 8 bits.
+    ``None`` when the member's fact does not determine one: the caller treats
+    that as unknown, never as 8 bits.
     """
-    text = re.sub(r"\s+", " ", _CV.sub("", spelling)).strip()
-    if text.endswith(("*", "&")):
-        return 64
-    if "[" in text:
-        return scalar_natural_align_bits(text.split("[", 1)[0])
-    words = text.split()
-    if not words or any(w not in _WORDS for w in words):
-        return None
-    # ``signed``/``unsigned``/``int`` only select a width or signedness, which
-    # the core words below already fix; a bare ``int``/``unsigned`` is 32 bits.
-    core = [w for w in words if w not in ("signed", "unsigned", "int")]
-    if not core:
-        return 32
-    key = " ".join(core)
-    table = {
-        "char": 8,
-        "bool": 8,
-        "char8_t": 8,
-        "short": 16,
-        "char16_t": 16,
-        "float": 32,
-        "wchar_t": 32,
-        "char32_t": 32,
-        "long": 64,
-        "long long": 64,
-        "double": 64,
-        "long double": 128,
-        "__int128": 128,
-    }
-    if key in table:
-        return table[key]
-    if key in ("double long",):
-        return 128
-    return None
+    abi = member_abi(member)
+    return None if abi is None else abi.align * 8
 
 
 def _natural_max_bits(fields: list[TypeField]) -> int | None:
@@ -125,7 +74,7 @@ def _natural_max_bits(fields: list[TypeField]) -> int | None:
         return None
     best = 0
     for field_ in fields:
-        align = scalar_natural_align_bits(field_.type)
+        align = member_align_bits(field_)
         if align is None:
             return None
         best = max(best, align)

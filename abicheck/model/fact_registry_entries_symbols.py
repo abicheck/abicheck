@@ -690,6 +690,24 @@ SYMBOL_FACTS: list[FactDefinition] = [
         ),
     ),
     _E(
+        owner="Function",
+        field="return_by_value",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.compare.record_return_convention:returned_by_value_records",
+        ),
+        notes=(
+            "Schema v70: whether the return type is a record passed by value, read from the declared type (castxml's type graph; clang's desugared return QualType resolved through the TU's record/enum declarations). A pointer or reference return is False; an unresolved or template-instance return is unset. Only a PRESENT True feeds the SysV return-convention gate (STRUCT_RETURN_CONVENTION_CHANGED)."
+        ),
+    ),
+    _E(
         owner="Param",
         field="type_identities",
         value_type="tuple[str, ...]",

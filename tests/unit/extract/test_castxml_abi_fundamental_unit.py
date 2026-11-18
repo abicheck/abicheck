@@ -263,12 +263,20 @@ def test_unresolved_type_id_has_no_fact(type_id: str) -> None:
     assert castxml_abi_fundamental(ctx, type_id) is None
 
 
-@pytest.mark.parametrize("tag", ["PointerType", "ReferenceType", "Struct", "ArrayType"])
+@pytest.mark.parametrize("tag", ["ReferenceType", "Struct", "ArrayType"])
 def test_non_fundamental_node_kinds_have_no_fact(tag: str) -> None:
     ctx = _ctx(
         _node(tag, "_p", type="_i", size="64", align="64"), _fundamental("_i", "int", 4)
     )
     assert castxml_abi_fundamental(ctx, "_p") is None
+
+
+def test_a_pointer_is_one_unsigned_word_of_its_declared_size() -> None:
+    # Pointer width is castxml's own size (bits), not an assumed target.
+    ctx = _ctx(_node("PointerType", "_p", type="_i", size="64", align="64"))
+    assert castxml_abi_fundamental(ctx, "_p") == AbiFundamental(
+        FundamentalEncoding.UNSIGNED, 8, 8
+    )
 
 
 def test_typedef_without_a_type_reference_has_no_fact() -> None:

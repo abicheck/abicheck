@@ -135,6 +135,11 @@ def _fact_of(ctx: Any, type_id: str, depth: int) -> AbiFundamental | None:
         if inner is None or inner.lanes:
             return None
         return _fact(el, encoding=inner.encoding, align_bits=el.get("align"))
+    # A pointer is one unsigned word of the target's size (castxml states it in
+    # bits); a member of pointer type carries this fact, so a pointer-bearing
+    # record is classified by its layout rather than left undecided.
+    if tag == "PointerType":
+        return _fact(el, encoding=_UNSIGNED, align_bits=el.get("align"))
     if tag == "Unimplemented" and el.get("type_class") == "Vector":
         return _vector_fact(ctx.vector_spellings.get(type_id), plain_char)
     return None

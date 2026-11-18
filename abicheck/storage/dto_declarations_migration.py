@@ -26,3 +26,18 @@ def declarations_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
                 "only a v2 writer emits"
             )
     return payload
+
+
+def declarations_v2_to_v3(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Declarations v2 -> v3: ``Function.return_by_value_fact`` is new. A v2
+    writer never wrote the key, so the payload is unchanged and every function
+    reads as "not determined" (unset), which never fires the by-value
+    return-convention check. A v2 payload that already carries the key was not
+    written by a v2 writer, so it is refused rather than migrated."""
+    for fn in payload.get("functions", ()):
+        if isinstance(fn, Mapping) and "return_by_value_fact" in fn:
+            raise ValueError(
+                "'declarations' section v2 carries 'return_by_value_fact', "
+                "which only a v3 writer emits"
+            )
+    return payload

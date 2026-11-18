@@ -59,6 +59,10 @@ from ..model.semantic_ir_legacy_adapter import (
 from ..model.semantic_ir_record_layout import entity_layout
 from .declined_comparisons import record_declined
 from .record_packing import record_packing_changes
+from .record_return_convention import (
+    record_return_convention_changes,
+    returned_by_value_records,
+)
 
 if TYPE_CHECKING:
     from ..model.change import Change
@@ -76,9 +80,11 @@ class RecordLayoutIndex:
     index: SemanticIRIndex
     ir: SemanticIR
     by_record: dict[int, OccurrenceId] = field(default_factory=dict)
-    # Whether this side is an LP64 x86_64 ELF, the model the packing check's
-    # natural-alignment table assumes (see compare/record_packing.py).
+    # Whether this side is an LP64 x86_64 ELF, the model the return-convention
+    # table assumes (compare/record_return_convention.py).
     lp64_x86_64: bool = False
+    # Record spellings some declared function returns by value.
+    returned_by_value: frozenset[str] = frozenset()
 
     def entity_for(self, record: RecordType) -> CanonicalEntity | None:
         occ_id = self.by_record.get(id(record))
@@ -92,7 +98,7 @@ class RecordLayoutIndex:
 def record_layout_index(
     semantic_ir: SemanticIR | None,
     records: Iterable[RecordType],
-    elf: object | None = None,
+    snapshot: object | None = None,
 ) -> RecordLayoutIndex:
     """One side's layout index -- see the module docstring for the rule.
 
@@ -121,14 +127,13 @@ def record_layout_index(
         index=SemanticIRIndex(ir),
         ir=ir,
         by_record={id(r): occ for r, occ in zip(projected, order)},
-        lp64_x86_64=_is_lp64_x86_64(elf),
-    )
-
-
-def _is_lp64_x86_64(elf: object | None) -> bool:
-    return (
-        getattr(elf, "machine", None) == "EM_X86_64"
-        and getattr(elf, "elf_class", None) == 64
+        lp64_x86_64=(
+            getattr(getattr(snapshot, "elf", None), "machine", None) == "EM_X86_64"
+            and getattr(getattr(snapshot, "elf", None), "elf_class", None) == 64
+        ),
+        returned_by_value=returned_by_value_records(
+            getattr(getattr(snapshot, "declarations", None), "functions", ())
+        ),
     )
 
 
@@ -179,4 +184,5 @@ def record_layout_changes(
                 entity_id=entity_id,
             )
         )
+    record_return_convention_changes(changes, name, t_old, t_new, old_index, new_index)
     record_packing_changes(changes, name, t_old, t_new, old_index, new_index)

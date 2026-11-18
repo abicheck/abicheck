@@ -274,8 +274,8 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     # ADR-063 6B: record layout is read from each side's SemanticIR.
     layout_indexes = (
-        record_layout_index(old.canonical_ir, old.declarations.types, old.elf),
-        record_layout_index(new.canonical_ir, new.declarations.types, new.elf),
+        record_layout_index(old.canonical_ir, old.declarations.types, old),
+        record_layout_index(new.canonical_ir, new.declarations.types, new),
     )
 
     # Tracked by object identity, not key membership: a legacy-schema-vs-fresh
