@@ -618,14 +618,34 @@ def test_stdlib_implementation_change_is_observed_from_the_binary_alone(
         pytest.skip(skip_reason("clang", "shared"))
     if gcc is None:
         pytest.skip(skip_reason("gcc", "shared"))
-    probe = subprocess.run(
-        [*clang, "-stdlib=libc++", "-fsyntax-only", "-x", "c++", "-"],
-        input="#include <string>\n",
-        text=True,
-        capture_output=True,
-    )
+    import re
+
+    probe_src = "#include <string>\nvoid probe(const std::string& s) { (void)s; }\n"
+    probe_cmd = [
+        *clang,
+        "-stdlib=libc++",
+        "-O0",
+        "-fPIC",
+        "-shared",
+        "-x",
+        "c++",
+        "-",
+        "-o",
+        str(tmp_path / "probe.so"),
+    ]
+    probe = subprocess.run(probe_cmd, input=probe_src, text=True, capture_output=True)
     if probe.returncode != 0:
-        pytest.skip("libc++ headers are not installed: " + probe.stderr[:200])
+        # Skip only when the toolchain reports libc++ itself missing; any other
+        # failure of a configured compiler is a test failure.
+        if re.search(
+            r"file not found|cannot find -lc\+\+|unable to find library -lc\+\+",
+            probe.stderr,
+        ):
+            pytest.skip("libc++ is not installed: " + probe.stderr[:200])
+        pytest.fail(
+            f"libc++ probe failed\ncommand: {probe_cmd}\nsource:\n{probe_src}"
+            f"stderr:\n{probe.stderr}"
+        )
     source = tmp_path / "api.cpp"
     source.write_text(
         "#include <string>\n"
