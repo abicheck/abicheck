@@ -3054,6 +3054,87 @@
           }
         }
       }
+    },
+    "call_axis_shadow": {
+      "type": "array",
+      "description": "Schema 7.6, ADR-094 D9 (shadow mode): the `call` axis for each function a `func_params_changed`/`func_return_changed` finding names -- whether a caller compiled against the old declaration still calls the new function correctly under the platform calling convention (only x86-64 SysV ELF is modelled; anything else is `unknown`). Present only when at least one such function was assessed. Advisory: never affects `verdict`, `severity` or any exit code.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "symbol",
+          "change_kinds",
+          "abi",
+          "status",
+          "reason",
+          "existing_verdict",
+          "disagreement"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "The function's symbol, as the signature finding names it."
+          },
+          "change_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "func_params_changed",
+                "func_return_changed"
+              ]
+            },
+            "description": "The signature findings recorded for this function."
+          },
+          "abi": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "sysv_amd64",
+              null
+            ],
+            "description": "The calling convention both sides' platform facts establish; `null` when unmodelled or when the two sides disagree."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "preserved",
+              "broken",
+              "unknown"
+            ],
+            "description": "ADR-094 D2 axis value."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the axis has this value."
+          },
+          "existing_verdict": {
+            "type": "string",
+            "enum": [
+              "NO_CHANGE",
+              "COMPATIBLE",
+              "COMPATIBLE_WITH_RISK",
+              "API_BREAK",
+              "BREAKING"
+            ],
+            "description": "The highest effective verdict the active policy gave this function's signature findings."
+          },
+          "disagreement": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "breaking_but_call_preserved",
+              "compatible_but_call_broken",
+              null
+            ],
+            "description": "`breaking_but_call_preserved`: the existing verdict is BREAKING but the axis is `preserved`. `compatible_but_call_broken`: the existing verdict is below BREAKING but the axis is `broken`. `null` otherwise (an `unknown` axis never disagrees)."
+          }
+        }
+      }
     }
   },
   "$defs": {
