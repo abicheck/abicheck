@@ -289,6 +289,7 @@
           "ownership_fact",
           "params",
           "ref_qualifier",
+          "return_by_value_fact",
           "return_pointer_depth",
           "return_type",
           "return_type_abi_fact",
@@ -353,7 +354,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 2
+      "section_schema_version": 3
     },
     "graph": {
       "fields": {

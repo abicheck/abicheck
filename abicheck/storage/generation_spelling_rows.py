@@ -738,4 +738,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     83: GenerationSpellingChange(
         'no type or name spelling changes. A headerless PE dump\'s export-table functions take is_extern_c and entity_id from the PE identity function: a MinGW C++ export spelled _Z... is a C++ function, not extern "C", and carries an entity identity where the older extractor left it unset. Export names and return types are unchanged.'
     ),
+    84: GenerationSpellingChange(
+        "no type or name spelling changes: Function.return_by_value_fact is a new fact on the declaration (castxml's type graph; clang's desugared return QualType resolved through the TU's record/enum declarations). Export names, return types and parameter spellings are unchanged. Provisional generation number, taken from the parent's assignment."
+    ),
 }

@@ -61,6 +61,7 @@ from .fact_payload_validation import (
     validated_identities,
     validated_template_param_defaults,
 )
+from .fact_return_by_value import decode_return_by_value
 from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
@@ -193,8 +194,8 @@ _FUNCTION_FACT_KEYS = (
     "return_type_identities_fact",
     "is_inline_fact",
     "return_type_abi_fact",
+    "return_by_value_fact",
 )
-
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
 # own case-(b) *_fact siblings. Each is a single nested sub-dict under the
 # top-level "elf"/"pe"/"macho" key (ElfMetadata/PeMetadata/MachoMetadata are
@@ -630,6 +631,7 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                     _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS,
                 )
             ),
+            "return_by_value_fact": decode_return_by_value(f, schema_version),
             "explicit_instantiation_fact": _explicit_instantiation_value(
                 decode_fact(
                     f.get("explicit_instantiation_fact"),

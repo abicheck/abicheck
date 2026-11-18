@@ -308,6 +308,14 @@ class Function:
     return_type_abi_fact: Fact[AbiFundamental] | None = field(
         default=None, kw_only=True, compare=False
     )
+    # Schema v70: whether the return type is a record (struct/class/union)
+    # passed by value -- True for ``Rec``, ``const Rec``, a typedef to ``Rec``;
+    # False for a pointer, a reference, or any fundamental/enum. Unset (or
+    # UNKNOWN) when a producer cannot say; an undetermined side never yields a
+    # return-convention finding. See compare/record_return_convention.py.
+    return_by_value_fact: Fact[bool] | None = field(
+        default=None, kw_only=True, compare=False
+    )
     # ADR-085 D1 for a function template: the spelled default of each template
     # parameter of the ``FunctionTemplateDecl`` this declaration is the pattern
     # of, in declaration order (``None`` for a parameter with no default). Set

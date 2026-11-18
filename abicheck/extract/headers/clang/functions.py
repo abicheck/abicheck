@@ -602,6 +602,13 @@ def parse_functions(
                     typedef_abi_facts,
                     entry.template_type_param_names,
                 ),
+                return_by_value_fact=(
+                    type_identities.by_value_fact(
+                        _return_type(_qualtype_desugared(entry.node)), entry.scope
+                    )
+                    if type_identities
+                    else None
+                ),
                 params=params,
                 visibility=vis,
                 **surface_facts,

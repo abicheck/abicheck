@@ -60,7 +60,7 @@ from ..model.semantic_ir_record_layout import entity_layout
 from .declined_comparisons import record_declined
 from .record_return_convention import (
     record_return_convention_changes,
-    returned_by_value_names,
+    returned_by_value_records,
 )
 
 if TYPE_CHECKING:
@@ -127,7 +127,7 @@ def record_layout_index(
         ir=ir,
         by_record={id(r): occ for r, occ in zip(projected, order)},
         lp64_x86_64=_is_lp64_x86_64(getattr(snapshot, "elf", None)),
-        returned_by_value=returned_by_value_names(
+        returned_by_value=returned_by_value_records(
             getattr(snapshot, "function_map", {}).values()
         ),
     )

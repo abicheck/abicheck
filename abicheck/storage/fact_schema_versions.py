@@ -181,3 +181,9 @@ _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT = 65
 # above and as unset below. An absent fact never proves two slots equal, so an
 # old baseline keeps its pre-v69 classification.
 _MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS = 69
+
+# Schema v70: ``Function.return_by_value_fact`` -- whether the return type is a
+# record passed by value (Fact[bool]). Written only where a producer determined
+# it (castxml today); an absent key reads as NOT_COLLECTED at v70 and above and
+# as unset below. An unset fact never fires the return-convention check.
+_MIN_SCHEMA_VERSION_FOR_RETURN_BY_VALUE_FACT = 70

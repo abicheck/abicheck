@@ -46,7 +46,7 @@ from ..model.semantic_ir_record_layout import entity_layout
 
 __all__ = [
     "record_return_convention_changes",
-    "returned_by_value_names",
+    "returned_by_value_records",
     "return_convention",
     "scalar_class",
 ]
@@ -145,14 +145,24 @@ def return_convention(
     return ("regs", *(str(c) for c in eightbytes))
 
 
-def returned_by_value_names(functions: Iterable[Function]) -> frozenset[str]:
-    """The record spellings that some declared function returns by value."""
+def returned_by_value_records(functions: Iterable[Function]) -> frozenset[str]:
+    """The record identities some declared function returns by value.
+
+    Read from ``Function.return_by_value_fact`` (set by the header backend from
+    the declared type graph) and the resolved identities of the return type.
+    A function whose fact is unset or False contributes nothing, and a return
+    type whose identities are unresolved contributes nothing -- an undetermined
+    return never yields a finding.
+    """
     names: set[str] = set()
     for function in functions:
-        text = _KEYWORDS.sub("", function.return_type)
-        text = re.sub(r"\s+", " ", text).strip()
-        if text and not text.endswith(("*", "&")):
-            names.add(text)
+        by_value = function.return_by_value_fact
+        if by_value is None or by_value.value is not True:
+            continue
+        identities = function.return_type_identities_fact
+        if identities is None or not identities.is_present:
+            continue
+        names.update(identities.value or ())
     return frozenset(names)
 
 
@@ -172,10 +182,8 @@ def record_return_convention_changes(
     """
     if not (old_index.lp64_x86_64 and new_index.lp64_x86_64):
         return
-    if (
-        name not in old_index.returned_by_value
-        and name not in new_index.returned_by_value
-    ):
+    keys = {name, t_old.qualified_name, t_new.qualified_name} - {None}
+    if not keys & (old_index.returned_by_value | new_index.returned_by_value):
         return
     old_size, _ = entity_layout(old_index.entity_for(t_old))
     new_size, _ = entity_layout(new_index.entity_for(t_new))

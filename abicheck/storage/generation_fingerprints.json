@@ -108,7 +108,7 @@
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/function_type_cc.py": "629328f9a0e9c3842ef43c05e11ef3f781b9f5c351e3f14638ce54b91e36405a",
-      "abicheck/extract/headers/castxml/functions.py": "f50eca555f141a4b8f710fa666f7ecfc9e1fec9429dc79bca6a56855cb6efd9b",
+      "abicheck/extract/headers/castxml/functions.py": "12b7cba52411b7280fe79efaedcb3b8fd03fa360a3e2a26cefa27da86ae7b7ff",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -119,6 +119,7 @@
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "154b766dafc01b3ceec3d95312396a174cc39f17947902ce40f4be4011318493",
+      "abicheck/extract/headers/castxml/return_by_value.py": "4a71d9600c6ae71b4f7d3f9f7b4c22ea32f81155fab213cb80454b19689567f0",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
@@ -146,7 +147,7 @@
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "ea6bffb6e5a2c12c7dead503d5e5c617f2270012a2c04734c45ed71601b97b52",
+      "abicheck/extract/headers/clang/functions.py": "e05d7c7677b3fd2256f1602a611adfb541e1787ac8337b0cac17f76843dbac26",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "03490daf8db2a1d1711c9b8a67f8a78b3479dfef54cce9baffbb98ba8f49420c",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -167,7 +168,7 @@
       "abicheck/extract/headers/clang/template_default_spelling.py": "dd2f4d32ff440849edc6547afeacd9945502860e4536d158bde3109306908434",
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
-      "abicheck/extract/headers/clang/type_identity.py": "702248290b2d42f931f9be5bf8450be3e90327f840e4dcfb357a48feff2f84f7",
+      "abicheck/extract/headers/clang/type_identity.py": "52fd39017d7b0079e101428fcca4264726c31c4fd1917cf221652a0de620c96a",
       "abicheck/extract/headers/clang/typedefs.py": "112486b3fd0a842f45c154334587639f23e9455adc125b93aa90b6dd47804202",
       "abicheck/extract/headers/clang/var_alignment.py": "f313f0f9c2941929fa649c7944c182adbbe6522743cf5a1972e477c2a7cd8d71",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
@@ -245,9 +246,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "8bb022b2bada053abd91bb468214596aea94a2474b77b5dedf180f8ecc093b3a",
-    "generation": 83,
-    "reason": "headerless PE export identity (is_extern_c and entity_id from the PE identity function) on top of #2115's generation 82 (merged main)"
+    "fingerprint": "28f067f262e3a7c4a016c35dbeef04ccc42eb082da85ad7c69c8a63b5e3213e2",
+    "generation": 84,
+    "reason": "by-value return fact (castxml + clang, schema v70); provisional generation 84 per parent"
   },
   "resolver": {
     "files": {
