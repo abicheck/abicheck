@@ -18,7 +18,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 - Total kinds: **434**
 - Kinds with at least one real source: **214**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 104
+- Kinds per source: catalog 159, field_shapes 9, integration 105
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -215,7 +215,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_renamed` | API_BREAK | 1 | 0 | 0 |
 | `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 0 |
 | `func_cv_changed` | BREAKING | 1 | 0 | 0 |
-| `func_params_changed` | BREAKING | 5 | 1 | 15 |
+| `func_params_changed` | BREAKING | 5 | 1 | 16 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
 | `func_return_changed` | BREAKING | 5 | 0 | 6 |
 | `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |
@@ -266,7 +266,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 |---|---|---:|---:|---:|
 | `base_class_access_narrowed` | API_BREAK | 0 | 0 | 2 |
 | `constant_changed` | API_BREAK | 1 | 0 | 2 |
-| `cpo_kind_changed` | BREAKING | 1 | 0 | 0 |
+| `cpo_kind_changed` | BREAKING | 1 | 0 | 1 |
 | `cpu_dispatch_isa_dropped` | RISK | 1 | 0 | 0 |
 | `ctor_explicit_added` | API_BREAK | 1 | 0 | 0 |
 | `ctor_overload_ambiguity_risk` | RISK | 0 | 0 | 0 |

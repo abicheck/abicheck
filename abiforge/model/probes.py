@@ -179,7 +179,12 @@ _ALIAS_ROLES: dict[str, RoleText] = {
         "int tpk_use(TpK<2>* p) { return p->v[0]; }",
     ),
     "tp.instadd": (
-        "template <class T> T tpi(T v);\nextern template int tpi<int>(int);",
+        # gcc gives an explicit instantiation the visibility of the template's
+        # definition, which sits outside the header's visibility pragma, so
+        # -fvisibility=hidden would hide tpi<int>/<long>; the attribute is the
+        # export macro (as k.inst's ktwice).
+        'template <class T> __attribute__((visibility("default"))) T tpi(T v);\n'
+        "extern template int tpi<int>(int);",
         "template <class T> T tpi(T v) { return v + 1; }\ntemplate int tpi<int>(int);",
     ),
     "tp.specadd": (

@@ -19,12 +19,15 @@ from abiforge.operators import matrix
 
 DATA = Path(__file__).resolve().parent / "data" / "default_cell_expectations.json"
 PRODUCER = Toolchain("gcc", 13, "gcc-13", "g++-13")
+#: The recorded data is a gcc/ELF build; pin it so a Windows or macOS host
+#: (PE / Mach-O, where other kinds are observable) computes the same cells.
+ELF = ("linux", "elf")
 
 
 def _current() -> dict[str, dict[str, object]]:
     out: dict[str, dict[str, object]] = {}
     for op, seed in matrix():
-        config = default_config(seed.lang, PRODUCER)
+        config = default_config(seed.lang, PRODUCER).with_(platform=ELF)
         if op.requires(config) is not None or not op.applies_to(seed):
             continue
         exp = op.expect(config)
