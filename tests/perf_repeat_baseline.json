@@ -240,7 +240,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4719,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4663,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 570,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.type_by_name)": 312,
@@ -311,5 +311,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 232257
+  "total": 232201
 }

@@ -66,6 +66,7 @@ from .record_return_convention import (
 
 if TYPE_CHECKING:
     from ..model.change import Change
+    from ..model.declarations import Function
     from ..model.entities import RecordType
 
 __all__ = ["RecordLayoutIndex", "record_layout_changes", "record_layout_index"]
@@ -98,14 +99,17 @@ class RecordLayoutIndex:
 def record_layout_index(
     semantic_ir: SemanticIR | None,
     records: Iterable[RecordType],
-    snapshot: object | None = None,
+    elf: object | None,
+    functions: Iterable[Function],
 ) -> RecordLayoutIndex:
     """One side's layout index -- see the module docstring for the rule.
 
     *records* is that side's own record collection, used only for the
     adapter projection (a side with no record occurrences) and for records
     no producer gave an identity. The caller must pass the same record
-    objects it later pairs: the adapter half is keyed by object.
+    objects it later pairs: the adapter half is keyed by object. *elf* and
+    *functions* are the side's own bound metadata and declarations, passed in
+    so the layout index never re-reads the snapshot.
     """
     records = list(records)
     if semantic_ir is not None and semantic_ir_covers_kind(
@@ -128,12 +132,10 @@ def record_layout_index(
         ir=ir,
         by_record={id(r): occ for r, occ in zip(projected, order)},
         lp64_x86_64=(
-            getattr(getattr(snapshot, "elf", None), "machine", None) == "EM_X86_64"
-            and getattr(getattr(snapshot, "elf", None), "elf_class", None) == 64
+            getattr(elf, "machine", None) == "EM_X86_64"
+            and getattr(elf, "elf_class", None) == 64
         ),
-        returned_by_value=returned_by_value_records(
-            getattr(getattr(snapshot, "declarations", None), "functions", ())
-        ),
+        returned_by_value=returned_by_value_records(functions),
     )
 
 
