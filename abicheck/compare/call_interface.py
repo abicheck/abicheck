@@ -37,6 +37,13 @@ read from a register the old caller never set, so the call is ``BROKEN``. A
 rename is indistinguishable from an insertion plus a removal; it is reported
 as one, which only ever errs towards ``BROKEN``.
 
+A non-static member function's implicit ``this`` is the leading slot
+``this`` (:class:`ImplicitThis`): on Itanium x86-64 it is passed exactly as a
+first declared pointer argument, after any hidden sret pointer, so the proved
+``locAt``/``argLoc`` placement covers it unchanged (``formal/MEMBER_FRAGMENT.md``,
+confirmed by execution). Whether a function is such a member is read from
+``Function.member_kind_fact``; without it the axis is ``UNKNOWN``.
+
 The answer is checked case by case against the proved model on every case of
 the E13 and E14 fragments (``tests/test_call_interface_fragments.py``). This
 module decides no verdict; ADR-094 D9's shadow comparison and switch do.
@@ -47,12 +54,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ..model.availability import FactStatus
 from ..model.call_interface import (
     MAX_INTEGER_ARGS,
     MAX_SSE_ARGS,
     SYSV_AMD64,
     ArgClass,
     ArgSlot,
+    Rep,
     RetShape,
     arg_locations,
     ret_location,
@@ -61,6 +70,7 @@ from ..model.call_interface import (
 )
 from ..model.cc_attributes import is_cc_attribute
 from ..model.declarations import Function
+from ..model.member_kind import MemberKind
 from ..model.owner_recovery import is_mangled_identity
 from ..model.snapshot import AbiSnapshot
 
@@ -68,6 +78,7 @@ __all__ = [
     "AxisStatus",
     "CallAxis",
     "CallSignature",
+    "ImplicitThis",
     "assess_call_interface",
     "call_signature_of",
     "linkage_evidence_reliable",
@@ -90,6 +101,27 @@ class CallAxis:
     reason: str
 
 
+class ImplicitThis(StrEnum):
+    """Whether a call passes an implicit ``this`` that ``params`` does not list.
+
+    ``PRESENT`` for a non-static member function: on x86-64 SysV (Itanium C++
+    ABI) ``this`` is an object pointer passed exactly like a first declared
+    pointer argument -- the first INTEGER register, or the second after a
+    hidden sret pointer (``formal/MEMBER_FRAGMENT.md``). ``ABSENT`` for a free
+    or static member function. ``UNKNOWN`` when the evidence cannot say.
+    """
+
+    ABSENT = "absent"
+    PRESENT = "present"
+    UNKNOWN = "unknown"
+
+
+#: The name the implicit ``this`` takes among the slots. A C++ keyword, so no
+#: declared parameter can carry it; a function that gains or loses ``this``
+#: therefore gains or loses a parameter.
+THIS_SLOT = "this"
+
+
 @dataclass(frozen=True, slots=True)
 class CallSignature:
     """A signature reduced to what the convention sees.
@@ -99,15 +131,17 @@ class CallSignature:
     it is unknown whether the function takes ``...``. ``convention`` is ``""``
     for the platform default, a calling-convention attribute (``ms_abi``) when
     one is declared, and ``None`` when attributes were not captured.
-    ``maybe_member`` is true when the function may receive an implicit
-    ``this`` argument, which ``params`` does not list.
+    ``implicit_this`` says whether the call passes an implicit ``this``;
+    when it is ``PRESENT``, ``params`` starts with the ``this`` slot.
+    ``unknown_reason`` says why it is ``UNKNOWN``.
     """
 
     params: tuple[ArgSlot, ...] | None
     ret: RetShape | None
     variadic: bool | None
     convention: str | None = ""
-    maybe_member: bool = False
+    implicit_this: ImplicitThis = ImplicitThis.ABSENT
+    unknown_reason: str = ""
 
 
 #: The extractor generation from which the clang header backend records a
@@ -145,31 +179,54 @@ def call_signature_of(
     is false, no function is taken to have C linkage.
     """
     convention = _convention(fn.contract_attributes)
-    # A non-static member function receives an implicit `this` that `params`
-    # does not list, and no single recorded fact identifies a member: not
-    # `is_static` (for a free function it means internal linkage), not the
-    # name (extractors store the leaf, `f`), not the symbol alone (clang gives
-    # an uninstantiated template method its bare name), and not `is_extern_c`
-    # alone (clang propagates an `extern "C" { struct ... }` block into the
-    # record's members). Two together do: a C-linkage function is flagged
-    # `is_extern_c` AND has an unmangled symbol, because a linkage
-    # specification never changes a member's `_Z` symbol. Only those
-    # functions are modelled.
-    c_linkage = (
-        linkage_reliable and fn.is_extern_c and not is_mangled_identity(fn.mangled)
-    )
-    maybe_member = not c_linkage
+    this, why = _implicit_this(fn, linkage_reliable)
     if ret is None:
         ret = ret_shape_of(
             fn.return_type_abi_fact, fn.return_pointer_depth, fn.return_type
         )
-    slots = []
+    slots = [ArgSlot(THIS_SLOT, Rep.I64)] if this is ImplicitThis.PRESENT else []
+    params: tuple[ArgSlot, ...] | None = None
     for p in fn.params:
         rep = slot_rep(p.type_abi_fact, p.pointer_depth, p.type)
         if rep is None:
-            return CallSignature(None, ret, fn.is_variadic, convention, maybe_member)
+            break
         slots.append(ArgSlot(p.name, rep))
-    return CallSignature(tuple(slots), ret, fn.is_variadic, convention, maybe_member)
+    else:
+        params = tuple(slots)
+    return CallSignature(params, ret, fn.is_variadic, convention, this, why)
+
+
+def _implicit_this(fn: Function, linkage_reliable: bool) -> tuple[ImplicitThis, str]:
+    """Whether *fn*'s call passes an implicit ``this``, and why not known.
+
+    A C-linkage function (``is_extern_c`` AND an unmangled symbol: a linkage
+    specification never changes a member's ``_Z`` symbol) has none. Otherwise
+    only ``member_kind_fact`` decides: no older recorded fact identifies a
+    member (``is_static`` means internal linkage on a free function, the name
+    is the leaf, an uninstantiated template method's symbol is its bare name).
+    A virtual function is modelled like any non-static member: a call through
+    the vtable passes the same registers, and where the slot sits is the
+    vtable's concern, not this axis's. ``const``/``volatile``/ref-qualifiers
+    do not change the argument registers (they change the symbol, a ``load``
+    axis question). Constructors and destructors stay unknown: their symbol
+    variants (C1/C2, D0/D1/D2) differ, and the base-object variant of a class
+    with virtual bases takes a hidden VTT argument after ``this``.
+    """
+    if linkage_reliable and fn.is_extern_c and not is_mangled_identity(fn.mangled):
+        return ImplicitThis.ABSENT, ""
+    fact = fn.member_kind_fact
+    if fact is None or fact.status is not FactStatus.PRESENT:
+        return ImplicitThis.UNKNOWN, (
+            "member kind not recorded: a possible member function's implicit this is not modelled"
+        )
+    kind = fact.value
+    if kind in (MemberKind.FREE, MemberKind.STATIC):
+        return ImplicitThis.ABSENT, ""
+    if kind is MemberKind.INSTANCE:
+        return ImplicitThis.PRESENT, ""
+    return ImplicitThis.UNKNOWN, (
+        f"a {kind}: ABI variants and a possible VTT argument are not modelled"
+    )
 
 
 def _convention(attributes: list[str] | None) -> str | None:
@@ -193,8 +250,8 @@ def _domain_gap(old: CallSignature, new: CallSignature, abi: str) -> str | None:
             return "calling-convention attributes not captured"
         if sig.convention:
             return f"non-default calling convention ({sig.convention})"
-        if sig.maybe_member:
-            return "not a C-linkage function: a possible member function's implicit this is not modelled"
+        if sig.implicit_this is ImplicitThis.UNKNOWN:
+            return sig.unknown_reason or "implicit this unknown"
     if old.variadic is not False or new.variadic is not False:
         return "variadic or unprototyped function"
     if old.params is None or new.params is None:

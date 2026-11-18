@@ -48,6 +48,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_noexcept` | `bool` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.member_kind` | `MemberKind` | castxml, clang | consumed | ✅ | — | — | — | — |
 | `Function.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `Function.return_type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `Function.return_type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
