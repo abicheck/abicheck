@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Seed ``observable_at`` on the ChangeKind taxonomy (ADR-093, WS-1 slice 3).
+
 ``DECISIONS`` is the reviewable record of each kind's observability: one row per
 kind, ``kind  CODE  # note``. No row, or code ``U``, stays ``UNCLASSIFIED``: a
 wrong value creates a false-clean obligation no run can discharge.
@@ -40,6 +41,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from seed_observable_forms_g3 import G3_FORMS
+
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "abicheck" / "model" / "change_catalog"
 BASELINE = REPO / "tests" / "data" / "change_kind_unclassified.json"
@@ -59,12 +62,6 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
     "B:MACHO": ((("B",),), "", ("macho",), "_OBS_B_MACHO"),
     "B:PE": ((("B",),), "", ("pe",), "_OBS_B_PE"),
     "B:ELF_MACHO": ((("B",),), "", ("elf", "macho"), "_OBS_B_ELF_MACHO"),
-    "BH": (
-        (("B", "H"),),
-        "declared in the public header and present in the export table",
-        (),
-        "_OBS_BH",
-    ),
     "BHDOC": (
         (("B", "H"),),
         "the ratio counts exports against public-header declarations; a binary alone has no header records to compare with",
@@ -101,13 +98,6 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_H_HEADER",
     ),
-    "D:PRESENCE": (
-        (("B", "D"),),
-        "DWARF presence on the old side: only a debug-info read sees it",
-        (),
-        "_OBS_D_PRESENCE",
-    ),
-    "D:DELETED": ((("B", "D"),), "deleted member: the DWARF DIE carries DW_AT_deleted, which the export table cannot show; without debug info the binary pair reports it as func_removed_elf_only", (), "_OBS_D_DELETED"),
     "D1": (
         (("B", "D"),),
         "underlying size set by the compiler: only DWARF records it",
@@ -168,18 +158,6 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         ("elf", "pe"),
         "_OBS_DH_ELFPE",
     ),
-    "BH:PE": (
-        (("B", "H"),),
-        "declared in the public header and present in the export table",
-        ("pe",),
-        "_OBS_BH_PE",
-    ),
-    "BH:ELFPE": (
-        (("B", "H"),),
-        "declared in the public header and present in the export table",
-        ("elf", "pe"),
-        "_OBS_BH_ELFPE",
-    ),
     "DH:C": (
         (("B", "D"), ("B", "H")),
         "a C parameter change keeps the symbol: DWARF or the header carries it",
@@ -232,6 +210,8 @@ UNCLASSIFIED_REASONS: dict[str, str] = {
     "suppression_*": "policy disposition facts (ADR-067), not observation facts",
     "kabi_*": "kernel ABI symbol metadata: not covered by the ELF/PE/Mach-O sets",
 }
+
+FORMS.update(G3_FORMS)  # header-graph and DWARF-deleted families; see seed_observable_forms_g3.py
 
 FORM_CODES = frozenset(FORMS)
 
