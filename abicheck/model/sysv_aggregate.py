@@ -148,7 +148,10 @@ def _flatten(
             return None
         members, align = got
         if f.is_bitfield and not f.name:
-            align = 8  # an unnamed bitfield does not align the record
+            # An unnamed bitfield is padding: it neither aligns the record nor
+            # holds a value the caller reads, so it is not part of the image.
+            align = 8
+            members = []
         elif not f.is_bitfield and f.offset_bits % align:
             return None  # misaligned member: packed
         out.extend(members)

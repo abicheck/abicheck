@@ -228,7 +228,34 @@ def test_an_unnamed_bitfield_does_not_align_the_record(
     assert (got is not None) is classified
     if got is not None:
         assert got.shape is RetShape.INT1
-        assert [(m.offset, m.size) for m in got.members or ()] == [(0, 8), (8, 1)]
+        # The unnamed bitfield is padding: not a member the caller reads.
+        assert [(m.offset, m.size) for m in got.members or ()] == [(0, 8)]
+
+
+def test_dropping_an_unnamed_bitfield_keeps_the_call_intact() -> None:
+    """Padding the caller never reads cannot break it: ``{char c; unsigned :1;}``
+    -> ``{char c;}`` reads the same byte from the same register."""
+    from abicheck.compare.call_interface import (
+        AxisStatus,
+        CallSignature,
+        assess_call_interface,
+    )
+    from abicheck.model.call_interface import SYSV_AMD64
+
+    def c() -> TypeField:
+        f = _named_bit("c", 0, 8, _fact(_S, 1))
+        f.is_bitfield, f.bitfield_bits = False, None
+        return f
+
+    old = _classify(_rec([c(), _named_bit("", 8, 1, _fact(_U, 4))], 16, 8))
+    new = _classify(_rec([c()], 8, 8))
+    assert old is not None and new is not None
+    sigs = [
+        CallSignature((), r.shape, False, "", ret_members=r.members, ret_size=r.size)
+        for r in (old, new)
+    ]
+    got = assess_call_interface(sigs[0], sigs[1], SYSV_AMD64)
+    assert got.status is AxisStatus.PRESERVED, got.reason
 
 
 def _snapshot(*types: RecordType, typedefs: dict[str, str], lang: str) -> AbiSnapshot:
