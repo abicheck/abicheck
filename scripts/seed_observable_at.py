@@ -121,6 +121,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_DBD",
     ),
+    "DH:ELF_X86_64": (
+        (("B", "D"), ("B", "H")),
+        "layout or type fact: DWARF and the public header both carry it",
+        ("elf",),
+        "_OBS_DH_ELF_X86_64",
+    ),
     "BBD": (
         (("B", "BD"),),
         "compiler-flag fact: the header never carries it and the binary does not; build data (a compile database) does",
@@ -233,6 +239,7 @@ FORM_CODES = frozenset(FORMS)
 #: The language a form's condition is scoped to (``DH:C``, ``B:CXX``). Forms
 #: absent here are language-free.
 FORM_LANGUAGES: dict[str, tuple[str, ...]] = {"DH:C": ("c",), "B:CXX": ("cxx",)}
+FORM_ARCHES: dict[str, tuple[str, ...]] = {"DH:ELF_X86_64": ("x86_64",)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,12 +273,13 @@ def form_observability(code: str) -> tuple[Any, ...]:
     alts, rationale, platforms, _const = FORMS[code]
     languages = FORM_LANGUAGES.get(code, ())
     condition = None
-    if platforms or languages:
+    if platforms or languages or FORM_ARCHES.get(code):
         condition = ObservabilityCondition(
             platform=frozenset(Platform(p) for p in platforms) if platforms else None,
             language=frozenset(Language(lang) for lang in languages)
             if languages
             else None,
+            arch=frozenset(FORM_ARCHES.get(code, ())) or None,
         )
     return (observable(*alts, rationale=rationale, condition=condition),)
 
@@ -389,7 +397,7 @@ def _shape(dec: Decision) -> str:
     for code in dec.codes:
         alts, _rat, platforms, _const = FORMS[code]
         text = _spell(alts)
-        scope = [*platforms, *FORM_LANGUAGES.get(code, ())]
+        scope = [*platforms, *FORM_LANGUAGES.get(code, ()), *FORM_ARCHES.get(code, ())]
         if scope:
             text += " on " + ",".join(scope)
         parts.append(text)

@@ -34,7 +34,9 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .observability import ObservabilityCondition, Platform, observable
+from dataclasses import replace
+
+from .observability import ELF_X86_64, ObservabilityCondition, Platform, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -69,6 +71,7 @@ _OBS_DH = observable(
     ("B", "H"),
     rationale="layout or type fact: DWARF and the public header both carry it",
 )
+_OBS_DH_ELF_X86_64 = replace(_OBS_DH, condition=ELF_X86_64)
 _OBS_D = observable(
     ("B", "D"), rationale="underlying size set by the compiler: only DWARF records it"
 )
@@ -405,7 +408,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
-        observable_at=(_OBS_DH,),
+        observable_at=(_OBS_DH_ELF_X86_64,),
     ),
     _E(
         "sycl_backend_driver_req_changed",
