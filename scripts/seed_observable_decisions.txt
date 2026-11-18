@@ -339,6 +339,8 @@ instantiation_missing_from_binary  B  # diff_templates / template_instance_absen
 overload_set_rerouted  B  # diff_types: an overload set rerouted under the same mangled name family; the stripped binary pair emits it (tag oracle), so B
 abi_equivalent_type_changed  DH  # compare/abi_equivalent_retype.py: a retype the compiler passes identically (long -> long long on LP64) needs the declared types (header or DWARF); header and DWARF pairs emit it, a stripped binary does not
 typedef_version_sentinel  H:HEADER  # types_2.py: a typedef name carrying a release version; the header pair emits it, the stripped and DWARF-only pairs do not (the typedef is never exported)
+secondary_vtable_group_changed  DH  # diff_vtable_layout.py: fires when a direct base's polymorphism flips (first virtual added) and the class's base list is unchanged; needs base and vtable facts (castxml/clang headers or DWARF); the header pair and the gcc DWARF-only pair emit it, a stripped binary does not
+cpo_kind_changed  B  # diff_templates.py:789-808: a public name that is a function in one side and a variable (function object) in the other, from the export table's symbol types; the stripped binary pair emits it in both directions
 
 # -- WS-1 domain families: build, numpy, wheel, bundle (ADR-093 batch 6) --
 # Each row: a real-artifact oracle through the public compare (see
