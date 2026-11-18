@@ -149,7 +149,7 @@ A test then asserts, for every case of the exported space, that the production e
 
 | Axis | Evaluator | Fragment |
 |---|---|---|
-| `call` | SysV x86-64 register and return model (D8) | E13, E14 |
+| `call` | SysV x86-64 register and return model (D8) | E13, E14, E15 |
 | `data` | scalar struct field insertion | E10 |
 | `data` | C enumerator values | E12 |
 
@@ -188,6 +188,8 @@ The event's `call` axis becomes `Preserved` and `source` stays `Broken`, so D4 d
 The axis is per ABI by construction. `long` ↔ `void *` is not preserved on Windows x64 (LLP64) or x32. Windows x64 also assigns positional slots, so removing a middle `int` moves a later `double`. Those ABIs return `Unknown(out_of_model)` until each has its fragment.
 
 The test `tests/test_call_interface_fragments.py` asserts `assess_call_interface` equals the exported `call_compatible` on all 3336 fragment cases.
+
+A non-static C++ member's implicit `this` is a prepended pointer argument (after the sret pointer when the result is in memory), so the same placement decides members; `Function.member_kind_fact`, read from the header AST node kind, says which functions have one. Constructors, destructors and functions without the fact stay unknown. Execution evidence is E15 (`formal/MEMBER_FRAGMENT.md`); `tests/test_call_interface_members.py` checks every E13/E14 case as a member.
 
 ### D9. Report, migration and rollout
 

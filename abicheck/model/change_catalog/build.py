@@ -59,6 +59,24 @@ _CS = ContractSubject
 _OBS_B_ELF = observable(
     ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
 )
+_OBS_B = observable(("B",))
+# Package or set scope is comparison scope (ADR-065), not an evidence atom.
+_SCOPE_RATIONALE = (
+    "requires package/set scope: the wheel archive, bundle artifact "
+    "set or instantiation manifest is the comparison scope, orthogonal to "
+    "per-artifact evidence; the fact itself is read from the binary (B)"
+)
+_OBS_B_SCOPE = observable(("B",), rationale=_SCOPE_RATIONALE)
+_OBS_B_ELF_SCOPE = observable(
+    ("B",),
+    rationale=_SCOPE_RATIONALE,
+    condition=ObservabilityCondition(platform=frozenset({Platform.ELF})),
+)
+_OBS_BD_DWARF = observable(
+    ("B", "D"),
+    rationale="the signature or layout of a sibling's type is read from DWARF; "
+    "the stripped binary alone reports the weaker unverified or no finding",
+)
 _OBS_DBD = observable(
     ("B", "D"),
     ("B", "BD"),
@@ -122,6 +140,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_SCOPE,),
     ),
     _E(
         "bundle_intra_dep_resolved_to_different_version",
@@ -145,6 +164,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_BD_DWARF,),
     ),
     _E(
         "bundle_intra_dep_signature_unverified",
@@ -161,6 +181,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_SCOPE,),
     ),
     _E(
         "bundle_intra_type_changed",
@@ -172,6 +193,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_BD_DWARF,),
     ),
     _E(
         "bundle_library_added",
@@ -245,6 +267,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B_SCOPE,),
     ),
     _E(
         "bundle_manifest_instantiation_removed",
@@ -256,6 +279,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B_SCOPE,),
     ),
     _E(
         "bundle_provider_changed",
@@ -268,6 +292,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_BD_DWARF,),
     ),
     _E(
         "bundle_unresolved_intra_dependency",
@@ -448,6 +473,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_SCOPE,),
     ),
     _E(
         "numpy_capi_consumption_added",
@@ -465,6 +491,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.ADDED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "numpy_capi_consumption_removed",
@@ -476,6 +503,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "numpy_metadata_understates_required_version",
@@ -490,6 +518,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_SCOPE,),
     ),
     _E(
         "numpy_target_floor_raised",
@@ -503,6 +532,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "runtime_floor_raised",
@@ -564,6 +594,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.DEPENDENCY_EDGE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_SCOPE,),
     ),
     _E(
         "wheel_rpath_not_portable",
@@ -580,6 +611,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF_SCOPE,),
     ),
     _E(
         "wheel_tag_architecture_mismatch",
@@ -596,5 +628,9 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        # Declared ELF only. The Mach-O branch (_macho_arch_mismatch) is real, but
+        # no Mach-O producer exists on Linux CI, so no oracle confirms it yet;
+        # docs/contribute/plans/abicheck-abiforge-completeness.md 11.2 keeps the row.
+        observable_at=(_OBS_B_ELF_SCOPE,),
     ),
 ]

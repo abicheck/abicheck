@@ -746,4 +746,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "symbols and type spellings are unchanged; an older clang snapshot keeps the flag "
         "as stored (the call axis declines to trust it), and no rewrite applies."
     ),
+    85: GenerationSpellingChange(
+        "Member kind: no stored type or name spelling changes. The clang and castxml "
+        "header backends record Function.member_kind_fact (free, instance, static, "
+        "constructor, destructor) from the declaration's AST node kind. "
+        "An older snapshot carries no such fact, which reads as not collected, and the "
+        "call axis keeps a function that is not provably C linkage UNKNOWN; no rewrite "
+        "applies."
+    ),
 }
