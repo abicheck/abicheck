@@ -115,6 +115,7 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_D_PRESENCE",
     ),
+    "D:DELETED": ((("B", "D"),), "deleted member: the DWARF DIE carries DW_AT_deleted, which the export table cannot show; without debug info the removal is reported as func_removed", (), "_OBS_D_DELETED"),
     "D1": (
         (("B", "D"),),
         "underlying size set by the compiler: only DWARF records it",
