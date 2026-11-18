@@ -32,6 +32,7 @@ from ..model.call_interface import SYSV_AMD64
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.snapshot import AbiSnapshot
+from ..model.sysv_aggregate import struct_returns_in
 from .call_interface import (
     CallAxis,
     assess_call_interface,
@@ -101,14 +102,15 @@ def call_axis_shadow(
     old_reliable = linkage_evidence_reliable(old)
     new_reliable = linkage_evidence_reliable(new)
     old_fns, new_fns = old.function_map, new.function_map
+    old_ret, new_ret = struct_returns_in(old), struct_returns_in(new)
     records: list[CallAxisRecord] = []
     for symbol in sorted(kinds_by_symbol):
         old_fn, new_fn = old_fns.get(symbol), new_fns.get(symbol)
         if old_fn is None or new_fn is None:
             continue
         axis = assess_call_interface(
-            call_signature_of(old_fn, linkage_reliable=old_reliable),
-            call_signature_of(new_fn, linkage_reliable=new_reliable),
+            call_signature_of(old_fn, old_ret(old_fn), linkage_reliable=old_reliable),
+            call_signature_of(new_fn, new_ret(new_fn), linkage_reliable=new_reliable),
             abi,
         )
         records.append(

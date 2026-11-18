@@ -32,7 +32,19 @@ confirmed by execution on gcc and clang:
   eightbytes, and through caller memory for a struct over 16 bytes. In that
   last case the caller passes the address as a hidden first INTEGER
   argument, so every INTEGER argument moves up one register
-  (``RetFragment.argLoc``).
+  (``RetFragment.argLoc``);
+* a struct of one or two eightbytes of one class comes back in ``rax`` /
+  ``rax:rdx`` or ``xmm0`` / ``xmm0:xmm1``, each eightbyte in the next
+  register of its class. :func:`ret_image` places each struct member (from
+  :mod:`abicheck.model.sysv_aggregate`) in its register bits, which is what
+  lets two struct returns of the same class be compared member by member.
+  In Lean (``formal/lean/AbiLean/StructRetFragment.lean``), over its model
+  of structs of ``int``/``long``/``double`` members, the comparison
+  predicate is proved equivalent to the member-read oracle for every
+  nonempty old member list; this Python code is checked against that model
+  on the exported fragment and against execution on gcc and clang
+  (``formal/experiments/struct_ret_fragment.py``). Neither is a proof of
+  this implementation.
 
 Only the representations the fragments covered are modelled. A slot outside
 them has no :class:`Rep`, and the comparison then says it cannot judge.
@@ -53,9 +65,11 @@ __all__ = [
     "SYSV_AMD64",
     "ArgClass",
     "ArgSlot",
+    "Member",
     "Rep",
     "RetShape",
     "arg_locations",
+    "ret_image",
     "ret_location",
     "ret_shape_of",
     "slot_rep",
@@ -100,6 +114,8 @@ class RetShape(StrEnum):
     I32 = "i32"  # eax
     I64 = "i64"  # rax
     F64 = "f64"  # xmm0
+    INT1 = "int1"  # rax, a struct of one INTEGER eightbyte
+    SSE1 = "sse1"  # xmm0, a struct of one SSE eightbyte
     INT2 = "int2"  # rax:rdx, two INTEGER eightbytes
     SSE2 = "sse2"  # xmm0:xmm1, two SSE eightbytes
     MEMORY = "memory"  # caller memory, address in a hidden rdi argument
@@ -108,12 +124,23 @@ class RetShape(StrEnum):
     def is_sret(self) -> bool:
         return self is RetShape.MEMORY
 
+    @property
+    def is_aggregate(self) -> bool:
+        return self in _AGGREGATE_SHAPES
+
+
+_AGGREGATE_SHAPES = frozenset(
+    {RetShape.INT1, RetShape.SSE1, RetShape.INT2, RetShape.SSE2, RetShape.MEMORY}
+)
+
 
 _RET_LOCATION = {
     RetShape.VOID: "none",
     RetShape.I32: "eax",
     RetShape.I64: "rax",
     RetShape.F64: "xmm0",
+    RetShape.INT1: "rax",
+    RetShape.SSE1: "xmm0",
     RetShape.INT2: "rax:rdx",
     RetShape.SSE2: "xmm0:xmm1",
     RetShape.MEMORY: "caller memory",
@@ -123,6 +150,65 @@ _RET_LOCATION = {
 def ret_location(shape: RetShape) -> str:
     """The register (or memory) a result of *shape* is read from."""
     return _RET_LOCATION[shape]
+
+
+@dataclass(frozen=True, slots=True)
+class Member:
+    """One scalar member of a struct return, flattened: its offset and size
+    in bits from the start of the struct, and its SysV class."""
+
+    offset: int
+    size: int
+    cls: ArgClass
+
+
+#: A scalar result's size in bits and class.
+_SCALAR_BITS = {
+    RetShape.I32: (32, ArgClass.INTEGER),
+    RetShape.I64: (64, ArgClass.INTEGER),
+    RetShape.F64: (64, ArgClass.SSE),
+}
+
+#: One piece of a returned value as its reader sees it: ``scalar`` or
+#: ``member``, the register (or ``mem``), the bit offset inside it, the size in
+#: bits and the class.
+ImagePart = tuple[str, str, int, int, ArgClass]
+
+
+def ret_image(
+    shape: RetShape, members: tuple[Member, ...] | None
+) -> frozenset[ImagePart] | None:
+    """Where each piece of a result of *shape* comes back, or ``None`` for a
+    struct return whose *members* are unknown.
+
+    A struct's eightbytes take the registers of their class in order (``rax``
+    then ``rdx``; ``xmm0`` then ``xmm1``); a ``MEMORY`` struct lies in caller
+    memory as declared. A scalar is tagged ``scalar`` and a struct member
+    ``member``: a scalar reader never expects a struct member's value, even
+    one in the same bits (E14 calls every scalar <-> struct change broken).
+    """
+    if shape is RetShape.VOID:
+        return frozenset()
+    if shape in _SCALAR_BITS:
+        size, cls = _SCALAR_BITS[shape]
+        reg = "rax" if cls is ArgClass.INTEGER else "xmm0"
+        return frozenset({("scalar", reg, 0, size, cls)})
+    if members is None:
+        return None
+    if shape is RetShape.MEMORY:
+        return frozenset(("member", "mem", m.offset, m.size, m.cls) for m in members)
+    regs = {
+        ArgClass.INTEGER: iter(("rax", "rdx")),
+        ArgClass.SSE: iter(("xmm0", "xmm1")),
+    }
+    reg_of: dict[int, str] = {}
+    for eb in sorted({m.offset // 64 for m in members}):
+        cls = next(m.cls for m in members if m.offset // 64 == eb)
+        reg_of[eb] = next(regs[cls])
+    return frozenset(
+        ("member", reg_of[m.offset // 64], m.offset % 64, m.size, m.cls)
+        for m in members
+    )
 
 
 @dataclass(frozen=True, slots=True)
