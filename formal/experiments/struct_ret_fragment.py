@@ -127,10 +127,20 @@ def write_sources(out: Path, cases: list[tuple[str, str]]) -> None:
     new_h = [_decl(i, n) for i, (_o, n) in enumerate(cases)]
     old_c, new_c = ['#include "old.h"'], ['#include "new.h"']
     main = [
+        "#include <errno.h>",
         "#include <stdio.h>",
+        "#include <stdlib.h>",
         "#include <unistd.h>",
         "#include <sys/wait.h>",
         '#include "old.h"',
+        # A harness failure (fork/waitpid) is not an observation: exit 2.
+        "static int run_case(void (*c)(void)){ fflush(stdout); pid_t pid = fork();"
+        ' if (pid < 0) { perror("fork"); exit(2); }'
+        " if (pid == 0) { c(); fflush(stdout); _exit(0); }"
+        " int st = 0; pid_t w;"
+        " do { w = waitpid(pid, &st, 0); } while (w < 0 && errno == EINTR);"
+        ' if (w != pid) { perror("waitpid"); exit(2); }'
+        " return WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : 1; }",
         "int main(void){",
     ]
     callers: list[str] = []
@@ -150,14 +160,9 @@ def write_sources(out: Path, cases: list[tuple[str, str]]) -> None:
             f" struct R{i} r = f{i}();"
             f' printf("R {i} {" ".join(fmt)}\\n", {", ".join(vals)}); }}'
         )
-        main.append(
-            "{ fflush(stdout); pid_t pid = fork(); if (pid == 0) {"
-            f" c{i}(); fflush(stdout); _exit(0); }}"
-            " int st = 0; waitpid(pid, &st, 0);"
-            f' printf("A {i} %d\\n", WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : 1); }}'
-        )
+        main.append(f'printf("A {i} %d\\n", run_case(c{i}));')
     main.append("return 0;}")
-    main[4:4] = callers
+    main[-2 - len(cases) : -2 - len(cases)] = callers
     for name, text in (
         ("old.h", old_h),
         ("new.h", new_h),
@@ -203,7 +208,11 @@ def build_and_run(out: Path, cc: str) -> tuple[dict[int, bool], dict[int, list[s
         ],
         check=True,
     )
-    proc = _run([str(exe)])
+    proc = _run([str(exe.resolve())])
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"{exe.name} failed (exit {proc.returncode}): {proc.stderr.strip()}"
+        )
     got: dict[int, bool] = {}
     reads: dict[int, list[str]] = {}
     for ln in proc.stdout.splitlines():
@@ -212,6 +221,12 @@ def build_and_run(out: Path, cc: str) -> tuple[dict[int, bool], dict[int, list[s
             reads[int(parts[1])] = parts[2:]
         elif parts[0] == "A":
             got[int(parts[1])] = parts[2] == "0"
+    # Every case needs its status record: a missing one is a harness fault,
+    # not a "broken" observation. A child that crashed still reports one.
+    cases = (out / "main.c").read_text(encoding="utf-8").count(", run_case(c")
+    missing = sorted(set(range(cases)) - set(got))
+    if missing:
+        raise RuntimeError(f"{exe.name}: no status record for case(s) {missing[:10]}")
     return got, reads
 
 

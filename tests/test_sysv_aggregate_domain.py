@@ -100,6 +100,38 @@ def _classify(rec: RecordType, *others: RecordType) -> StructReturn | None:
         (_rec([_f("long", 64, _LONG)], 64, 64), "member past the end"),
         (_rec([_f("long", 0, _LONG)], 128, 64), "all-padding eightbyte"),
         (_rec([_f("long", 0, _LONG), _f("double", 64, _DOUBLE)], 128, 64), "mixed"),
+        (
+            _rec([_f("long", 0, _LONG)], 64, 64, bases_fact=Fact.partial(["B"])),
+            "partially known base class",
+        ),
+        (
+            _rec(
+                [_f("long", 0, _LONG)], 64, 64, virtual_bases_fact=Fact.partial(["V"])
+            ),
+            "partially known virtual base",
+        ),
+        (
+            _rec([_f("long", 0, _LONG)], 64, 64, vtable_fact=Fact.partial(["f"])),
+            "partially known vtable",
+        ),
+        (_rec([_f("_Bool", 0, _fact(FundamentalEncoding.BOOLEAN, 1))], 8, 8), "bool"),
+        (
+            _rec(
+                [
+                    _f("int", 0, _INT),
+                    _f("_Bool", 32, _fact(FundamentalEncoding.BOOLEAN, 1)),
+                ],
+                64,
+                32,
+            ),
+            "bool after int",
+        ),
+        (
+            _rec([_f("_Bool", 0, _fact(FundamentalEncoding.BOOLEAN, 1), bits=1)], 8, 8),
+            "bool bitfield",
+        ),
+        (_rec([_f("void *[10000000]", 0)], 640000000, 64), "huge pointer array"),
+        (_rec([_f("void *[257]", 0)], 257 * 64, 64), "over the member budget"),
     ],
 )
 def test_out_of_domain_records_are_not_classified(rec: RecordType, why: str) -> None:
@@ -136,6 +168,48 @@ def test_an_unsigned_and_a_char_member_are_integer_class() -> None:
     )
 
 
+def test_an_array_at_the_member_budget_is_classified() -> None:
+    got = _classify(_rec([_f("void *[256]", 0)], 256 * 64, 64))
+    assert got is not None and got.shape is RetShape.MEMORY
+    assert len(got.members or ()) == 256
+
+
+def test_many_scalar_fields_past_the_budget_are_not_classified() -> None:
+    fields = [_f("char", i * 8, _fact(_S, 1)) for i in range(257)]
+    assert _classify(_rec(fields, 257 * 8, 8)) is None
+    assert _classify(_rec(fields[:256], 256 * 8, 8)) is not None
+
+
+def _named_bit(name: str, offset: int, bits: int, fact: AbiFundamental) -> TypeField:
+    f = _f("unsigned int", offset, fact, bits=bits)
+    f.name = name
+    return f
+
+
+@pytest.mark.parametrize(
+    ("widths", "fact", "size", "align"),
+    [
+        ((3, 5), _fact(_U, 4), 32, 32),  # struct { unsigned a:3, b:5; }
+        ((1,), _fact(_U, 4), 32, 32),
+        ((7, 9, 16), _fact(_U, 4), 32, 32),
+        ((3, 5), _fact(_U, 8), 64, 64),  # unsigned long bitfields
+        ((4, 4), _fact(_U, 2), 16, 16),  # unsigned short bitfields
+    ],
+)
+def test_named_bitfields_align_the_record_to_their_type(
+    widths: tuple[int, ...], fact: AbiFundamental, size: int, align: int
+) -> None:
+    fields, at = [], 0
+    for i, w in enumerate(widths):
+        fields.append(_named_bit(f"b{i}", at, w, fact))
+        at += w
+    got = _classify(_rec(fields, size, align))
+    assert got is not None and got.shape is RetShape.INT1
+    assert [(m.offset, m.size) for m in got.members or ()] == [
+        (sum(widths[:i]), w) for i, w in enumerate(widths)
+    ]
+
+
 def _snapshot(*types: RecordType, typedefs: dict[str, str], lang: str) -> AbiSnapshot:
     snap = AbiSnapshot(
         library="libs.so", version="1", types=list(types), typedefs=typedefs
@@ -155,6 +229,9 @@ _POINT = _rec([_f("long", 0, _LONG), _f("long", 64, _LONG)], 128, 64, name="poin
         ("alias_t", {"alias_t": "point_t", "point_t": "point"}),
         ("point", {"point": ""}),  # castxml: typedef of an anonymous record
         ("point", {"point": "struct point"}),  # clang's self-named typedef
+        # A tag names the tag even when an ordinary typedef shares its name.
+        ("struct point", {"point": "struct other"}),
+        ("struct point", {"point": "int"}),
     ],
 )
 def test_struct_return_of_resolves_tags_and_typedef_chains(
@@ -172,9 +249,37 @@ def test_struct_return_of_resolves_tags_and_typedef_chains(
         (Function("f", "f", "struct point*"), "c"),
         (Function("f", "f", "struct missing"), "c"),
         (Function("f", "_Z1fv", "point"), "cpp"),  # C++, triviality not proved
+        (Function("f", "f", "struct other"), "c"),  # tag absent, no typedef hop
     ],
 )
 def test_struct_return_of_declines_non_record_and_unproved_returns(
     fn: Function, lang: str
 ) -> None:
     assert struct_return_of(fn, _snapshot(_POINT, typedefs={}, lang=lang)) is None
+
+
+@pytest.mark.parametrize(
+    ("producer", "classified"),
+    [
+        ("castxml", True),
+        ("clang", False),
+        ("gcc", False),
+        ("hybrid", False),
+        (None, False),
+    ],
+)
+def test_a_cxx_record_needs_the_castxml_trait(
+    producer: str | None, classified: bool
+) -> None:
+    """Only castxml's trait excludes all-deleted copy/move constructors."""
+    rec = _rec(
+        [_f("long", 0, _LONG), _f("long", 64, _LONG)],
+        128,
+        64,
+        name="point",
+        is_trivially_copyable=True,
+    )
+    snap = _snapshot(rec, typedefs={}, lang="cpp")
+    snap.ast_producer = producer
+    got = struct_return_of(Function("f", "_Z1fv", "point"), snap)
+    assert (got is not None and got.shape is RetShape.INT2) is classified

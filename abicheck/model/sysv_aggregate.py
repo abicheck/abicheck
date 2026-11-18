@@ -30,12 +30,18 @@ The SysV rules applied (psABI 3.2.3, "Returning of values"):
 * a C++ record that is not trivial for the purposes of calls is returned in
   memory (Itanium C++ ABI 3.1.1). The register rules are applied only when
   that is excluded: the header was parsed as C, or the extractor proved the
-  record trivially copyable (castxml additionally requires a non-deleted
-  copy constructor, which is the Itanium condition).
+  record trivial for calls. Only the castxml backend's trait proves that:
+  it additionally requires a non-deleted copy or move constructor, which is
+  the Itanium condition. The clang and gcc backends record plain
+  ``is_trivially_copyable``, which is also true of a record whose copy and
+  move constructors are all deleted (returned in memory), so a C++ record
+  from any other backend is not classified.
 
 Everything else is ``None`` (the comparison reads UNKNOWN): unions, a
 mixed INTEGER/SSE struct (``rax:xmm0``), ``float`` / ``long double`` /
-vector members, arrays whose element is a fundamental type (the element's
+vector members, ``_Bool`` members (their encoding is not carried in
+:class:`Member`, so ``_Bool`` and ``unsigned char`` would compare equal),
+records with more than :data:`MAX_MEMBERS` scalar members, arrays whose element is a fundamental type (the element's
 ABI fact is not stored), enum fields without an ABI fact, base classes, a
 vtable, packed or over-aligned records, misaligned members, and any field
 whose type cannot be resolved.
@@ -59,6 +65,10 @@ __all__ = ["StructReturn", "classify_record", "struct_return_of"]
 
 #: A 16-byte struct is the largest returned in registers.
 _MAX_REGISTER_BITS = 128
+
+#: The most flattened scalar members one record may expand to; past it the
+#: record is not classified (bounds work on ``void *p[10000000]``).
+MAX_MEMBERS = 256
 
 _ARRAY = re.compile(r"^(?P<elem>.+?)\s*\[(?P<n>\d+)\]$")
 _TAG = re.compile(r"^(?:struct|class)\s+")
@@ -88,7 +98,7 @@ def _fundamental(f: TypeField) -> tuple[int, int, ArgClass] | None:
     if fact is None or fact.status is not FactStatus.PRESENT or fact.value is None:
         return None
     v = fact.value
-    if v.lanes:
+    if v.lanes or v.encoding is FundamentalEncoding.BOOLEAN:
         return None
     if v.encoding is FundamentalEncoding.FLOAT:
         # Only double: float pairs share an eightbyte, long double is X87.
@@ -103,7 +113,11 @@ def _maybe_nonempty(fact: Fact[list[str]] | None) -> bool:
     is taken as empty: a C record has no bases or vtable, and a C++ record
     reaches here only when proved trivially copyable (no virtual member or
     base); a non-virtual base of such a record is recorded when present."""
-    return fact is not None and fact.status is FactStatus.PRESENT and bool(fact.value)
+    return (
+        fact is not None
+        and fact.status in (FactStatus.PRESENT, FactStatus.PARTIAL)
+        and bool(fact.value)
+    )
 
 
 def _flatten(
@@ -133,11 +147,13 @@ def _flatten(
         if got is None:
             return None
         members, align = got
-        if f.is_bitfield:
-            align = 8
-        elif f.offset_bits % align:
+        if f.is_bitfield and not f.name:
+            align = 8  # an unnamed bitfield does not align the record
+        elif not f.is_bitfield and f.offset_bits % align:
             return None  # misaligned member: packed
         out.extend(members)
+        if len(out) > MAX_MEMBERS:
+            return None
         natural = max(natural, align)
     if record.alignment_bits != natural or record.size_bits % natural:
         return None  # packed or explicitly over-aligned
@@ -171,6 +187,8 @@ def _typed(
         if elem is None or count == 0:
             return None
         members, align, stride = elem
+        if count * len(members) > MAX_MEMBERS:
+            return None
         return (
             [
                 Member(at + i * stride + x.offset, x.size, x.cls)
@@ -196,11 +214,19 @@ def _typed(
 
 
 def classify_record(
-    record: RecordType, resolve: Resolve, *, c_language: bool
+    record: RecordType,
+    resolve: Resolve,
+    *,
+    c_language: bool,
+    trivial_for_calls_proved: bool = False,
 ) -> StructReturn | None:
     """The SysV return classification of *record*, or ``None`` when it is
-    outside the modelled domain (see the module docstring)."""
-    if not c_language and record.is_trivially_copyable is not True:
+    outside the modelled domain (see the module docstring).
+    *trivial_for_calls_proved* says the record's ``is_trivially_copyable``
+    also excludes deleted copy/move constructors (the castxml trait)."""
+    if not c_language and (
+        not trivial_for_calls_proved or record.is_trivially_copyable is not True
+    ):
         return None
     flat = _flatten(record, 0, resolve, 0)
     if flat is None or record.size_bits is None:
@@ -235,15 +261,17 @@ def _resolver(snapshot: AbiSnapshot) -> Resolve:
     def resolve(spelling: str) -> RecordType | None:
         name = spelling.strip()
         for _ in range(8):
-            name = _TAG.sub("", name).strip()
+            if _TAG.match(name):
+                # An elaborated ``struct R`` names the tag R; an ordinary
+                # typedef also called R is another namespace (C 6.2.3).
+                return snapshot.type_by_name(_TAG.sub("", name).strip())
             target = typedefs.get(name)
             # castxml maps a typedef of an anonymous record to "", clang to
-            # "struct <typedef name>".
-            if not target or _TAG.sub("", target).strip() == name:
-                break
-            name = target
-        name = _TAG.sub("", name).strip()
-        return snapshot.type_by_name(name)
+            # "struct <typedef name>" (followed above as a tag).
+            if not target:
+                return snapshot.type_by_name(name)
+            name = target.strip()
+        return None
 
     return resolve
 
@@ -257,4 +285,9 @@ def struct_return_of(fn: Function, snapshot: AbiSnapshot) -> StructReturn | None
     record = resolve(fn.return_type)
     if record is None:
         return None
-    return classify_record(record, resolve, c_language=snapshot.language_profile == "c")
+    return classify_record(
+        record,
+        resolve,
+        c_language=snapshot.language_profile == "c",
+        trivial_for_calls_proved=snapshot.ast_producer == "castxml",
+    )

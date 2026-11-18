@@ -364,9 +364,17 @@ def _result_broken(old: CallSignature, new: CallSignature) -> str | None:
     if old_img is None or new_img is None:
         if old.ret.is_aggregate != new.ret.is_aggregate:
             return differ  # a scalar reader never gets a struct member
-        if _places(old.ret) & _places(new.ret):
-            return None
-        return differ
+        if not _places(old.ret) <= _places(new.ret):
+            return differ  # the old caller reads a register the new one never sets
+        if (
+            old.ret is RetShape.MEMORY
+            and new.ret is RetShape.MEMORY
+            and old.ret_size is not None
+            and new.ret_size is not None
+            and new.ret_size > old.ret_size
+        ):
+            return _grew(old.ret_size, new.ret_size)
+        return None
     lost = old_img - new_img
     if lost:
         tag, reg, off, size, cls = min(lost, key=lambda p: (p[1], p[2]))
@@ -381,11 +389,15 @@ def _result_broken(old: CallSignature, new: CallSignature) -> str | None:
     ):
         if old.ret_size is None or new.ret_size is None:
             return None
-        return (
-            f"struct return in memory grew from {old.ret_size // 8} to "
-            f"{new.ret_size // 8} bytes: the new function writes past the old caller's buffer"
-        )
+        return _grew(old.ret_size, new.ret_size)
     return ""
+
+
+def _grew(old_size: int, new_size: int) -> str:
+    return (
+        f"struct return in memory grew from {old_size // 8} to "
+        f"{new_size // 8} bytes: the new function writes past the old caller's buffer"
+    )
 
 
 def _places(shape: RetShape) -> frozenset[str]:

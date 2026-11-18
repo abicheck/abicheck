@@ -24,6 +24,7 @@ that experiment confirms by execution.
 from __future__ import annotations
 
 import importlib.util
+import platform
 import shutil
 import subprocess
 import sys
@@ -38,7 +39,10 @@ from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(sys.platform != "linux", reason="x86-64 SysV only"),
+    pytest.mark.skipif(
+        sys.platform != "linux" or platform.machine() not in ("x86_64", "AMD64"),
+        reason="x86-64 SysV only",
+    ),
 ]
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -131,7 +135,14 @@ struct plain { long a, b; };
 struct owning { long a, b; ~owning(); };
 struct base { long a; };
 struct derived : base { long b; };
+struct nocopy {
+    long a, b;
+    nocopy(long x, long y) : a(x), b(y) {}
+    nocopy(const nocopy &) = delete;
+    nocopy(nocopy &&) = delete;
+};
 extern "C" plain g_plain();
+extern "C" nocopy g_nocopy();
 extern "C" owning g_owning();
 extern "C" derived g_derived();
 """
@@ -140,6 +151,7 @@ _CXX_SOURCE = (
     'extern "C" plain g_plain() { return plain{1, 2}; }\n'
     'extern "C" owning g_owning() { return owning{1, 2}; }\n'
     'extern "C" derived g_derived() { return derived{}; }\n'
+    'extern "C" nocopy g_nocopy() { return nocopy(1, 2); }\n'
 )
 
 
@@ -147,13 +159,19 @@ _CXX_SOURCE = (
 def test_a_non_trivial_cxx_record_is_never_given_a_register_shape(
     tmp_path: Path, frontend: str
 ) -> None:
-    """``owning`` is returned in memory (Itanium 3.1.1); the header facts do
-    not prove that, so it stays unclassified rather than reading INT2."""
+    """``owning`` and ``nocopy`` are returned in memory (Itanium 3.1.1); the
+    header facts do not prove that, so they stay unclassified rather than
+    reading INT2. clang's trait cannot tell ``nocopy`` from ``plain``, so a
+    clang C++ dump classifies neither."""
     _require("g++", frontend)
     snap = _dump(tmp_path, _CXX_HEADER, _CXX_SOURCE, "c++", frontend)
     fns = {f.name: f for f in snap.declarations.functions}  # type: ignore[attr-defined]
     plain = struct_return_of(fns["g_plain"], snap)  # type: ignore[arg-type]
-    assert plain is not None and plain.shape is RetShape.INT2
+    if frontend == "castxml":
+        assert plain is not None and plain.shape is RetShape.INT2
+    else:
+        assert plain is None
+    assert struct_return_of(fns["g_nocopy"], snap) is None  # type: ignore[arg-type]
     assert struct_return_of(fns["g_owning"], snap) is None  # type: ignore[arg-type]
     # A base class is outside the modelled layout.
     assert struct_return_of(fns["g_derived"], snap) is None  # type: ignore[arg-type]

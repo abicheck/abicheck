@@ -38,9 +38,13 @@ confirmed by execution on gcc and clang:
   register of its class. :func:`ret_image` places each struct member (from
   :mod:`abicheck.model.sysv_aggregate`) in its register bits, which is what
   lets two struct returns of the same class be compared member by member.
-  That extension is proved in Lean for any member list
-  (``formal/lean/AbiLean/StructRetFragment.lean``) and checked by execution
-  on gcc and clang over 1190 cases (``formal/experiments/struct_ret_fragment.py``).
+  In Lean (``formal/lean/AbiLean/StructRetFragment.lean``), over its model
+  of structs of ``int``/``long``/``double`` members, the comparison
+  predicate is proved equivalent to the member-read oracle for every
+  nonempty old member list; this Python code is checked against that model
+  on the exported fragment and against execution on gcc and clang
+  (``formal/experiments/struct_ret_fragment.py``). Neither is a proof of
+  this implementation.
 
 Only the representations the fragments covered are modelled. A slot outside
 them has no :class:`Rep`, and the comparison then says it cannot judge.

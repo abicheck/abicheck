@@ -20,6 +20,9 @@ The oracle for the pair verdicts is execution, not this module's helpers:
 member-layout changes of ``formal/experiments/struct_ret_fragment.py`` an old
 caller survived when run against the new library built by gcc and by clang.
 The classification is checked against that script's own psABI classifier.
+The Lean model's equivalence proof (``StructRetFragment.lean``) covers the
+model's predicates, not this implementation; these tests check the
+implementation against execution.
 """
 
 from __future__ import annotations
@@ -98,11 +101,14 @@ def _from_seq(seq: str) -> RecordType:
 
 
 def _classify(
-    rec: RecordType, *others: RecordType, c: bool = True
+    rec: RecordType, *others: RecordType, c: bool = True, proved: bool = True
 ) -> StructReturn | None:
     by_name = {r.name: r for r in (rec, *others)}
     return classify_record(
-        rec, lambda s: by_name.get(s.removeprefix("struct ")), c_language=c
+        rec,
+        lambda s: by_name.get(s.removeprefix("struct ")),
+        c_language=c,
+        trivial_for_calls_proved=proved,
     )
 
 
@@ -152,12 +158,49 @@ def test_a_memory_result_that_grows_overflows_the_old_buffer() -> None:
     assert axis.status is AxisStatus.BROKEN and "24 to 32 bytes" in axis.reason
 
 
-def test_unknown_members_of_overlapping_shapes_stay_unknown() -> None:
-    old = CallSignature((), RetShape.INT1, False)
-    new = CallSignature((), RetShape.INT2, False)
-    assert assess_call_interface(old, new, SYSV_AMD64).status is AxisStatus.UNKNOWN
-    sse = CallSignature((), RetShape.SSE2, False)
-    assert assess_call_interface(old, sse, SYSV_AMD64).status is AxisStatus.BROKEN
+@pytest.mark.parametrize(
+    ("old_shape", "new_shape", "want"),
+    [
+        # The new result covers every register the old caller reads.
+        (RetShape.INT1, RetShape.INT2, AxisStatus.UNKNOWN),
+        (RetShape.SSE1, RetShape.SSE2, AxisStatus.UNKNOWN),
+        (RetShape.INT2, RetShape.INT2, AxisStatus.UNKNOWN),
+        (RetShape.MEMORY, RetShape.MEMORY, AxisStatus.UNKNOWN),
+        # The old caller reads rdx / xmm1, which the new function never sets.
+        (RetShape.INT2, RetShape.INT1, AxisStatus.BROKEN),
+        (RetShape.SSE2, RetShape.SSE1, AxisStatus.BROKEN),
+        (RetShape.INT1, RetShape.SSE2, AxisStatus.BROKEN),
+        (RetShape.INT2, RetShape.MEMORY, AxisStatus.BROKEN),
+        (RetShape.MEMORY, RetShape.INT1, AxisStatus.BROKEN),
+    ],
+)
+def test_shape_only_struct_returns(
+    old_shape: RetShape, new_shape: RetShape, want: AxisStatus
+) -> None:
+    old = CallSignature((), old_shape, False)
+    new = CallSignature((), new_shape, False)
+    assert assess_call_interface(old, new, SYSV_AMD64).status is want
+
+
+@pytest.mark.parametrize(
+    ("old_size", "new_size", "want"),
+    [
+        (192, 256, AxisStatus.BROKEN),
+        (192, 1024, AxisStatus.BROKEN),
+        (256, 256, AxisStatus.UNKNOWN),
+        (256, 192, AxisStatus.UNKNOWN),
+        (None, 256, AxisStatus.UNKNOWN),
+    ],
+)
+def test_memory_growth_breaks_without_member_layouts(
+    old_size: int | None, new_size: int | None, want: AxisStatus
+) -> None:
+    old = CallSignature((), RetShape.MEMORY, False, ret_size=old_size)
+    new = CallSignature((), RetShape.MEMORY, False, ret_size=new_size)
+    axis = assess_call_interface(old, new, SYSV_AMD64)
+    assert axis.status is want
+    if want is AxisStatus.BROKEN:
+        assert "grew" in axis.reason
 
 
 def test_a_scalar_never_matches_a_struct_member() -> None:
@@ -213,11 +256,21 @@ def test_outside_the_domain_is_none(
 
 
 @pytest.mark.parametrize(
-    ("trivial", "classified"), [(True, True), (False, False), (None, False)]
+    ("trivial", "proved", "classified"),
+    [
+        (True, True, True),
+        # clang/gcc's trait is also true with every copy/move ctor deleted
+        # (returned in memory under Itanium), so it does not prove triviality.
+        (True, False, False),
+        (False, True, False),
+        (False, False, False),
+        (None, True, False),
+        (None, False, False),
+    ],
 )
 def test_cxx_records_need_proved_triviality(
-    trivial: bool | None, classified: bool
+    trivial: bool | None, proved: bool, classified: bool
 ) -> None:
     rec = _record("r", [_field("a", "long", 0)], 64, 64, is_trivially_copyable=trivial)
-    assert (_classify(rec, c=False) is not None) is classified
-    assert _classify(rec, c=True) is not None
+    assert (_classify(rec, c=False, proved=proved) is not None) is classified
+    assert _classify(rec, c=True, proved=proved) is not None

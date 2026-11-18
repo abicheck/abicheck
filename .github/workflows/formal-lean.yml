@@ -37,6 +37,7 @@ on:
       - 'tests/test_formal_enum_fragment.py'
       - 'tests/test_formal_func_fragment.py'
       - 'tests/test_formal_ret_fragment.py'
+      - 'tests/test_formal_struct_ret_fragment.py'
       - '.github/workflows/formal-lean.yml'
   push:
     branches: [main]
@@ -54,6 +55,7 @@ on:
       - 'tests/test_formal_enum_fragment.py'
       - 'tests/test_formal_func_fragment.py'
       - 'tests/test_formal_ret_fragment.py'
+      - 'tests/test_formal_struct_ret_fragment.py'
       - '.github/workflows/formal-lean.yml'
   workflow_dispatch:
 
