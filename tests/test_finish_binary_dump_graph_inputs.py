@@ -25,6 +25,7 @@ import pytest
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.workflows import snapshot_factory
 from abicheck.workflows.dump import default_header_graph
+from abicheck.workflows.dump.default_header_graph import graph_public_scope
 
 
 @pytest.fixture
@@ -71,3 +72,17 @@ def test_enabled_graph_inputs_attach_one_graph(
     _finish(([Path("api.h")], [], "c++", False))
     assert len(attach_calls) == 1
     assert attach_calls[0]["graph"] is True
+
+
+def test_empty_public_lists_fall_back_to_the_header_operands() -> None:
+    # An empty explicit list is no boundary: the -H operands define it.
+    headers = [Path("include/api.h")]
+    assert graph_public_scope(headers, None, None) == (headers, [])
+    assert graph_public_scope(headers, [], []) == (headers, [])
+
+
+def test_explicit_public_dirs_define_the_boundary() -> None:
+    headers = [Path("include/api.h")]
+    files, dirs = graph_public_scope(headers, None, [Path("include")])
+    assert files == []
+    assert dirs == [Path("include")]

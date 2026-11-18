@@ -17,6 +17,7 @@ from _field_shapes import shape_sources
 
 from abicheck.checker import compare
 from abicheck.dumper import dump
+from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import load_snapshot
 from tests._abicheck_subprocess import abicheck_command
 from tests._elf_capability import elf_capability, skip_reason
@@ -65,7 +66,9 @@ def _build_pair(tmp_path: Path, prefix: list[str]) -> dict[str, tuple[Path, Path
     return pairs
 
 
-def _cli_snapshots(tmp_path: Path, pairs: dict[str, tuple[Path, Path]]):
+def _cli_snapshots(
+    tmp_path: Path, pairs: dict[str, tuple[Path, Path]]
+) -> dict[str, AbiSnapshot]:
     """The CLI's own dump of each side, loaded back as snapshots.
 
     Comparing these with ``checker.compare`` isolates the dump routes: the CLI
@@ -150,4 +153,4 @@ def test_typed_and_cli_agree_on_a_plain_removal_without_the_graph(
     cli = {c.kind.value for c in compare(cli_snaps["old"], cli_snaps["new"]).changes}
     assert "func_removed" in typed, typed
     assert "func_removed" in cli, cli
-    assert typed - KNOWN_ROUTE_DIFFERENCE == cli - KNOWN_ROUTE_DIFFERENCE, (typed, cli)
+    assert typed == cli, (typed, cli)

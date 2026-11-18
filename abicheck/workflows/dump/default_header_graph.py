@@ -70,9 +70,9 @@ def graph_public_scope(
     public directories (contained headers are public) and file operands are
     public files, as the CLI routes them.
     """
-    if public_headers or public_header_dirs is not None:
+    if public_headers or public_header_dirs:
         files = list(public_headers or [])
-        dirs = list(public_header_dirs) if public_header_dirs is not None else None
+        dirs = list(public_header_dirs) if public_header_dirs else None
         return files, dirs
     return (
         [h for h in headers if not h.is_dir()],
