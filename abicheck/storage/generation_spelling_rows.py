@@ -754,4 +754,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "call axis keeps a function that is not provably C linkage UNKNOWN; no rewrite "
         "applies."
     ),
+    86: GenerationSpellingChange(
+        "Typed dump(): no stored type or name spelling changes. The typed API now attaches "
+        "the same default header-only graph the CLI attaches, through one owner "
+        "(workflows/dump/default_header_graph.py), so a typed snapshot records header-graph "
+        "facts it did not record before. The CLI output is unchanged. An older typed snapshot "
+        "carries no such graph and reads as not collected; no rewrite applies."
+    ),
 }

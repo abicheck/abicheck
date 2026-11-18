@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "e9c50c27dd6055c65f7483e1f606ae3b632500a79fd626687296c80ee37a51ec",
+      "abicheck/dumper.py": "256a6f0c64890268207596cefe89a66ccefab13f5cae1a611f964aab094807bf",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
       "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
@@ -243,12 +243,12 @@
       "abicheck/workflows/dump/elf_fallback.py": "31947cad933371a0d3863476ad34e1f9e3e60f8474b2eddbe161fdc1182eb2fa",
       "abicheck/workflows/dump/formats.py": "634c897b872e20c7c1579a9f569700a32c1b99b204569e8bb198a4174587b6d2",
       "abicheck/workflows/dump/macho.py": "ee301926fd430c4eed3128e75b07fc494805ff76d0b2acbcd83fa7a8fc9f424e",
-      "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
+      "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "d2c437c833f4ed2b147b7585164c822a7c2457418deb61126cb573d3c64e92a0",
-    "generation": 85,
-    "reason": "member_kind.py was added in generation 85 (#2135) but the fingerprint was recorded before its final edit; the generation-85 bump already covers it"
+    "fingerprint": "940ab468729b88d7ae1f76dcbc86bb50b87539c7c9ddc4fb35bcf1aff68c3051",
+    "generation": 86,
+    "reason": "86: typed dump() now attaches the default header-only graph the CLI already records, through one owner (workflows/dump/default_header_graph.py). This is a semantic change for typed snapshots; the CLI output is unchanged. Spelling row 86 is audited; the generation-85 corpus is frozen from origin/main."
   },
   "resolver": {
     "files": {
