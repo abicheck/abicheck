@@ -371,6 +371,7 @@ def build_markdown_document(
             result, severity_config, shared_document
         ),
         "pattern_modulations": list(getattr(result, "pattern_modulations", ()) or ()),
+        "call_axis_shadow": list(result.call_axis_shadow or ()),  # ADR-094 D9
         # Workstream G S1's "what changed / review actions" section: same
         # already-resolved findings the severity groups above use, projected
         # as additions/removals/modifications so a compatible run still

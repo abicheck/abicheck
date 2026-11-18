@@ -15,17 +15,9 @@
 #     - key: abicheck.module#Class.method
 #       reason: documented extension hook, called by third-party plugins
 test_only_functions:
-  - key: abicheck.compare.call_interface#call_signature_of
-    reason: "ADR-094 D8's call-axis evaluator, checked against the E13/E14 fragments; its first production caller is ADR-094 D9's shadow comparison (next slice), which makes this entry stale"
-  - key: abicheck.compare.call_interface#linkage_evidence_reliable
-    reason: "ADR-094 D8: decides from a snapshot's producer and extractor generation whether its is_extern_c flags exclude members; its caller is ADR-094 D9's shadow comparison (next slice), which makes this entry stale"
   - key: abicheck.frontends.cli.registry#LazyGroup.get_command
     reason: "Click Group extension hook: Click dispatch and completion call this override through the third-party base-class interface; the static caller scan cannot resolve that dynamic dispatch"
 test_only_modules:
-  - key: abicheck.compare.call_interface
-    reason: "ADR-094 D8's call-axis evaluator; first production caller is ADR-094 D9's shadow comparison (next slice), which makes this entry stale"
-  - key: abicheck.model.call_interface
-    reason: "ADR-094 D8's SysV register model, used by abicheck.compare.call_interface; production use arrives with ADR-094 D9's shadow comparison"
   - key: abicheck.workflows.consumer_scope_standalone
     reason: "public Python API: check_appcompat/check_plugin_host_contract (docs/use/appcompat.md, docs/use/plugin-systems.md) for library users; the CLI uses the pre-computed-diff path instead"
   - key: abicheck.workflows.package_gc

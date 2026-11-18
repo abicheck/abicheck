@@ -284,6 +284,7 @@
           "is_virtual",
           "is_volatile",
           "mangled",
+          "member_kind_fact",
           "name",
           "origin",
           "ownership_fact",
@@ -353,7 +354,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 2
+      "section_schema_version": 3
     },
     "graph": {
       "fields": {

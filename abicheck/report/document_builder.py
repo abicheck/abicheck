@@ -110,6 +110,7 @@ def build_report_document(
     (Codex review, fresh evidence).
     """
     from ..policy.gate_decision import gate_decision_for_result
+    from .call_axis_section import add_call_axis_shadow
     from .change_json import prewarm_change_demangling
     from .contract_blocks import (
         add_contract_context as _add_contract_context,
@@ -241,6 +242,7 @@ def build_report_document(
     ).to_dict()
     _add_finding_evolution(d, result)
     _add_pattern_preprocessor_scan(d, result)
+    add_call_axis_shadow(d, result)
     add_surface_scope(d, result)
     add_reconciled(d, result)
     _add_contract_context(
