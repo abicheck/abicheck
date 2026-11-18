@@ -88,7 +88,7 @@ _OBS_DH = observable(
 #: deletion while the binary pair shows the removal.
 _OBS_D_DELETED = observable(
     ("B", "D"),
-    rationale="deleted member: the DWARF DIE carries DW_AT_deleted, which the export table cannot show; without debug info the removal is reported as func_removed",
+    rationale="deleted member: the DWARF DIE carries DW_AT_deleted, which the export table cannot show; without debug info the binary pair reports it as func_removed_elf_only",
 )
 _OBS_L5 = observable(("B", "H", "BD", "S", "G"), rationale="needs the source graph (G)")
 
