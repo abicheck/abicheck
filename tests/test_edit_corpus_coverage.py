@@ -37,7 +37,7 @@ from abiforge.model.opkit import SONAME_ADVISORY
 from abiforge.model.seeds import SEED_BY_NAME, SEEDS
 from abiforge.operators import OP_BY_NAME, OPERATORS
 from abiforge.run.cells import seed_conflict
-from abiforge.run.tiers import _PR
+from abiforge.run.tiers import _PR, evidence_fields
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 CLANG = Toolchain("clang", 18, "clang", "clang++")
@@ -329,6 +329,8 @@ def _pr_tier_declared() -> set[str]:
             elif key == "consumer":
                 other = CLANG if value == "clang" else GCC
                 cfg = cfg.with_(consumers=(Consumer(toolchain=other),))
+            elif key == "evidence":
+                cfg = cfg.with_(**evidence_fields(value))
             else:
                 cfg = cfg.with_(**{key: value})
         out |= cov.expectation_kinds(OP_BY_NAME[op_name].expect(cfg))
@@ -923,6 +925,8 @@ def test_every_pr_tier_cell_runs_a_feasible_point() -> None:
                 cfg = cfg.with_(std=STANDARD_BY_NAME[str(value)])
             elif key == "consumer":
                 cfg = cfg.with_(consumers=(Consumer(toolchain=CLANG),))
+            elif key == "evidence":
+                cfg = cfg.with_(**evidence_fields(value))
             else:
                 cfg = cfg.with_(**{key: value})
         for p in space.cell_points(OP_BY_NAME[op_name], cfg, _all_ran(cfg)):
