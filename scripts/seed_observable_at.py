@@ -468,11 +468,8 @@ def _constants_block(codes: set[str]) -> list[str]:
         ]
         if rationale:
             parts.append(f'rationale="{rationale}"')
-        pl = ", ".join(f"Platform.{v.upper()}" for v in platforms)
-        ar = ", ".join(f"Arch.{v.upper()}" for v in FORM_ARCHES.get(code, ()))
-        cond = [
-            f"{k}=frozenset({{{v}}})" for k, v in (("platform", pl), ("arch", ar)) if v
-        ]
+        axes = (("platform", ", ".join(f"Platform.{x.upper()}" for x in platforms)), ("arch", ", ".join(f"Arch.{x.upper()}" for x in FORM_ARCHES.get(code, ()))))
+        cond = [f"{k}=frozenset({{{v}}})" for k, v in axes if v]
         if cond:
             parts.append(f"condition=ObservabilityCondition({', '.join(cond)})")
         block.append(f"{const} = observable({', '.join(parts)})")
@@ -627,8 +624,7 @@ def _split_owner(
     used = {"observable"}
     if any(FORMS[c][2] for c in codes):
         used |= {"ObservabilityCondition", "Platform"}
-    if any(FORM_ARCHES.get(c) for c in codes):
-        used.add("Arch")
+    used |= {"Arch"} if any(FORM_ARCHES.get(c) for c in codes) else set()
     if any(FORM_LANGUAGES.get(c) for c in codes):
         used |= {"Language", "ObservabilityCondition"}
     header = _header_for_sibling(lines, head, family, path.stem, number)
@@ -712,8 +708,7 @@ def apply_decisions(dry_run: bool) -> dict[str, int]:
         used = {"observable"}
         if any(FORMS[c][2] for d in decs for c in d.codes):
             used |= {"ObservabilityCondition", "Platform"}
-        if any(FORM_ARCHES.get(c) for d in decs for c in d.codes):
-            used.add("Arch")
+        used |= {"Arch"} if any(FORM_ARCHES.get(c) for d in decs for c in d.codes) else set()
         lines.insert(imp, f"from .observability import {', '.join(sorted(used))}\n")
         text = _ruff_format(path, "".join(lines))
         if text.count("\n") <= PRODUCTION_LINE_CAP:
