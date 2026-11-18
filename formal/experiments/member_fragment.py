@@ -373,11 +373,13 @@ def main(argv: list[str] | None = None) -> int:
     summary = {k: v for k, v in res.items() if k != "observed"}
     (a.out / "summary.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps(summary, indent=1))
-    if a.write_observed:
-        OBSERVED.write_text(json.dumps(observed_rows(cases, res), indent=0) + "\n")
     failed = res["compiler_disagree"] or any(
         c["lean_disagree"] for c in res["compilers"].values()
     )
+    # Only a run on which every compiler agreed may become the committed
+    # observation: the file keeps one result per row.
+    if a.write_observed and not failed:
+        OBSERVED.write_text(json.dumps(observed_rows(cases, res), indent=0) + "\n")
     return 1 if failed else 0
 
 
