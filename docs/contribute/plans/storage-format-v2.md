@@ -1340,7 +1340,7 @@ bytes/objects actually loaded.
 
 | Module | Contract |
 |---|---|
-| `abicheck/storage/dto_declarations_migration.py` | `declarations_v1_to_v2` — the declarations section v1 -> v2 step (generation 82, G7) |
+| `abicheck/storage/dto_declarations_migration.py` | `DECLARATIONS_MIGRATIONS`, `declarations_v1_to_v2`, `declarations_v2_to_v3` — the declarations section v1 -> v2 step (generation 82, G7) and v2 -> v3 step (generation 85, `Function.member_kind_fact`) |
 | `abicheck/storage/availability_ledger.py` | `FactStatus`, `Confidence`, `FactAvailability`, `AvailabilityLedger` (A0.1) |
 | `abicheck/storage/fact_availability.py` | `FactAvailability` — internal record leaf, re-exported by `availability.py` |
 | `abicheck/storage/availability_status.py` | `FactStatus`, `Confidence`, `COMPARABLE_STATUSES`, `GAP_STATUSES`, `ASSERTS_NO_PRODUCER`, `STATUS_ORDER`, `CONFIDENCE_ORDER`, `worse_status`, `worse_confidence` — internal vocabulary leaf, re-exported by `availability.py` only for `FactStatus`/`Confidence` |
