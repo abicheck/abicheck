@@ -79,6 +79,9 @@ FAMILIES: dict[str, Family] = {
             ),
             harness_tests=(
                 "tests/test_family_f2_route_parity.py",
+                # Typed dump() and the CLI dump attach the same header graph, so
+                # graph-derived kinds agree across the two routes.
+                "tests/test_typed_cli_header_graph_parity.py",
                 "tests/test_no_shared_mutation.py",
                 "tests/test_family_f2_live_route_matrix.py",
                 "tests/test_family_f2_release_member_parity.py",

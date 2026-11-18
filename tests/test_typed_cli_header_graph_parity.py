@@ -102,3 +102,68 @@ def test_typed_api_and_cli_agree_on_header_graph_findings(tmp_path: Path) -> Non
     assert typed == cli, (typed, cli)
     assert "var_visibility_changed" in typed, typed
     assert "var_removed" not in typed, typed
+
+
+@pytest.mark.integration
+def test_typed_and_cli_agree_on_a_plain_removal_without_the_graph(
+    tmp_path: Path,
+) -> None:
+    # Negative control: a plain removed function involves no vanished
+    # specialization, so both routes must report the same kinds.
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    headers = {
+        "old": 'extern "C" int keep(int);\nextern "C" int gone(int);\n',
+        "new": 'extern "C" int keep(int);\n',
+    }
+    pairs: dict[str, tuple[Path, Path]] = {}
+    for name, header in headers.items():
+        src = tmp_path / name
+        src.mkdir()
+        (src / "api.h").write_text(header)
+        cpp = src / f"{name}.cpp"
+        cpp.write_text(
+            '#include "api.h"\nint keep(int x) { return x; }\n'
+            + ("int gone(int x) { return x; }\n" if name == "old" else "")
+        )
+        so = tmp_path / f"{name}.so"
+        subprocess.run(
+            [
+                *prefix,
+                "-g",
+                "-O0",
+                "-fPIC",
+                "-shared",
+                f"-I{src}",
+                str(cpp),
+                "-o",
+                str(so),
+            ],
+            check=True,
+        )
+        pairs[name] = (so, src / "api.h")
+    (old_so, old_h), (new_so, new_h) = pairs["old"], pairs["new"]
+    typed = {
+        c.kind.value
+        for c in compare(dump(old_so, [old_h]), dump(new_so, [new_h])).changes
+    }
+    cli_out = {}
+    for name, (so, header) in pairs.items():
+        out = tmp_path / f"cli-{name}.json"
+        subprocess.run(
+            abicheck_command("dump", str(so), "-H", str(header), "-o", str(out)),
+            check=True,
+            capture_output=True,
+        )
+        cli_out[name] = out
+    cli_text = subprocess.run(
+        abicheck_command("compare", str(cli_out["old"]), str(cli_out["new"])),
+        capture_output=True,
+        text=True,
+    ).stdout
+    cli = {kind for kind in typed | GRAPH_KINDS if kind in cli_text}
+    assert "func_removed" in typed or "func_removed" in cli_text, typed
+    assert {k for k in typed if k in GRAPH_KINDS} == {
+        k for k in cli if k in GRAPH_KINDS
+    }
