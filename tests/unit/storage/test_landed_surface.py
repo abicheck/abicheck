@@ -67,7 +67,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.dto_declarations_migration",
     "abicheck.storage.fact_payload_validation",
     "abicheck.storage.fact_decode",
-    "abicheck.storage.fact_return_by_value",
+    "abicheck.storage.fact_codec_function",
     "abicheck.storage.guards",
     "abicheck.storage.availability_status",
     "abicheck.storage.entity_ids",

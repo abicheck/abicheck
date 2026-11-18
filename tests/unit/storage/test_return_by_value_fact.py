@@ -15,7 +15,11 @@ import pytest
 from abicheck.extract.headers.castxml.return_by_value import (
     castxml_return_by_value_fact,
 )
-from abicheck.storage.fact_return_by_value import decode_return_by_value
+from abicheck.storage.fact_codec_function import decode_function_facts
+
+
+def decode_return_by_value(fn: dict[str, Any], schema_version: int) -> Any:
+    return decode_function_facts(fn, schema_version)["return_by_value_fact"]
 
 
 class _Ctx:
