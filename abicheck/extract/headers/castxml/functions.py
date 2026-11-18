@@ -42,6 +42,7 @@ from ....model.cc_attributes import is_cc_attribute
 from ....model.export_index import ExportMatch
 from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
+from ..member_kind import castxml_member_kind
 from .abi_fundamental import castxml_type_abi_fact
 from .calling_convention import source_calling_conventions
 from .clang_semantics_join import function_decl_key, special_member_key
@@ -664,6 +665,7 @@ def parse_function_element(
         vtable_index=vtable_index,
         source_location=source_loc,
         is_static=el.get("static") == "1",
+        member_kind_fact=castxml_member_kind(el.tag, el.get("static") == "1"),
         is_const=is_const,
         is_volatile=is_volatile,
         is_pure_virtual=el.get("pure_virtual") == "1",

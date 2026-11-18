@@ -34,6 +34,7 @@ from ..model import (
     ExplicitInstantiation,
     Fact,
     FactStatus,
+    MemberKind,
     ParamKind,
     SymbolBinding,
 )
@@ -71,6 +72,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_INLINE_FACT,
     _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
     _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_MEMBER_KIND_FACT,
     _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
     _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
@@ -177,6 +179,7 @@ _FUNCTION_FACT_KEYS = (
     "contract_attributes_fact",
     "template_param_defaults_fact",
     "explicit_instantiation_fact",
+    "member_kind_fact",
     "is_explicit_fact",
     "is_hidden_friend_fact",
     "source_header_fact",
@@ -504,12 +507,11 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
                     min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
                 )
             ),
-            "explicit_instantiation_fact": _explicit_instantiation_value(
-                decode_fact(
-                    v.get("explicit_instantiation_fact"),
-                    schema_version,
-                    _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
-                )
+            "explicit_instantiation_fact": decode_fact(
+                v.get("explicit_instantiation_fact"),
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
+                value_decoder=ExplicitInstantiation,
             ),
         },
     )
@@ -630,26 +632,20 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                     _MIN_SCHEMA_VERSION_FOR_FUNCTION_TEMPLATE_PARAM_DEFAULTS,
                 )
             ),
-            "explicit_instantiation_fact": _explicit_instantiation_value(
-                decode_fact(
-                    f.get("explicit_instantiation_fact"),
-                    schema_version,
-                    _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
-                )
+            "explicit_instantiation_fact": decode_fact(
+                f.get("explicit_instantiation_fact"),
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
+                value_decoder=ExplicitInstantiation,
+            ),
+            "member_kind_fact": decode_fact(
+                f.get("member_kind_fact"),
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_MEMBER_KIND_FACT,
+                value_decoder=MemberKind,
             ),
         },
     )
-
-
-def _explicit_instantiation_value(
-    fact: Fact[Any] | None,
-) -> Fact[ExplicitInstantiation] | None:
-    """Rebuild ``Function``/``Variable.explicit_instantiation_fact``'s value as
-    an :class:`ExplicitInstantiation` member (JSON carries the string). A missing
-    key reads as ``None`` before v65 and ``NOT_COLLECTED`` from it on."""
-    if fact is not None and fact.value is not None:
-        return replace(fact, value=ExplicitInstantiation(fact.value))
-    return fact
 
 
 def decode_snapshot_facts(d: dict[str, Any], schema_version: int) -> dict[str, Any]:

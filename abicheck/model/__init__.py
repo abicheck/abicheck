@@ -76,6 +76,7 @@ from .fact_registry import (
     FactDefinition as FactDefinition,
     FactLifecycle as FactLifecycle,
 )
+from .member_kind import MemberKind as MemberKind
 from .snapshot import AbiSnapshot as AbiSnapshot
 from .stdlib_surface import stdlib_namespaces_excluded as stdlib_namespaces_excluded
 from .surface_facts import (
@@ -158,6 +159,7 @@ __all__ = [
     "EnumMember",
     "EnumType",
     "ExplicitInstantiation",
+    "MemberKind",
     "ExtractionContract",
     "FACT_REGISTRY",
     "Fact",
