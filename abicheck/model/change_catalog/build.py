@@ -628,6 +628,9 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         entity=_ENT.BUILD,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        # Declared ELF only. The Mach-O branch (_macho_arch_mismatch) is real, but
+        # no Mach-O producer exists on Linux CI, so no oracle confirms it yet;
+        # docs/contribute/plans/abicheck-abiforge-completeness.md 11.2 keeps the row.
         observable_at=(_OBS_B_ELF_SCOPE,),
     ),
 ]
