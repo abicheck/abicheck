@@ -48,8 +48,8 @@ from .disposition_ledger import (
     DispositionLedger,
     _GateContext,
     _kept_disposition,
-    record_suppressed_change,
 )
+from .disposition_suppression import record_suppressed_change
 from .disposition_transitions import exclude_consumer_only
 from .disposition_types import CONSUMER_ONLY_APPLICATION_POINTS
 

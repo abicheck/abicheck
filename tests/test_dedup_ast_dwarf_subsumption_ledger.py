@@ -18,7 +18,7 @@ from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind as K
 from abicheck.policy.disposition_ledger import DispositionLedger
-from abicheck.policy.disposition_types import Disposition
+from abicheck.policy.disposition_types import Disposition, RelatedFinding
 from abicheck.policy.finding_disposition.dedup_ast_dwarf_step import (
     DeduplicateAstDwarf,
 )
@@ -100,3 +100,63 @@ def test_record_count_equals_drop_count_over_a_mixed_input() -> None:
     # The unpaired DWARF finding is kept and recorded by no subsumption.
     unpaired = [r for r in ledger.records if r.symbol == "Unpaired"]
     assert all(r.reason_code is None for r in unpaired)
+
+
+@pytest.mark.parametrize(
+    ("dropped", "retained", "related"),
+    [
+        (
+            _change(K.STRUCT_SIZE_CHANGED, "Point"),
+            _change(K.TYPE_SIZE_CHANGED, "Point"),
+            RelatedFinding(kind="type_size_changed", symbol="Point", field_name=None),
+        ),
+        (
+            _change(K.STRUCT_FIELD_OFFSET_CHANGED, "Point", "x"),
+            _change(K.TYPE_FIELD_OFFSET_CHANGED, "Point", "x"),
+            RelatedFinding(
+                kind="type_field_offset_changed", symbol="Point", field_name="x"
+            ),
+        ),
+        (
+            _change(K.STRUCT_FIELD_TYPE_CHANGED, "Point", "x"),
+            _change(K.UNION_FIELD_TYPE_CHANGED, "Point", "x"),
+            RelatedFinding(
+                kind="union_field_type_changed", symbol="Point", field_name="x"
+            ),
+        ),
+    ],
+    ids=["size", "field_offset", "field_type_union_partner"],
+)
+def test_dropped_duplicate_names_the_retained_finding_it_collapsed_into(
+    dropped: Change, retained: Change, related: RelatedFinding
+) -> None:
+    kept, ledger = _run([dropped, retained])
+    assert [c.kind for c in kept] == [retained.kind]
+    (record,) = [r for r in ledger.records if r.kind == dropped.kind.value]
+    assert record.related == related
+    assert record.relation == "subsumed_by"
+
+
+def test_retained_finding_identity_is_the_same_for_every_input_order() -> None:
+    # Two partners on one subject. The struct finding has both a type and a union
+    # partner; the recorded retained finding is the one the declared order picks.
+    changes = [
+        _change(K.STRUCT_FIELD_TYPE_CHANGED, "Both", "x"),
+        _change(K.TYPE_FIELD_TYPE_CHANGED, "Both", "x"),
+        _change(K.UNION_FIELD_TYPE_CHANGED, "Both", "x"),
+    ]
+    expected = RelatedFinding(
+        kind="type_field_type_changed", symbol="Both", field_name="x"
+    )
+    orders = [
+        changes,
+        list(reversed(changes)),
+        changes[1:] + changes[:1],
+        [changes[2], changes[0], changes[1]],
+    ]
+    for order in orders:
+        _kept, ledger = _run(list(order))
+        (record,) = [
+            r for r in ledger.records if r.kind == K.STRUCT_FIELD_TYPE_CHANGED.value
+        ]
+        assert record.related == expected, order

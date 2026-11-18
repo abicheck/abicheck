@@ -65,6 +65,20 @@ class Disposition(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class RelatedFinding:
+    """The finding that kept a resolved one (ADR-093 D5), by its identity.
+
+    Identity is the kind, symbol and field of the retained finding. It is
+    deliberately not a reference to the :class:`Change` object: a record must
+    stay valid after the report's change list is rebuilt.
+    """
+
+    kind: str
+    symbol: str | None
+    field_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class DispositionRecord:
     """One atomically detected change and the single disposition it received."""
 
@@ -104,6 +118,12 @@ class DispositionRecord:
     #: suppressed it" (:attr:`rule`), instead of leaving `scope`/
     #: out-of-contract exclusions as a bare count with no provenance.
     reason_code: str | None = None
+    #: ADR-093 D5: the retained finding that a resolved relation (subsumption,
+    #: variant, same-event, implication) kept this finding against, and the
+    #: relation's code (``subsumed_by``). Both are ``None`` for a finding that
+    #: was not resolved against another.
+    related: RelatedFinding | None = None
+    relation: str | None = None
     #: Set when something *other than severity* already put this finding
     #: outside the gate that decides the run: a consumer scope
     #: (``--used-by``/``consumers.required_symbols``) judged it irrelevant, ADR-039
