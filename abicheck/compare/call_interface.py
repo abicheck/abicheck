@@ -48,9 +48,11 @@ The answer is checked case by case against the proved model on every case of
 the E13 and E14 fragments (``tests/test_call_interface_fragments.py``). A
 result is intact when every piece the old caller reads is left in the same
 register bits as the same kind of value (``ret_image``), and a result in
-caller memory did not grow; for struct returns that is checked against
-execution on every case of ``formal/experiments/struct_ret_fragment.py``
-(``tests/test_call_interface_struct_returns.py``). Struct *parameters* are
+caller memory did not grow; for struct returns that is proved equal to the
+member-read oracle (``formal/lean/AbiLean/StructRetFragment.lean``) and
+checked against execution on every case of
+``formal/experiments/struct_ret_fragment.py``
+(``tests/test_formal_struct_ret_fragment.py``). Struct *parameters* are
 not modelled: a by-value record parameter has no :class:`Rep`, so the axis is
 ``UNKNOWN``. This module decides no verdict; ADR-094 D9's shadow comparison and switch do.
 """

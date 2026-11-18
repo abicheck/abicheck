@@ -38,8 +38,9 @@ confirmed by execution on gcc and clang:
   register of its class. :func:`ret_image` places each struct member (from
   :mod:`abicheck.model.sysv_aggregate`) in its register bits, which is what
   lets two struct returns of the same class be compared member by member.
-  That extension is checked by execution on gcc and clang over 1190 cases
-  (``formal/experiments/struct_ret_fragment.py``), not yet proved in Lean.
+  That extension is proved in Lean for any member list
+  (``formal/lean/AbiLean/StructRetFragment.lean``) and checked by execution
+  on gcc and clang over 1190 cases (``formal/experiments/struct_ret_fragment.py``).
 
 Only the representations the fragments covered are modelled. A slot outside
 them has no :class:`Rep`, and the comparison then says it cannot judge.

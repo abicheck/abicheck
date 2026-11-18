@@ -228,8 +228,38 @@ and every pair is re-checked in the unit lane
 (`tests/test_call_interface_struct_returns.py`); the integration lane re-runs
 the execution for gcc (`tests/test_call_interface_struct_returns_integration.py`).
 
-**Not yet proved.** This extension has no Lean counterpart yet: the model is
-tested on every case of the space, not proved for it.
+**Proved** (`formal/lean/AbiLean/StructRetFragment.lean`). The structs, their
+natural layout (byte offsets) and the psABI classification are defined in
+Lean; the oracle (`intact`) reads each old member from where the *old*
+classification puts it (the `k`-th register of the struct's class for
+eightbyte `k`, and the byte in it, or the caller's buffer) and asks that the
+new function leave the member of the same type at the same place, and that a
+new function returning in memory be called with a buffer at least as large.
+abicheck's comparison (`checkIntact`: no `ret_image` piece lost, memory not
+grown) is modelled separately. For **any** nonempty member list (no
+enumeration):
+
+* `checkIntact_iff_intact` -- abicheck's image comparison is the oracle;
+* `intact_iff_sublayout` -- intact iff every old member (type and offset) is a
+  member of the new struct, both or neither come back in memory, and a memory
+  result did not grow. The register shape need not be the same (`{int}` to
+  `{int, long}` is INT1 to INT2, and intact);
+* `reg_member_cls` -- every member of a register-returned struct has the
+  struct's class (a `double` fills its eightbyte alone), which is why the
+  register of a kept member cannot change.
+
+On the fragment: `mem_structs` (35 structs), `mem_space`, `space_nodup`,
+`space_length` (1190), the generator bijection (`decode_gen`, `gen_decode`,
+`generated_in_exactly_one`), and `intact_pairs`/`check_pairs`: the oracle and
+abicheck pick out the same 12 pairs, which are the pairs execution observed.
+`StructRetFragmentExport.lean` writes `lean/struct_ret_fragment_cases.json`
+(structs, layouts, shapes, every pair's verdict, an FNV-1a-64 checksum of the
+generator); `tests/test_formal_struct_ret_fragment.py` checks it against the
+experiment's own classifier and space, against
+`struct_ret_fragment_observed.json`, and against `assess_call_interface` on
+every pair. Assumed, not proved: that a member read returns the stored value
+iff the member of that type was stored at that place (execution checks it),
+and the psABI rules themselves.
 
 **Outside the domain** (`None`, the axis reads UNKNOWN): unions, mixed
 INTEGER/SSE eightbytes, `float`, `long double` and vector members, arrays of
@@ -250,12 +280,13 @@ are not modelled.
 | abicheck meets the report contract | **tested** on every case, both builds |
 | The SysV return rules themselves | **assumed** from the psABI (§3.2.3): classification of the three structs, `rdi` for the hidden pointer |
 | Same observable ⇔ same key; reduced set covers every class | **proved** / **tested** |
-| Same-class struct returns compared by member layout (E14b) | **tested** by execution on 1190 cases, both compilers, both header backends; not proved |
+| Same-class struct returns compared by member layout (E14b) | **proved** for the model, for any member list (`StructRetFragment.lean`); the 1190-case table equals execution on both compilers and abicheck on every pair (**tested**) |
 
 ## Reproduce
 
 ```bash
-(cd formal/lean && lake build && lake env lean AbiLean/RetFragmentExport.lean)
+(cd formal/lean && lake build && lake env lean AbiLean/RetFragmentExport.lean && lake env lean AbiLean/StructRetFragmentExport.lean)
+pytest tests/test_formal_struct_ret_fragment.py -q                # E14b: Lean = execution = abicheck
 pytest tests/test_formal_ret_fragment.py -q                       # fast checks
 pytest tests/test_formal_ret_fragment.py -q -m integration        # + execution, abicheck (add slow: full set)
 python formal/experiments/ret_fragment.py OUT [--reduced]
