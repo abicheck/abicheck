@@ -45,8 +45,16 @@ confirmed by execution). Whether a function is such a member is read from
 ``Function.member_kind_fact``; without it the axis is ``UNKNOWN``.
 
 The answer is checked case by case against the proved model on every case of
-the E13 and E14 fragments (``tests/test_call_interface_fragments.py``). This
-module decides no verdict; ADR-094 D9's shadow comparison and switch do.
+the E13 and E14 fragments (``tests/test_call_interface_fragments.py``). A
+result is intact when every piece the old caller reads is left in the same
+register bits as the same kind of value (``ret_image``), and a result in
+caller memory did not grow; for struct returns that is proved equal to the
+member-read oracle (``formal/lean/AbiLean/StructRetFragment.lean``) and
+checked against execution on every case of
+``formal/experiments/struct_ret_fragment.py``
+(``tests/test_formal_struct_ret_fragment.py``). Struct *parameters* are
+not modelled: a by-value record parameter has no :class:`Rep`, so the axis is
+``UNKNOWN``. This module decides no verdict; ADR-094 D9's shadow comparison and switch do.
 """
 
 from __future__ import annotations
@@ -61,9 +69,11 @@ from ..model.call_interface import (
     SYSV_AMD64,
     ArgClass,
     ArgSlot,
+    Member,
     Rep,
     RetShape,
     arg_locations,
+    ret_image,
     ret_location,
     ret_shape_of,
     slot_rep,
@@ -73,6 +83,7 @@ from ..model.declarations import Function
 from ..model.member_kind import MemberKind
 from ..model.owner_recovery import is_mangled_identity
 from ..model.snapshot import AbiSnapshot
+from ..model.sysv_aggregate import StructReturn
 
 __all__ = [
     "AxisStatus",
@@ -133,7 +144,9 @@ class CallSignature:
     one is declared, and ``None`` when attributes were not captured.
     ``implicit_this`` says whether the call passes an implicit ``this``;
     when it is ``PRESENT``, ``params`` starts with the ``this`` slot.
-    ``unknown_reason`` says why it is ``UNKNOWN``.
+    ``unknown_reason`` says why it is ``UNKNOWN``. ``ret_members`` and
+    ``ret_size`` (bits) are a struct return's flattened member layout and
+    size, ``None`` when unknown (:mod:`abicheck.model.sysv_aggregate`).
     """
 
     params: tuple[ArgSlot, ...] | None
@@ -142,6 +155,8 @@ class CallSignature:
     convention: str | None = ""
     implicit_this: ImplicitThis = ImplicitThis.ABSENT
     unknown_reason: str = ""
+    ret_members: tuple[Member, ...] | None = None
+    ret_size: int | None = None
 
 
 #: The extractor generation from which the clang header backend records a
@@ -167,12 +182,17 @@ def linkage_evidence_reliable(snapshot: AbiSnapshot) -> bool:
 
 
 def call_signature_of(
-    fn: Function, ret: RetShape | None = None, *, linkage_reliable: bool
+    fn: Function,
+    ret: RetShape | StructReturn | None = None,
+    *,
+    linkage_reliable: bool,
 ) -> CallSignature:
     """Reduce *fn* to a :class:`CallSignature` from its recorded facts.
 
     *ret* overrides the return shape for a struct return whose classification
-    the caller knows; otherwise a scalar or ``void`` return is read from the
+    the caller knows -- a bare :class:`RetShape`, or a
+    :class:`StructReturn` (``sysv_aggregate.struct_returns_in``) that also
+    carries the member layout; otherwise a scalar or ``void`` return is read from the
     return slot's ABI fact. *linkage_reliable* is required, and is
     :func:`linkage_evidence_reliable` of the snapshot *fn* came from: there is
     no default, so a caller cannot forget it and trust a stale flag. When it
@@ -180,8 +200,15 @@ def call_signature_of(
     """
     convention = _convention(fn.contract_attributes)
     this, why = _implicit_this(fn, linkage_reliable)
-    if ret is None:
-        ret = ret_shape_of(
+    members: tuple[Member, ...] | None = None
+    size: int | None = None
+    shape: RetShape | None
+    if isinstance(ret, StructReturn):
+        shape, members, size = ret.shape, ret.members, ret.size
+    else:
+        shape = ret
+    if shape is None:
+        shape = ret_shape_of(
             fn.return_type_abi_fact, fn.return_pointer_depth, fn.return_type
         )
     slots = [ArgSlot(THIS_SLOT, Rep.I64)] if this is ImplicitThis.PRESENT else []
@@ -193,7 +220,9 @@ def call_signature_of(
         slots.append(ArgSlot(p.name, rep))
     else:
         params = tuple(slots)
-    return CallSignature(params, ret, fn.is_variadic, convention, this, why)
+    return CallSignature(
+        params, shape, fn.is_variadic, convention, this, why, members, size
+    )
 
 
 def _implicit_this(fn: Function, linkage_reliable: bool) -> tuple[ImplicitThis, str]:
@@ -304,22 +333,77 @@ def assess_call_interface(old: CallSignature, new: CallSignature, abi: str) -> C
                 AxisStatus.BROKEN,
                 "the new function returns through a hidden pointer the old caller never passed",
             )
-    elif old.ret is new.ret and old.ret in _AGGREGATE_SHAPES:
-        # Same class, but the shape does not carry the member layout: two
-        # INT2 structs can be {long, long} and {int, int, long}.
-        return _unknown(
-            "two struct returns of the same class; member layouts not compared"
-        )
-    elif old.ret is not new.ret:
-        return CallAxis(
-            AxisStatus.BROKEN,
-            f"the old caller reads its result from {ret_location(old.ret)} as {old.ret}, "
-            f"the new function leaves it in {ret_location(new.ret)} as {new.ret}",
-        )
+    else:
+        broken = _result_broken(old, new)
+        if broken is None:
+            return _unknown(
+                "two struct returns in overlapping places; a member layout is unknown"
+            )
+        if broken:
+            return CallAxis(AxisStatus.BROKEN, broken)
     return CallAxis(AxisStatus.PRESERVED, _preserved_reason(old, new))
 
 
-_AGGREGATE_SHAPES = frozenset({RetShape.INT2, RetShape.SSE2, RetShape.MEMORY})
+def _result_broken(old: CallSignature, new: CallSignature) -> str | None:
+    """Why an old non-``void`` caller misreads the new result, ``""`` when it
+    reads it intact, ``None`` when that cannot be decided.
+
+    Intact iff every piece the old caller reads (:func:`ret_image`) is one
+    the new function leaves in the same register bits, as the same kind of
+    value -- and, for a result in caller memory, the new struct is no larger
+    than the buffer the old caller provides. Members the old caller does not
+    read (a new trailing field in padding) do not matter.
+    """
+    assert old.ret is not None and new.ret is not None
+    differ = (
+        f"the old caller reads its result from {ret_location(old.ret)} as {old.ret}, "
+        f"the new function leaves it in {ret_location(new.ret)} as {new.ret}"
+    )
+    old_img = ret_image(old.ret, old.ret_members)
+    new_img = ret_image(new.ret, new.ret_members)
+    if old_img is None or new_img is None:
+        if old.ret.is_aggregate != new.ret.is_aggregate:
+            return differ  # a scalar reader never gets a struct member
+        if not _places(old.ret) <= _places(new.ret):
+            return differ  # the old caller reads a register the new one never sets
+        if (
+            old.ret is RetShape.MEMORY
+            and new.ret is RetShape.MEMORY
+            and old.ret_size is not None
+            and new.ret_size is not None
+            and new.ret_size > old.ret_size
+        ):
+            return _grew(old.ret_size, new.ret_size)
+        return None
+    lost = old_img - new_img
+    if lost:
+        tag, reg, off, size, cls = min(lost, key=lambda p: (p[1], p[2]))
+        if old.ret is not new.ret:
+            return differ
+        return (
+            f"struct return ({old.ret}): the old caller reads a {size}-bit {cls} "
+            f"{tag} at {reg} bit {off}, which the new layout does not place there"
+        )
+    if old.ret.is_sret and (
+        old.ret_size is None or new.ret_size is None or new.ret_size > old.ret_size
+    ):
+        if old.ret_size is None or new.ret_size is None:
+            return None
+        return _grew(old.ret_size, new.ret_size)
+    return ""
+
+
+def _grew(old_size: int, new_size: int) -> str:
+    return (
+        f"struct return in memory grew from {old_size // 8} to "
+        f"{new_size // 8} bytes: the new function writes past the old caller's buffer"
+    )
+
+
+def _places(shape: RetShape) -> frozenset[str]:
+    loc = ret_location(shape)
+    return frozenset({"rax" if r == "eax" else r for r in loc.split(":")})
+
 
 _INT_REGS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
 

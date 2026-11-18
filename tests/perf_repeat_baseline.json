@@ -245,7 +245,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4691,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4701,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 580,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.type_by_name)": 312,
@@ -272,6 +272,9 @@
     "abicheck/model/surface_facts.py(is_public_export)": 612,
     "abicheck/model/synthetic_key.py(is_synthetic_ctor_key)": 1458,
     "abicheck/model/synthetic_key.py(is_synthetic_dtor_key)": 1100,
+    "abicheck/model/sysv_aggregate.py(_is_object_pointer)": 1,
+    "abicheck/model/sysv_aggregate.py(_resolver.<locals>.lookup)": 1,
+    "abicheck/model/sysv_aggregate.py(_resolver.<locals>.resolve)": 1,
     "abicheck/model/type_identifiers.py(type_identifiers)": 4959,
     "abicheck/model/type_indirection.py(unresolved_pair_verdict)": 1595,
     "abicheck/model/type_label.py(qualified_spelling)": 219,
@@ -317,5 +320,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 234527
+  "total": 234540
 }
