@@ -4,7 +4,7 @@
     "digest": "sha256:75b44bb6d3323784b0bcf14d2b472611879923b8f5d2dd4e9d99181e88b25332",
     "kind": "wire_carriers"
   },
-  "evidence_digest": "sha256:45144e5457e5893f44203614ce0e9ff00458f5389d71d27823e6a4ab2f2e637d",
+  "evidence_digest": "sha256:245a541ed3fb04124d4a31130fbb6ec23c3bd961244ace4c23f7f196568de444",
   "kind": "elf",
   "native_identity": {
     "library_name": "libextra.so"
@@ -12,7 +12,7 @@
   "ref_schema_version": 2,
   "sections": {
     "binary": {
-      "digest": "sha256:7e82ad23b7ab69d44387951067737e6be419417b7f3e306492b0ee5a5b0f8a73",
+      "digest": "sha256:9dd7730e73e3bc3c385c4f286d753a0c1ed216c7c043760c290ce9daf46a6477",
       "kind": "binary"
     },
     "build": {
@@ -24,7 +24,7 @@
       "kind": "debug"
     },
     "declarations": {
-      "digest": "sha256:c270484fb1741f85d638e9f51aa3f61c2cad8b853330b2052b884f6b50e14d88",
+      "digest": "sha256:b282f6ea441348423ad271b5d65a06afdc9871178b09d087f9950c6ac939e866",
       "kind": "declarations"
     },
     "graph": {
@@ -36,7 +36,7 @@
       "kind": "layout"
     },
     "provenance": {
-      "digest": "sha256:4e901dc340f8b9b021cc6a556fcf0531190c9f01a62dce07b4ec379ebd8bf4a4",
+      "digest": "sha256:791f0ee04ce26361e5dbea3fc70ca46b38043882279022c5a28d5821d550ecbf",
       "kind": "provenance"
     },
     "semantic_ir": {
@@ -44,7 +44,7 @@
       "kind": "semantic_ir"
     },
     "types": {
-      "digest": "sha256:9010742cc3973066451ae5c25c9b94a16a5e84d397ab88f1c826ab2219521da1",
+      "digest": "sha256:ce94bed69504fb17ef0d2459da9ea199b0c176a291d6c328fa5bfcec46effdd9",
       "kind": "types"
     }
   },
