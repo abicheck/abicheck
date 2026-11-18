@@ -21,7 +21,7 @@
       "abicheck/extract/binary_format.py": "7c5f31dba9fab2884f8e91b5263d871c4cc38c6c56307eb46d782cd76b8ae2f8",
       "abicheck/extract/binary_identity.py": "6e4f7c0e55443ab906c75d67b5ca11629e2e6fcd59ea0f28976b8eb6651a392b",
       "abicheck/extract/build_mode_capture.py": "e4975d7c6e28a64d17550912d2ee40d808c8c8c72a22be9accc89a485ae4262f",
-      "abicheck/extract/builtin_abi.py": "54fe8c4b1bbc3a7f5ed6ef3ef45dd70970c253684fb7176dab6cede87fb22abd",
+      "abicheck/extract/builtin_abi.py": "47c0e4a49b4d52adde63aa1039c2463da0b7ea3f59867f4dcbb0033d6ecb3fc9",
       "abicheck/extract/cache_dep_manifest.py": "7542e355161f8f9cb5e6c2c74402064e15e5bcb0ccee67429c99e74122a31080",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
       "abicheck/extract/cache_header_scan.py": "04fc927afed680495c7f8112c230cf4f5d93966dd398a7472533648657eff994",
@@ -96,7 +96,7 @@
       "abicheck/extract/headers/backend_protocol.py": "d1fde3a918a3442ad84dfecd45d67d57844c28de5b40d5778421c15f2ec6e58c",
       "abicheck/extract/headers/backend_registry.py": "5223cf34abe3322c36cf70d9381f22a8c079408aca80a1559b82f7d007c7cccb",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
-      "abicheck/extract/headers/castxml/abi_fundamental.py": "ec150b0310443c3dfd2d5745f4d6f962eca01d55c756f908d86b9fad61071eef",
+      "abicheck/extract/headers/castxml/abi_fundamental.py": "1317349eb6f7c59851d049270b8065a22c3d2465fa44b714ade2c9c45bda8d50",
       "abicheck/extract/headers/castxml/backend.py": "9993674214e2ec171b7738df4cc5da22b0741a22b2c5352642ed9497bb64aea7",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "e363ac7d1407d679798c84459d376450207e20bfd2c67789052ab0c6ee48a9ca",
@@ -246,9 +246,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "e50e1d8b7e7b9eb5c6dd393e1875c9b08cbb8e2e097dca1bfa6ed4b7bb895499",
+    "fingerprint": "1404c88ff656c925fabd8d855a04215fe6d03896d05e24ffa65e6dfa5899f77c",
     "generation": 85,
-    "reason": "clang return-type facts moved into compare-owning return_type.return_type_facts (refactor; no recorded fact changes); keeps functions.py under its 800-line cap"
+    "reason": "structural Indirection kind on the ABI fact (generation 85 is unshipped; origin/main ships 84)"
   },
   "resolver": {
     "files": {
