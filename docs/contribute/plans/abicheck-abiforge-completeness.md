@@ -821,6 +821,17 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 - `platform_baseline_floor_raised` (build data), the `kabi_*` family and the `sycl_*` family were not probed in this batch.
 - Non-Linux, deferred (per the priority from the orchestrator): `library_version_downgraded` (PE `VS_FIXEDFILEINFO`) and `compat_version_changed` (Mach-O) stay UNCLASSIFIED until their own lane runs; no MinGW or macOS toolchain in this container.
 
+**WS-1 domain families: build, NumPy, wheel, bundle, kABI (branch `fix/ws1-domain-build-kabi-1`).** Declared (15 kinds; oracle `tests/test_ws1_domain_build_observability.py`, real gcc artifacts through the public `compare`): `numpy_capi_consumption_added`/`_removed` and `numpy_target_floor_raised` are `{B}` (marker bytes in a stripped binary, no headers, no DWARF); `numpy_metadata_understates_required_version`, `numpy_abi_major_incompatible`, `wheel_rpath_not_portable`, `wheel_closure_dependency_violation`, `wheel_tag_architecture_mismatch` (ELF) and `bundle_intra_dep_removed`, `bundle_intra_dep_signature_unverified`, `bundle_manifest_instantiation_added`/`_removed` are `{B}` with a package-scope rationale; `bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`, `bundle_provider_changed` are `{B,D}` (the stripped binary emits the weaker `unverified` or nothing). **Open rows**, each still UNCLASSIFIED:
+
+- **Package scope is not an `EvidenceSource` atom (decision needed).** A wheel archive, a bundle artifact set and an instantiation manifest are the run's subject, so the kinds above are declared `{B}` with that scope as the rationale: a bare `.so` pair does not emit `wheel_rpath_not_portable` or any bundle kind, while the same binaries inside the scope do. ADR-093 has no atom for package scope; the orchestrator should ratify this reading or amend the ADR.
+- **kABI (`kabi_*`, 5 kinds).** The emitter reads only a `Module.symvers` manifest, and no kernel tree exists in CI, so a real manifest cannot be produced. The facts physically live in `vmlinux` sections (`__kcrctab`, `__ksymtab_gpl`, `__kstrtabns`), which suggests `{B}`, but the reader never opens them, so no oracle can confirm it.
+- **Unmatched libraries never reach bundle analysis.** `compare` on directories pairs only matched members; an added or removed library is reported as `Info: library unmatched` and `bundle_library_added`/`_removed` never fire. Reader gap: both stay UNCLASSIFIED.
+- **Audit-only kinds not probed through the audit path.** `bundle_duplicate_provider` and `bundle_unresolved_intra_dependency` are documented as audit-mode findings; `compare --no-baseline` on a directory did not emit the duplicate-provider fixture, so the audit oracle is unresolved.
+- **Not probed:** `bundle_intra_dep_resolved_to_different_version` (needs a version-script construction), `bundle_manifest_entry_unsatisfied` (audit-only manifest path), `bundle_soname_skew` (cohort configuration).
+- **Header observability of the D-declared bundle kinds is unproven.** Passing `-H` to a directory compare did not surface `bundle_intra_dep_signature_changed`, so `{B,D}` is a lower bound; `{B,H}` may also observe it.
+- **Mach-O branch of `wheel_tag_architecture_mismatch`** is not declared: no Mach-O producer exists on Linux CI. The ELF branch is proven.
+
+
 ### 11.3 File ownership and conflict hotspots
 
 **Owned paths.** Edit another workstream's paths only through a small,
