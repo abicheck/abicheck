@@ -232,6 +232,12 @@ def test_an_unnamed_bitfield_does_not_align_the_record(
         assert [(m.offset, m.size) for m in got.members or ()] == [(0, 8)]
 
 
+def test_a_record_of_only_unnamed_bitfields_is_not_classified() -> None:
+    """``struct { unsigned :1; }`` has no member the caller reads."""
+    pad = _named_bit("", 0, 1, _fact(_U, 4))
+    assert _classify(_rec([pad], 8, 8)) is None
+
+
 def test_dropping_an_unnamed_bitfield_keeps_the_call_intact() -> None:
     """Padding the caller never reads cannot break it: ``{char c; unsigned :1;}``
     -> ``{char c;}`` reads the same byte from the same register."""

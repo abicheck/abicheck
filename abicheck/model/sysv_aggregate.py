@@ -235,6 +235,8 @@ def classify_record(
     if flat is None or record.size_bits is None:
         return None
     members = tuple(sorted(flat[0], key=lambda x: x.offset))
+    if not members:
+        return None  # only padding (unnamed bitfields): nothing the caller reads
     size = record.size_bits
     for a, b in zip(members, members[1:]):
         if a.offset + a.size > b.offset:
