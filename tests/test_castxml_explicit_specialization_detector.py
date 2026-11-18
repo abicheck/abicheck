@@ -48,9 +48,32 @@ def _detect(text: str, line_no: int, name: str = "tpz") -> bool:
         ("template <> int other<int>(int);\nint tpz(int v);", 2, False),
         # A template<> spelled only in a comment is not code.
         ("// template <> int tpz<int>(int v);\nint tpz(int v);", 2, False),
+        # A primary-template namesake earlier on the same line does not hide
+        # the specialization after it.
+        ("template <class T> int tpz(T v); template <> int tpz<int>(int v);", 1, True),
+        # A member of a class specialization is not itself a specialization.
+        ("template <> struct Box<int> {\n    int tpz(int);\n};", 2, False),
     ],
 )
 def test_spelled_introducer_marks_only_its_own_declarator(
     text: str, line_no: int, expected: bool
 ) -> None:
     assert _detect(text, line_no) is expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # castxml names an operator bare; the keyword and spacing both count.
+        ("template <> Box<int> operator+(Box<int> a, Box<int> b);", True),
+        ("template <> Box<int> operator + (Box<int> a, Box<int> b);", True),
+        # An arithmetic expression spelling the same characters is no declarator.
+        ("template <> int x = a+b;", False),
+        # The longer operator is not the shorter one.
+        ("template <> Box<int> operator+=(Box<int> a, int b);", False),
+    ],
+)
+def test_operator_specialization_is_matched_by_its_keyword(
+    text: str, expected: bool
+) -> None:
+    assert _detect(text, 1, name="+") is expected

@@ -28,10 +28,12 @@ Joining the text's instantiation lines to the XML is a separate change.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from xml.etree.ElementTree import Element
 
-from ....model import ExplicitInstantiation, Fact
+from ....model.explicit_instantiation import ExplicitInstantiation
+from ....model.fact import Fact
 from .calling_convention import _code_window
 from .context import CastxmlParserContext
 
@@ -81,18 +83,63 @@ def _raw_declaration_lines(
     return (lines, line_no) if 1 <= line_no <= len(lines) else None
 
 
+#: Characters an operator symbol is made of.
+_OPERATOR_CHARS = frozenset("+-*/%^&|~!=<>,()[]")
+#: Characters that would extend a symbol, so ``operator+=`` is not ``operator+``.
+#: ``(`` opens the parameter list and does not extend it.
+_EXTENDING_CHARS = frozenset("+-*/%^&|~!=<>")
+
+
+def _is_word(ch: str) -> bool:
+    return ch == "_" or ch.isalnum()
+
+
+def _declarator_starts(text: str, start: int, name: str) -> Iterator[int]:
+    """Offsets from *start* where the declarator *name* begins in *text*.
+
+    An identifier must be a whole word. An operator symbol (castxml names it
+    bare, ``+``) must follow the ``operator`` keyword, optional spaces between,
+    and not run into another operator character.
+    """
+    if name and _is_word(name[0]):
+        pos = text.find(name, start)
+        while pos != -1:
+            end = pos + len(name)
+            before = text[pos - 1] if pos > 0 else ""
+            after = text[end] if end < len(text) else ""
+            if not (before and _is_word(before)) and not (after and _is_word(after)):
+                yield pos
+            pos = text.find(name, pos + 1)
+        return
+    if not name or any(ch not in _OPERATOR_CHARS for ch in name):
+        return
+    pos = text.find("operator", start)
+    while pos != -1:
+        j = pos + len("operator")
+        while j < len(text) and text[j] in " \t":
+            j += 1
+        end = j + len(name)
+        after = text[end] if end < len(text) else ""
+        if text.startswith(name, j) and not (after and after in _EXTENDING_CHARS):
+            yield pos
+        pos = text.find("operator", pos + 1)
+
+
 def _declares_specialization(code: str, start: int, end: int, name: str) -> bool:
     """Whether a ``template <>`` introduces the declarator *name* on the
-    reported line: the declarator is the first whole-word *name* on that line,
-    and nothing between the introducer and it ends a declaration (``;`` or
-    ``}``), so an earlier specialization's closing brace never reaches it."""
+    reported line (or the wrapped line above it).
+
+    Each whole-word occurrence (or ``operator`` form) of *name* on the reported
+    line is checked on its own, so a same-line primary-template namesake does
+    not hide a later specialization. Between the introducer and the declarator
+    there must be no ``;``, ``{`` or ``}``: that rules out an earlier
+    declaration's end, and a class specialization's body, whose members get
+    no introducer of their own.
+    """
     prefix = code[:end]
-    declarator = re.search(rf"(?<![\w]){re.escape(name)}(?!\w)", prefix[start:])
-    if declarator is None:
-        return False
-    at = start + declarator.start()
-    for introducer in _SPECIALIZATION_RE.finditer(prefix[:at]):
-        between = prefix[introducer.end() : at]
-        if ";" not in between and "}" not in between:
-            return True
+    for at in _declarator_starts(prefix, start, name):
+        for introducer in _SPECIALIZATION_RE.finditer(prefix[:at]):
+            between = prefix[introducer.end() : at]
+            if not any(ch in between for ch in ";{}"):
+                return True
     return False

@@ -107,7 +107,7 @@
       "abicheck/extract/headers/castxml/dumper.py": "48acb009a9fe78ccac63f0746fb14c35cde518744cc01b86cb40c000cceb8f2e",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
-      "abicheck/extract/headers/castxml/explicit_instantiation.py": "3424116ae2fe3881aedf4e71d94ba4823cc0d68e36b694a8e47714fa09a186d2",
+      "abicheck/extract/headers/castxml/explicit_instantiation.py": "02efd130ec0654aa7e4fb684b83c2be6c2273c85d58a6b6ca8fd1c90221e1616",
       "abicheck/extract/headers/castxml/function_type_cc.py": "629328f9a0e9c3842ef43c05e11ef3f781b9f5c351e3f14638ce54b91e36405a",
       "abicheck/extract/headers/castxml/functions.py": "166b8bed26420ce1b4085102e10c3f3421f1d51641e69083879742937506fc94",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
@@ -247,9 +247,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "530102d50c9b355156116a55042b8af80f6bfb2fd48f1889e07fa23026fe33d2",
+    "fingerprint": "bf0ee86e417b50dff50a9e4d88ba667d201a6d50180fb6ffefe84afda0f9ab40",
     "generation": 86,
-    "reason": "86: castxml records an explicit specialization's explicit_instantiation_fact from its template<> line. A removed explicit specialization is now func_removed on the castxml route. Spelling row 86 is audited; the generation-85 corpus is frozen from origin/main."
+    "reason": "Refines the castxml explicit-specialization detector within generation 86, which is unreleased: per-occurrence declarator matching, operator symbols, and no introducer across a class body. The extractor generation stays 86; no snapshot changes."
   },
   "resolver": {
     "files": {
