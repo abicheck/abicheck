@@ -41,6 +41,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from seed_observable_forms_ws1 import WS1_FORMS
+
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "abicheck" / "model" / "change_catalog"
 BASELINE = REPO / "tests" / "data" / "change_kind_unclassified.json"
@@ -50,12 +52,6 @@ PRODUCTION_LINE_CAP = 800  # architecture/modules.yaml `limits.production`
 # ``const`` is the module-level name the taxonomy file defines and reuses.
 FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] = {
     "B": ((("B",),), "", (), "_OBS_B"),
-    # WS-1 domain families (ADR-093, build/numpy/wheel/bundle): the package-scope
-    # rationale and the DWARF-only sibling-signature rationale, verbatim from
-    # abicheck/model/change_catalog/build.py.
-    "B:SCOPE": ((("B",),), "requires package/set scope: the wheel archive, bundle artifact set or instantiation manifest is the comparison scope, orthogonal to per-artifact evidence; the fact itself is read from the binary (B)", (), "_OBS_B_SCOPE"),
-    "B:ELF:SCOPE": ((("B",),), "requires package/set scope: the wheel archive, bundle artifact set or instantiation manifest is the comparison scope, orthogonal to per-artifact evidence; the fact itself is read from the binary (B)", ("elf",), "_OBS_B_ELF_SCOPE"),
-    "BD:DWARF": ((("B", "D"),), "the signature or layout of a sibling's type is read from DWARF; the stripped binary alone reports the weaker unverified or no finding", (), "_OBS_BD_DWARF"),
     "B:ELF": ((("B",),), "", ("elf",), "_OBS_B_ELF"),
     "B:MACHO": ((("B",),), "", ("macho",), "_OBS_B_MACHO"),
     "B:PE": ((("B",),), "", ("pe",), "_OBS_B_PE"),
@@ -211,6 +207,8 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         "_OBS_L5",
     ),
 }
+
+FORMS.update(WS1_FORMS)  # domain + Linux batches; see seed_observable_forms_ws1.py
 
 # kind  CODE  [# note].  Kinds absent here (or coded U) stay UNCLASSIFIED.
 DECISIONS_FILE = Path(__file__).with_name("seed_observable_decisions.txt")

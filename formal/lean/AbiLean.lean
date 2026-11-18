@@ -6,3 +6,4 @@ import AbiLean.EnumFragment
 import AbiLean.FuncFragment
 import AbiLean.RetFragment
 import AbiLean.MemberFragment
+import AbiLean.StructRetFragment

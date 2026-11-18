@@ -1,7 +1,6 @@
 {
   "_comment": "ADR-093: kinds whose observable_at is still UNCLASSIFIED. This list may only shrink; tests/test_change_kind_observability_complete.py keeps it exact.",
   "unclassified": [
-    "abi_surface_explosion",
     "api_depends_on_consumer_env",
     "behavioural_default_changed",
     "build_context_changed",
@@ -25,10 +24,8 @@
     "declaration_moved",
     "declaration_renamed",
     "evidence_required_missing",
-    "exported_object_alignment_reduced",
     "exported_symbol_source_owner_changed",
     "func_deleted_dwarf",
-    "func_deleted_elf_fallback",
     "generated_file_dependency_unstable",
     "generated_header_changed",
     "generated_header_reaches_public_api",
@@ -38,7 +35,6 @@
     "header_parse_context_drift",
     "identity_collision_detected",
     "include_graph_public_header_drift",
-    "inline_namespace_moved",
     "kabi_crc_changed",
     "kabi_export_type_changed",
     "kabi_symbol_added",
