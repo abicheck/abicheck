@@ -1,6 +1,5 @@
 {
  "array_grown_into_padding|cxx_more|wrong-kind||none-of:TYPE_FIELD_OFFSET_CHANGED;none-of:TYPE_SIZE_CHANGED|BREAKING|A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan \u00a711.2)#0": {},
- "by_value_struct_became_nontrivial|cxx_alt|wrong-kind||missing:VALUE_ABI_TRAIT_CHANGED|BREAKING|A value-ABI trait, a packed record or a struct return convention is not emitted from stripped public headers#0": {},
  "char_made_unsigned|c_elf|wrong-verdict||missing:CHAR_SIGNEDNESS_CHANGED;weaker-than:COMPATIBLE_WITH_RISK|NO_CHANGE|A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth#0": {
   "c++11|clang18": "db6db6db6db6db6db6db6db6",
   "c++11|clang19": "db6db6db6db6db6db6db6db6",
@@ -361,9 +360,6 @@
   "c99|gcc13": "ffffffffffffffffffffffff000000000000000000000000000000000000000000000000",
   "c99|gcc14": "ffffffffffffffffffffffff000000000000000000000000000000000000000000000000"
  },
- "record_became_packed|c_elf|wrong-kind||missing:STRUCT_PACKING_CHANGED|BREAKING|A value-ABI trait, a packed record or a struct return convention is not emitted from stripped public headers#0": {},
- "record_lost_trivially_copyable|cxx_more|wrong-kind||missing:VALUE_ABI_TRAIT_CHANGED|BREAKING|A value-ABI trait, a packed record or a struct return convention is not emitted from stripped public headers#0": {},
- "returned_struct_grew_past_registers|c_elf_alt|wrong-kind||missing:STRUCT_RETURN_CONVENTION_CHANGED|BREAKING|A value-ABI trait, a packed record or a struct return convention is not emitted from stripped public headers#0": {},
  "std_string_abi_flipped|cxx_alt|wrong-kind||missing:GLIBCXX_DUAL_ABI_FLIP_DETECTED|BREAKING|A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported#0": {
   "c++20|gcc13": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
   "c++20|gcc14": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",

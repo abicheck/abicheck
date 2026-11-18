@@ -128,12 +128,6 @@ dependency walk and debug roots to every member. No open gap remains.
 
 <!-- no-canary: pinned by the stripped nightly's strict-xfail entries in abiforge/known.py, which fail once the answer changes -->
 
-#### A value-ABI trait, a packed record or a struct return convention is not emitted from stripped public headers (2026-11-17)
-
-**Status (2026-11-17): OPEN.** At stripped `{B,H}` the clang header dump reports `TRIVIALLY_COPYABLE_LOST` for a class that loses triviality but not `VALUE_ABI_TRAIT_CHANGED`, which the edit requires; a record that becomes `__attribute__((packed))` reads its layout kinds but not `STRUCT_PACKING_CHANGED` under castxml; a struct that grows past the return registers reads `TYPE_SIZE_CHANGED` but not `STRUCT_RETURN_CONVENTION_CHANGED`. These are header-visible facts the dump does not emit. Found by the stripped nightly lane (`by_value_struct_became_nontrivial`, `record_lost_trivially_copyable`, `returned_struct_grew_past_registers`, `record_became_packed`). Owner: `extract/headers/` (clang and castxml), plan §11.2 WS-2.
-
-<!-- no-canary: pinned by the stripped nightly's strict-xfail entries in abiforge/known.py, which fail once the answer changes -->
-
 ### Report and detector coverage
 
 #### A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported (2026-11-12)

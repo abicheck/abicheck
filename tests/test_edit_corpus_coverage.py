@@ -330,7 +330,8 @@ def _pr_tier_declared() -> set[str]:
                 other = CLANG if value == "clang" else GCC
                 cfg = cfg.with_(consumers=(Consumer(toolchain=other),))
             elif key == "evidence":
-                cfg = cfg.with_(**evidence_fields(value))
+                evidence, stripped = evidence_fields(str(value))
+                cfg = cfg.with_(evidence=evidence, stripped=stripped)
             else:
                 cfg = cfg.with_(**{key: value})
         out |= cov.expectation_kinds(OP_BY_NAME[op_name].expect(cfg))
@@ -926,7 +927,8 @@ def test_every_pr_tier_cell_runs_a_feasible_point() -> None:
             elif key == "consumer":
                 cfg = cfg.with_(consumers=(Consumer(toolchain=CLANG),))
             elif key == "evidence":
-                cfg = cfg.with_(**evidence_fields(value))
+                evidence, stripped = evidence_fields(str(value))
+                cfg = cfg.with_(evidence=evidence, stripped=stripped)
             else:
                 cfg = cfg.with_(**{key: value})
         for p in space.cell_points(OP_BY_NAME[op_name], cfg, _all_ran(cfg)):

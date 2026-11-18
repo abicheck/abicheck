@@ -39,10 +39,6 @@ GAP_FLAG_INVISIBLE_LAYOUT = (
     "A config-level layout flag a public header cannot carry: stripped {B,H} reads the "
     "layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)"
 )
-GAP_HEADER_TRAIT_STRIPPED = (
-    "A value-ABI trait, a packed record or a struct return convention is not emitted from "
-    "stripped public headers"
-)
 
 
 def _always(_: Config) -> bool:
@@ -351,51 +347,6 @@ KNOWN: tuple[Known, ...] = (
         "flag reads ENUM_UNDERLYING_SIZE_CHANGED (BREAKING)",
         GAP_FLAG_INVISIBLE_LAYOUT,
         issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    # Stripped {B,H}: a header-visible fact the dump does not emit (plan §11.2 WS-2).
-    Known(
-        "by_value_struct_became_nontrivial",
-        frozenset({"cxx_alt"}),
-        "wrong-kind",
-        lambda c: c.stripped and c.header_backend == "clang",
-        "the clang header dump reports TRIVIALLY_COPYABLE_LOST for a class that loses "
-        "triviality but not VALUE_ABI_TRAIT_CHANGED, which the edit's ABI meaning requires",
-        GAP_HEADER_TRAIT_STRIPPED,
-        issues=frozenset({"missing:VALUE_ABI_TRAIT_CHANGED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "record_lost_trivially_copyable",
-        frozenset({"cxx_more"}),
-        "wrong-kind",
-        lambda c: c.stripped and c.producer.family == "clang",
-        "a clang-built class that loses triviality reads TRIVIALLY_COPYABLE_LOST without "
-        "VALUE_ABI_TRAIT_CHANGED from stripped headers",
-        GAP_HEADER_TRAIT_STRIPPED,
-        issues=frozenset({"missing:VALUE_ABI_TRAIT_CHANGED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "returned_struct_grew_past_registers",
-        frozenset({"c_elf_alt"}),
-        "wrong-kind",
-        lambda c: c.stripped and c.header_backend == "clang",
-        "a struct that grows past the return registers changes its return convention, which "
-        "the stripped header dump does not report as STRUCT_RETURN_CONVENTION_CHANGED",
-        GAP_HEADER_TRAIT_STRIPPED,
-        issues=frozenset({"missing:STRUCT_RETURN_CONVENTION_CHANGED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "record_became_packed",
-        frozenset({"c_elf"}),
-        "wrong-kind",
-        lambda c: c.stripped and c.header_backend == "castxml" and c.flags.short_enums,
-        "a record that becomes __attribute__((packed)) is a header fact, but the castxml "
-        "dump does not report STRUCT_PACKING_CHANGED alongside the layout kinds",
-        GAP_HEADER_TRAIT_STRIPPED,
-        issues=frozenset({"missing:STRUCT_PACKING_CHANGED"}),
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(

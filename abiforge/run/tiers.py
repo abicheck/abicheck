@@ -253,11 +253,11 @@ def _missing(family: str, role: str) -> str:
     return f"no {role} {family} toolchain installed"
 
 
-def evidence_fields(value: object) -> dict[str, object]:
-    """The ``Config`` fields one evidence axis value stands for."""
+def evidence_fields(value: str) -> tuple[str, bool]:
+    """The ``(evidence, stripped)`` pair one evidence axis value stands for."""
     if value == STRIPPED_HEADERS:
-        return {"evidence": "headers", "stripped": True}
-    return {"evidence": value}
+        return "headers", True
+    return value, False
 
 
 def pr_cells() -> list[Cell | tuple[str, str]]:
@@ -274,7 +274,8 @@ def pr_cells() -> list[Cell | tuple[str, str]]:
             if key == "std":
                 cfg = replace(cfg, std=next(s for s in STANDARDS if s.name == value))
             elif key == "evidence":
-                cfg = replace(cfg, **evidence_fields(value))
+                evidence, stripped = evidence_fields(str(value))
+                cfg = replace(cfg, evidence=evidence, stripped=stripped)
             elif key == "consumer":
                 other = _newest(str(value), consumer_toolchains())
                 if other is None:
@@ -582,6 +583,7 @@ def row_to_cell(
         ),
         flags=consumer_flags,
     )
+    evidence, stripped = evidence_fields(str(row["evidence"]))
     cfg = Config(
         std=_repair_std(op, lang, int(row["std"]), tc),  # type: ignore[call-overload]
         producer=tc,
@@ -589,7 +591,8 @@ def row_to_cell(
         # The build's own consumer and the drawn one: one library pair, two checks.
         consumers=(Consumer(), drawn) if drawn != Consumer() else (),
         header_backend=str(row.get("header_backend", "castxml")),
-        **evidence_fields(row["evidence"]),  # type: ignore[arg-type]
+        evidence=evidence,
+        stripped=stripped,
     )
     return Cell(op, seed, cfg)
 
