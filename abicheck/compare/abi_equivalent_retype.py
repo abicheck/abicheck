@@ -88,8 +88,26 @@ _RETYPE_KINDS = frozenset(
 _UNREAD_DEFAULT: AbiFundamental = cast(AbiFundamental, None)
 
 
-def _comparable_equal(comparison: FactComparison[AbiFundamental]) -> bool:
+_INDIRECT_TAIL = re.compile(r"[*&]\s*(?:const\s*|volatile\s*)*$")
+
+
+def _is_indirect(spelling: str) -> bool:
+    """Whether a slot's spelling is a pointer or reference (any cv on it).
+
+    A pointer slot carries an ABI fact (one unsigned word) so that the return-
+    convention and packing checks can read it, but a retype between two pointer
+    types is a source-level change, never an ABI-equivalent one: this module
+    keeps such a slot's break, as its contract states.
+    """
+    return bool(_INDIRECT_TAIL.search(" ".join(spelling.split())))
+
+
+def _comparable_equal(
+    comparison: FactComparison[AbiFundamental], old_spelling: str, new_spelling: str
+) -> bool:
     """Whether a comparable, fully PRESENT pair of slots is ABI-equal."""
+    if _is_indirect(old_spelling) or _is_indirect(new_spelling):
+        return False
     if not comparison.is_comparable or comparison.degraded:
         return False
     if comparison.old_value is None or comparison.new_value is None:
@@ -114,7 +132,9 @@ def _params_retyped_only(
         if old_p.type == new_p.type:
             continue
         if not _comparable_equal(
-            compare_facts(old_p.type_abi_fact, new_p.type_abi_fact, _UNREAD_DEFAULT)
+            compare_facts(old_p.type_abi_fact, new_p.type_abi_fact, _UNREAD_DEFAULT),
+            old_p.type,
+            new_p.type,
         ):
             return False
         differing = True
@@ -132,7 +152,9 @@ def _function_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
                 old_fn.return_type_abi_fact,
                 new_fn.return_type_abi_fact,
                 _UNREAD_DEFAULT,
-            )
+            ),
+            old_fn.return_type,
+            new_fn.return_type,
         )
     return _params_retyped_only(old_fn.params, new_fn.params)
 
@@ -156,7 +178,9 @@ def _field_retype(
     if _pointee_renamed(old_f, new_f, old, new):
         return True
     return _comparable_equal(
-        compare_facts(old_f.type_abi_fact, new_f.type_abi_fact, _UNREAD_DEFAULT)
+        compare_facts(old_f.type_abi_fact, new_f.type_abi_fact, _UNREAD_DEFAULT),
+        old_f.type,
+        new_f.type,
     )
 
 
@@ -268,7 +292,9 @@ def _variable_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
     if old_var is None or new_var is None or old_var.type == new_var.type:
         return False
     return _comparable_equal(
-        compare_facts(old_var.type_abi_fact, new_var.type_abi_fact, _UNREAD_DEFAULT)
+        compare_facts(old_var.type_abi_fact, new_var.type_abi_fact, _UNREAD_DEFAULT),
+        old_var.type,
+        new_var.type,
     )
 
 
@@ -295,7 +321,9 @@ def _typedef_retype(
             _typedef_fact(old, change.symbol, index),
             _typedef_fact(new, change.symbol, index),
             _UNREAD_DEFAULT,
-        )
+        ),
+        change.old_value or "",
+        change.new_value or "",
     )
 
 
