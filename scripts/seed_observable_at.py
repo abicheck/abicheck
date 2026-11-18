@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Seed ``observable_at`` on the ChangeKind taxonomy (ADR-093, WS-1 slice 3).
-
 ``DECISIONS`` is the reviewable record of each kind's observability: one row per
 kind, ``kind  CODE  # note``. No row, or code ``U``, stays ``UNCLASSIFIED``: a
 wrong value creates a false-clean obligation no run can discharge.
