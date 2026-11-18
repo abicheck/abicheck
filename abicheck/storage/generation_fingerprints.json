@@ -107,8 +107,9 @@
       "abicheck/extract/headers/castxml/dumper.py": "48acb009a9fe78ccac63f0746fb14c35cde518744cc01b86cb40c000cceb8f2e",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
+      "abicheck/extract/headers/castxml/explicit_instantiation.py": "3424116ae2fe3881aedf4e71d94ba4823cc0d68e36b694a8e47714fa09a186d2",
       "abicheck/extract/headers/castxml/function_type_cc.py": "629328f9a0e9c3842ef43c05e11ef3f781b9f5c351e3f14638ce54b91e36405a",
-      "abicheck/extract/headers/castxml/functions.py": "b49358d564982264ed3de293713b60f0b69042b4fcce4107228b1e98bba9d529",
+      "abicheck/extract/headers/castxml/functions.py": "166b8bed26420ce1b4085102e10c3f3421f1d51641e69083879742937506fc94",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -246,9 +247,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "d2c437c833f4ed2b147b7585164c822a7c2457418deb61126cb573d3c64e92a0",
-    "generation": 85,
-    "reason": "member_kind.py was added in generation 85 (#2135) but the fingerprint was recorded before its final edit; the generation-85 bump already covers it"
+    "fingerprint": "530102d50c9b355156116a55042b8af80f6bfb2fd48f1889e07fa23026fe33d2",
+    "generation": 86,
+    "reason": "86: castxml records an explicit specialization's explicit_instantiation_fact from its template<> line. A removed explicit specialization is now func_removed on the castxml route. Spelling row 86 is audited; the generation-85 corpus is frozen from origin/main."
   },
   "resolver": {
     "files": {

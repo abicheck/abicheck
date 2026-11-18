@@ -754,4 +754,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "call axis keeps a function that is not provably C linkage UNKNOWN; no rewrite "
         "applies."
     ),
+    86: GenerationSpellingChange(
+        "castxml header backend: an explicit specialization is recorded as "
+        "explicit_instantiation_fact SPECIALIZATION, read from its template<> line. No stored "
+        "type or name spelling changes; a removed explicit specialization is now judged as a "
+        "removed declaration (func_removed), not an export loss, on the castxml route. "
+        "An older snapshot carries no such fact, which reads as no evidence, and no rewrite applies."
+    ),
 }
