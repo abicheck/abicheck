@@ -85,7 +85,7 @@
   "excluded_header_matching": "glob",
   "excluded_header_patterns": [],
   "fact_generations": {
-    "extractor": 81,
+    "extractor": 83,
     "resolver": 4,
     "source": 15
   },

@@ -16,9 +16,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **200**
+- Kinds with at least one real source: **204**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 88
+- Kinds per source: catalog 159, field_shapes 9, integration 93
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 104 |
+| unmapped | 120 | 100 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -94,7 +94,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
 | `func_removed` | BREAKING | 15 | 1 | 23 |
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 7 |
-| `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
+| `func_visibility_changed` | BREAKING | 2 | 0 | 3 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
 | `glibcxx_dual_abi_changed` | BREAKING | 0 | 0 | 3 |
 | `glibcxx_dual_abi_flip_detected` | COMPATIBLE | 1 | 0 | 0 |
@@ -146,7 +146,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_floor_raised` | RISK | 1 | 0 | 0 |
 | `runtime_symbol_provider_changed` | RISK | 0 | 0 | 0 |
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
-| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 3 |
+| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 5 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
 | `stack_canary_removed` | RISK | 1 | 0 | 3 |
@@ -356,7 +356,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `float_abi_changed` | RISK | 0 | 0 | 0 |
 | `header_build_context_mismatch` | API_BREAK | 1 | 0 | 0 |
 | `lto_mode_changed` | RISK | 1 | 0 | 0 |
-| `rtti_mode_changed` | RISK | 1 | 0 | 0 |
+| `rtti_mode_changed` | RISK | 1 | 0 | 2 |
 | `sanitizer_mode_changed` | RISK | 0 | 0 | 0 |
 | `stdlib_debug_mode_changed` | RISK | 0 | 0 | 0 |
 | `struct_packing_mode_changed` | RISK | 1 | 0 | 0 |
@@ -435,7 +435,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_became_inline` | RISK | 0 | 0 | 0 |
 | `func_deleted` | BREAKING | 0 | 0 | 1 |
 | `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
-| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 0 |
+| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 1 |
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |
@@ -470,8 +470,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `removed_const_overload` | API_BREAK | 0 | 0 | 0 |
 | `return_pointer_level_changed` | BREAKING | 0 | 0 | 0 |
 | `rpath_changed` | COMPATIBLE | 0 | 0 | 0 |
-| `soname_bump_recommended` | COMPATIBLE | 0 | 0 | 1 |
-| `soname_bump_unnecessary` | COMPATIBLE | 0 | 0 | 0 |
+| `soname_bump_recommended` | COMPATIBLE | 0 | 0 | 4 |
+| `soname_bump_unnecessary` | COMPATIBLE | 0 | 0 | 2 |
 | `source_binary_provenance_mismatch` | RISK | 0 | 0 | 0 |
 | `source_decl_binary_symbol_mismatch` | RISK | 0 | 0 | 0 |
 | `source_level_kind_changed` | COMPATIBLE | 0 | 0 | 0 |
@@ -509,7 +509,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_field_removed` | BREAKING | 0 | 0 | 0 |
 | `type_lost_final` | RISK | 0 | 0 | 0 |
 | `typedef_version_sentinel` | COMPATIBLE | 0 | 0 | 0 |
-| `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 0 |
+| `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 2 |
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |
 | `union_field_type_changed` | BREAKING | 0 | 0 | 0 |
 | `unspecified_return_now_named` | COMPATIBLE | 0 | 0 | 1 |
@@ -520,6 +520,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `vector_abi_changed` | BREAKING | 0 | 0 | 0 |
 | `version_script_missing` | COMPATIBLE | 0 | 0 | 0 |
 | `virtual_method_added` | BREAKING | 0 | 0 | 0 |
-| `visibility_leak` | COMPATIBLE | 0 | 0 | 0 |
+| `visibility_leak` | COMPATIBLE | 0 | 0 | 2 |
 | `vtable_symbol_identity_changed` | RISK | 0 | 0 | 0 |
 | `writable_executable_segment` | RISK | 0 | 0 | 0 |

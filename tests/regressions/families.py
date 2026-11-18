@@ -200,6 +200,9 @@ FAMILIES: dict[str, Family] = {
                 # <unnamed-tag>, header Outer::<unnamed-type-u>): the same member
                 # must not read as a type change across readers.
                 "tests/test_anonymous_member_spelling.py",
+                # A headerless PE dump names a MinGW C++ export by its PE
+                # mangling, as the other PE route does (not extern "C").
+                "tests/test_pe_noheader_export_identity.py",
                 # A per-architecture ABI baseline: a version node at the target's
                 # baseline raises no floor (test_version_floor_new_provider.py).
                 "tests/test_version_floor_new_provider.py",
@@ -555,6 +558,7 @@ _F2 = (
     "evidence.unreadable_one_sided_member",
 )
 _F3 = (
+    "compare.glibcxx_dual_abi_flip_below_churn_threshold",
     "storage.digest_answers_the_wrong_question",
     "config.location_dependent_fingerprint",
     "extract.aggregate_layout_header_attribution",
@@ -723,6 +727,9 @@ _F21 = (
     "comparability.runtime_abi_selector_refused_instead_of_reported",
     "classification.demangled_signature_used_as_entity_name",
     "classification.one_sibling_of_a_change_kind_family_read",
+    # A const object's changed initializer read as nothing on the binary lane,
+    # while the same edit under headers reads as VAR_VALUE_CHANGED.
+    "extraction.binary_only_const_initializer_not_read",
 )
 _F12 = (
     # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or

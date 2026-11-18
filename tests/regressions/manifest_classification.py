@@ -989,6 +989,27 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="compare.glibcxx_dual_abi_flip_below_churn_threshold",
+        invariant=(
+            "A libstdc++ dual-ABI flip (_GLIBCXX_USE_CXX11_ABI 0 <-> 1) is "
+            "reported for every number of re-mangled exports, not only when "
+            "at least five removed and five added symbols churn: each export "
+            "whose demangled identity agrees once the dual-ABI spellings are "
+            "removed, and whose cxx11 tag differs, is one flipped function; a "
+            "library with no std::string reports no flip, in either direction."
+        ),
+        fixed_by=(2111,),
+        seed_tests=(
+            "tests/test_glibcxx_dual_abi_pairing.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        axes={
+            "count": ("1", "2", "8"),
+            "direction": ("0to1", "1to0"),
+            "lane": ("binary-only",),
+        },
+    ),
+    BugClass(
         id="comparability.runtime_abi_selector_refused_instead_of_reported",
         invariant=(
             "A rebuild under the other libstdc++ dual ABI "

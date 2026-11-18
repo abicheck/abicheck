@@ -46,6 +46,7 @@ from ..model.change_catalog.subsumption import SUBSUMED_BY
 from ..model.identity import EntityId
 from .dedup_key import hashable_value
 from .finding_identity import resolve_change_identity
+from .finding_representative import RepresentativeIndex
 from .identity_memo import INPUT_FIELDS, IdentityMemo
 from .source_replay_twins import drop_replay_twins
 from .variable_names import qualified_variable_name
@@ -343,7 +344,7 @@ def _dedup_cross_kind(
     changes: list[Change],
     record_names: dict[str, str] | None = None,
     ambiguous: Mapping[EntityId, str] | None = None,
-    on_subsumed: Callable[[Change, ChangeKind], None] | None = None,
+    on_subsumed: Callable[[Change, ChangeKind, Change], None] | None = None,
 ) -> list[Change]:
     """Pass 3: drop a DWARF finding when an equivalent AST finding exists.
 
@@ -371,6 +372,9 @@ def _dedup_cross_kind(
     _Transition = tuple[object, object] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
+    # Which AST finding kept a drop (ADR-093 D5); see finding_representative.
+    ast_reps = RepresentativeIndex()
+
     _relevant_ast = {ak for aks in _SUBSUMED_AST_KINDS.values() for ak in aks}
     for c in (c for c in changes if c.kind in _relevant_ast):
         hint = _ast_qualified_hint(c, known_ambiguous)
@@ -380,6 +384,7 @@ def _dedup_cross_kind(
         )
         transition = cross_tier_transition(c)
         ast_findings.setdefault((c.kind.value, canon), set()).add(transition)
+        ast_reps.add((c.kind.value, canon), transition, c)
         if c.field_name is not None:
             # Keyed by the parent record alone, the spelling the DWARF lookup
             # below derives from its own field symbol. ``canon`` already carries
@@ -392,6 +397,7 @@ def _dedup_cross_kind(
             ast_field_findings.setdefault(
                 (c.kind.value, parent, c.field_name), set()
             ).add(transition)
+            ast_reps.add((c.kind.value, parent, c.field_name), transition, c)
 
     def _matches(
         transitions: set[_Transition] | None,
@@ -433,7 +439,10 @@ def _dedup_cross_kind(
             )
             if partner is not None:
                 if on_subsumed is not None:
-                    on_subsumed(c, partner)
+                    related = ast_reps.pick(
+                        (partner.value, canon_symbol), dwarf_transition
+                    )
+                    on_subsumed(c, partner, related)
                 continue
 
             # Parent-type match (FIX-F): "Point::x" → check "Point". Only for
@@ -468,7 +477,13 @@ def _dedup_cross_kind(
                     )
                 if partner is not None:
                     if on_subsumed is not None:
-                        on_subsumed(c, partner)
+                        related = ast_reps.pick(
+                            (partner.value, parent, c.field_name)
+                            if c.field_name is not None
+                            else (partner.value, parent),
+                            dwarf_transition,
+                        )
+                        on_subsumed(c, partner, related)
                     continue
 
         result.append(c)
@@ -479,7 +494,7 @@ def deduplicate_ast_dwarf(
     changes: list[Change],
     old: AbiSnapshot | None = None,
     new: AbiSnapshot | None = None,
-    on_subsumed: Callable[[Change, ChangeKind], None] | None = None,
+    on_subsumed: Callable[[Change, ChangeKind, Change], None] | None = None,
     *,
     identity_memo: IdentityMemo | None = None,
 ) -> list[Change]:
@@ -645,22 +660,16 @@ def dedup_identity_key(
     if change.kind not in DEDUP_CATEGORY_BY_KIND:
         return None
     if identity_memo is not None:
-        # Inline validity check (not a call) so a hit costs one lookup and the
-        # memo's own primary_id runs only on a miss. The snapshot expression
-        # matches IdentityMemo.primary_id's.
+        # Inline validity check (not a call), so a hit costs one lookup and the
+        # memo's own primary_id runs only on a miss. The snapshot is taken raw:
+        # a change with a list or set field never equals the frozen snapshot the
+        # memo stored, so it recomputes (correct, merely uncached). No dedup-table
+        # kind's identity reads such a field, so freezing here would be dead code.
         hit = identity_memo.entries.get(id(change))
         if (
             hit is not None
             and hit[0] is change
-            and hit[1]
-            == tuple(
-                tuple(v)
-                if isinstance(v, list)
-                else frozenset(v)
-                if isinstance(v, set)
-                else v
-                for v in (getattr(change, n) for n in INPUT_FIELDS)
-            )
+            and hit[1] == tuple(getattr(change, n) for n in INPUT_FIELDS)
         ):
             return hit[2]
         return identity_memo.primary_id(change)

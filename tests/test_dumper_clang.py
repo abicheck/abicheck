@@ -38,7 +38,6 @@ from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
     _configured_target_triple,
-    _header_ast_parser,
     _parse_gnu_include_search_dirs,
     _resolve_clang_system_includes,
     _resolve_probe_compiler,
@@ -52,7 +51,7 @@ from abicheck.dumper_clang import (
 )
 from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
-from abicheck.extract import compiler_driver
+from abicheck.extract import compiler_driver, header_ast_backend as ast_backend
 from abicheck.extract.compiler_driver import (
     is_clang_family_binary,
     is_intel_sycl_driver,
@@ -3630,7 +3629,7 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(
         clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="clang",
@@ -3661,7 +3660,7 @@ def test_header_ast_parser_clang_branch_records_resolved_lang_mode(
     monkeypatch.setattr(
         clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, True)
     )
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="clang",
@@ -3695,7 +3694,7 @@ def test_header_ast_parser_passes_explicit_target_to_clang_parser(
     monkeypatch.setattr(
         clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="clang",
@@ -3732,7 +3731,7 @@ def test_header_ast_parser_clang_branch_records_abi_dialect(
     monkeypatch.setattr(
         clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="clang",
@@ -3769,7 +3768,7 @@ def test_header_ast_parser_clang_branch_records_msvc_abi_dialect(
     monkeypatch.setattr(
         clang_backend, "resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
     )
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="clang",
@@ -3794,7 +3793,7 @@ def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> No
     parser_sentinel = parser_cls.__new__(parser_cls)
     monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: sentinel)
     monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="castxml",
@@ -3826,7 +3825,7 @@ def test_header_ast_parser_castxml_branch_records_abi_dialect(
     parser_sentinel = parser_cls.__new__(parser_cls)
     monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: sentinel)
     monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="castxml",
@@ -3866,7 +3865,7 @@ def test_header_ast_parser_castxml_branch_records_the_force_cpp_aware_compiler(
 
     monkeypatch.setattr(cxb, "castxml_dump", fake_castxml_dump)
     monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="castxml",
@@ -3897,7 +3896,7 @@ def test_header_ast_parser_castxml_branch_records_msvc_abi_dialect(
     parser_sentinel = parser_cls.__new__(parser_cls)
     monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: sentinel)
     monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="castxml",
@@ -3932,7 +3931,7 @@ def test_header_ast_parser_stamps_castxml_supported(
             "version": "castxml version 0.7.0\nclang version 18.1.8",
         },
     )
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="castxml",
@@ -3967,7 +3966,7 @@ def test_header_ast_parser_stamps_castxml_unsupported(
             "version": "castxml version 0.4.5\nclang version 8.0.0",
         },
     )
-    parser = _header_ast_parser(
+    parser = ast_backend.header_ast_parser(
         [],
         [],
         backend="castxml",
@@ -4032,7 +4031,7 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     monkeypatch.setattr(dumper_clang_errors, "run_clang_to_ast_file", _graph_pass_run)
 
     # Step 1: the main snapshot pass's own parser construction (mirrors
-    # dumper._header_ast_parser's `_run_clang()` inner call for
+    # dumper.header_ast_parser's `_run_clang()` inner call for
     # `--ast-frontend clang`) -- the exact path a real ELF/PE/Mach-O
     # clang-frontend dump takes. Wrapped in ast_memoize_scope() -- the same
     # scope service.run_dump's own format branches open around their
@@ -4041,7 +4040,7 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     # (pre-existing behaviour), not the new in-process AST memo this test
     # is meant to guard (CodeRabbit review).
     with dumper_cache.ast_memoize_scope():
-        parser = dumper._header_ast_parser(
+        parser = dumper.header_ast_parser(
             [header],
             [],
             backend="clang",

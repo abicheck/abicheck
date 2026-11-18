@@ -265,7 +265,7 @@ class TestDumpCacheExtraKey:
     def test_differs_when_layout_tool_becomes_available_for_unpinned_auto(
         self, monkeypatch
     ):
-        # Codex review: dumper._header_ast_parser's G16 logic can silently
+        # Codex review: dumper.header_ast_parser's G16 logic can silently
         # runtime-fallback a genuinely-unpinned "auto" request from castxml to
         # clang (toolchain-version mismatch or a direct-include #error guard)
         # -- invisible to _resolve_header_backend's static, content-blind

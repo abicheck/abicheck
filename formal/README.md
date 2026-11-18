@@ -15,7 +15,11 @@ tested, and what is assumed are kept separate in [§ Boundaries](#boundaries).
 | `lean/AbiLean/Examples.lean` | non-vacuity witnesses, negative checks N1–N6, `#print axioms`, truth-table `#eval` |
 | `lean/AbiLean/Layout.lean`, `lean/AbiLean/LayoutExport.lean`, `lean/layout_table.json` | layout model with alignment, class-reduction theorems, exported 1248-case table (experiments E2–E6) |
 | `lean/AbiLean/Fragment.lean`, `lean/AbiLean/FragmentExport.lean`, `lean/fragment_cases.json`, `experiments/layout_fragment.py`, `FRAGMENT.md` | the closed layout fragment (E10): explicit 6368-case space, generator bijection, oracle, gcc/clang/abicheck run, proved reduction |
-| `tla/`, `experiments/`, `EXPERIMENTS.md` | experiments E1–E10 and their results |
+| `lean/AbiLean/EnumFragment.lean`, `lean/AbiLean/EnumFragmentExport.lean`, `lean/enum_fragment_cases.json`, `experiments/enum_fragment.py`, `ENUM_FRAGMENT.md` | the closed enum fragment (E12): 11372 cases, generator bijection, value oracle, gcc/clang/abicheck run, proved interval and reduction |
+| `lean/AbiLean/FuncFragment.lean`, `lean/AbiLean/FuncFragmentExport.lean`, `lean/func_fragment_cases.json`, `experiments/func_fragment.py`, `FUNC_FRAGMENT.md` | the closed function-signature fragment (E13): 2160 cases, report contract and SysV call-interface oracle, execution and abicheck runs |
+| `lean/AbiLean/RetFragment.lean`, `lean/AbiLean/RetFragmentExport.lean`, `lean/ret_fragment_cases.json`, `experiments/ret_fragment.py`, `RET_FRAGMENT.md` | the closed return-type fragment (E14): 1176 cases, report contract and SysV return/sret oracle, execution and abicheck runs |
+| `tla/`, `experiments/`, `EXPERIMENTS.md` | experiments E1–E14 and their results |
+| `tla/disposition_trace.py`, `tla/trace_corpus.py`, `tla/check_trace.py`, `tla/DispositionTrace.tla` | E11: real pipeline runs recorded and checked against the disposition spec |
 | `lean/fires_truth_table.json` | the rule's truth table as computed by Lean (test oracle) |
 | `fixtures/` | old/new C library (exposed and opaque record), four old consumers, `run_experiment.sh` |
 | `../tests/test_lean_field_offset_rule.py` | conformance + regression tests |
@@ -196,6 +200,15 @@ unaffected — correct, because the verdict is existential over consumers.
 
 ## TLA+ models: TLC and the Python checkers
 
+**Trace validation (E11).** Besides model checking, real pipeline runs are
+checked against `DispositionPipeline.tla`:
+
+```bash
+python formal/tla/trace_corpus.py --out traces.json        # needs gcc + castxml
+python formal/tla/check_trace.py traces.json --tlc tla2tools.jar
+python formal/tla/check_trace.py traces.json --mutants --tlc tla2tools.jar
+```
+
 `tla/DispositionPipeline.tla` (E7) and `tla/ScopeCompleteness.tla` (E8) are
 checked two ways, and CI compares the two (job `tlc` in
 `.github/workflows/formal-lean.yml`):
@@ -280,7 +293,7 @@ are paths in both graphs, and both are the E7 count-balancing shape.
 
 ## Next steps
 
-The roadmap (generator completeness, Lean/TLA+ roles, experiments E1–E10) is
+The roadmap (generator completeness, Lean/TLA+ roles, experiments E1–E14) is
 [`docs/contribute/plans/formal-methods-and-generator-completeness.md`](../docs/contribute/plans/formal-methods-and-generator-completeness.md).
 Candidate rules if the per-rule line is ever resumed:
 

@@ -254,6 +254,13 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
         operation=_OP.MODIFIED,
+        observable_at=(
+            observable(
+                ("B", "BD"),
+                rationale="compiler-flag fact: the header never carries it and "
+                "the binary does not; build data (a compile database) does",
+            ),
+        ),
     ),
     _E(
         "runpath_changed",
@@ -292,6 +299,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "soname_bump_unnecessary",
@@ -303,6 +311,7 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "soname_changed",

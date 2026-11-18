@@ -139,6 +139,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
+        observable_at=(_OBS_B_ELF,),
     ),
     _E(
         "vtable_symbol_identity_changed",
@@ -246,6 +247,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         description_template="Sanitizer runtime required: {detail}",
         entity=_ENT.BINARY,
         contract_subject=_CS.DEPENDENCY_EDGE,
+        observable_at=(_OBS_B_ELF,),
         operation=_OP.ADDED,
     ),
     _E(

@@ -1696,7 +1696,7 @@ class TestDumpHybridDispatch:
     binary reaches ``dumper.dump()`` directly (``cli_dump_helpers.
     perform_elf_dump`` imports and calls it, bypassing ``service.run_dump``
     entirely) -- so ``dump()`` itself must resolve "hybrid" rather than
-    falling through to ``_header_ast_parser``'s single-backend guard.
+    falling through to ``header_ast_parser``'s single-backend guard.
     """
 
     def test_dump_hybrid_delegates_to_run_hybrid_dump(self, tmp_path):

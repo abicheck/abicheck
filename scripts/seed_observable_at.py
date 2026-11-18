@@ -67,6 +67,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_BH",
     ),
+    "BHDOC": (
+        (("B", "H"),),
+        "the ratio counts exports against public-header declarations; a binary alone has no header records to compare with",
+        (),
+        "_OBS_BH_DOC",
+    ),
     "H": (
         (("B", "H"),),
         "declaration-only fact: visible in the public header",
@@ -115,6 +121,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         (),
         "_OBS_DBD",
     ),
+    "BBD": (
+        (("B", "BD"),),
+        "compiler-flag fact: the header never carries it and the binary does not; build data (a compile database) does",
+        (),
+        "_OBS_BBD",
+    ),
     "BHSG": (
         (("B", "H", "S", "G"),),
         "call edges across translation units: needs sources and the graph",
@@ -138,6 +150,12 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         "record alignment is a header layout fact; DWARF records it only when explicit",
         (),
         "_OBS_BH_ALIGN",
+    ),
+    "DH:PEMACHO": (
+        (("B", "D"), ("B", "H")),
+        "layout or type fact: DWARF and the public header both carry it",
+        ("pe", "macho"),
+        "_OBS_DH_PEMACHO",
     ),
     "DH:ELFPE": (
         (("B", "D"), ("B", "H")),

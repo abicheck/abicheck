@@ -1193,9 +1193,9 @@ class TestAbiTagChanged:
         r = compare(_snap(functions=old), _snap(functions=new))
         assert not _has_kind(r, ChangeKind.ABI_TAG_CHANGED)
 
-    def test_suppressed_under_mass_dual_abi_flip(self):
+    def test_not_suppressed_under_mass_dual_abi_flip(self):
         old = [_pub_func(f"f{i}", f"_ZN3foo{i}B5cxx11Ev") for i in range(8)]
         new = [_pub_func(f"f{i}", f"_ZN3foo{i}Ev") for i in range(8)]
         r = compare(_snap(functions=old), _snap(functions=new))
         assert _has_kind(r, ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED)
-        assert not _has_kind(r, ChangeKind.ABI_TAG_CHANGED)
+        assert len(_changes_of_kind(r, ChangeKind.ABI_TAG_CHANGED)) == 8

@@ -329,6 +329,7 @@
           "entity_id",
           "explicit_instantiation_fact",
           "in_public_contract_fact",
+          "initializer_hex",
           "is_const",
           "is_static",
           "mangled",
@@ -352,7 +353,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 1
+      "section_schema_version": 2
     },
     "graph": {
       "fields": {
