@@ -249,7 +249,7 @@
     },
     "fingerprint": "bf0ee86e417b50dff50a9e4d88ba667d201a6d50180fb6ffefe84afda0f9ab40",
     "generation": 86,
-    "reason": "Refines the castxml explicit-specialization detector within generation 86, which is unreleased: per-occurrence declarator matching, operator symbols, and no introducer across a class body. The extractor generation stays 86; no snapshot changes."
+    "reason": "86: castxml records an explicit specialization's explicit_instantiation_fact from its template<> line (same-line namesakes, operator symbols, no introducer across a class body). A removed explicit specialization is now func_removed on the castxml route. Spelling row 86 is audited; the generation-85 corpus is frozen from origin/main."
   },
   "resolver": {
     "files": {

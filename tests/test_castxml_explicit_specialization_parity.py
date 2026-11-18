@@ -22,7 +22,6 @@ not covered here: castxml cannot join it to its XML node yet (see the plan's
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -54,8 +53,6 @@ def test_castxml_and_clang_agree_on_specialization_and_implicit_instance(
     prefix = elf_capability("gcc", "shared")
     if prefix is None:
         pytest.skip(skip_reason("gcc", "shared"))
-    if shutil.which("clang") is None:
-        pytest.skip("clang is required for the clang header backend")
     (tmp_path / "api.h").write_text(HEADER)
     (tmp_path / "api.cpp").write_text(SOURCE)
     so = tmp_path / "libapi.so"
