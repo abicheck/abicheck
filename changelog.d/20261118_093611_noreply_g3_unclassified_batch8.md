@@ -17,6 +17,7 @@ it should read in CHANGELOG.md. Delete the other sections.
 <!--
 ### Changed
 
+- **ADR-093 observability for `var_visibility_changed`** — declared `{B,H}`: the CLI's default dump attaches the header graph that proves a vanished specialization's origin. The typed `dumper.dump()` path does not attach it (divergence recorded in the plan).
 - **Short bold summary** — the rest of the sentence: what changed, for
   whom, and why it matters. Backtick identifiers like `ChangeKind` or
   `--policy-file`.

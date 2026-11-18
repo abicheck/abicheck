@@ -846,3 +846,79 @@ def test_sycl_overload_family_removal_needs_the_header_not_the_binary(
         c.kind.value for c in binary_only.changes
     }
     assert not _observes_on("sycl_overload_set_removed", "elf", BINARY)
+
+
+@pytest.mark.integration
+def test_var_visibility_change_is_emitted_by_the_cli_at_headers_depth(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle (GNU ELF producer): an explicitly instantiated static
+    # data member of a vanished specialization. The CLI's default dump (headers
+    # depth) attaches the header graph, which proves the specialization's origin,
+    # so the pair emits var_visibility_changed. The binary-only pair reports
+    # var_removed instead. Declared {B,H}. (The typed dumper.dump() path does not
+    # attach the graph and reports var_removed; that divergence is in the plan.)
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    headers = {
+        "old": "template <class T> struct S { static int v; };\n"
+        "template <class T> int S<T>::v = 1;\n"
+        "inline int use() { return S<int>::v; }\n",
+        "new": "template <class T> struct S { static int v; };\n"
+        "template <class T> int S<T>::v = 1;\n",
+    }
+    sources = {
+        "old": '#include "api.h"\ntemplate int S<int>::v;\n',
+        "new": '#include "api.h"\n',
+    }
+    shapes: dict[str, dict[str, Path]] = {}
+    for name in ("old", "new"):
+        src = tmp_path / name
+        src.mkdir()
+        (src / "api.h").write_text(headers[name])
+        (src / f"{name}.cpp").write_text(sources[name])
+        so = tmp_path / f"{name}.so"
+        subprocess.run(
+            [
+                *prefix,
+                "-g",
+                "-O0",
+                "-fPIC",
+                "-shared",
+                f"-I{src}",
+                str(src / f"{name}.cpp"),
+                "-o",
+                str(so),
+            ],
+            check=True,
+        )
+        with_headers = tmp_path / f"{name}-headers.json"
+        binary_only = tmp_path / f"{name}-binary.json"
+        subprocess.run(
+            abicheck_command(
+                "dump", str(so), "-H", str(src / "api.h"), "-o", str(with_headers)
+            ),
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            abicheck_command("dump", str(so), "-o", str(binary_only)),
+            check=True,
+            capture_output=True,
+        )
+        shapes[name] = {"headers": with_headers, "binary": binary_only}
+
+    def _emitted(shape: str) -> str:
+        return subprocess.run(
+            abicheck_command(
+                "compare", str(shapes["old"][shape]), str(shapes["new"][shape])
+            ),
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    assert "var_visibility_changed" in _emitted("headers")
+    assert "var_visibility_changed" not in _emitted("binary")
+    assert _observes_on("var_visibility_changed", "elf", ("B", "H"))
+    assert not _observes_on("var_visibility_changed", "elf", BINARY)

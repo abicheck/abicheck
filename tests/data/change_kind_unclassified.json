@@ -90,7 +90,6 @@
     "sycl_plugin_removed",
     "sycl_plugin_search_path_changed",
     "sycl_runtime_version_changed",
-    "toolchain_version_changed",
-    "var_visibility_changed"
+    "toolchain_version_changed"
   ]
 }

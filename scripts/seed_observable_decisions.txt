@@ -12,7 +12,7 @@ var_added_elf_only  B  # export-table-only kind: emitted for binary-only snapsho
 var_export_added  DH  # export_transition.py:250: same _export_was_gained gate as func_export_added; needs the declaration on the old side
 var_removed  DH  # diff_symbols_variables.py:86: binary-only snapshots emit VAR_REMOVED_ELF_ONLY for export-table-only records
 var_removed_elf_only  B  # export-table-only kind: emitted for binary-only snapshots of any format (diff_symbols_variables.py:86)
-var_visibility_changed  U  # emitted only from template_instance_absence.py:516 (typed template evidence)
+var_visibility_changed  BH  # template_instance_absence.py:_export_lost via variable_changes_for: the CLI default (headers depth) attaches the header graph, which proves the vanished specialization; the typed dumper.dump() path does not attach it and reports var_removed instead (typed/CLI divergence recorded in the plan); a binary-only pair never reaches it
 symbol_renamed_batch  B  # diff_symbols_renames.py:682-690: rename pairs from symbol names with ELF binding
 symbol_size_changed              B:ELF  # st_size in .dynsym; no PE/Mach-O analogue
 symbol_size_changed_const_object B:ELF
