@@ -183,7 +183,7 @@
       "abicheck/extract/headers/gcc/gcc_facts.cc": "bf2cfffa18bcde2253bc79f59b69d92e2fee5b87d773989dfc82aa70048900e5",
       "abicheck/extract/headers/gcc/projection.py": "8b323a4e70e35ea81aa06a859712b250b6107283d8da1028d923490a67054569",
       "abicheck/extract/headers/manifest.py": "f5e7421de9ecfc09bac00bfae8e8f0cd0cb8c5dc34d8dcaeebf13327bd35b585",
-      "abicheck/extract/headers/member_kind.py": "54845f5a06e619a8d051473da8f2b0e0137c6f56bb6cf69a71614505bfc9bc2a",
+      "abicheck/extract/headers/member_kind.py": "267fa542378721738093df55a47fca5081f54b4da24cd7fc30e9a2fc4e7e5ff3",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/std_reexports.py": "fc9a3aa7123707b327837a06ee3e6ba461f007b734b0a745446ad9e26ac3aac4",
@@ -246,9 +246,9 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "17f932a045eb3555bf2ffb106abbb9aeecdfac4a686c9d4494734b3028a0cab8",
+    "fingerprint": "d2c437c833f4ed2b147b7585164c822a7c2457418deb61126cb573d3c64e92a0",
     "generation": 85,
-    "reason": "bumped to 85 for a semantic change"
+    "reason": "member_kind.py was added in generation 85 (#2135) but the fingerprint was recorded before its final edit; the generation-85 bump already covers it"
   },
   "resolver": {
     "files": {
