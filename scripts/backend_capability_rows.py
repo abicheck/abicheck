@@ -345,6 +345,20 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "member_kind_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "Both backends read it from the declaration's AST node "
+            "kind (`extract/headers/member_kind.py`): clang's FunctionDecl / "
+            "CXXMethodDecl / CXXConversionDecl / CXXConstructorDecl / "
+            "CXXDestructorDecl, castxml's Function / OperatorFunction / Method / "
+            "OperatorMethod / Converter / Constructor / Destructor, with `static` "
+            "splitting static from non-static members."
+        ),
+    ),
+    FactRow(
+        "Function",
         "is_compiler_generated",
         _FULL,
         _NONE,

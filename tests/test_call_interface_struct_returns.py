@@ -107,7 +107,9 @@ def _classify(
 
 
 def _sig(ret: StructReturn) -> CallSignature:
-    return CallSignature((), ret.shape, False, "", False, ret.members, ret.size)
+    return CallSignature(
+        (), ret.shape, False, "", ret_members=ret.members, ret_size=ret.size
+    )
 
 
 @pytest.mark.parametrize("seq", frag.structs())

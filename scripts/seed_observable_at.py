@@ -57,6 +57,12 @@ PRODUCTION_LINE_CAP = 800
 # ``const`` is the module-level name the taxonomy file defines and reuses.
 FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] = {
     "B": ((("B",),), "", (), "_OBS_B"),
+    # WS-1 domain families (ADR-093, build/numpy/wheel/bundle): the package-scope
+    # rationale and the DWARF-only sibling-signature rationale, verbatim from
+    # abicheck/model/change_catalog/build.py.
+    "B:SCOPE": ((("B",),), "requires package/set scope: the wheel archive, bundle artifact set or instantiation manifest is the comparison scope, orthogonal to per-artifact evidence; the fact itself is read from the binary (B)", (), "_OBS_B_SCOPE"),
+    "B:ELF:SCOPE": ((("B",),), "requires package/set scope: the wheel archive, bundle artifact set or instantiation manifest is the comparison scope, orthogonal to per-artifact evidence; the fact itself is read from the binary (B)", ("elf",), "_OBS_B_ELF_SCOPE"),
+    "BD:DWARF": ((("B", "D"),), "the signature or layout of a sibling's type is read from DWARF; the stripped binary alone reports the weaker unverified or no finding", (), "_OBS_BD_DWARF"),
     "B:ELF": ((("B",),), "", ("elf",), "_OBS_B_ELF"),
     "B:MACHO": ((("B",),), "", ("macho",), "_OBS_B_MACHO"),
     "B:PE": ((("B",),), "", ("pe",), "_OBS_B_PE"),
