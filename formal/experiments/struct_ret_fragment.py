@@ -227,6 +227,11 @@ def build_and_run(out: Path, cc: str) -> tuple[dict[int, bool], dict[int, list[s
     missing = sorted(set(range(cases)) - set(got))
     if missing:
         raise RuntimeError(f"{exe.name}: no status record for case(s) {missing[:10]}")
+    # A child that exited cleanly has made its call and printed the members
+    # it read; no read record then is a harness fault, not a broken result.
+    unread = sorted(i for i, clean in got.items() if clean and i not in reads)
+    if unread:
+        raise RuntimeError(f"{exe.name}: clean case(s) without a read {unread[:10]}")
     return got, reads
 
 
