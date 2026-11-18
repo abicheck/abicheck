@@ -644,11 +644,11 @@ def test_stdlib_implementation_change_is_observed_from_the_binary_alone(
     from abicheck.dumper import dump
 
     clang = elf_capability("clang", "shared")
-    gcc = elf_capability("gcc", "shared")
+    gcc = elf_capability("gcc", "shared", std_headers=True)
     if clang is None:
         pytest.skip(skip_reason("clang", "shared"))
     if gcc is None:
-        pytest.skip(skip_reason("gcc", "shared"))
+        pytest.skip(skip_reason("gcc", "shared", std_headers=True))
     import re
 
     probe_src = "#include <string>\nvoid probe(const std::string& s) { (void)s; }\n"
