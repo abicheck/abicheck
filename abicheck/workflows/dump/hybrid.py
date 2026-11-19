@@ -46,6 +46,7 @@ from ..run_dump_scope import extraction_scope
 from ..snapshot_factory import DependencyScopeInputs, SnapshotFinish, finish_snapshot
 from .default_header_graph import (
     attach_typed_header_graph,
+    compile_context_from_options,
     header_graph_suppressed,
 )
 from .formats import NativeExtractRequest
@@ -90,6 +91,14 @@ def run_hybrid_dump(
             public_header_dirs=kwargs.get("public_header_dirs"),
             include_search_dirs=kwargs.get("public_include_search_dirs"),
             enabled=not (kwargs.get("dwarf_only") or kwargs.get("symbols_only")),
+            compile=compile_context_from_options(
+                gcc_path=kwargs.get("gcc_path"),
+                gcc_prefix=kwargs.get("gcc_prefix"),
+                gcc_options=kwargs.get("gcc_options"),
+                gcc_option_tokens=kwargs.get("gcc_option_tokens") or (),
+                sysroot=kwargs.get("sysroot"),
+                nostdinc=bool(kwargs.get("nostdinc")),
+            ),
         )
     return closure_identity.renumber_anonymous_closure_identities(merged)
 

@@ -80,6 +80,43 @@ def graph_public_scope(
     )
 
 
+def compile_context_from_options(
+    *,
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    gcc_option_tokens: Sequence[str] = (),
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
+) -> CompileContext | None:
+    """The compile context a typed dump's header parse runs with, or ``None``.
+
+    The graph parse must see the same ``-D``/``-I``/sysroot/nostdinc options as
+    the primary header parse, or it can describe a different preprocessor
+    configuration than the snapshot it is attached to. With no options given,
+    ``None`` keeps the graph parse on its default context, as before.
+    """
+    from ...compile_context import CompileContext
+
+    if not (
+        gcc_path
+        or gcc_prefix
+        or gcc_options
+        or gcc_option_tokens
+        or sysroot
+        or nostdinc
+    ):
+        return None
+    return CompileContext(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=tuple(gcc_option_tokens),
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+    )
+
+
 def attach_typed_header_graph(
     snap: AbiSnapshot,
     *,
@@ -90,6 +127,7 @@ def attach_typed_header_graph(
     public_header_dirs: Sequence[Path] | None,
     include_search_dirs: Sequence[Path] | None,
     enabled: bool,
+    compile: CompileContext | None = None,
 ) -> AbiSnapshot:
     """The typed route's graph attach: the -H boundary, then the shared owner."""
     files, dirs = graph_public_scope(headers, public_headers, public_header_dirs)
@@ -98,7 +136,7 @@ def attach_typed_header_graph(
         headers=list(headers),
         includes=list(includes),
         lang=lang,
-        compile=None,
+        compile=compile,
         public_headers=files,
         public_header_dirs=dirs,
         include_search_dirs=(
