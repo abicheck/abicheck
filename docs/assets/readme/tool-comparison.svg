@@ -1,42 +1,56 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-labelledby="title desc">
-<title id="title">Three workflows for C/C++ compatibility analysis</title>
-<desc id="desc">libabigail builds typed ABI corpora from ELF and debug information. ABICC supports header and ABI Dumper workflows with binary and source reports. abicheck combines available evidence with dependency and deployment contracts. Capability summary, not an accuracy ranking.</desc>
-<rect width="1200" height="590" rx="20" fill="#0e1729"/>
-<text x="32" y="49" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="29" font-weight="700">C/C++ compatibility: what each workflow explains</text>
-<text x="32" y="80" fill="#9fb1ca" font-family="DejaVu Sans,Arial,sans-serif" font-size="18" font-weight="400">Available inputs determine what can be established.</text>
-<rect x="30" y="110" width="360" height="400" rx="14" fill="#19263b"/>
-<text x="50" y="151" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="27" font-weight="700">libabigail</text>
-<text x="50" y="179" fill="#a9c6d9" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">abidiff</text>
-<text x="50" y="219" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">INPUTS</text>
-<text x="50" y="246" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ELF + debug information</text>
-<text x="50" y="289" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Typed ABI corpus</text>
-<text x="50" y="317" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">DWARF / CTF / BTF types</text>
-<text x="50" y="345" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Types reachable from exports</text>
-<text x="50" y="397" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">RESULT</text>
-<text x="50" y="429" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ABI changes and affected interfaces</text>
-<text x="50" y="457" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Header paths can filter the corpus</text>
-<rect x="420" y="110" width="360" height="400" rx="14" fill="#19263b"/>
-<text x="440" y="151" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="27" font-weight="700">ABICC</text>
-<text x="440" y="179" fill="#a9c6d9" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ABI Compliance Checker</text>
-<text x="440" y="219" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">INPUTS</text>
-<text x="440" y="246" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Headers + libraries, or ABI dumps</text>
-<text x="440" y="289" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Header / XML descriptor workflow</text>
-<text x="440" y="317" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">ABI Dumper workflow with debug info</text>
-<text x="440" y="345" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Binary and source compatibility</text>
-<text x="440" y="397" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">RESULT</text>
-<text x="440" y="429" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Separate binary and source reports</text>
-<text x="440" y="457" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Type, signature and vtable changes</text>
-<rect x="810" y="110" width="360" height="400" rx="14" fill="#123c40"/>
-<text x="830" y="151" fill="#ffffff" font-family="DejaVu Sans,Arial,sans-serif" font-size="27" font-weight="700">abicheck</text>
-<text x="830" y="179" fill="#a9c6d9" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Evidence + declared contract</text>
-<text x="830" y="219" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">INPUTS</text>
-<text x="830" y="246" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Binaries + optional supporting inputs</text>
-<text x="830" y="289" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Debug info and public header AST</text>
-<text x="830" y="317" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Build context and source evidence</text>
-<text x="830" y="345" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="400">Dependencies and deployment target</text>
-<text x="830" y="397" fill="#86d9d1" font-family="DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="700">RESULT</text>
-<text x="830" y="429" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">ABI vs source-only break verdicts</text>
-<text x="830" y="457" fill="#dce5f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="15" font-weight="400">Evidence limits and contract context</text>
-<text x="32" y="546" fill="#bdcbe0" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400">Capability summary, not a benchmark. All three analyze types; none proves behavioral compatibility.</text>
-<text x="32" y="574" fill="#8ea3bf" font-family="DejaVu Sans,Arial,sans-serif" font-size="14" font-weight="400">Workflows and primary documentation linked in the README. Reviewed 2026-11-18.</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 480" role="img" aria-labelledby="title"><title id="title">Coverage of distinct compatibility scenarios on the 190-pair developer-authored catalog</title><rect width="1060" height="480" fill="white"/><g font-family="DejaVu Sans,Arial,sans-serif">
+<text x="25" y="38" font-size="28" fill="#17252a" text-anchor="start" font-weight="bold">Coverage of distinct compatibility scenarios</text>
+<text x="25" y="70" font-size="16" fill="#17252a" text-anchor="start" font-weight="normal">190 scenarios · 129 ABI/API breaks · 21 risks · 40 compatible or stable controls</text>
+<text x="916" y="108" font-size="16" fill="#17252a" text-anchor="start" font-weight="bold">D / R / U</text>
+<text x="305" y="145" font-size="15" fill="#17252a" text-anchor="end" font-weight="normal">abicheck · Clang + build/source</text>
+<rect x="315" y="127" width="507" height="25" fill="#207954"/>
+<text x="568.5" y="145" font-size="15" fill="white" text-anchor="middle" font-weight="normal">169</text>
+<rect x="822" y="127" width="63" height="25" fill="#a46908"/>
+<text x="853.5" y="145" font-size="15" fill="white" text-anchor="middle" font-weight="normal">21</text>
+<text x="916" y="145" font-size="15" fill="#17252a" text-anchor="start" font-weight="normal">169 / 21 / 0</text>
+<text x="305" y="184" font-size="15" fill="#17252a" text-anchor="end" font-weight="normal">abicheck · Clang + headers</text>
+<rect x="315" y="166" width="507" height="25" fill="#207954"/>
+<text x="568.5" y="184" font-size="15" fill="white" text-anchor="middle" font-weight="normal">169</text>
+<rect x="822" y="166" width="48" height="25" fill="#a46908"/>
+<text x="846.0" y="184" font-size="15" fill="white" text-anchor="middle" font-weight="normal">16</text>
+<rect x="870" y="166" width="15" height="25" fill="#ac4652"/>
+<text x="916" y="184" font-size="15" fill="#17252a" text-anchor="start" font-weight="normal">169 / 16 / 5</text>
+<text x="305" y="223" font-size="15" fill="#17252a" text-anchor="end" font-weight="normal">abidiff</text>
+<rect x="315" y="205" width="264" height="25" fill="#207954"/>
+<text x="447.0" y="223" font-size="15" fill="white" text-anchor="middle" font-weight="normal">88</text>
+<rect x="579" y="205" width="156" height="25" fill="#a46908"/>
+<text x="657.0" y="223" font-size="15" fill="white" text-anchor="middle" font-weight="normal">52</text>
+<rect x="735" y="205" width="150" height="25" fill="#ac4652"/>
+<text x="810.0" y="223" font-size="15" fill="white" text-anchor="middle" font-weight="normal">50</text>
+<text x="916" y="223" font-size="15" fill="#17252a" text-anchor="start" font-weight="normal">88 / 52 / 50</text>
+<text x="305" y="262" font-size="15" fill="#17252a" text-anchor="end" font-weight="normal">abidiff · header filter</text>
+<rect x="315" y="244" width="261" height="25" fill="#207954"/>
+<text x="445.5" y="262" font-size="15" fill="white" text-anchor="middle" font-weight="normal">87</text>
+<rect x="576" y="244" width="150" height="25" fill="#a46908"/>
+<text x="651.0" y="262" font-size="15" fill="white" text-anchor="middle" font-weight="normal">50</text>
+<rect x="726" y="244" width="159" height="25" fill="#ac4652"/>
+<text x="805.5" y="262" font-size="15" fill="white" text-anchor="middle" font-weight="normal">53</text>
+<text x="916" y="262" font-size="15" fill="#17252a" text-anchor="start" font-weight="normal">87 / 50 / 53</text>
+<text x="305" y="301" font-size="15" fill="#17252a" text-anchor="end" font-weight="normal">ABICC · Dumper</text>
+<rect x="315" y="283" width="327" height="25" fill="#207954"/>
+<text x="478.5" y="301" font-size="15" fill="white" text-anchor="middle" font-weight="normal">109</text>
+<rect x="642" y="283" width="57" height="25" fill="#a46908"/>
+<text x="670.5" y="301" font-size="15" fill="white" text-anchor="middle" font-weight="normal">19</text>
+<rect x="699" y="283" width="186" height="25" fill="#ac4652"/>
+<text x="792.0" y="301" font-size="15" fill="white" text-anchor="middle" font-weight="normal">62</text>
+<text x="916" y="301" font-size="15" fill="#17252a" text-anchor="start" font-weight="normal">109 / 19 / 62</text>
+<text x="305" y="340" font-size="15" fill="#17252a" text-anchor="end" font-weight="normal">ABICC · XML</text>
+<rect x="315" y="322" width="282" height="25" fill="#207954"/>
+<text x="456.0" y="340" font-size="15" fill="white" text-anchor="middle" font-weight="normal">94</text>
+<rect x="597" y="322" width="75" height="25" fill="#a46908"/>
+<text x="634.5" y="340" font-size="15" fill="white" text-anchor="middle" font-weight="normal">25</text>
+<rect x="672" y="322" width="213" height="25" fill="#ac4652"/>
+<text x="778.5" y="340" font-size="15" fill="white" text-anchor="middle" font-weight="normal">71</text>
+<text x="916" y="340" font-size="15" fill="#17252a" text-anchor="start" font-weight="normal">94 / 25 / 71</text>
+<rect x="30" y="372" width="16" height="16" fill="#207954"/>
+<text x="58" y="385" font-size="16" fill="#17252a" text-anchor="start" font-weight="normal">D   Correct definitive interface decision</text>
+<rect x="30" y="400" width="16" height="16" fill="#a46908"/>
+<text x="58" y="413" font-size="16" fill="#17252a" text-anchor="start" font-weight="normal">R   Advisory or change signal only</text>
+<rect x="30" y="428" width="16" height="16" fill="#ac4652"/>
+<text x="58" y="441" font-size="16" fill="#17252a" text-anchor="start" font-weight="normal">U   Unresolved, including misclassification, errors and timeouts</text>
+</g></svg>

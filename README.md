@@ -23,6 +23,13 @@
 
 ---
 
+![Coverage of 190 developer-authored compatibility scenarios across six workflows](docs/assets/readme/tool-comparison.svg)
+
+Each workflow compared the same 190 Release library pairs at abicheck revision `d9983e4a7cde`.
+Green counts correct definitive interface decisions, amber counts advisory or change signals,
+and red counts unresolved cases, including wrong classifications, errors and timeouts.
+The cohort includes 129 ABI/API breaks, 21 risks and 40 compatible or stable controls.
+
 ## The problem
 
 You ship a shared library. Other people's programs were compiled against version 1, and you are about to release version 2. If an exported function vanished, a struct field moved, a vtable slot shifted, or an enum was renumbered, those programs **crash, corrupt data silently, or refuse to load**. No compiler warns you, and a test suite that rebuilds from source never sees it.
@@ -182,7 +189,6 @@ This is a discoverability floor, not an accuracy score; the [tool comparison pag
 
 ## How it compares to other tools
 
-![Comparison of libabigail, ABICC and abicheck inputs and reports](docs/assets/readme/tool-comparison.svg)
 
 | Workflow | Inputs and result |
 |---|---|
