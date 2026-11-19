@@ -24,8 +24,9 @@ dispatch; this module only owns the descriptor type.
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ..model.snapshot import AbiSnapshot
@@ -84,3 +85,16 @@ def with_extraction_limitations(builder: Callable[..., Any]) -> Callable[..., An
         return snap
 
     return _build
+
+
+def detect_format(path: Path, handlers: Sequence[_FormatHandler]) -> str:
+    """Detect binary format from magic bytes. Returns the matching handler's name, or 'unknown'."""
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+    except OSError:
+        return "unknown"
+    for handler in handlers:
+        if handler.matches_magic(magic):
+            return handler.name
+    return "unknown"

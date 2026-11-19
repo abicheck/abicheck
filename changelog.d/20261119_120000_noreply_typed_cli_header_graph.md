@@ -1,0 +1,3 @@
+### Fixed
+
+- **A source break on a public-header type no export reaches stays in contract** — an API-break finding (a changed template default argument, a removed or renamed type member) on a type declared in a public header is judged in the `public` contract even when no exported function reaches the type, as with a class template that has no exported instantiation. Reachability from the export table had called such a type non-public and excluded the finding, so once the header graph made the surface resolvable a changed `template <class T, int N = 4>` default scored `NO_CHANGE`. The same unreachable type from a private header stays excluded, and binary-only kinds keep the reachability answer.

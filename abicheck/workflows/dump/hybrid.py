@@ -44,6 +44,11 @@ from ...storage import closure_identity
 from ...storage.header_ast_cache import ast_memoize_scope
 from ..run_dump_scope import extraction_scope
 from ..snapshot_factory import DependencyScopeInputs, SnapshotFinish, finish_snapshot
+from .default_header_graph import (
+    attach_typed_header_graph,
+    compile_context_from_options,
+    header_graph_suppressed,
+)
 from .formats import NativeExtractRequest
 from .hybrid_merge import merge_snapshots
 
@@ -54,6 +59,8 @@ def run_hybrid_dump(
     dump_fn: Callable[..., AbiSnapshot],
     so_path: Path,
     headers: list[Path],
+    *,
+    attach_graph: bool = True,
     **kwargs: Any,
 ) -> AbiSnapshot:
     """Run *dump_fn* (``dumper.dump``) once per real backend and merge.
@@ -67,12 +74,33 @@ def run_hybrid_dump(
     with (
         closure_identity.defer_closure_identity_renumbering(),
         suppress_dependency_exclusion(),
+        header_graph_suppressed(),
     ):
         castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
         clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
-    return closure_identity.renumber_anonymous_closure_identities(
-        merge_snapshots(castxml_snap, clang_snap)
-    )
+    merged = merge_snapshots(castxml_snap, clang_snap)
+    if attach_graph:
+        # One graph for the merged declarations; each leg's own graph would come
+        # from one backend's parse and carry only that backend's provenance.
+        merged = attach_typed_header_graph(
+            merged,
+            headers=headers,
+            includes=list(kwargs.get("extra_includes") or []),
+            lang=kwargs.get("lang"),
+            public_headers=kwargs.get("public_headers"),
+            public_header_dirs=kwargs.get("public_header_dirs"),
+            include_search_dirs=kwargs.get("public_include_search_dirs"),
+            enabled=not (kwargs.get("dwarf_only") or kwargs.get("symbols_only")),
+            compile=compile_context_from_options(
+                gcc_path=kwargs.get("gcc_path"),
+                gcc_prefix=kwargs.get("gcc_prefix"),
+                gcc_options=kwargs.get("gcc_options"),
+                gcc_option_tokens=kwargs.get("gcc_option_tokens") or (),
+                sysroot=kwargs.get("sysroot"),
+                nostdinc=bool(kwargs.get("nostdinc")),
+            ),
+        )
+    return closure_identity.renumber_anonymous_closure_identities(merged)
 
 
 def _forced_backend(
@@ -129,4 +157,6 @@ def compose_hybrid(
     # AST memoization (G31 Phase C): the caller's header-graph attach after
     # the merge is a real downstream consumer of both legs' parses.
     with ast_memoize_scope():
-        return run_hybrid_dump(_leg_for_backend, request.path, request.headers)
+        return run_hybrid_dump(
+            _leg_for_backend, request.path, request.headers, attach_graph=False
+        )

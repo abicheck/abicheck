@@ -398,14 +398,19 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         from abicheck.workflows import snapshot_factory
 
         dumper_src = pathlib.Path(dumper.__file__).read_text(encoding="utf-8")
-        # dumper reaches provenance through finish_binary_dump, which records
-        # build_mode and then delegates to finish_provenance exactly once.
+        # dumper reaches provenance through finish_scoped_dump (the tail
+        # moved out of dumper.py), which calls finish_binary_dump, which
+        # records build_mode and delegates to finish_provenance exactly once.
+        # Each hop has one call site, so the ownership chain has one decision.
         assert "finish_provenance(" not in dumper_src
-        assert dumper_src.count("finish_binary_dump(") == 1, (
+        assert "finish_binary_dump(" not in dumper_src
+        assert dumper_src.count("finish_scoped_dump(") == 1, (
             "dumper must reach declaration provenance through exactly one "
             "call; a second call site is a second place "
             "ownership can be decided"
         )
+        scoped_src = inspect.getsource(snapshot_factory.finish_scoped_dump)
+        assert scoped_src.count("finish_binary_dump(") == 1
         finish_binary_src = inspect.getsource(snapshot_factory.finish_binary_dump)
         assert finish_binary_src.count("finish_provenance(") == 1
         # appcompat supplies the same parameter rather than classifying

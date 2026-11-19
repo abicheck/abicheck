@@ -764,4 +764,18 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     87: GenerationSpellingChange(
         "Return-by-value and pointer facts: no stored type or name spelling changes. Function.return_by_value_fact is a new fact (castxml's type graph; clang's desugared return type resolved through the record and enum declarations), and a pointer member now carries an ABI fact (castxml's PointerType size; clang's probed void * size). Names, symbols and type spellings are unchanged; the return-convention and packing checks read these facts instead of spellings."
     ),
+    88: GenerationSpellingChange(
+        "Typed dump(): no stored type or name spelling changes. The typed API now attaches "
+        "the same default header-only graph the CLI attaches, through one owner "
+        "(workflows/dump/default_header_graph.py), so a typed snapshot records header-graph "
+        "facts it did not record before. The CLI output is unchanged. An older typed snapshot "
+        "carries no such graph and reads as not collected; no rewrite applies."
+    ),
+    89: GenerationSpellingChange(
+        "Typed dump() header graph: no stored type or name spelling changes. The graph is "
+        "parsed with the dump's own compile options (-D, -I, sysroot, nostdinc), so a "
+        "declaration gated by a macro is in the graph exactly when the snapshot's header "
+        "parse sees it. A snapshot dumped with options before this generation recorded a "
+        "graph without them; no rewrite applies."
+    ),
 }

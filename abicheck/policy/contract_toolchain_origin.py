@@ -50,6 +50,7 @@ from ..model.change_catalog.kinds import ChangeKind
 __all__ = [
     "DEPENDENCY_EDGE_KINDS",
     "DEPENDENCY_EDGE_KIND_SLUGS",
+    "TOOLCHAIN_NAME_UNBOUND_REASON",
     "TOOLCHAIN_RUNTIME_ORIGIN_REASON",
     "exclude_toolchain_runtime_findings",
 ]
@@ -57,6 +58,10 @@ __all__ = [
 #: The reason code an excluded finding carries (a key of
 #: ``contract_relevance_types.CONTRACT_REASON_CODES``).
 TOOLCHAIN_RUNTIME_ORIGIN_REASON = "toolchain_runtime_origin"
+
+#: The reason code a name-only runtime match carries when no snapshot has a
+#: symbol table to bind it (ADR-089 A8): the finding is not excluded.
+TOOLCHAIN_NAME_UNBOUND_REASON = "toolchain_runtime_name_unbound"
 
 _PUBLIC_ROOT_REASON = "public_root_membership"
 
@@ -88,6 +93,7 @@ def exclude_toolchain_runtime_findings(
     toolchain_symbols: Collection[str],
     *,
     is_runtime_name: Callable[[str], bool] | None = None,
+    symbol_table_evidence: bool = True,
 ) -> list[Any]:
     """*decisions* with every runtime-owned, unexcluded finding made out of contract.
 
@@ -96,9 +102,18 @@ def exclude_toolchain_runtime_findings(
     the decisions in order; a decision that is not replaced is returned as is.
 
     A finding is runtime-owned when its symbol is in *toolchain_symbols* (the
-    snapshots' own ELF tables), when *is_runtime_name* says so for a symbol no
-    table lists, or when its kind already attributes the symbol to an external
-    dependency.
+    snapshots' own ELF tables), when its kind already attributes the symbol to
+    an external dependency, or when *is_runtime_name* says so for a symbol no
+    table lists (a name-only match).
+
+    A name-only match is excluded only when *symbol_table_evidence* is true:
+    some snapshot carries a symbol table, so a symbol no table lists is itself
+    evidence that the library does not emit it. With no symbol table at all
+    (PE, Mach-O: no binding records), the name alone cannot tell a runtime
+    copy from a library export, so the decision stands, its assurance drops to
+    ``PARTIAL`` and the reason is recorded as ``toolchain_runtime_name_unbound``
+    (ADR-089 A8). A finding the surface already places in contract keeps its
+    decision untouched.
     """
     out: list[Any] = []
     for change, decision in zip(changes, decisions, strict=True):
@@ -106,29 +121,40 @@ def exclude_toolchain_runtime_findings(
             decision.relevance is not NON_ENTITY_RELEVANCE
             and decision.reason_code != _PUBLIC_ROOT_REASON
         ):
-            reason = _exclusion_reason(change, toolchain_symbols, is_runtime_name)
-            if reason is not None:
+            owner = _runtime_owner(change, toolchain_symbols, is_runtime_name)
+            if owner is _BY_NAME and not symbol_table_evidence:
+                if decision.relevance is not ContractRelevance.IN_CONTRACT:
+                    decision = replace(
+                        decision,
+                        reason_code=TOOLCHAIN_NAME_UNBOUND_REASON,
+                        assurance=ContractAssurance.PARTIAL,
+                    )
+            elif owner is not None:
                 decision = replace(
                     decision,
                     relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
-                    reason_code=reason,
+                    reason_code=TOOLCHAIN_RUNTIME_ORIGIN_REASON,
                     assurance=ContractAssurance.COMPLETE,
                 )
         out.append(decision)
     return out
 
 
-def _exclusion_reason(
+#: How a finding was attributed to the runtime: by binding-bearing evidence
+#: (a symbol-table entry or the detector's own attribution) or by name alone.
+_BY_TABLE = "table"
+_BY_NAME = "name"
+
+
+def _runtime_owner(
     change: Any,
     toolchain_symbols: Collection[str],
     is_runtime_name: Callable[[str], bool] | None,
 ) -> str | None:
     kind = getattr(change, "kind", None)
     symbol = change.symbol or ""
-    if (
-        kind in _EXTERNAL_ORIGIN_KINDS
-        or (symbol and symbol in toolchain_symbols)
-        or (is_runtime_name is not None and is_runtime_name(symbol))
-    ):
-        return TOOLCHAIN_RUNTIME_ORIGIN_REASON
+    if kind in _EXTERNAL_ORIGIN_KINDS or (symbol and symbol in toolchain_symbols):
+        return _BY_TABLE
+    if is_runtime_name is not None and is_runtime_name(symbol):
+        return _BY_NAME
     return None

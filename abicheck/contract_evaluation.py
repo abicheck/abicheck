@@ -67,6 +67,7 @@ from .contract_relevance_types import (
 from .export_surface import ExportSurface
 from .model import ScopeOrigin
 from .model.change import Change
+from .model.change_catalog.assembled import API_BREAK_KINDS
 from .model.change_catalog.kinds import ChangeKind
 from .policy.class_metadata_identity import (
     class_metadata_owner_confirmed,
@@ -192,24 +193,12 @@ _REASON_POST_MANIFEST_NOT_COMMITTED = "not in POST manifest committed surface"
 # "Private-header provenance alone is never terminal while such a [stronger]
 # provider is missing, failed, stale, partial, or identity-ambiguous."
 # `REASON_PRIVATE_HEADER`/`REASON_SYSTEM_HEADER` are treated as
-# unconditionally terminal here regardless of whether some *other*,
-# stronger provider (an exact manifest beyond `--post-manifest`, a
-# required-symbol overlay beyond `force_public_symbols`, concrete
-# consumer-import evidence) was configured for this run and hasn't
-# completed -- because this module has no persisted provider-completeness
-# ledger to consult at all (see the module docstring's own "provider ledger
-# ... is not built yet"), not because the two known, wireable providers
-# this module *can* already see are ignored: `force_public_symbols` and
-# `--post-manifest` (`_REASON_POST_MANIFEST_NOT_COMMITTED`) are both
-# checked and, by construction, can never coexist with reaching this
-# terminal-reason branch for the same finding (each fully resolves the
-# finding itself, one way or the other, before this branch is reached).
-# The remaining risk is entirely providers this codebase does not yet wire
-# as an input anywhere (no caller anywhere constructs "an exact manifest
-# was configured and is still loading" data) -- building that ledger is
-# Phase 3's own gate item ("every shadow delta has evidence") and Phase 4/5
-# territory (`docs/contribute/plans/public-contract-default.md`), not a
-# narrow fix available with today's data model.
+# unconditionally terminal here because this module has no persisted
+# provider-completeness ledger to consult (see the module docstring). The two
+# wireable providers it can see, `force_public_symbols` and `--post-manifest`
+# (`_REASON_POST_MANIFEST_NOT_COMMITTED`), each resolve the finding before
+# this branch. Building that ledger is Phase 4/5 territory
+# (`docs/contribute/plans/public-contract-default.md`).
 _TERMINAL_SURFACE_REASONS: frozenset[str] = frozenset(
     {
         REASON_NON_PUBLIC_TYPE,
@@ -342,18 +331,24 @@ def _decision_for_surface_reason(
     can't tell" case `_origin_reason` also routes here) still degrades to
     the weak, unresolved default.
     """
+    # A source-contract finding (an API_BREAK kind) on a type declared in a
+    # public header is in the `public` domain whether or not an export reaches
+    # the type: a header-only template has no exported root at all.
+    source_on_public_type = (
+        reason == REASON_NON_PUBLIC_TYPE and change.kind in API_BREAK_KINDS
+    )
+    if (
+        reason == REASON_NOT_EXPORTED or source_on_public_type
+    ) and _symbol_authoritative_origin_is_public_header(change, surf_old, surf_new):
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
     if reason in _TERMINAL_SURFACE_REASONS:
         return ContractEvaluationDecision(
             relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
             reason_code="terminal_authoritative_exclusion",
-            assurance=ContractAssurance.COMPLETE,
-        )
-    if reason == REASON_NOT_EXPORTED and _symbol_authoritative_origin_is_public_header(
-        change, surf_old, surf_new
-    ):
-        return ContractEvaluationDecision(
-            relevance=ContractRelevance.IN_CONTRACT,
-            reason_code="public_root_membership",
             assurance=ContractAssurance.COMPLETE,
         )
     return _unresolved_decision(

@@ -144,10 +144,10 @@ def _graphs_attached(
     # The recorder runs in the member's worker; keep members on threads so
     # its observations land in this process.
     monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", "0")
-    import abicheck.workflows.dump.native as native
+    import abicheck.workflows.dump.default_header_graph as default_header_graph
     from abicheck.cli import main
 
-    real_attach = native._attach_header_graph
+    real_attach = default_header_graph._attach_header_graph
     seen: dict[str, tuple[str, ...]] = {}
 
     def _recording(*args: object, **kwargs: object) -> object:
@@ -161,7 +161,7 @@ def _graphs_attached(
                 seen[snap.library] = ids
         return snap
 
-    monkeypatch.setattr(native, "_attach_header_graph", _recording)
+    monkeypatch.setattr(default_header_graph, "_attach_header_graph", _recording)
     # Each invocation gets its own empty whole-snapshot cache: the spy only
     # sees graphs attached by a *fresh* dump, so a warm hit served from an
     # earlier invocation in the same test would make this run observe nothing

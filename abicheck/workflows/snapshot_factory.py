@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING, Any
 from ..model import AbiSnapshot
 
 if TYPE_CHECKING:
+    from ..compile_context import CompileContext
     from ..model.ownership_rules import OwnershipRequest
 
 __all__ = [
@@ -171,6 +172,72 @@ def finish_provenance(
     )
 
 
+def finish_scoped_dump(
+    snapshot: AbiSnapshot,
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+    *,
+    include_search_dirs: list[Path] | None,
+    read_dwarf: bool,
+    debug_info_path: Path | None,
+    headers: list[Path],
+    extra_includes: list[Path],
+    lang: str | None,
+    suppressed: bool,
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
+) -> AbiSnapshot:
+    """Finish a typed dump's snapshot with its public scope and header graph.
+
+    Provenance tagging runs first, then the default header-only graph is
+    attached with the dump's compile options, so the graph's header parse sees
+    the same -D/-I/sysroot/nostdinc context as the snapshot's own parse.
+
+    Explicit public headers still define the provenance boundary. Include-search
+    directories fold into it only once a real public set has opted provenance
+    in: a header-AST dump parses only declarations reachable by #include from its
+    own -H roots, so a header under the same include root that the umbrella
+    header pulled in is not a private implementation detail merely because it
+    is not the literal -H file.
+
+    The caller's extra include path is deliberately not folded in: it is the full
+    compile include path, which also carries directories auto-derived only so an
+    umbrella header's own relative #includes resolve (typically the umbrella's
+    own directory). That directory can hold a genuinely private sibling header,
+    so folding it in would defeat private-header scoping. *include_search_dirs*
+    carries only the directories a caller can attest as an explicit dependency
+    search declaration (a literal -I/--include).
+
+    Explicit is still not owned: provenance keeps only the roots the run's own
+    declared public headers live under. An -I a library passes only so a
+    dependency's #include resolves stays compile context; see
+    ``extract.public_root_ownership``.
+    """
+    from .dump.default_header_graph import compile_context_from_options
+
+    compile_ctx = compile_context_from_options(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+    )
+    return finish_binary_dump(
+        snapshot,
+        public_headers,
+        public_header_dirs,
+        include_search_dirs=include_search_dirs,
+        read_dwarf=read_dwarf,
+        debug_info_path=debug_info_path,
+        graph_inputs=(headers, extra_includes, lang, suppressed, compile_ctx),
+    )
+
+
 def finish_binary_dump(
     snapshot: AbiSnapshot,
     public_headers: Sequence[Path] | None,
@@ -179,20 +246,45 @@ def finish_binary_dump(
     include_search_dirs: Sequence[Path] | None = None,
     read_dwarf: bool = True,
     debug_info_path: Path | None = None,
+    graph_inputs: (
+        tuple[list[Path], list[Path], str | None, bool]
+        | tuple[list[Path], list[Path], str | None, bool, CompileContext | None]
+        | None
+    ) = None,
 ) -> AbiSnapshot:
     """``dumper.dump``'s shared tail for every binary format: record the
     image's own build mode (ELF ``DW_AT_producer``/``DW_AT_language``/
     ``.comment``, falling back to the detached *debug_info_path*; Mach-O
     dSYM/``__DWARF``; see :mod:`abicheck.extract.build_mode_capture`), then
-    :func:`finish_provenance`."""
+    :func:`finish_provenance`, then the default header-only graph when
+    *graph_inputs* is ``(headers, includes, lang, suppressed[, compile])``. The -H headers
+    are the public surface for the graph when no narrower set is given, as the
+    CLI's dump treats them."""
     from ..extract.build_mode_capture import capture_build_mode
 
     capture_build_mode(snapshot, read_dwarf=read_dwarf, debug_info_path=debug_info_path)
-    return finish_provenance(
+    snapshot = finish_provenance(
         snapshot,
         public_headers,
         public_header_dirs,
         include_search_dirs=include_search_dirs,
+    )
+    if graph_inputs is None:
+        return snapshot
+    from .dump.default_header_graph import attach_typed_header_graph
+
+    headers, includes, lang, suppressed, *rest = graph_inputs
+    compile_ctx = rest[0] if rest else None
+    return attach_typed_header_graph(
+        snapshot,
+        headers=headers,
+        includes=includes,
+        lang=lang,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        include_search_dirs=include_search_dirs,
+        enabled=not suppressed,
+        compile=compile_ctx,
     )
 
 

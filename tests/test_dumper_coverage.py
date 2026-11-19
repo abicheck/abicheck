@@ -683,6 +683,14 @@ class TestCastxmlParserAccessLevel:
         assert types[0].fields[0].access == AccessLevel.PRIVATE
 
 
+def _detect_format(path: Path) -> str:
+    """The format of *path* under the dumper's own handler registry."""
+    from abicheck.dumper import _FORMAT_HANDLERS
+    from abicheck.extract.binary_format import detect_format
+
+    return detect_format(path, _FORMAT_HANDLERS)
+
+
 # ── _detect_format ──────────────────────────────────────────────────────────
 
 
@@ -690,56 +698,48 @@ class TestDetectFormat:
     """Test magic-byte format detection."""
 
     def test_elf(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _detect_format
 
         f = tmp_path / "lib.so"
         f.write_bytes(b"\x7fELF\x00\x00")
         assert _detect_format(f) == "elf"
 
     def test_macho_le64(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _detect_format
 
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\xcf\xfa\xed\xfe")
         assert _detect_format(f) == "macho"
 
     def test_macho_be32(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _detect_format
 
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\xfe\xed\xfa\xce")
         assert _detect_format(f) == "macho"
 
     def test_macho_fat(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _detect_format
 
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\xca\xfe\xba\xbe")
         assert _detect_format(f) == "macho"
 
     def test_pe(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _detect_format
 
         f = tmp_path / "lib.dll"
         f.write_bytes(b"MZ\x90\x00")
         assert _detect_format(f) == "pe"
 
     def test_unknown(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _detect_format
 
         f = tmp_path / "lib.bin"
         f.write_bytes(b"\x00\x01\x02\x03")
         assert _detect_format(f) == "unknown"
 
     def test_oserror(self, tmp_path: Path) -> None:
-        from abicheck.dumper import _detect_format
 
         assert _detect_format(tmp_path / "nonexistent.so") == "unknown"
 
     def test_ar_archive_is_unknown(self, tmp_path: Path) -> None:
         # ar archives are not a single linkable image; _detect_format does not
         # classify them (dump() rejects them separately with guidance — G8).
-        from abicheck.dumper import _detect_format
 
         f = tmp_path / "libfoo.a"
         f.write_bytes(b"!<arch>\n" + b"\x00" * 16)
@@ -785,7 +785,7 @@ class TestDumpRoutingMachoPe:
         import abicheck.macho_metadata as _macho_mod
 
         with (
-            patch.object(dumper, "_detect_format", return_value="macho"),
+            patch.object(dumper, "detect_format", return_value="macho"),
             patch.object(_macho_mod, "parse_macho_metadata", return_value=mock_meta),
             patch.object(
                 castxml_backend, "castxml_dump", return_value=([], [], None, [])
@@ -816,7 +816,7 @@ class TestDumpRoutingMachoPe:
         import abicheck.pe_metadata as _pe_mod
 
         with (
-            patch.object(dumper, "_detect_format", return_value="pe"),
+            patch.object(dumper, "detect_format", return_value="pe"),
             patch.object(_pe_mod, "parse_pe_metadata", return_value=mock_meta),
             patch.object(
                 castxml_backend, "castxml_dump", return_value=([], [], None, [])
@@ -836,7 +836,7 @@ class TestDumpRoutingMachoPe:
         f = tmp_path / "weird.bin"
         f.write_bytes(b"\x00\x01\x02\x03")
 
-        with patch.object(dumper, "_detect_format", return_value="unknown"):
+        with patch.object(dumper, "detect_format", return_value="unknown"):
             with pytest.raises(ValueError, match="(?i)unknown|unrecogni"):
                 dump(f, headers=[], version="1.0")
 

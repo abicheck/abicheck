@@ -41,8 +41,8 @@ a shared fixture would let a later measurement silently hit a disk-cache
 entry an earlier one already wrote for the identical path, understating the
 genuine cold-invocation cost this gate exists to catch. Then time:
 
-* ``dump_ms`` — ``dumper.dump(so, [header], header_backend=...)``, which
-  does **not** itself attach the header graph (see
+* ``dump_ms`` — ``dumper.dump(so, [header], header_backend=...)`` with its
+  own graph attach suppressed, as the CLI does, so it does **not** attach it (see
   ``abicheck/buildsource/CLAUDE.md``'s ``header_graph.py`` row: the attach
   step lives in ``service.py``, not ``dumper.py``), run inside
   ``dumper_cache.ast_memoize_scope()`` — the exact scope
@@ -146,6 +146,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gc
 import importlib.util
 import json
@@ -517,6 +518,15 @@ def _header_call_graph_pass() -> str:
     return HEADER_CALL_GRAPH_PASS
 
 
+def _graph_suppressed_scope() -> Any:
+    """Scope in which the typed ``dump()`` skips its own header-graph attach (no-op on a base without it)."""
+    try:
+        from abicheck.workflows.dump.default_header_graph import header_graph_suppressed
+    except ImportError:
+        return contextlib.nullcontext()
+    return header_graph_suppressed()
+
+
 def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
     """Raise unless *snap*'s attached graph reflects a genuine clang AST parse.
 
@@ -615,23 +625,15 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
             inc_extra, deferred_tokens, extra_hash_dirs = _resolve_includes(header)
 
             t0 = time.perf_counter()
-            with dumper_cache.ast_memoize_scope():
+            with dumper_cache.ast_memoize_scope(), _graph_suppressed_scope():
                 snap = dump(
                     so,
                     [header],
                     extra_includes=inc_extra,
                     header_backend=backend,
-                    # None, not "c++": production normalizes the default
-                    # C++ request to None for both this call and the
-                    # _attach_header_graph call below (service.py's
-                    # `lang if lang == "c" else None`) -- lang is part of
-                    # clang_header_dump's AST cache key, so passing the
-                    # unnormalized "c++" here exercised a different cache
-                    # key than the one a real default-C++ dump computes
-                    # (Codex review). Auto-detection (_detect_cpp_headers)
-                    # still resolves this fixture as C++ correctly, since
-                    # its synthesized `namespace hgperf { ... }` is one of
-                    # the structural C++ patterns it matches.
+                    # None, not "c++": production normalizes the default C++
+                    # request to None, and lang is part of the AST cache key
+                    # (Codex review); auto-detection still resolves C++ here.
                     lang=None,
                     gcc_option_tokens=deferred_tokens,
                     extra_hash_dirs=extra_hash_dirs,
@@ -641,9 +643,8 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
             t2 = time.perf_counter()
             attached = _attach_header_graph(
                 snap,
-                # Keyword, not positional -- two adjacent bare `True`s made
-                # this call fragile to a silent reordering (CodeRabbit
-                # review). Production (service._run_dump_uncached) always
+                # Keyword, not positional (CodeRabbit review). Production
+                # (service._run_dump_uncached) always
                 # passes _HEADER_GRAPH_INCLUDES_ENABLED (a module constant,
                 # True since G31 Phase A) alongside header_graph, not just
                 # the bare AST-attach flag -- that second flag drives
@@ -656,8 +657,7 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
                 header_graph_includes=True,
                 headers=[header],
                 includes=[],
-                # None, matching the primary dump() call above -- see its
-                # own comment (Codex review).
+                # None, matching the primary dump() call above.
                 lang=None,
                 compile=CompileContext(),
                 public_headers=None,
@@ -762,7 +762,7 @@ def _memory_probe(n: int, backend: str) -> dict[str, float]:
     with tempfile.TemporaryDirectory(prefix="hgperf_mem_") as tmp:
         so, header = _build_fixture(Path(tmp), n, memory_shaped=True)
         inc_extra, deferred_tokens, extra_hash_dirs = _resolve_includes(header)
-        with dumper_cache.ast_memoize_scope():
+        with dumper_cache.ast_memoize_scope(), _graph_suppressed_scope():
             snap = dump(
                 so,
                 [header],

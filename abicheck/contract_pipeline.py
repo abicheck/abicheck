@@ -149,6 +149,10 @@ class ContractEvaluationStage:
     #: The same origin test over any name, for a finding whose symbol no ELF
     #: table lists (``export_accounting.toolchain_runtime_name_predicate``).
     toolchain_name_predicate: Callable[[str], bool] | None = None
+    #: Whether some snapshot carries a symbol table (an ELF table). A name-only
+    #: runtime match binds to nothing without one (ADR-089 A8): PE and Mach-O
+    #: targets keep such a finding gating at partial assurance.
+    symbol_table_evidence: bool = True
     #: Each side's dependency internals no public declaration reaches
     #: (``workflows.dump.dependency_internals``), for the findings
     #: :func:`~abicheck.policy.contract_dependency_origin.exclude_unreachable_dependency_findings`
@@ -216,6 +220,7 @@ class ContractEvaluationStage:
             decisions,
             self.toolchain_symbols,
             is_runtime_name=self.toolchain_name_predicate,
+            symbol_table_evidence=self.symbol_table_evidence,
         )
         decisions = exclude_unreachable_dependency_findings(
             fresh,
@@ -717,6 +722,9 @@ def build_contract_stage(
         toolchain_symbols=toolchain_symbols,
         toolchain_name_predicate=toolchain_runtime_name_predicate(
             [snap for snap in (old, new) if snap is not None]
+        ),
+        symbol_table_evidence=any(
+            snap.elf is not None for snap in (old, new) if snap is not None
         ),
     )
 

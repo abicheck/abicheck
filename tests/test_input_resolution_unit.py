@@ -304,7 +304,8 @@ class TestResolveInput:
         with (
             fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
+                return_value=snap,
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c++")
@@ -324,7 +325,8 @@ class TestResolveInput:
         with (
             fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
+                return_value=snap,
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c")
@@ -352,7 +354,8 @@ class TestResolveInput:
         with (
             fake_format_adapter("elf", result=snap) as mock_dump_elf,
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
+                return_value=snap,
             ),
         ):
             run_dump(
@@ -385,7 +388,8 @@ class TestResolveInput:
         with (
             fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
+                return_value=snap,
             ) as mock_attach,
         ):
             run_dump(
@@ -416,7 +420,8 @@ class TestResolveInput:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
+                return_value=snap,
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="c++")
@@ -435,7 +440,8 @@ class TestResolveInput:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
+                return_value=snap,
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="C")
