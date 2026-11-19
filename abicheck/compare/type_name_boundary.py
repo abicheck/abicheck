@@ -27,11 +27,16 @@ different scopes apart is ``compare/type_symbol_disambiguation``'s job.
 
 from __future__ import annotations
 
+import string
 
-def _is_ident(ch: str) -> bool:
-    return ch.isalnum() or ch == "_"
+from ..model.execution_cache import memoized
+
+#: Characters that continue an identifier. A non-ASCII letter also counts
+#: (``isalnum``), checked only when the character is not in this set.
+_IDENT = frozenset(string.ascii_letters + string.digits + "_")
 
 
+@memoized(maxsize=1 << 16)
 def occurs_as_identifier(name: str, text: str) -> bool:
     """True when *name* occurs in *text* with no identifier character
     immediately before or after that occurrence."""
@@ -40,9 +45,11 @@ def occurs_as_identifier(name: str, text: str) -> bool:
     start = text.find(name)
     while start != -1:
         end = start + len(name)
-        before = text[start - 1] if start else ""
-        after = text[end] if end < len(text) else ""
-        if not (before and _is_ident(before)) and not (after and _is_ident(after)):
+        before = text[start - 1] if start else " "
+        after = text[end] if end < len(text) else " "
+        if not (before in _IDENT or before.isalnum()) and not (
+            after in _IDENT or after.isalnum()
+        ):
             return True
         start = text.find(name, start + 1)
     return False
