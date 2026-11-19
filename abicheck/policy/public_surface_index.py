@@ -240,6 +240,9 @@ def _index_surface_types(
     all matching types and the closure marks every one public — over-keeping is
     the safe direction (never hide a real break behind snapshot order).
 
+    Also records the header-proven ``std_reexports`` as public-header origins,
+    so a using-declaration of a ``std::`` name is a declared public name.
+
     Deliberately keyed off the flat ``snapshot.types``/``.enums`` lists, not
     the (deduplicating) graph node set — see this module's own docstring for
     why that distinction matters for ``ambiguous_type_names`` specifically.
@@ -312,6 +315,17 @@ def _index_surface_types(
     surface.ambiguous_type_names.update(
         name for name, count in combined_counts.items() if count > 1
     )
+    # A namespace-scope using-declaration in a public header declares its name
+    # into the public surface (ADR-049 D4). The header backend records only the
+    # re-exports a public header declares (``std_reexports``), so each one is a
+    # public-header declaration of its own name: a removed ``using std::abs;``
+    # is then a declared-public change, not one the surface lacks entirely.
+    for declared in snap.std_reexports or {}:
+        _record_origin(
+            surface,
+            {declared, declared.rsplit("::", 1)[-1]},
+            ScopeOrigin.PUBLIC_HEADER,
+        )
     return record_by_name, enum_by_name
 
 
