@@ -50,6 +50,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.member_kind` | `MemberKind` | castxml, clang | consumed | ✅ | — | — | — | — |
 | `Function.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
+| `Function.return_by_value` | `bool` | castxml, clang | consumed | ✅ | — | — | — | — |
 | `Function.return_type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `Function.return_type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
 | `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |

@@ -402,6 +402,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "field_bitfield_changed",
                 "field_renamed",
                 "flexible_array_member_changed",
+                "struct_return_convention_changed",
                 "type_added",
                 "type_alignment_changed",
                 "type_base_changed",

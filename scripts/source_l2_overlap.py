@@ -279,6 +279,10 @@ _JUDGED: dict[str, Row] = {
         L4_ONLY, note="declaration without its binary symbol"
     ),
     "SOURCE_FACT_COVERAGE_INCOMPLETE": Row(L4_ONLY, note="fact-coverage meta finding"),
+    "STRUCT_RETURN_CONVENTION_CHANGED": Row(
+        L2_ONLY,
+        note="header-visible SysV return class; the source tier keeps no return convention",
+    ),
     "TEMPLATE_BODY_CHANGED": Row(L4_ONLY, note="template body fingerprint"),
     "UNINSTANTIATED_TEMPLATE_REMOVED": Row(
         L4_ONLY,

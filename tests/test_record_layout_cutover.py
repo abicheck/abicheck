@@ -86,8 +86,18 @@ def _run(old: AbiSnapshot, new: AbiSnapshot, o: RecordType, n: RecordType):
         o.name,
         o,
         n,
-        record_layout_index(old.canonical_ir, old.declarations.types),
-        record_layout_index(new.canonical_ir, new.declarations.types),
+        record_layout_index(
+            old.canonical_ir,
+            old.declarations.types,
+            old.elf,
+            old.declarations.functions,
+        ),
+        record_layout_index(
+            new.canonical_ir,
+            new.declarations.types,
+            new.elf,
+            new.declarations.functions,
+        ),
     )
     return [(c.kind, c.old_value, c.new_value) for c in got]
 

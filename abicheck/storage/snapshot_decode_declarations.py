@@ -46,11 +46,11 @@ from .entity_id_codec import decode_entity_id_list, decode_sidecar_entity_ids
 from .fact_codec import (
     decode_enum_facts,
     decode_field_facts,
-    decode_function_facts,
     decode_param_facts,
     decode_record_facts,
     decode_variable_facts,
 )
+from .fact_codec_function import decode_function_facts
 
 # One dict lookup per row instead of `Enum.__call__` (see `decode_memo`).
 _ParamKind = enum_decoder(ParamKind)

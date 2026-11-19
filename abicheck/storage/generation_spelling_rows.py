@@ -761,4 +761,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "removed declaration (func_removed), not an export loss, on the castxml route. "
         "An older snapshot carries no such fact, which reads as no evidence, and no rewrite applies."
     ),
+    87: GenerationSpellingChange(
+        "Return-by-value and pointer facts: no stored type or name spelling changes. Function.return_by_value_fact is a new fact (castxml's type graph; clang's desugared return type resolved through the record and enum declarations), and a pointer member now carries an ABI fact (castxml's PointerType size; clang's probed void * size). Names, symbols and type spellings are unchanged; the return-convention and packing checks read these facts instead of spellings."
+    ),
 }
