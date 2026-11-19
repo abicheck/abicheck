@@ -591,20 +591,23 @@ def parse_functions(
             name,
             no_binary_evidence=no_binary_evidence,
         )
+        rt = return_type_facts(
+            entry.node,
+            ret_type,
+            entry.scope,
+            builtin_abi,
+            typedef_abi_facts,
+            entry.template_type_param_names,
+            type_identities,
+        )
         funcs.append(
             Function(
                 name=name,
                 mangled=mangled,
                 return_type=ret_type,
-                **return_type_facts(
-                    entry.node,
-                    ret_type,
-                    entry.scope,
-                    builtin_abi,
-                    typedef_abi_facts,
-                    entry.template_type_param_names,
-                    type_identities,
-                ),
+                return_type_identities_fact=rt["return_type_identities_fact"],
+                return_type_abi_fact=rt["return_type_abi_fact"],
+                return_by_value_fact=rt["return_by_value_fact"],
                 params=params,
                 visibility=vis,
                 **surface_facts,

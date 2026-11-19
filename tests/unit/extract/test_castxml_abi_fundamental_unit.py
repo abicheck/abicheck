@@ -37,7 +37,11 @@ from abicheck.extract.headers.castxml.abi_fundamental import (
     castxml_type_abi_fact,
     probe_plain_char_unsigned,
 )
-from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from abicheck.model.abi_fundamental import (
+    AbiFundamental,
+    FundamentalEncoding,
+    Indirection,
+)
 from abicheck.model.fact import Fact
 
 _S = FundamentalEncoding.SIGNED
@@ -275,7 +279,7 @@ def test_a_pointer_is_one_unsigned_word_of_its_declared_size() -> None:
     # Pointer width is castxml's own size (bits), not an assumed target.
     ctx = _ctx(_node("PointerType", "_p", type="_i", size="64", align="64"))
     assert castxml_abi_fundamental(ctx, "_p") == AbiFundamental(
-        FundamentalEncoding.UNSIGNED, 8, 8
+        FundamentalEncoding.UNSIGNED, 8, 8, 0, Indirection.POINTER
     )
 
 

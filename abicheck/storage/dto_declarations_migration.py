@@ -7,7 +7,7 @@ registered there in ``_MIGRATIONS`` like every other step.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 __all__ = ["declarations_v1_to_v2"]
@@ -29,15 +29,38 @@ def declarations_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def declarations_v2_to_v3(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Declarations v2 -> v3: ``Function.return_by_value_fact`` is new. A v2
-    writer never wrote the key, so the payload is unchanged and every function
-    reads as "not determined" (unset), which never fires the by-value
-    return-convention check. A v2 payload that already carries the key was not
-    written by a v2 writer, so it is refused rather than migrated."""
+    """Declarations v2 -> v3: ``Function.return_by_value_fact`` is new, and every
+    ABI fact carries an ``indirection`` kind (none, pointer or reference). A v2
+    writer never wrote either, so the payload is unchanged: a function reads as
+    "not determined" for the by-value fact, and an ABI fact without the kind reads
+    as ``none``, the pre-kind meaning. A v2 payload that already carries either is
+    refused rather than migrated, since a v2 writer never wrote it."""
+
+    def carries_indirection(node: Any) -> bool:
+        if isinstance(node, Mapping):
+            if "indirection" in node and "encoding" in node:
+                return True
+            return any(carries_indirection(v) for v in node.values())
+        if isinstance(node, list):
+            return any(carries_indirection(v) for v in node)
+        return False
+
     for fn in payload.get("functions", ()):
         if isinstance(fn, Mapping) and "return_by_value_fact" in fn:
             raise ValueError(
                 "'declarations' section v2 carries 'return_by_value_fact', "
                 "which only a v3 writer emits"
             )
+    if carries_indirection(payload):
+        raise ValueError(
+            "'declarations' section v2 carries an ABI fact 'indirection' kind, "
+            "which only a v3 writer emits"
+        )
     return payload
+
+
+#: The ``"declarations"`` section's migration steps, from each version it reads.
+DECLARATIONS_MIGRATIONS: dict[int, Callable[[Mapping[str, Any]], Mapping[str, Any]]] = {
+    1: declarations_v1_to_v2,
+    2: declarations_v2_to_v3,
+}
