@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,19 @@ def _require_toolchain() -> None:
             pytest.skip(f"{tool} is not on PATH; this integration test needs it")
 
 
+def _identity_args(name: str) -> list[str]:
+    """Pin the library's identity so the old and new builds compare equal.
+
+    Without this, macOS records the output path as the install name, and the
+    two builds (written to different directories) read as ``SONAME_CHANGED``,
+    a finding unrelated to the re-export under test. Linux records no soname
+    unless one is given; giving the same one to both sides changes nothing.
+    """
+    if sys.platform == "darwin":
+        return [f"-Wl,-install_name,@rpath/{name}"]
+    return [f"-Wl,-soname,{name}"]
+
+
 def _build(tmp: Path, stem: str, header: str, source: str) -> tuple[Path, Path]:
     """Compile one shared library from *source* with *header* as its public header."""
     tmp.mkdir(parents=True, exist_ok=True)
@@ -56,6 +70,7 @@ def _build(tmp: Path, stem: str, header: str, source: str) -> tuple[Path, Path]:
             "-shared",
             "-fPIC",
             "-std=c++17",
+            *_identity_args(so.name),
             "-I",
             str(tmp),
             str(src),
@@ -145,6 +160,7 @@ def test_private_bare_name_collision_keeps_the_reexport_finding(tmp_path: Path) 
                 "-shared",
                 "-fPIC",
                 "-std=c++17",
+                *_identity_args(so.name),
                 "-I",
                 str(tmp_path),
                 "-I",
