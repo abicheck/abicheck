@@ -164,6 +164,8 @@ def parse_abidiff(text: str) -> dict[str, dict]:
 def parse_abicc(xml_text: str) -> dict[str, dict]:
     out: dict[str, dict] = defaultdict(_empty)
     root = ET.fromstring(xml_text)
+    if root.tag != "report" or root.find("problem_summary") is None:
+        raise ValueError(f"not an ABICC report (root <{root.tag}>)")
     for t in root.iter("type"):
         name = (t.get("name") or "").removeprefix("struct ")
         if not re.fullmatch(r"s\d+", name):
@@ -194,6 +196,9 @@ def parse_abicc(xml_text: str) -> dict[str, dict]:
 
 
 def from_abicheck(report: dict) -> dict[str, dict]:
+    changes = report["changes"]
+    if not isinstance(changes, list) or not all(isinstance(c, dict) for c in changes):
+        raise ValueError("abicheck report: 'changes' is not a list of findings")
     out: dict[str, dict] = defaultdict(_empty)
     for c in report["changes"]:
         rec = out[c["symbol"].split("::")[0]]

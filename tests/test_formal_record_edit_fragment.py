@@ -310,7 +310,9 @@ def test_probe_values_convert_like_c() -> None:
 COMP = _load(FORMAL / "experiments" / "record_edit_competitors.py")
 
 
-@pytest.mark.parametrize("body", ["{}", '{"changes": [1]}', "{trunc"])
+@pytest.mark.parametrize(
+    "body", ["{}", '{"changes": [1]}', '{"changes": {}}', "{trunc"]
+)
 def test_one_unreadable_report_does_not_stop_the_others(
     tmp_path: Path, body: str
 ) -> None:
@@ -325,6 +327,16 @@ def test_one_unreadable_report_does_not_stop_the_others(
     assert parsed["abicheck"] is None and errors["abicheck"].startswith("parse_error")
     assert parsed["abidiff"]["s0"]["size"] is True
     assert parsed["abicc"] is None and errors["abicc"] == "error_or_unavailable"
+
+
+@pytest.mark.parametrize("xml", ["<not_a_report/>", "<report/>", "<report"])
+def test_abicc_output_that_is_not_a_report_is_a_parse_error(
+    tmp_path: Path, xml: str
+) -> None:
+    (tmp_path / "abicc_gcc.xml").write_text(xml)
+    status = {"abidiff": {"ok": False}, "abicc": {"ok": True}}
+    parsed, errors = COMP._parse_all(tmp_path, "gcc", status)
+    assert parsed["abicc"] is None and errors["abicc"].startswith("parse_error")
 
 
 def test_report_older_than_either_library_is_stale(tmp_path: Path) -> None:
