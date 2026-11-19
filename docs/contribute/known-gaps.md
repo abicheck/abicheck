@@ -120,6 +120,14 @@ the `--debug-info` and `deps.*` config homes were added, `--sources` stays a
 flag only, by design, and a directory/package `compare` now applies the
 dependency walk and debug roots to every member. No open gap remains.
 
+### Stripped {B,H} evidence
+
+#### A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2) (2026-11-17)
+
+**Status (2026-11-17): OPEN.** A library built with `-fpack-struct=1`, `-fshort-enums` or another layout flag the public header does not carry is audited at stripped `{B,H}` with the header dump taken without that flag. The dump's layout then disagrees with the binary: a tail-padding or inserted field reads `COMPATIBLE` while the binary breaks (`sizeof` 5 -> 6); a packed enum reads `ENUM_UNDERLYING_SIZE_CHANGED` (BREAKING) where the size is unchanged. Found by the stripped nightly lane (`field_added_in_tail_padding`, `field_inserted_in_padding`, `enum_append_wide_value`, `enum_underlying_narrow`, `field_removed_without_shrink` and `array_grown_into_padding`). The fix needs a signal that says "this `{B,H}` verdict cannot establish compatibility for a flag the header does not carry" (reduced assurance). No existing signal expresses it: `LAYOUT_UNVERIFIABLE` fires only for asymmetric evidence. The ADR is pending. Owner: `abiforge/model/expect.py` (expectation), the assurance model (ADR pending), plan §11.2 WS-2 (A3).
+
+<!-- no-canary: pinned by the stripped nightly's strict-xfail entries in abiforge/known.py, which fail once the answer changes -->
+
 ### Report and detector coverage
 
 #### A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth (2026-11-12)
