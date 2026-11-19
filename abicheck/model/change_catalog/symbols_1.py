@@ -84,6 +84,12 @@ _OBS_DH = observable(
     ("B", "H"),
     rationale="layout or type fact: DWARF and the public header both carry it",
 )
+#: A deleted member: only the DWARF DIE carries DW_AT_deleted, so the debug info names the
+#: deletion while the binary pair shows the removal.
+_OBS_D_DELETED = observable(
+    ("B", "D"),
+    rationale="deleted member: the DWARF DIE carries DW_AT_deleted, which the export table cannot show; without debug info the binary pair reports it as func_removed_elf_only",
+)
 _OBS_L5 = observable(("B", "H", "BD", "S", "G"), rationale="needs the source graph (G)")
 
 SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
@@ -337,6 +343,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_D_DELETED,),
     ),
     _E(
         "func_deprecated_added",

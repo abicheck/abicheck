@@ -1,0 +1,131 @@
+{
+ "cases": 1190,
+ "runs": {
+  "gcc/oracle": {
+   "intact": 12,
+   "intact_pairs": [
+    [
+     "i",
+     "ii"
+    ],
+    [
+     "i",
+     "il"
+    ],
+    [
+     "i",
+     "iii"
+    ],
+    [
+     "i",
+     "iil"
+    ],
+    [
+     "l",
+     "li"
+    ],
+    [
+     "l",
+     "ll"
+    ],
+    [
+     "l",
+     "lii"
+    ],
+    [
+     "d",
+     "dd"
+    ],
+    [
+     "ii",
+     "iii"
+    ],
+    [
+     "ii",
+     "iil"
+    ],
+    [
+     "il",
+     "iil"
+    ],
+    [
+     "li",
+     "lii"
+    ]
+   ]
+  },
+  "gcc/castxml": {
+   "agree": 1190,
+   "disagree": 0,
+   "examples": []
+  },
+  "gcc/clang": {
+   "agree": 1190,
+   "disagree": 0,
+   "examples": []
+  },
+  "clang/oracle": {
+   "intact": 12,
+   "intact_pairs": [
+    [
+     "i",
+     "ii"
+    ],
+    [
+     "i",
+     "il"
+    ],
+    [
+     "i",
+     "iii"
+    ],
+    [
+     "i",
+     "iil"
+    ],
+    [
+     "l",
+     "li"
+    ],
+    [
+     "l",
+     "ll"
+    ],
+    [
+     "l",
+     "lii"
+    ],
+    [
+     "d",
+     "dd"
+    ],
+    [
+     "ii",
+     "iii"
+    ],
+    [
+     "ii",
+     "iil"
+    ],
+    [
+     "il",
+     "iil"
+    ],
+    [
+     "li",
+     "lii"
+    ]
+   ]
+  },
+  "clang/castxml": {
+   "agree": 1190,
+   "disagree": 0,
+   "examples": []
+  },
+  "clang/clang": {
+   "agree": 1190,
+   "disagree": 0,
+   "examples": []
+  }
+ }
+}
