@@ -333,6 +333,37 @@ def test_one_unreadable_report_does_not_stop_the_others(
     assert parsed["abicc"] is None and errors["abicc"] == "error_or_unavailable"
 
 
+def test_main_scores_the_valid_tool_and_writes_the_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end through ``main``: abicheck's report is malformed, abidiff's is
+    valid; the summary is written, abicheck's cell names the error, abidiff
+    is scored."""
+    row = next(r for r in ROWS if r["rep"] and r["edit"][0] == 0)
+    for side in ("old", "new"):
+        (tmp_path / f"lib{side}_gcc_g.so").write_bytes(side.encode())
+    (tmp_path / "lib_hashes.json").write_text(
+        json.dumps({"gcc": FRAG.lib_hashes(tmp_path, "gcc")})
+    )
+    (tmp_path / "built_rows.json").write_text(json.dumps([row["id"]]))
+    (tmp_path / "compare_gcc_dwarf.json").write_text('{"changes": {}}')
+    (tmp_path / "abidiff_gcc.txt").write_text(
+        f"  in pointed to type 'struct s{row['id']}' at new.h:1:1:\n"
+    )
+    monkeypatch.setattr(
+        COMP,
+        "run_tools",
+        lambda out, cc: {"abidiff": {"ok": True}, "abicc": {"ok": False}},
+    )
+    assert COMP.main([str(tmp_path), "--compilers", "gcc"]) == 0
+    tools = json.loads((tmp_path / "competitors.json").read_text())["compilers"]["gcc"][
+        "tools"
+    ]
+    assert tools["abicheck"]["status"].startswith("parse_error")
+    assert tools["abicc"]["status"] == "error_or_unavailable"
+    assert tools["abidiff"]["claims"]["flagged"] == {"match": 1}
+
+
 @pytest.mark.parametrize("xml", ["<not_a_report/>", "<report/>", "<report"])
 def test_abicc_output_that_is_not_a_report_is_a_parse_error(
     tmp_path: Path, xml: str
