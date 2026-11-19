@@ -322,6 +322,11 @@ def change_to_dict(
     }
     if reclassified_by:
         d["reclassified_by"] = reclassified_by
+    # Schema 7.7: the member a field-level finding is about, as a typed key
+    # (``Change.field_name``, stamped by the TYPE_FIELD_*/STRUCT_FIELD_*
+    # emitters). Before, the member was readable only from ``description``.
+    if field_name := getattr(c, "field_name", None):
+        d["field_name"] = field_name
     # Two per-declaration blocks, omitted when absent (see their own field
     # docs on Change): `demangled_symbol`, a readable name for a finding whose
     # old-side declaration is export-table-only (`symbol`/`old_value` stay raw
@@ -450,6 +455,8 @@ def suppressed_change_entry(
         entry["impact_assessment"] = assessment.to_dict()
     if getattr(c, "symbol_binding", None):
         entry["symbol_binding"] = c.symbol_binding
+    if getattr(c, "field_name", None):
+        entry["field_name"] = c.field_name
     removed_insts = removed_instantiations_field(c)
     if removed_insts is not None:
         entry["removed_instantiations"] = removed_insts
