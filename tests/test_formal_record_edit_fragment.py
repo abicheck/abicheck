@@ -389,6 +389,22 @@ def test_a_report_without_its_library_record_is_not_scored(tmp_path: Path) -> No
     assert parsed["abicheck"] is None and "no library record" in errors["abicheck"]
 
 
+def test_a_truncated_library_record_is_an_abicheck_error(tmp_path: Path) -> None:
+    for side in ("old", "new"):
+        (tmp_path / f"lib{side}_gcc_g.so").write_bytes(side.encode())
+    (tmp_path / "compare_gcc_dwarf.json").write_text('{"changes": []}')
+    (tmp_path / "compare_gcc_dwarf.libs.json").write_text('{"old": "ab')
+    (tmp_path / "abidiff_gcc.txt").write_text(
+        "  in pointed to type 'struct s0' at n.h:1:1:\n"
+    )
+    status = {"abidiff": {"ok": True}, "abicc": {"ok": False}}
+    parsed, errors = COMP._parse_all(tmp_path, "gcc", status)
+    assert (
+        parsed["abicheck"] is None and "library record unreadable" in errors["abicheck"]
+    )
+    assert parsed["abidiff"]["s0"]["flagged"] is True
+
+
 @pytest.mark.integration
 @_LP64_EARLY
 def test_a_narrower_batch_in_the_same_directory_drops_the_old_dwarf_report(

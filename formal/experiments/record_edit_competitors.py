@@ -339,9 +339,14 @@ def _parse_all(out: Path, cc: str, status: dict) -> tuple[dict, dict]:
     errors: dict[str, str] = {}
     rep = out / f"compare_{cc}_dwarf.json"
     sidecar = out / f"compare_{cc}_dwarf.libs.json"
-    recorded = json.loads(sidecar.read_text()) if sidecar.exists() else None
+    recorded, sidecar_err = (
+        _read(sidecar, json.loads) if sidecar.exists() else (None, None)
+    )
     if not rep.exists():
         errors["abicheck"] = "unavailable: no dwarf-lane report"
+    elif sidecar_err:
+        # an interrupted batch can leave a half-written record
+        errors["abicheck"] = f"unavailable: library record unreadable ({sidecar_err})"
     elif recorded is None:
         errors["abicheck"] = "unavailable: dwarf-lane report has no library record"
     elif recorded != frag.lib_hashes(out, cc):
