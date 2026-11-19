@@ -301,6 +301,7 @@ the module ≈ 4 min, the export ≈ 2 min; fast tests ≈ 1 s.
 (cd formal/lean && lake build && lake env lean --tstack=4000000 AbiLean/RecordEditFragmentExport.lean)
 pytest tests/test_formal_record_edit_fragment.py -q                    # fast checks
 pytest tests/test_formal_record_edit_fragment.py -q -m integration     # + compilers, lanes (full space: ABICHECK_E16_FULL=1)
+# CI: formal-lean.yml job `e16-full` runs the full space nightly (02:41 UTC) and on dispatch.
 python formal/experiments/record_edit_fragment.py OUT [--reduced] [--per-case] [--repeat N]
 python formal/experiments/record_edit_competitors.py OUT               # after a batch run into OUT
 ```
