@@ -88,6 +88,14 @@ switch_to_primary_mirror() {
 for attempt in $(seq 1 "$attempts"); do
   if [ "$attempt" -gt 1 ]; then
     switch_to_primary_mirror
+    # A previous attempt killed by its timeout mid-configure (observed: the
+    # man-db trigger outlasting the 240 s budget, job 135901309403) leaves
+    # dpkg "interrupted", and every later `apt-get install` refuses with
+    # "you must manually run 'sudo dpkg --configure -a'". Finish that
+    # configuration first, or the retries can never succeed.
+    if ! timeout -k 10 "$install_timeout" sudo dpkg --configure -a; then
+      echo "::warning::dpkg --configure -a failed on attempt $attempt/$attempts; trying the install anyway"
+    fi
   fi
   # `timeout`'s default signal is SIGTERM, which a caught/ignored signal in
   # apt-get, dpkg, or sudo's own child-signal handling can survive

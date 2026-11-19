@@ -116,6 +116,7 @@ def _fake_apt_env(
     install_exit: int = 0,
     installed: tuple[str, ...] | None = None,
     install_fail_first: int = 0,
+    interrupt_first: bool = False,
 ) -> tuple[dict[str, str], Path]:
     """Build a PATH holding a fake ``sudo``/``apt-get``/``dpkg-query``.
 
@@ -123,6 +124,9 @@ def _fake_apt_env(
     install (``None`` means "whatever install was asked for", the honest
     case). ``install_fail_first`` makes the first N install invocations fail, so a
     test can observe the retry loop rather than only its endpoints.
+    ``interrupt_first`` makes the first install die mid-configure, leaving
+    dpkg interrupted: every later install refuses until ``dpkg --configure
+    -a`` runs, as the real dpkg does.
     """
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
@@ -149,6 +153,14 @@ if [ "$sub" = update ]; then
 fi
 if [ "$sub" = install ]; then
   n=$(grep -c '^apt-get install' "$log")
+  if [ -e "$state.interrupted" ]; then
+    echo "E: dpkg was interrupted, you must manually run 'sudo dpkg --configure -a' to correct the problem." >&2
+    exit 100
+  fi
+  if [ {"1" if interrupt_first else "0"} -eq 1 ] && [ "$n" -eq 1 ]; then
+    : > "$state.interrupted"
+    exit 137
+  fi
   if [ "$n" -le {install_fail_first} ]; then
     echo "E: Unable to locate package" >&2
     exit 100
@@ -164,6 +176,15 @@ if [ "$sub" = install ]; then
   fi
   exit 0
 fi
+exit 0
+""",
+    )
+
+    _write(
+        bindir / "dpkg",
+        f"""#!/usr/bin/env bash
+echo "dpkg $*" >> {log!s}
+[ "$*" = "--configure -a" ] && rm -f {state!s}.interrupted
 exit 0
 """,
     )
@@ -298,6 +319,21 @@ class TestInstallIsTheGate:
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert len(_installs(log)) == failures_before_success + 1
+
+    @pytest.mark.parametrize("attempts", [2, 3])
+    def test_an_attempt_killed_mid_configure_is_repaired_before_retry(
+        self, tmp_path: Path, attempts: int
+    ) -> None:
+        env, log = _fake_apt_env(tmp_path, interrupt_first=True)
+        env["APT_INSTALL_ATTEMPTS"] = str(attempts)
+        result = _run(env, "gcc g++ clang")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        lines = log.read_text(encoding="utf-8").splitlines()
+        repair = lines.index("dpkg --configure -a")
+        installs = _installs(log)
+        assert len(installs) == 2
+        assert lines.index(installs[1], repair) > repair
 
     def test_install_reporting_success_without_installing_is_caught(
         self, tmp_path: Path

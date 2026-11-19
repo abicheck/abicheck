@@ -59,7 +59,7 @@ permissions:
 
 jobs:
   integration:
-    name: integration (${{ matrix.os }}${{ matrix.shard && format(', shard {0}/2', matrix.shard) || '' }})
+    name: integration (${{ matrix.os }}${{ matrix.shard && format(', shard {0}/3', matrix.shard) || '' }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     permissions:
@@ -67,24 +67,32 @@ jobs:
       id-token: write  # Codecov OIDC upload (Linux)
     strategy:
       fail-fast: false
-      # The Linux leg runs as two shards. Its integration step alone measured
+      # The Linux leg runs as three shards. Its integration step alone measured
       # 35-38 min of this 40-min budget on main (the job ran 39:29 at #1918,
       # 38:40 at #1920) before the catalog backend-parity harness added ~95 s
       # and the leg started being cancelled mid-tail (42012488845, at #1925).
-      # `--shard=K/2` splits the integration tests by whole file, balanced on
+      # `--shard=K/N` splits the integration tests by whole file, balanced on
       # their own measured seconds (tests/shard_weights_integration.json; the
       # unit lane's weights know nothing of integration cost), so each shard
       # takes about half and the budget has room again. The shards partition
       # the selection: nothing is dropped and nothing runs twice
       # (tests/test_pytest_shards.py). The tool-lane tail (libabigail, ABICC,
-      # libz demo) runs on shard 2 only, and both shards upload coverage under
-      # the one Codecov `integration` flag, which merges them.
+      # libz demo) runs on the last shard only, and every shard uploads coverage
+      # under the one Codecov `integration` flag, which merges them.
+      # Two shards stopped fitting by 2026-11 (#2131/#2143/#2146 era): run
+      # 44591446435 measured 90 and 127 worker-minutes of tests per shard
+      # (35:45 wall for shard 2's step, plus its ~2.5-min tool tail), so shard
+      # 2 hit the 40-min cancel on main (44592009546, 44555163422,
+      # 44477956683). A third shard, with weights refreshed from that run's
+      # durations, puts each shard back near 24 min.
       matrix:
         include:
           - os: ubuntu-24.04
             shard: 1
           - os: ubuntu-24.04
             shard: 2
+          - os: ubuntu-24.04
+            shard: 3
           - os: macos-latest
           - os: windows-latest
     steps:
@@ -230,19 +238,19 @@ jobs:
           # The edit corpus's PR tier writes one coverage record per cell
           # (abiforge/coverage.py); the next step reports them.
           ABICHECK_EDIT_CORPUS_COVERAGE_DIR: edit-corpus-coverage
-          PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/2 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
+          PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/3 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
         run: python scripts/verify.py --profile full --only integration --require-complete
       - name: Edit corpus coverage (Linux)
         # ChangeKinds this shard's corpus cells verified and the language space
         # they ran, in the step summary. Reported only: the `pr` verified floor
-        # is checked on both shards merged (the edit-corpus-coverage job), since
-        # a kind one shard's cells expect may be verified only in the other.
+        # is checked on all shards merged (the edit-corpus-coverage job), since
+        # a kind one shard's cells expect may be verified only in another.
         if: (success() || failure()) && runner.os == 'Linux'
         env:
           SHARD: ${{ matrix.shard }}
         run: |
           # This shard's integration step finished (passed or failed): the
-          # floor job judges a run only when both shards left this marker, so a
+          # floor job judges a run only when every shard left this marker, so a
           # cancelled shard is never read as missing records. Written first, so
           # a failing report below fails this step without hiding the shard.
           had_records=0
@@ -251,7 +259,7 @@ jobs:
           : > "edit-corpus-coverage/shard-${SHARD}.done"
           if [ "$had_records" = 1 ]; then
             python -m abiforge.coverage report edit-corpus-coverage \
-              --title "Edit corpus PR-tier coverage (shard ${SHARD}/2)" \
+              --title "Edit corpus PR-tier coverage (shard ${SHARD}/3)" \
               --summary "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload edit corpus coverage records
@@ -296,19 +304,19 @@ jobs:
         run: python scripts/verify.py --profile full --only msvc --require-complete
       - name: libabigail parity
         # Marker-scoped, and the step sets its own ABICHECK_MIN_EXECUTED.
-        # This tail (libabigail, ABICC, libz demo) runs on one Linux shard.
-        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 2
+        # This tail (libabigail, ABICC, libz demo) runs on one Linux shard (the last).
+        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 3
         run: python scripts/verify.py --profile full --only libabigail-parity --require-complete
       - name: ABICC parity
         # Native `compare` verdicts against the real abi-compliance-checker;
         # the step sets its own ABICHECK_MIN_EXECUTED.
-        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 2
+        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 3
         run: python scripts/verify.py --profile full --only abicc-parity --require-complete
       - name: End-to-end demo (libz)
         # Formerly ci.yml's `e2e` job: the distro libz dumped with its real
         # zlib.h through CastXML, then mutated and classified. The demo takes
         # ~3 s; as its own job it paid a full runner's setup on every PR.
-        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 2
+        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 3
         run: python scripts/verify.py --profile full --only demo-libz --require-complete
       - name: Upload integration coverage to Codecov
         if: ${{ always() && runner.os == 'Linux' }}
@@ -321,7 +329,7 @@ jobs:
 
   edit-corpus-coverage:
     # The PR tier's verified ChangeKind floor (abiforge/coverage_ledger.json),
-    # held over both Linux shards' corpus records merged. Judged only when both
+    # held over all Linux shards' corpus records merged. Judged only when all
     # shards left their `shard-N.done` marker (their integration step finished),
     # so a cancelled run is never judged; no records at all fail the job.
     name: edit corpus coverage floor
@@ -341,7 +349,7 @@ jobs:
           cache: 'pip'
       - name: Install package
         run: pip install -e .
-      - name: Download both shards' records
+      - name: Download all shards' records
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           pattern: edit-corpus-coverage-shard*
@@ -351,23 +359,23 @@ jobs:
         run: |
           set -euo pipefail
           # needs.integration.result reads `failure` when one matrix leg failed
-          # and another was cancelled; judge only a run whose two Linux shards
-          # both finished their integration step.
+          # and another was cancelled; judge only a run whose three Linux shards
+          # all finished their integration step.
           # (No artifact at all leaves no directory: find fails, count is 0.)
           # $(( )) strips the leading blanks BSD `wc -l` pads its count with.
           done_shards=$(( $({ find edit-corpus-coverage -name 'shard-*.done' 2>/dev/null || true; } | wc -l) ))
-          if [ "$done_shards" -lt 2 ]; then
-            echo "::notice::only ${done_shards} of 2 Linux shards finished (cancelled run); the PR-tier floor is not judged"
+          if [ "$done_shards" -lt 3 ]; then
+            echo "::notice::only ${done_shards} of 3 Linux shards finished (cancelled run); the PR-tier floor is not judged"
             exit 0
           fi
           # A shard whose test files hold no corpus cells uploads no records; the
           # pair of shards must still have recorded the PR tier somewhere.
           if [ -z "$(find edit-corpus-coverage -name '*.json' -print -quit 2>/dev/null)" ]; then
-            echo "::error::neither Linux shard uploaded edit corpus coverage records"
+            echo "::error::no Linux shard uploaded edit corpus coverage records"
             exit 1
           fi
           python -m abiforge.coverage report edit-corpus-coverage \
-            --title "Edit corpus PR-tier coverage (both shards)" \
+            --title "Edit corpus PR-tier coverage (all shards)" \
             --summary "$GITHUB_STEP_SUMMARY" --json edit-corpus-coverage-report.json \
             --check-floor pr
       - name: Upload the PR-tier coverage report
