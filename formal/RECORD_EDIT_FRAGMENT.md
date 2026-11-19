@@ -159,6 +159,7 @@ abicheck = oracle, dwarf lane          9252 /  9252      9252 /  9252
 abicheck = oracle, both lanes          9252 /  9252      9252 /  9252
 consumer = byte model (read + write)   9252 /  9252      9252 /  9252
 consumer-visible change not named           0                 0
+affected_symbols exactly the record's own   9252 / 9252       9252 / 9252   (every lane)
 controls with a finding               0 / 340 per lane  0 / 340 per lane
 ```
 
@@ -172,7 +173,9 @@ recorded as a duplicate of its `type_*` equivalent, and stays counted in
 
 **Per-case runs** (each representative its own library pair and `abicheck
 compare` per lane, so the exit code is that case's verdict): 88 cases × 2
-compilers × 3 lanes, see the receipt.
+compilers × 3 lanes = 528 runs, all `agree` with exit code 4. The other
+9164 cases were run in batch only: a per-case sweep of the full space is
+≈ 6 × 9252 compares, roughly 10 h on this machine, and was not run.
 
 ### Other tools, shared vocabulary
 
@@ -191,7 +194,17 @@ claim; a claim a format cannot express is `unsupported`, never a miss:
 | exactly the fields whose offset changed | ✓ | ✓ | unsupported: a removal is one combined problem; `Moved_Field` is the *position* |
 | a swap names both swapped fields | unsupported (offsets, not positions) | unsupported | ✓ |
 
-Full-space counts per tool and compiler are in the receipt. This is
+Full space, both compilers (identical counts for gcc and clang builds):
+
+| Claim | abicheck (`dwarf`) | abidiff 2.4.0 | ABICC 2.3 |
+|---|---|---|---|
+| record flagged | 9252 / 9252 | 9252 / 9252 | 9252 / 9252 |
+| edit member (1248 removals + 6260 retypes; a swap has none) | 9252 / 9252 | 9252 / 9252 | 9252 / 9252 |
+| sizeof change iff it changed | 9252 / 9252 | 9252 / 9252 | 9252 / 9252 |
+| fields whose offset changed | 9252 / 9252 | 9252 / 9252 | unsupported |
+| swap names both fields (1744 swaps) | unsupported | unsupported | 1744 / 1744 (n/a on the 7508 others) |
+
+No tool errored, no cell missed. This is
 shared-domain agreement on R, not a ranking: abicheck's other lanes (header,
 alignment) are capabilities the others' workflows here do not exercise, and
 abidiff's header filtering was not used (it matches header *file names*
@@ -245,8 +258,21 @@ formal-fragment run is not that corpus.
 
 ## Cost
 
-`--repeat` gives timing samples; `/usr/bin/time -v` the peak RSS. See the
-receipt for the numbers of the recorded run.
+One 4-core shared cloud container, wall time, measured while other jobs
+(CI-equivalent test runs) shared the machine, so treat these as upper
+bounds rather than comparative performance claims:
+
+| Run | Cases | Wall | Breakdown |
+|---|---|---|---|
+| batch, full space, 2 compilers × 3 lanes + 340 controls | 9252 | 902 s, 901 s (2 samples) | generate 0.3 s; build + layout probe + consumer: gcc 77 s, clang 423 s; compare per lane (gcc/clang): hdr 73/73 s, dwarf 42/44 s, both 81/83 s |
+| batch, reduced set | 88 | 26.0, 25.5, 24.6 s (3 samples) | |
+| per case, reduced set, 4 jobs | 88 × 6 | 234 s | |
+| abidiff / ABICC (abi-dumper + checker), full space | 9252 | gcc 274 / 45 s; clang 271 / 45 s | |
+
+Peak child RSS: 1835 MB (full batch; the largest is one `abicheck compare`
+over the 9592-record libraries), 134 MB (reduced). An earlier full batch
+on an idle machine took 358 s with the same results. Lean: `lake build` of
+the module ≈ 4 min, the export ≈ 2 min; fast tests ≈ 1 s.
 
 ## What is and is not proved
 
@@ -262,6 +288,7 @@ receipt for the numbers of the recorded run.
 | abicheck = oracle, three lanes | **tested** exhaustively, both builds |
 | Consumer observations = byte model | **tested** exhaustively, both builds, two probe values, both directions |
 | Every consumer-visible change is named by abicheck | **tested** exhaustively (0 unexplained); a byte-level probe with two values, not a theorem about all values or all consumers |
+| The probe itself is well-defined C | **assumed** for the provider: `fill_sN`/`show_sN` access the consumer's byte buffer through a `struct sN *` (the consumer side uses `memcpy` at `offsetof`). That is the cross-version access under test, but even with the unchanged provider it relies on gcc/clang treating the aligned buffer as the struct at `-O0`; the byte model agreeing on every case is the evidence, not a guarantee |
 | abidiff / ABICC = oracle on the shared vocabulary | **tested** exhaustively, one version each |
 | The layout rule is the ABI | **assumed** (SysV psABI); observed on two compilers |
 | Signed narrowing wraps | **assumed**: implementation-defined in ISO C, documented by GCC and Clang |
@@ -280,4 +307,42 @@ python formal/experiments/record_edit_competitors.py OUT               # after a
 
 ## Receipt
 
-Filled from the recorded run below.
+Raw results: [`receipts/e16/`](receipts/e16/) — `full_summary.json`
+(environment, per-compiler/lane outcome counts, disposition totals,
+timings), `cases.jsonl.gz` (one line per case and compiler: every lane's
+observed and expected `kind:field_name` multiset, typed-value
+disagreements, affected-symbol verdict, consumer read/write changes),
+`competitors.json`, `percase_summary.json`, `reduced_summary.json`.
+Disagreements: none (every list in those files is empty).
+
+* **Code that ran.** Started on `a972438a2`; two commits landed during the
+  run, touching only `record_edit_competitors.py`'s error handling (loaded
+  by the competitor stage, which started after them) and tests. Every file
+  the run loads is identical at `38117df82`, which `full_summary.json`'s
+  `environment.commit` records; `abicheck_module` is this checkout's
+  package.
+* **Environment.** Linux x86-64; gcc 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1);
+  clang 18.1.3; castxml 0.7.0; Python 3.13.18; abidiff 2.4.0;
+  abi-compliance-checker 2.3; abi-dumper 1.2; Lean 4.15.0.
+* **Commands.**
+
+```bash
+python formal/experiments/record_edit_fragment.py OUT/full --repeat 2
+python formal/experiments/record_edit_competitors.py OUT/full
+python formal/experiments/record_edit_fragment.py OUT/percase --reduced --per-case --jobs 4
+python formal/experiments/record_edit_fragment.py OUT/reduced --reduced --repeat 3
+```
+
+### Denominators
+
+| Count | Value |
+|---|---|
+| modeled edit classes (operations) | 3 (remove, swap, retype) |
+| observable classes (distinct expected finding sets) | 88 |
+| generated transitions | 9252 (1248 / 1744 / 6260) |
+| configurations executed | 2 compilers × 3 lanes, `-O0`, one target |
+| oracle-validated cases (layout, findings, consumer) | 9252 per configuration |
+| exact matches | 9252 per configuration |
+| per-case CLI runs | 528 (88 × 6) |
+| xfails | 0 |
+| unsupported cells | competitor claims a tool cannot express (table above); no configuration unsupported |
