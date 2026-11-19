@@ -683,6 +683,15 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         ),
     ),
     FactRow(
+        "Function",
+        "return_by_value_fact",
+        _FULL,
+        _PARTIAL,
+        note=(
+            "Schema v70: whether the return type is a record passed by value (`Fact[bool]`). castxml reads it from its type graph (`extract/headers/castxml/return_by_value.py`): a Struct/Class/Union is by value; a pointer, a reference or a fundamental/enum is not. clang is `PARTIAL`: `-ast-dump=json` gives only the desugared `qualType`, so `extract/headers/clang/type_identity.py` decides it from the declarator and the unambiguous record/enum declaration of the desugared return type; an ambiguous or unresolved name stays NOT_COLLECTED."
+        ),
+    ),
+    FactRow(
         "Param",
         "type_identities_fact",
         _FULL,

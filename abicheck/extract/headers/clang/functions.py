@@ -108,7 +108,7 @@ from .qualifiers import (
 )
 from .redeclarations import RedeclarationIdentity
 from .restrict_spelling import without_top_level_restrict
-from .return_type import return_type as _return_type, typedef_return_fact
+from .return_type import return_type as _return_type, return_type_facts
 from .type_identity import TypeIdentityIndex
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -592,25 +592,23 @@ def parse_functions(
             name,
             no_binary_evidence=no_binary_evidence,
         )
+        rt = return_type_facts(
+            entry.node,
+            ret_type,
+            entry.scope,
+            builtin_abi,
+            typedef_abi_facts,
+            entry.template_type_param_names,
+            type_identities,
+        )
         funcs.append(
             Function(
                 name=name,
                 mangled=mangled,
                 return_type=ret_type,
-                return_type_identities_fact=type_identities.resolve(
-                    ret_type, entry.scope
-                )
-                if type_identities
-                else None,
-                return_type_abi_fact=typedef_return_fact(
-                    builtin_type_fact(
-                        _return_type(_qualtype_desugared(entry.node)), builtin_abi
-                    ),
-                    ret_type,
-                    entry.scope,
-                    typedef_abi_facts,
-                    entry.template_type_param_names,
-                ),
+                return_type_identities_fact=rt["return_type_identities_fact"],
+                return_type_abi_fact=rt["return_type_abi_fact"],
+                return_by_value_fact=rt["return_by_value_fact"],
                 params=params,
                 visibility=vis,
                 **surface_facts,

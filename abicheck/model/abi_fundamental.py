@@ -57,10 +57,25 @@ from enum import StrEnum
 __all__ = [
     "AbiFundamental",
     "FundamentalEncoding",
+    "Indirection",
     "RegisterClass",
     "abi_equivalent",
     "register_class",
 ]
+
+
+class Indirection(StrEnum):
+    """Whether a slot's declared type is itself a pointer or a reference.
+
+    Set by the header backend from the type's structure (castxml's PointerType,
+    clang's pointer declarator). A pointer or reference slot carries its fact
+    only so the return-convention and packing checks can read its word size;
+    retype equivalence never proves two indirect slots equal by fact.
+    """
+
+    NONE = "none"
+    POINTER = "pointer"
+    REFERENCE = "reference"
 
 
 class FundamentalEncoding(StrEnum):
@@ -97,6 +112,7 @@ class AbiFundamental:
     size: int
     align: int
     lanes: int = 0
+    indirection: Indirection = Indirection.NONE
 
     def __post_init__(self) -> None:
         if self.size <= 0 or self.align <= 0 or self.lanes < 0:

@@ -88,10 +88,16 @@ def test_numbering_is_numeric_not_lexicographic(tmp_path: Path) -> None:
     corpus = tmp_path / "containers"
     shutil.copytree(gate.CORPUS, corpus)
     manifest = copy.deepcopy(_MANIFEST)
-    stale = copy.deepcopy(manifest["entries"]["pe_snapshot/1"])
+    entries = manifest["entries"]
+    pe_keys = [k for k in entries if k.startswith("pe_snapshot/")]
+    newest = max(pe_keys, key=lambda k: int(k.split("/")[1]))
+    current = entries[newest]
+    for key in pe_keys:
+        del entries[key]
+    stale = copy.deepcopy(current)
     stale["versions"]["snapshot_schema_version"] -= 1
-    manifest["entries"]["pe_snapshot/9"] = stale
-    manifest["entries"]["pe_snapshot/10"] = manifest["entries"].pop("pe_snapshot/1")
+    entries["pe_snapshot/9"] = stale
+    entries["pe_snapshot/10"] = current
     assert gate.evaluate(manifest, corpus, _DECLARED) == []
 
 

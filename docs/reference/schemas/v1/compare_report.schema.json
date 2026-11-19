@@ -1271,6 +1271,9 @@
               "symbol_binding": {
                 "$ref": "#/$defs/change/properties/symbol_binding"
               },
+              "field_name": {
+                "$ref": "#/$defs/change/properties/field_name"
+              },
               "demangled_symbol": {
                 "$ref": "#/$defs/change/properties/demangled_symbol"
               }
@@ -4157,6 +4160,10 @@
           "type": "boolean",
           "description": "Schema 3.8 (ADR-068 D3): true when this finding comes from a check that is meaningful only on the candidate (NEW) side \u2014 today `compare --abi3-floor`'s stable-ABI audit \u2014 rather than from comparing the two sides. Such a finding rides this same result document, marked, instead of a second result; it is advisory (RISK-class) and is gated only through policy. Omitted entirely for an ordinary two-sided finding.",
           "const": true
+        },
+        "field_name": {
+          "type": "string",
+          "description": "Schema 7.7: the member a field-level finding is about (\"x\" for a change to \"Widget::x\"), on the type_field_* and struct_field_* kinds and the other field-level kinds that record it. Before 7.7 the member was readable only from `description`. Omitted for every finding that is not about one member."
         },
         "symbol_binding": {
           "type": "string",

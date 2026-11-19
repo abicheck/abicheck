@@ -56,7 +56,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import cast
 
-from ..model.abi_fundamental import AbiFundamental, abi_equivalent
+from ..model.abi_fundamental import AbiFundamental, Indirection, abi_equivalent
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.declarations import Function, Param, Variable
@@ -89,12 +89,25 @@ _UNREAD_DEFAULT: AbiFundamental = cast(AbiFundamental, None)
 
 
 def _comparable_equal(comparison: FactComparison[AbiFundamental]) -> bool:
-    """Whether a comparable, fully PRESENT pair of slots is ABI-equal."""
+    """Whether a comparable, fully PRESENT pair of slots is ABI-equal.
+
+    A pointer or reference slot is never equal by fact: its fact records the
+    word it occupies, not the type it points to, so two indirect slots can
+    prove only their size, not their meaning. The check reads the fact's
+    ``indirection`` kind, which the header backend sets from the type's
+    structure, so it needs no spelling.
+    """
     if not comparison.is_comparable or comparison.degraded:
         return False
-    if comparison.old_value is None or comparison.new_value is None:
+    old, new = comparison.old_value, comparison.new_value
+    if old is None or new is None:
         return False
-    return abi_equivalent(comparison.old_value, comparison.new_value)
+    if (
+        old.indirection is not Indirection.NONE
+        or new.indirection is not Indirection.NONE
+    ):
+        return False
+    return abi_equivalent(old, new)
 
 
 def _params_retyped_only(
@@ -114,7 +127,7 @@ def _params_retyped_only(
         if old_p.type == new_p.type:
             continue
         if not _comparable_equal(
-            compare_facts(old_p.type_abi_fact, new_p.type_abi_fact, _UNREAD_DEFAULT)
+            compare_facts(old_p.type_abi_fact, new_p.type_abi_fact, _UNREAD_DEFAULT),
         ):
             return False
         differing = True
@@ -132,7 +145,7 @@ def _function_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
                 old_fn.return_type_abi_fact,
                 new_fn.return_type_abi_fact,
                 _UNREAD_DEFAULT,
-            )
+            ),
         )
     return _params_retyped_only(old_fn.params, new_fn.params)
 
@@ -156,7 +169,7 @@ def _field_retype(
     if _pointee_renamed(old_f, new_f, old, new):
         return True
     return _comparable_equal(
-        compare_facts(old_f.type_abi_fact, new_f.type_abi_fact, _UNREAD_DEFAULT)
+        compare_facts(old_f.type_abi_fact, new_f.type_abi_fact, _UNREAD_DEFAULT),
     )
 
 
@@ -268,7 +281,7 @@ def _variable_retype(change: Change, old: AbiSnapshot, new: AbiSnapshot) -> bool
     if old_var is None or new_var is None or old_var.type == new_var.type:
         return False
     return _comparable_equal(
-        compare_facts(old_var.type_abi_fact, new_var.type_abi_fact, _UNREAD_DEFAULT)
+        compare_facts(old_var.type_abi_fact, new_var.type_abi_fact, _UNREAD_DEFAULT),
     )
 
 
@@ -295,7 +308,7 @@ def _typedef_retype(
             _typedef_fact(old, change.symbol, index),
             _typedef_fact(new, change.symbol, index),
             _UNREAD_DEFAULT,
-        )
+        ),
     )
 
 

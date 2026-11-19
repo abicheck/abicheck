@@ -12,6 +12,15 @@ from .ast_inner import ast_inner
 from .context import _Decl
 
 _CV = re.compile(r"\b(?:const|volatile|restrict|struct|class|union|enum)\b")
+#: Marks a name that matches two declarations at one depth (never confirmed).
+_AMBIGUOUS = "\0ambiguous"
+#: Builtin type words: a return of only these is a scalar, never a record.
+_BUILTIN_WORDS = frozenset(
+    {
+        "void", "bool", "_Bool", "char", "wchar_t", "char8_t", "char16_t",
+        "char32_t", "short", "int", "long", "float", "double", "signed", "unsigned",
+    }
+)  # fmt: skip
 
 
 def _unwrap_type(spelling: str) -> str:
@@ -58,6 +67,12 @@ class TypeIdentityIndex:
             if e.node.get("name")
         }
         self.known = self.names | self.aliases.keys()
+        self.record_names = {
+            "::".join((*e.scope, e.node["name"])) for e in records if e.node.get("name")
+        }
+        self.enum_names = {
+            "::".join((*e.scope, e.node["name"])) for e in enums if e.node.get("name")
+        }
         self.imports: dict[tuple[str, ...], list[str]] = {}
         self.namespace_ids: dict[str, str] = {}
         self._namespaces(root, ())
@@ -112,7 +127,18 @@ class TypeIdentityIndex:
         name = _unwrap_type(spelling)
         if not name or "(" in name or name in seen:
             return Fact.not_collected()
-        seen = seen | {name}
+        found = self._match_name(name, scope)
+        if found is None or found is _AMBIGUOUS:
+            return Fact.not_collected()
+        if found in self.aliases:
+            return self._resolve(
+                self.aliases[found], tuple(found.split("::")[:-1]), seen | {name}
+            )
+        return Fact.present((found,))
+
+    def _match_name(self, name: str, scope: tuple[str, ...]) -> str | None:
+        """The one declaration *name* means from *scope*, ``_AMBIGUOUS`` when
+        two match at the same depth, or ``None`` when none does."""
         rooted = name.startswith("::")
         name = name.removeprefix("::")
         depths = (0,) if rooted else range(len(scope), -1, -1)
@@ -125,12 +151,48 @@ class TypeIdentityIndex:
                 )
             matches = set(candidates) & self.known
             if len(matches) > 1:
-                return Fact.not_collected()
+                return _AMBIGUOUS
             if matches:
-                found = next(iter(matches))
-                if found in self.aliases:
-                    return self._resolve(
-                        self.aliases[found], tuple(found.split("::")[:-1]), seen
-                    )
-                return Fact.present((found,))
-        return Fact.not_collected()
+                return next(iter(matches))
+        return None
+
+    def by_value_fact(self, spelling: str, scope: tuple[str, ...]) -> Fact[bool]:
+        """Whether *spelling* is a record returned by value (``Function.return_by_value_fact``).
+
+        Read from the declared type, not the name: a pointer or reference
+        declarator (the desugared return ``QualType``'s own suffix, taken before
+        any alias is looked through) is not by value, and a typedef is followed to
+        its target. A name that resolves to a record declaration is by value; one
+        that resolves to an enumeration or a builtin is not. Anything else (an
+        unresolved or ambiguous name, a function type, a template instance) is
+        undetermined, so the fact is not collected.
+        """
+        answer = self._by_value(spelling, scope, frozenset())
+        return Fact.not_collected() if answer is None else Fact.present(answer)
+
+    def _by_value(
+        self, spelling: str, scope: tuple[str, ...], seen: frozenset[str]
+    ) -> bool | None:
+        text = " ".join(_CV.sub(" ", spelling).split())
+        if not text or "(" in text:
+            return None
+        if text.endswith(("*", "&")):
+            return False
+        if set(text.split()) <= _BUILTIN_WORDS:
+            return False
+        if text in seen:
+            return None
+        found = self._match_name(text, scope)
+        if found is None or found is _AMBIGUOUS:
+            return None
+        if found in self.aliases:
+            return self._by_value(
+                self.aliases[found],
+                tuple(found.split("::")[:-1]),
+                seen | {text},
+            )
+        if found in self.record_names:
+            return True
+        if found in self.enum_names:
+            return False
+        return None

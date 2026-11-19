@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 69,
+  "schema_version": 70,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -168,7 +168,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`69`**. See
+The current value is **`70`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -388,6 +388,7 @@ definition.
 
 (v68) `dwarf_advanced.extraction` -- how the advanced-DWARF extraction that produced the `dwarf_advanced` block ended: `not_run` (a presence-only lookup, no payload parsed), `completed` (the parse ran to the end; an empty payload is a real result) or `failed` (the extraction errored; the payload is not usable). Written only when the status is recorded, so a BTF/CTF/PDB object or a hand-built one (`unrecorded`) writes no key and encodes exactly as v67. A DWARF dump always records `completed` or `failed`. A pre-v68 document, or a v68 one without the key, decodes to `unrecorded`: the reader keeps the payload inference, never reads the block as `completed`. A pre-v68 reader drops the key silently and reads that same inference, so the key adds no reader-side hard rejection. Because the content digest covers the encoded document, DWARF-derived snapshot digests change once at this bump.
 
+(v70) `Function.return_by_value_fact` -- whether a function's return type is a record passed by value (`Fact[bool]`), read from the declared type by castxml and clang. Written only where a producer determined it; the declarations section moves to version 3 with a no-op migration. A pre-v70 reader would drop the key and read every function as unset, so the by-value return-convention check would silently stop firing: the bump is not additive for that reader.
 (v69) `Param`/`TypeField`/`Variable.type_abi_fact` and `Function.return_type_abi_fact` -- the ABI fact of a slot whose type is a fundamental, an enum, an `_Atomic` or a vector of one: The same fact is written per member of the `dwarf` layout (`structs[*].fields[*].type_abi_fact`, and the `struct_odr_conflicts` variants), where DWARF states one: the depth projection rebuilds its fields from that layout, so without it a projected retype read as a break. its encoding class (signed, unsigned, boolean or float), byte size, alignment and vector lane count (`abicheck/model/abi_fundamental.py`). DWARF and castxml record it; the clang frontend does not, so its slots carry no fact. Written only where a producer determined it, so every other slot encodes exactly as v68. A pre-v69 document, or a v69 one without the key, decodes to an unset fact, which never proves two slots equal: an old baseline keeps its name-based verdict. A pre-v69 reader drops the facts silently and reads a retype between ABI-identical types as an ABI break, so the bump is not additive for that reader's verdicts.
 
 (v67) `live_preprocessor_hidden` -- the castxml run's `-E -dD` branch scan, `{guard macro: [function names]}`, the declarations a header parse's configuration excluded. It attributes an export that no parsed declaration names to the macro its declaration sits under (`undeclared_export_census.by_guard`). Written only when a scan ran, so a snapshot without one encodes exactly as v66; a pre-v67 snapshot reads it as absent, and the census falls back to the named-cause rule for it.
