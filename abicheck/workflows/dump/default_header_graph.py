@@ -58,6 +58,25 @@ def header_graph_suppressed() -> Iterator[None]:
         _ATTACH_SUPPRESSED.reset(token)
 
 
+def effective_public_scope(
+    dump_manifest: object | None,
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+) -> tuple[list[Path] | None, list[Path] | None]:
+    """The public header files and directories a dump records for its scope.
+
+    A dump manifest's own public paths and directories replace the CLI-flag
+    derived ones (their mutual exclusivity is validated by the caller). With no
+    manifest the caller's own values come back unchanged.
+    """
+    if dump_manifest is not None:
+        return (
+            list(dump_manifest.public_header_paths),  # type: ignore[attr-defined]
+            list(dump_manifest.public_header_dirs),  # type: ignore[attr-defined]
+        )
+    return public_headers, public_header_dirs
+
+
 def graph_public_scope(
     headers: Sequence[Path],
     public_headers: Sequence[Path] | None,

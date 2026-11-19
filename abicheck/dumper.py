@@ -40,7 +40,11 @@ from .dumper_contract import (
 from .errors import (
     ValidationError,
 )
-from .extract.binary_format import _FormatHandler, with_extraction_limitations
+from .extract.binary_format import (
+    _FormatHandler,
+    detect_format,
+    with_extraction_limitations,
+)
 from .extract.debug_dump import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
     # sibling module (dumper.py is at the file-size cap); re-exported here so
@@ -141,6 +145,7 @@ from .model import AbiSnapshot, RecordType
 from .storage.ast_cache_location import reference_scratch_scoped
 from .storage.header_ast_cache import _cache_path as _cache_path
 from .workflows import memory_trace, snapshot_factory
+from .workflows.dump.default_header_graph import effective_public_scope
 from .workflows.dump.elf_fallback import (
     # DWARF/symbol-only fallback snapshot builders live in the sibling module
     # (dumper.py is at the file-size cap); re-exported here so
@@ -157,19 +162,6 @@ log = logging.getLogger(__name__)
 
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
-
-
-def _detect_format(path: Path) -> str:
-    """Detect binary format from magic bytes. Returns 'elf', 'macho', 'pe', or 'unknown'."""
-    try:
-        with open(path, "rb") as f:
-            magic = f.read(4)
-    except OSError:
-        return "unknown"
-    for handler in _FORMAT_HANDLERS:
-        if handler.matches_magic(magic):
-            return handler.name
-    return "unknown"
 
 
 @header_order_proof
@@ -337,7 +329,7 @@ def dump(
             public_include_search_dirs=public_include_search_dirs,
         )
 
-    fmt = _detect_format(so_path)
+    fmt = detect_format(so_path, _FORMAT_HANDLERS)
     validate_native_gcc_format(header_backend, fmt, bool(headers) and not dwarf_only)
     handler = _HANDLERS_BY_NAME.get(fmt)
     if handler is None:
@@ -367,15 +359,8 @@ def dump(
     # dump_manifest's own public_header_paths/public_header_dirs replace the
     # CLI-flag-derived ones for provenance/contract below (mutual exclusivity
     # already validated above).
-    effective_public_headers = (
-        list(dump_manifest.public_header_paths)
-        if dump_manifest is not None
-        else public_headers
-    )
-    effective_public_header_dirs = (
-        list(dump_manifest.public_header_dirs)
-        if dump_manifest is not None
-        else public_header_dirs
+    effective_public_headers, effective_public_header_dirs = effective_public_scope(
+        dump_manifest, public_headers, public_header_dirs
     )
     memory_trace.mark("dump.prologue:done")  # stage marks: off by default
     snapshot = handler.builder(
@@ -1011,9 +996,9 @@ def _dump_pe(
 
 # ---------------------------------------------------------------------------
 # Binary-format handler registry (C3). Single source of truth for magic-byte
-# recognition (drives _detect_format) and dump() dispatch. Defined after the
+# recognition (drives detect_format) and dump() dispatch. Defined after the
 # _dump_* builders it references; resolved at call time. Add a format by adding
-# an entry here — no edits to _detect_format or dump().
+# an entry here — no edits to detect_format or dump().
 # ---------------------------------------------------------------------------
 
 _FORMAT_HANDLERS: tuple[_FormatHandler, ...] = (
