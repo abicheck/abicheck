@@ -132,6 +132,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "func_virtual_became_pure",

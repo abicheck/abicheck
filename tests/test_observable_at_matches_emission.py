@@ -11,6 +11,7 @@ pairs in the shape the dumper produces, not the seeder's decision table.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -542,3 +543,207 @@ def test_function_becoming_variable_is_observed_from_the_stripped_binary(
         text=True,
     ).stdout
     assert "cpo_kind_changed" in stdout, stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("family", ["gcc", "clang"])
+def test_deleted_member_is_emitted_as_dwarf_deletion_only_with_debug_info(
+    tmp_path: Path, family: str
+) -> None:
+    # Real-compile oracle (GNU and Clang ELF producers): a member that becomes
+    # `= delete` keeps a DWARF declaration carrying DW_AT_deleted, but has no
+    # export symbol. With -g the pair emits func_deleted_dwarf; without -g the
+    # same change is only a removed export (func_removed_elf_only), so the
+    # declared {B,D} observation is the debug info, not the binary alone.
+    prefix = elf_capability(family, "shared")
+    if prefix is None:
+        pytest.skip(skip_reason(family, "shared"))
+    (tmp_path / "old.cpp").write_text(
+        "struct S { int f(int x); int g(int x); };\n"
+        "int S::f(int x) { return x + 1; }\n"
+        "int S::g(int x) { return x * 2; }\n"
+    )
+    (tmp_path / "new.cpp").write_text(
+        "struct S { int f(int x) = delete; int g(int x); };\n"
+        "int S::g(int x) { return x * 2; }\n"
+    )
+    # Some compilers mark only special members as deleted in DWARF; the
+    # assertions below need the ordinary-member marker, so probe for it.
+    readelf = shutil.which("readelf")
+    if readelf is None:
+        pytest.skip("missing capability: readelf (DWARF deleted-member probe)")
+    probe = tmp_path / "deleted-probe.so"
+    subprocess.run(
+        [
+            *prefix,
+            "-g",
+            "-O0",
+            "-fPIC",
+            "-shared",
+            str(tmp_path / "new.cpp"),
+            "-o",
+            str(probe),
+        ],
+        check=True,
+    )
+    dwarf = subprocess.run(
+        [readelf, "--debug-dump=info", str(probe)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    if "DW_AT_deleted" not in dwarf:
+        pytest.skip(
+            f"missing capability: {family} emits no DW_AT_deleted for an "
+            "ordinary deleted member (DWARF deleted-member marker)"
+        )
+
+    def _emitted(debug: bool) -> str:
+        dumps = []
+        for name in ("old", "new"):
+            so = tmp_path / f"{family}-{int(debug)}-{name}.so"
+            cmd = [*prefix, "-O0", "-fPIC", "-shared"]
+            if debug:
+                cmd.append("-g")
+            cmd += [str(tmp_path / f"{name}.cpp"), "-o", str(so)]
+            subprocess.run(cmd, check=True)
+            out = tmp_path / f"{family}-{int(debug)}-{name}.json"
+            subprocess.run(
+                abicheck_command("dump", str(so), "-o", str(out)),
+                check=True,
+                capture_output=True,
+            )
+            dumps.append(out)
+        return subprocess.run(
+            abicheck_command("compare", str(dumps[0]), str(dumps[1])),
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    with_debug = _emitted(debug=True)
+    assert "func_deleted_dwarf" in with_debug, with_debug
+    assert _observes_on("func_deleted_dwarf", "elf", ("B", "D"))
+    assert not _observes_on("func_deleted_dwarf", "elf", BINARY)
+
+    without_debug = _emitted(debug=False)
+    assert "func_deleted_dwarf" not in without_debug, without_debug
+    assert "func_removed_elf_only" in without_debug, without_debug
+
+
+@pytest.mark.integration
+def test_stdlib_implementation_change_is_observed_from_the_binary_alone(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle: a library built against libc++ (clang, std::__1
+    # mangling) and one built against libstdc++ (g++, std::__cxx11) differ only
+    # in the mangled std:: namespace the export table names. The build mode
+    # resolves from that namespace, so the binary pair alone emits
+    # stdlib_implementation_changed on the live compare path (no headers, no
+    # debug info). Declared {B}.
+    from abicheck.checker import compare
+    from abicheck.dumper import dump
+
+    clang = elf_capability("clang", "shared")
+    gcc = elf_capability("gcc", "shared", std_headers=True)
+    if clang is None:
+        pytest.skip(skip_reason("clang", "shared"))
+    if gcc is None:
+        pytest.skip(skip_reason("gcc", "shared", std_headers=True))
+    import re
+
+    probe_src = "#include <string>\nvoid probe(const std::string& s) { (void)s; }\n"
+    probe_cmd = [
+        *clang,
+        "-stdlib=libc++",
+        "-O0",
+        "-fPIC",
+        "-shared",
+        "-x",
+        "c++",
+        "-",
+        "-o",
+        str(tmp_path / "probe.so"),
+    ]
+    probe = subprocess.run(probe_cmd, input=probe_src, text=True, capture_output=True)
+    if probe.returncode != 0:
+        # Skip only when the toolchain reports libc++ itself missing; any other
+        # failure of a configured compiler is a test failure.
+        if re.search(
+            r"file not found|cannot find -lc\+\+|unable to find library -lc\+\+",
+            probe.stderr,
+        ):
+            pytest.skip("libc++ is not installed: " + probe.stderr[:200])
+        pytest.fail(
+            f"libc++ probe failed\ncommand: {probe_cmd}\nsource:\n{probe_src}"
+            f"stderr:\n{probe.stderr}"
+        )
+    source = tmp_path / "api.cpp"
+    source.write_text(
+        "#include <string>\n"
+        "void take(const std::string& s);\n"
+        "void take(const std::string& s) { (void)s; }\n"
+    )
+    libs = {
+        "libcxx": [*clang, "-stdlib=libc++", "-O0", "-fPIC", "-shared"],
+        "libstdcxx": [*gcc, "-O0", "-fPIC", "-shared"],
+    }
+    snaps = {}
+    for name, cmd in libs.items():
+        so = tmp_path / f"{name}.so"
+        subprocess.run([*cmd, str(source), "-o", str(so)], check=True)
+        snaps[name] = dump(so, [])
+    kinds = {c.kind.value for c in compare(snaps["libcxx"], snaps["libstdcxx"]).changes}
+    assert "stdlib_implementation_changed" in kinds, kinds
+    assert _observes_on("stdlib_implementation_changed", "elf", BINARY)
+
+
+@pytest.mark.integration
+def test_removed_isa_tier_is_observed_from_the_export_table_alone(
+    tmp_path: Path,
+) -> None:
+    # Real-compile oracle (GNU ELF producer): four exported `*_avx2` functions
+    # removed while their `*_sse2` siblings survive. The ISA-suffix clustering
+    # reads only the export table, so the binary pair alone emits
+    # cpu_dispatch_isa_dropped. Declared {B}.
+    from abicheck.checker import compare
+    from abicheck.dumper import dump
+
+    prefix = elf_capability("gcc", "shared")
+    if prefix is None:
+        pytest.skip(skip_reason("gcc", "shared"))
+    old_fns = "".join(
+        f'extern "C" int vec_{op}_{isa}(int x){{return x{sym} {n};}}\n'
+        for isa, n in (("avx2", 1), ("sse2", 3))
+        for op, sym in (("add", "+"), ("mul", "*"), ("sub", "-"), ("div", "/"))
+    )
+    (tmp_path / "old.cpp").write_text(old_fns)
+    (tmp_path / "new.cpp").write_text(
+        "".join(
+            f'extern "C" int vec_{op}_sse2(int x){{return x{sym} {n};}}\n'
+            for op, sym, n in (
+                ("add", "+", 3),
+                ("mul", "*", 4),
+                ("sub", "-", 2),
+                ("div", "/", 3),
+            )
+        )
+    )
+    snaps = {}
+    for name in ("old", "new"):
+        so = tmp_path / f"{name}.so"
+        subprocess.run(
+            [
+                *prefix,
+                "-O0",
+                "-fPIC",
+                "-shared",
+                str(tmp_path / f"{name}.cpp"),
+                "-o",
+                str(so),
+            ],
+            check=True,
+        )
+        snaps[name] = dump(so, [])
+    kinds = {c.kind.value for c in compare(snaps["old"], snaps["new"]).changes}
+    assert "cpu_dispatch_isa_dropped" in kinds, kinds
+    assert _observes_on("cpu_dispatch_isa_dropped", "elf", BINARY)
