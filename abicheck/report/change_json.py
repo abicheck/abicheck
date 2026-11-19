@@ -450,6 +450,8 @@ def suppressed_change_entry(
         entry["impact_assessment"] = assessment.to_dict()
     if getattr(c, "symbol_binding", None):
         entry["symbol_binding"] = c.symbol_binding
+    if getattr(c, "field_name", None):
+        entry["field_name"] = c.field_name
     removed_insts = removed_instantiations_field(c)
     if removed_insts is not None:
         entry["removed_instantiations"] = removed_insts

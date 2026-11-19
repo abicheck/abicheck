@@ -33,7 +33,7 @@ tests/test_adr061_gap_b_facades.py
 tests/test_adr091_python_renames.py
 tests/test_advanced_extraction_status.py
 tests/test_adversarial_inputs.py
-tests/test_affected_symbols_identifier_boundary_gap.py
+tests/test_affected_symbols_identifier_boundary.py
 tests/test_agent_skills_drift.py
 tests/test_aggregate_findings.py
 tests/test_aggregate_scope_completeness.py
@@ -92,6 +92,7 @@ tests/test_bundle_stored_file_members.py
 tests/test_bundle_stored_pair_compare.py
 tests/test_bundle_unresolved_imports.py
 tests/test_bundle_variants_capture.py
+tests/test_call_axis_shadow.py
 tests/test_canonical_finding_id.py
 tests/test_castxml_array_migration.py
 tests/test_castxml_base_offset_migration.py
@@ -293,6 +294,7 @@ tests/test_disposition_rule_inventory.py
 tests/test_disposition_scope_matrix.py
 tests/test_disposition_state_sweep.py
 tests/test_disposition_transitions.py
+tests/test_dual_abi_prefilter_reference.py
 tests/test_dump_bundle_facts.py
 tests/test_dump_pe_macho_unit.py
 tests/test_dumper_contract_wiring.py
@@ -358,6 +360,7 @@ tests/test_finding_evolution.py
 tests/test_finding_evolution_review_fixes.py
 tests/test_follow_deps_off_switch.py
 tests/test_followup_100_101.py
+tests/test_formal_experiments.py
 tests/test_fp_rate_gate.py
 tests/test_frozen_namespace.py
 tests/test_frozen_namespace_single_matcher.py
@@ -553,6 +556,7 @@ tests/test_report_baseline_provenance.py
 tests/test_report_change_view_entity_id.py
 tests/test_report_delta_baseline.py
 tests/test_report_failed_fact_visibility.py
+tests/test_report_field_name.py
 tests/test_report_filtering.py
 tests/test_report_format_bucket_parity.py
 tests/test_report_integrity.py

@@ -56,6 +56,12 @@ def change_annotation_fields(c: Any) -> dict[str, Any]:
     individual entries is kept with them below.
     """
     out: dict[str, Any] = {}
+    # Schema 7.7: the member a field-level finding is about, as a typed key
+    # (``Change.field_name``, stamped by the TYPE_FIELD_*/STRUCT_FIELD_*
+    # emitters). Before, the member was readable only from ``description``.
+    field_name = getattr(c, "field_name", None)
+    if field_name:
+        out["field_name"] = field_name
     # Source location
     loc = getattr(c, "source_location", None)
     if loc:

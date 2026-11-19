@@ -1,0 +1,449 @@
+{
+ "cases": 9252,
+ "compilers": {
+  "gcc": {
+   "tool_status": {
+    "abidiff": {
+     "exit": 4,
+     "ok": true,
+     "stderr": "",
+     "seconds": 274.28,
+     "version": "abidiff: 2.4.0"
+    },
+    "abicc": {
+     "exit": 1,
+     "ok": true,
+     "stderr": "",
+     "seconds": 45.43,
+     "version": "2.3"
+    }
+   },
+   "tools": {
+    "abicheck": {
+     "claims": {
+      "flagged": {
+       "match": 9252
+      },
+      "edit_member": {
+       "match": 9252
+      },
+      "size": {
+       "match": 9252
+      },
+      "offset_moved": {
+       "match": 9252
+      },
+      "position_moved": {
+       "unsupported": 9252
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 1248
+      },
+      "remove/flagged": {
+       "match": 1248
+      },
+      "remove/offset_moved": {
+       "match": 1248
+      },
+      "remove/position_moved": {
+       "unsupported": 1248
+      },
+      "remove/size": {
+       "match": 1248
+      },
+      "replace/edit_member": {
+       "match": 6260
+      },
+      "replace/flagged": {
+       "match": 6260
+      },
+      "replace/offset_moved": {
+       "match": 6260
+      },
+      "replace/position_moved": {
+       "unsupported": 6260
+      },
+      "replace/size": {
+       "match": 6260
+      },
+      "swap/edit_member": {
+       "match": 1744
+      },
+      "swap/flagged": {
+       "match": 1744
+      },
+      "swap/offset_moved": {
+       "match": 1744
+      },
+      "swap/position_moved": {
+       "unsupported": 1744
+      },
+      "swap/size": {
+       "match": 1744
+      }
+     },
+     "miss_examples": []
+    },
+    "abidiff": {
+     "claims": {
+      "flagged": {
+       "match": 9252
+      },
+      "edit_member": {
+       "match": 9252
+      },
+      "size": {
+       "match": 9252
+      },
+      "offset_moved": {
+       "match": 9252
+      },
+      "position_moved": {
+       "unsupported": 9252
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 1248
+      },
+      "remove/flagged": {
+       "match": 1248
+      },
+      "remove/offset_moved": {
+       "match": 1248
+      },
+      "remove/position_moved": {
+       "unsupported": 1248
+      },
+      "remove/size": {
+       "match": 1248
+      },
+      "replace/edit_member": {
+       "match": 6260
+      },
+      "replace/flagged": {
+       "match": 6260
+      },
+      "replace/offset_moved": {
+       "match": 6260
+      },
+      "replace/position_moved": {
+       "unsupported": 6260
+      },
+      "replace/size": {
+       "match": 6260
+      },
+      "swap/edit_member": {
+       "match": 1744
+      },
+      "swap/flagged": {
+       "match": 1744
+      },
+      "swap/offset_moved": {
+       "match": 1744
+      },
+      "swap/position_moved": {
+       "unsupported": 1744
+      },
+      "swap/size": {
+       "match": 1744
+      }
+     },
+     "miss_examples": []
+    },
+    "abicc": {
+     "claims": {
+      "flagged": {
+       "match": 9252
+      },
+      "edit_member": {
+       "match": 9252
+      },
+      "size": {
+       "match": 9252
+      },
+      "offset_moved": {
+       "unsupported": 9252
+      },
+      "position_moved": {
+       "n/a": 7508,
+       "match": 1744
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 1248
+      },
+      "remove/flagged": {
+       "match": 1248
+      },
+      "remove/offset_moved": {
+       "unsupported": 1248
+      },
+      "remove/position_moved": {
+       "n/a": 1248
+      },
+      "remove/size": {
+       "match": 1248
+      },
+      "replace/edit_member": {
+       "match": 6260
+      },
+      "replace/flagged": {
+       "match": 6260
+      },
+      "replace/offset_moved": {
+       "unsupported": 6260
+      },
+      "replace/position_moved": {
+       "n/a": 6260
+      },
+      "replace/size": {
+       "match": 6260
+      },
+      "swap/edit_member": {
+       "match": 1744
+      },
+      "swap/flagged": {
+       "match": 1744
+      },
+      "swap/offset_moved": {
+       "unsupported": 1744
+      },
+      "swap/position_moved": {
+       "match": 1744
+      },
+      "swap/size": {
+       "match": 1744
+      }
+     },
+     "miss_examples": []
+    }
+   }
+  },
+  "clang": {
+   "tool_status": {
+    "abidiff": {
+     "exit": 4,
+     "ok": true,
+     "stderr": "",
+     "seconds": 271.22,
+     "version": "abidiff: 2.4.0"
+    },
+    "abicc": {
+     "exit": 1,
+     "ok": true,
+     "stderr": "",
+     "seconds": 44.93,
+     "version": "2.3"
+    }
+   },
+   "tools": {
+    "abicheck": {
+     "claims": {
+      "flagged": {
+       "match": 9252
+      },
+      "edit_member": {
+       "match": 9252
+      },
+      "size": {
+       "match": 9252
+      },
+      "offset_moved": {
+       "match": 9252
+      },
+      "position_moved": {
+       "unsupported": 9252
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 1248
+      },
+      "remove/flagged": {
+       "match": 1248
+      },
+      "remove/offset_moved": {
+       "match": 1248
+      },
+      "remove/position_moved": {
+       "unsupported": 1248
+      },
+      "remove/size": {
+       "match": 1248
+      },
+      "replace/edit_member": {
+       "match": 6260
+      },
+      "replace/flagged": {
+       "match": 6260
+      },
+      "replace/offset_moved": {
+       "match": 6260
+      },
+      "replace/position_moved": {
+       "unsupported": 6260
+      },
+      "replace/size": {
+       "match": 6260
+      },
+      "swap/edit_member": {
+       "match": 1744
+      },
+      "swap/flagged": {
+       "match": 1744
+      },
+      "swap/offset_moved": {
+       "match": 1744
+      },
+      "swap/position_moved": {
+       "unsupported": 1744
+      },
+      "swap/size": {
+       "match": 1744
+      }
+     },
+     "miss_examples": []
+    },
+    "abidiff": {
+     "claims": {
+      "flagged": {
+       "match": 9252
+      },
+      "edit_member": {
+       "match": 9252
+      },
+      "size": {
+       "match": 9252
+      },
+      "offset_moved": {
+       "match": 9252
+      },
+      "position_moved": {
+       "unsupported": 9252
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 1248
+      },
+      "remove/flagged": {
+       "match": 1248
+      },
+      "remove/offset_moved": {
+       "match": 1248
+      },
+      "remove/position_moved": {
+       "unsupported": 1248
+      },
+      "remove/size": {
+       "match": 1248
+      },
+      "replace/edit_member": {
+       "match": 6260
+      },
+      "replace/flagged": {
+       "match": 6260
+      },
+      "replace/offset_moved": {
+       "match": 6260
+      },
+      "replace/position_moved": {
+       "unsupported": 6260
+      },
+      "replace/size": {
+       "match": 6260
+      },
+      "swap/edit_member": {
+       "match": 1744
+      },
+      "swap/flagged": {
+       "match": 1744
+      },
+      "swap/offset_moved": {
+       "match": 1744
+      },
+      "swap/position_moved": {
+       "unsupported": 1744
+      },
+      "swap/size": {
+       "match": 1744
+      }
+     },
+     "miss_examples": []
+    },
+    "abicc": {
+     "claims": {
+      "flagged": {
+       "match": 9252
+      },
+      "edit_member": {
+       "match": 9252
+      },
+      "size": {
+       "match": 9252
+      },
+      "offset_moved": {
+       "unsupported": 9252
+      },
+      "position_moved": {
+       "n/a": 7508,
+       "match": 1744
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 1248
+      },
+      "remove/flagged": {
+       "match": 1248
+      },
+      "remove/offset_moved": {
+       "unsupported": 1248
+      },
+      "remove/position_moved": {
+       "n/a": 1248
+      },
+      "remove/size": {
+       "match": 1248
+      },
+      "replace/edit_member": {
+       "match": 6260
+      },
+      "replace/flagged": {
+       "match": 6260
+      },
+      "replace/offset_moved": {
+       "unsupported": 6260
+      },
+      "replace/position_moved": {
+       "n/a": 6260
+      },
+      "replace/size": {
+       "match": 6260
+      },
+      "swap/edit_member": {
+       "match": 1744
+      },
+      "swap/flagged": {
+       "match": 1744
+      },
+      "swap/offset_moved": {
+       "unsupported": 1744
+      },
+      "swap/position_moved": {
+       "match": 1744
+      },
+      "swap/size": {
+       "match": 1744
+      }
+     },
+     "miss_examples": []
+    }
+   }
+  }
+ }
+}
