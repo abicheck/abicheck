@@ -333,10 +333,10 @@ def _parse_all(out: Path, cc: str, status: dict) -> tuple[dict, dict]:
     parsed: dict[str, dict | None] = {}
     errors: dict[str, str] = {}
     rep = out / f"compare_{cc}_dwarf.json"
-    lib = out / f"libnew_{cc}_g.so"
+    libs = [out / f"lib{side}_{cc}_g.so" for side in ("old", "new")]
     if not rep.exists():
         errors["abicheck"] = "unavailable: no dwarf-lane report"
-    elif rep.stat().st_mtime < lib.stat().st_mtime:
+    elif any(rep.stat().st_mtime < lib.stat().st_mtime for lib in libs):
         # a report left by an earlier batch over other libraries
         errors["abicheck"] = "stale: dwarf-lane report older than the libraries"
     else:

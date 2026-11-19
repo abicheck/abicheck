@@ -314,7 +314,8 @@ COMP = _load(FORMAL / "experiments" / "record_edit_competitors.py")
 def test_one_unreadable_report_does_not_stop_the_others(
     tmp_path: Path, body: str
 ) -> None:
-    (tmp_path / "libnew_gcc_g.so").write_bytes(b"")
+    for side in ("old", "new"):
+        (tmp_path / f"lib{side}_gcc_g.so").write_bytes(b"")
     (tmp_path / "compare_gcc_dwarf.json").write_text(body)
     (tmp_path / "abidiff_gcc.txt").write_text(
         "  in pointed to type 'struct s0' at new.h:1:1:\n    type size changed from 8 to 16 (in bits)\n"
@@ -324,6 +325,22 @@ def test_one_unreadable_report_does_not_stop_the_others(
     assert parsed["abicheck"] is None and errors["abicheck"].startswith("parse_error")
     assert parsed["abidiff"]["s0"]["size"] is True
     assert parsed["abicc"] is None and errors["abicc"] == "error_or_unavailable"
+
+
+def test_report_older_than_either_library_is_stale(tmp_path: Path) -> None:
+    import os
+
+    rep = tmp_path / "compare_gcc_dwarf.json"
+    rep.write_text('{"changes": []}')
+    for side, age in (("old", 0), ("new", -100)):
+        lib = tmp_path / f"lib{side}_gcc_g.so"
+        lib.write_bytes(b"")
+        os.utime(lib, (rep.stat().st_mtime - age, rep.stat().st_mtime - age))
+    # the old library was rebuilt after the report: a mixed pair
+    os.utime(tmp_path / "libold_gcc_g.so", (rep.stat().st_mtime + 10,) * 2)
+    status = {"abidiff": {"ok": False}, "abicc": {"ok": False}}
+    parsed, errors = COMP._parse_all(tmp_path, "gcc", status)
+    assert parsed["abicheck"] is None and errors["abicheck"].startswith("stale")
 
 
 # ------------------------------------------------------ compilers + abicheck
