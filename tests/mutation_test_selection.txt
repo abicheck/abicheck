@@ -33,7 +33,7 @@ tests/test_adr061_gap_b_facades.py
 tests/test_adr091_python_renames.py
 tests/test_advanced_extraction_status.py
 tests/test_adversarial_inputs.py
-tests/test_affected_symbols_identifier_boundary_gap.py
+tests/test_affected_symbols_identifier_boundary.py
 tests/test_agent_skills_drift.py
 tests/test_aggregate_findings.py
 tests/test_aggregate_scope_completeness.py
