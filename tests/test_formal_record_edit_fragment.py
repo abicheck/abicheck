@@ -176,6 +176,7 @@ def test_export_stays_under_the_large_file_threshold() -> None:
         ("char f0; int f1; short f2;", "short f2; int f1; char f0; "),
         ("char f1;", "short f1;"),  # names must start at f0
         ("float f0;", "int f0;"),  # base types exclude float
+        ("char f0;", ""),  # removing the only field is outside the space
         ("char f0; int f1;", "char f0;"),  # fine: removal ...
     ],
 )
@@ -323,8 +324,10 @@ def _tools() -> tuple[str, ...]:
     return ccs
 
 
-def _assert_all_agree(res: dict, n: int) -> None:
+def _assert_all_agree(res: dict, n: int, compilers: tuple[str, ...]) -> None:
+    assert set(res["compilers"]) == set(compilers)
     for cc, r in res["compilers"].items():
+        assert set(r["lanes"]) == set(FRAG.LANES), cc
         assert (r["layout_agree"], r["layout_disagree"]) == (2 * n, 0), cc
         for lane, v in r["lanes"].items():
             assert v["outcomes"] == {"agree": n}, (cc, lane, v["examples"][:3])
@@ -337,10 +340,9 @@ def _assert_all_agree(res: dict, n: int) -> None:
 @_LP64
 def test_reduced_set_matches_oracle_on_every_lane(tmp_path: Path) -> None:
     reps = [r for r in ROWS if r["rep"]]
-    res = FRAG.check_batch(
-        tmp_path, reps, CLASSES, _tools(), FRAG.LANES, FRAG.controls()
-    )
-    _assert_all_agree(res, len(reps))
+    ccs = _tools()
+    res = FRAG.check_batch(tmp_path, reps, CLASSES, ccs, FRAG.LANES, FRAG.controls())
+    _assert_all_agree(res, len(reps), ccs)
 
 
 @pytest.mark.integration
@@ -350,7 +352,11 @@ def test_per_case_exit_code_is_four(tmp_path: Path) -> None:
     picks = [
         next(r for r in ROWS if r["rep"] and r["edit"][0] == op) for op in (0, 1, 2)
     ]
-    res = FRAG.check_per_case(tmp_path, picks, CLASSES, _tools(), FRAG.LANES, jobs=3)
+    ccs = _tools()
+    res = FRAG.check_per_case(tmp_path, picks, CLASSES, ccs, FRAG.LANES, jobs=3)
+    want = {f"{cc}/{lane}" for cc in ccs for lane in FRAG.LANES}
+    assert set(res["cells"]) == want
+    assert all(cell == {"agree exit_ok=True": 3} for cell in res["cells"].values()), res
     assert res["bad"] == []
 
 
@@ -358,7 +364,6 @@ def test_per_case_exit_code_is_four(tmp_path: Path) -> None:
 @pytest.mark.slow
 @_LP64
 def test_full_space_matches_oracle_on_every_lane(tmp_path: Path) -> None:
-    res = FRAG.check_batch(
-        tmp_path, ROWS, CLASSES, _tools(), FRAG.LANES, FRAG.controls()
-    )
-    _assert_all_agree(res, len(ROWS))
+    ccs = _tools()
+    res = FRAG.check_batch(tmp_path, ROWS, CLASSES, ccs, FRAG.LANES, FRAG.controls())
+    _assert_all_agree(res, len(ROWS), ccs)

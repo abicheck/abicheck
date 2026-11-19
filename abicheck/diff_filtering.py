@@ -42,7 +42,7 @@ from .compare.opaque_types import (
     is_impl_source,
 )
 from .compare.public_surface import impact_candidate_functions
-from .compare.type_name_boundary import bounded_hits
+from .compare.type_name_boundary import bounded_hits, occurs_as_identifier
 from .model import AbiSnapshot, Function
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -333,8 +333,8 @@ def _resolve_ancestor_functions(
         else:
             parent_funcs: list[tuple[str, str]] = []
             for _m, func in old_pub.items():
-                func_types_used = {func.return_type} | {p.type for p in func.params}
-                if any(parent in ft for ft in func_types_used if ft):
+                used = {func.return_type} | {p.type for p in func.params}
+                if any(occurs_as_identifier(parent, t) for t in used if t):
                     parent_funcs.append((func.name, func.mangled))
             ancestor_func_cache[parent] = parent_funcs
             for fname, mname in parent_funcs:

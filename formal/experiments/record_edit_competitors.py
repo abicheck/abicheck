@@ -33,7 +33,7 @@ from the batch run's ``compare_{cc}_dwarf.json`` (same DWARF evidence).
 
 Usage::
 
-    record_edit_competitors.py OUT_DIR [--compilers gcc,clang] [--rows reduced|full]
+    record_edit_competitors.py OUT_DIR [--compilers gcc,clang]   # scores the rows OUT_DIR built
 """
 
 from __future__ import annotations
@@ -311,36 +311,63 @@ def run_tools(out: Path, cc: str) -> dict[str, dict]:
     return status
 
 
+def _read(path: Path, parse):  # type: ignore[no-untyped-def]
+    try:
+        return parse(path.read_text()), None
+    except (OSError, ValueError, ET.ParseError) as e:  # ValueError: JSON
+        return None, f"parse_error: {type(e).__name__}: {e}"
+
+
+def _parse_all(out: Path, cc: str, status: dict) -> tuple[dict, dict]:
+    """Each tool's per-record claims, or None with the reason in *errors*.
+    One tool's unreadable output never stops the others being scored."""
+    parsed: dict[str, dict | None] = {}
+    errors: dict[str, str] = {}
+    rep = out / f"compare_{cc}_dwarf.json"
+    lib = out / f"libnew_{cc}_g.so"
+    if not rep.exists():
+        errors["abicheck"] = "unavailable: no dwarf-lane report"
+    elif rep.stat().st_mtime < lib.stat().st_mtime:
+        # a report left by an earlier batch over other libraries
+        errors["abicheck"] = "stale: dwarf-lane report older than the libraries"
+    else:
+        parsed["abicheck"], err = _read(rep, lambda t: from_abicheck(json.loads(t)))
+        if err:
+            errors["abicheck"] = err
+    for tool, name, parse in (
+        ("abidiff", f"abidiff_{cc}.txt", parse_abidiff),
+        ("abicc", f"abicc_{cc}.xml", parse_abicc),
+    ):
+        if not status[tool].get("ok"):
+            errors[tool] = "error_or_unavailable"
+            continue
+        parsed[tool], err = _read(out / name, parse)
+        if err:
+            errors[tool] = err
+    for tool in ("abicheck", "abidiff", "abicc"):
+        parsed.setdefault(tool, None)
+    return parsed, errors
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("out", type=Path)
     ap.add_argument("--compilers", default="gcc,clang")
-    ap.add_argument("--rows", choices=("reduced", "full"), default="full")
     a = ap.parse_args(argv)
-    data = frag.load_export()
-    rows = data["rows"] if a.rows == "full" else [r for r in data["rows"] if r["rep"]]
+    out = a.out.resolve()  # ABICC runs with cwd=out; every path must be absolute
+    built_file = out / "built_rows.json"
+    if not built_file.exists():
+        ap.error(f"{built_file} missing: run record_edit_fragment.py {a.out} first")
+    built = set(json.loads(built_file.read_text()))
+    rows = [r for r in frag.load_export()["rows"] if r["id"] in built]
     summary: dict = {"cases": len(rows), "compilers": {}}
     for cc in a.compilers.split(","):
-        status = run_tools(a.out, cc)
-        parsed: dict[str, dict | None] = {}
-        rep = a.out / f"compare_{cc}_dwarf.json"
-        parsed["abicheck"] = (
-            from_abicheck(json.loads(rep.read_text())) if rep.exists() else None
-        )
-        parsed["abidiff"] = (
-            parse_abidiff((a.out / f"abidiff_{cc}.txt").read_text())
-            if status["abidiff"].get("ok")
-            else None
-        )
-        parsed["abicc"] = (
-            parse_abicc((a.out / f"abicc_{cc}.xml").read_text())
-            if status["abicc"].get("ok")
-            else None
-        )
+        status = run_tools(out, cc)
+        parsed, errors = _parse_all(out, cc, status)
         tools: dict = {}
         for tool, recs in parsed.items():
             if recs is None:
-                tools[tool] = {"status": "error_or_unavailable"}
+                tools[tool] = {"status": errors.get(tool, "error_or_unavailable")}
                 continue
             counts: dict[str, Counter] = {c: Counter() for c in CLAIMS}
             per_op: dict[str, Counter] = defaultdict(Counter)
@@ -365,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
                 "miss_examples": misses,
             }
         summary["compilers"][cc] = {"tool_status": status, "tools": tools}
-    (a.out / "competitors.json").write_text(json.dumps(summary, indent=1, default=list))
+    (out / "competitors.json").write_text(json.dumps(summary, indent=1, default=list))
     print(json.dumps(summary, indent=1, default=list))
     return 0
 

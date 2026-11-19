@@ -96,3 +96,25 @@ def test_matches_the_lookaround_oracle_on_generated_spellings() -> None:
         name = rng.choice(["a", "ab", "a1", "b_", "ab1"])
         text = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
         assert occurs_as_identifier(name, text) == _oracle(name, text), (name, text)
+
+
+def test_ancestor_attribution_uses_the_same_boundary() -> None:
+    """Only ``Leaf`` changes; the unchanged ``s1`` embeds it. Functions taking
+    ``s1`` are affected through the ancestor walk, ``use_s10`` is not."""
+    from abicheck.diff_filtering import _enrich_affected_symbols
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+
+    snap = AbiSnapshot(library="l", version="1")
+    snap.declarations.types = [
+        RecordType(
+            name="Leaf", kind="struct", fields=[TypeField(name="x", type="int")]
+        ),
+        RecordType(name="s1", kind="struct", fields=[TypeField(name="l", type="Leaf")]),
+        RecordType(name="s10", kind="struct", fields=[TypeField(name="y", type="int")]),
+    ]
+    snap.declarations.functions = [_fn("s1", "struct s1 *"), _fn("s10", "struct s10 *")]
+    change = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Leaf", description="d")
+    _enrich_affected_symbols([change], snap)
+    assert "use_s1" in change.affected_symbols
+    assert "use_s10" not in change.affected_symbols

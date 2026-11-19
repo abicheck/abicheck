@@ -46,19 +46,25 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import math
 import platform
 import random
 import re
-import resource
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+
+try:  # POSIX only; peak RSS reads as unavailable elsewhere
+    import resource
+except ImportError:  # pragma: no cover - Windows
+    resource = None  # type: ignore[assignment]
 
 HERE = Path(__file__).resolve().parent
 EXPORT = HERE.parent / "lean" / "record_edit_fragment_cases.json"
@@ -80,6 +86,9 @@ PREMISE = "\n".join(
     for t, n, _ in TYPES
 )
 LANES = ("hdr", "dwarf", "both")
+#: The checker under test: this interpreter's ``abicheck`` package, so the
+#: receipt's provenance (``abicheck_module``) names the code that ran.
+ABICHECK = (sys.executable, "-m", "abicheck")
 #: Kinds a lane cannot observe, by the kind's own ``observable_at``
 #: declaration: record alignment is a header fact; DWARF records it only when
 #: explicit (model/change_catalog/types_3.py, _OBS_ALIGN_H).
@@ -154,7 +163,7 @@ def _decode_edit(
 ) -> tuple[int, int, int] | None:
     """The one edit that turns *old* into *new*, or None."""
     n = len(old)
-    if len(new) == n - 1:
+    if len(new) == n - 1 and n >= 2:
         gone = sorted(set(range(n)) - {j for j, _ in new})
         ok = len(gone) == 1 and new == [d for d in old if d[0] != gone[0]]
         return (0, gone[0], 0) if ok else None
@@ -387,8 +396,11 @@ def _write_sources(out: Path, rows: list[dict], ctrl: list[dict]) -> None:
         # reports what it reads
         cons.append(f"memset(u.b,{SENTINEL},64);")
         for j, t in decls(r["old_body"]):
+            # typed temporary + memcpy at the compiler's offset: no store
+            # through a struct lvalue into the byte buffer
             cons.append(
-                f"((struct s{i}*)u.b)->f{j} = r ? {_literal(j, t, 1)} : {_literal(j, t, 0)};"
+                f"{{ {TYPES[t][0]} v = r ? {_literal(j, t, 1)} : {_literal(j, t, 0)}; "
+                f"memcpy(u.b+offsetof(struct s{i},f{j}), &v, sizeof v); }}"
             )
         cons.append(
             f'printf("W{i} %d", r); fflush(stdout); show_s{i}((struct s{i}*)u.b); fflush(stdout);'
@@ -482,7 +494,7 @@ def _compare(out: Path, cc: str, lane: str) -> tuple[int, dict]:
     rep.unlink(missing_ok=True)
     lib = "nog" if lane == "hdr" else "g"
     cmd = [
-        "abicheck",
+        *ABICHECK,
         "compare",
         str(out / f"libold_{cc}_{lib}.so"),
         str(out / f"libnew_{cc}_{lib}.so"),
@@ -601,6 +613,14 @@ def judge(
     }
 
 
+def _same(a: float | None, b: float | None) -> bool:
+    """Equal values, or two NaNs: an int read back as a float can be NaN
+    (``int -2`` is ``0xfffffffe``), and NaN never equals itself."""
+    if a is None or b is None:
+        return a is b
+    return a == b or (math.isnan(a) and math.isnan(b))
+
+
 def consumer_judge(row: dict, reads: dict, lane_got: list[str]) -> dict:
     """Old consumer, old vs new provider: which old fields read differently,
     whether the byte model predicted it, and whether abicheck names each such
@@ -619,9 +639,9 @@ def consumer_judge(row: dict, reads: dict, lane_got: list[str]) -> dict:
         w_old = reads["old"][("W", row["id"], rnd)]
         w_new = reads["new"][("W", row["id"], rnd)]
         wm_old, wm_new = write_model(row, "old", rnd), write_model(row, "new", rnd)
-        model_ok &= all(w_old.get(j) == wm_old[j] for j in fields)
-        model_ok &= all(w_new.get(j) == wm_new[j] for j in fields)
-        changed_w |= {j for j in fields if w_old.get(j) != w_new.get(j)}
+        model_ok &= all(_same(w_old.get(j), wm_old[j]) for j in fields)
+        model_ok &= all(_same(w_new.get(j), wm_new[j]) for j in fields)
+        changed_w |= {j for j in fields if not _same(w_old.get(j), w_new.get(j))}
     changed = sorted(changed_r | changed_w)
     named = {g.split(":")[1] for g in lane_got if g.split(":")[1]}
     return {
@@ -637,7 +657,9 @@ def consumer_judge(row: dict, reads: dict, lane_got: list[str]) -> dict:
 # ------------------------------------------------------------------- drivers
 
 
-def _peak_rss_mb() -> float:
+def _peak_rss_mb() -> float | None:
+    if resource is None:
+        return None
     return round(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024, 1)
 
 
@@ -650,7 +672,10 @@ def _tool_versions(compilers: tuple[str, ...]) -> dict:
 
     v = {cc: first([cc, "--version"]) for cc in compilers}
     v["castxml"] = first(["castxml", "--version"])
-    v["abicheck"] = first(["abicheck", "--version"])
+    v["abicheck"] = first([*ABICHECK, "--version"])
+    v["abicheck_module"] = first(
+        [sys.executable, "-c", "import abicheck; print(abicheck.__file__)"]
+    )
     v["python"] = sys.version.split()[0]
     v["target"] = f"{platform.system()} {platform.machine()}"
     v["flags"] = "-std=c11 -O0 -shared -fPIC (+ -g for dwarf/both lanes)"
@@ -741,12 +766,14 @@ def check_batch(
         res["compilers"][cc] = cres
         lines += [json.dumps(v) for v in per_case.values()]
     (out / "cases.jsonl").write_text("\n".join(lines) + "\n")
+    (out / "built_rows.json").write_text(json.dumps(sorted(r["id"] for r in rows)))
     res["peak_child_rss_mb"] = _peak_rss_mb()
     return res
 
 
-def _one_case(out: Path, row: dict, cls: dict, compilers, lanes) -> dict:
-    out.mkdir(parents=True, exist_ok=True)
+def _one_case(root: Path, row: dict, cls: dict, compilers, lanes) -> dict:
+    root.mkdir(parents=True, exist_ok=True)
+    out = Path(tempfile.mkdtemp(prefix=f"c{row['id']}_", dir=root))
     _write_sources(out, [row], [])
     r: dict = {"id": row["id"]}
     for cc in compilers:
@@ -770,9 +797,7 @@ def check_per_case(out: Path, rows, classes, compilers, lanes, jobs: int) -> dic
     with ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(
             ex.map(
-                lambda r: _one_case(
-                    out / f"c{r['id']}", r, classes[r["class"]], compilers, lanes
-                ),
+                lambda r: _one_case(out, r, classes[r["class"]], compilers, lanes),
                 rows,
             )
         )
@@ -820,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
         rows = sorted(random.Random(15).sample(rows, a.sample), key=lambda r: r["id"])
     compilers = tuple(a.compilers.split(","))
     lanes = tuple(a.lanes.split(","))
+    if bad := sorted(set(lanes) - set(LANES)):
+        ap.error(f"unknown lane(s) {bad}; choose from {list(LANES)}")
     ctrl = [] if (a.no_controls or a.per_case) else controls()
     runs = []
     for k in range(a.repeat):
