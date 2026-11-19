@@ -27,7 +27,7 @@ each against an oracle that is not the code under test:
 * the consumer byte model against hand-computed bytes;
 * (``integration``) gcc/clang layouts, abicheck's typed findings in the
   header, DWARF and combined lanes, and the old-consumer observation, for the
-  class representatives; per-case exit codes; the full space under ``slow``.
+  class representatives; per-case exit codes; the full space under ``slow`` with ``ABICHECK_E16_FULL=1``.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from __future__ import annotations
 import importlib.util
 import itertools
 import json
+import os
 import platform
 import shutil
 import sys
@@ -513,6 +514,11 @@ def test_per_case_exit_code_is_four(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.slow
 @_LP64
+@pytest.mark.skipif(
+    os.environ.get("ABICHECK_E16_FULL") != "1",
+    reason="full E16 space takes ~15 min (over the 600 s per-test timeout); "
+    "set ABICHECK_E16_FULL=1 — the receipt in formal/receipts/e16/ records the run",
+)
 def test_full_space_matches_oracle_on_every_lane(tmp_path: Path) -> None:
     ccs = _tools()
     res = FRAG.check_batch(tmp_path, ROWS, CLASSES, ccs, FRAG.LANES, FRAG.controls())

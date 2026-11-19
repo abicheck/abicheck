@@ -300,7 +300,7 @@ the module ≈ 4 min, the export ≈ 2 min; fast tests ≈ 1 s.
 ```bash
 (cd formal/lean && lake build && lake env lean --tstack=4000000 AbiLean/RecordEditFragmentExport.lean)
 pytest tests/test_formal_record_edit_fragment.py -q                    # fast checks
-pytest tests/test_formal_record_edit_fragment.py -q -m integration     # + compilers, lanes (add slow: full space)
+pytest tests/test_formal_record_edit_fragment.py -q -m integration     # + compilers, lanes (full space: ABICHECK_E16_FULL=1)
 python formal/experiments/record_edit_fragment.py OUT [--reduced] [--per-case] [--repeat N]
 python formal/experiments/record_edit_competitors.py OUT               # after a batch run into OUT
 ```
