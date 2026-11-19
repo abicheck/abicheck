@@ -24,7 +24,11 @@ tests that exercise the same rules through a full AST stay in
 
 from __future__ import annotations
 
-from abicheck.buildsource.type_graph_names import _base_type_name
+import itertools
+
+import pytest
+
+from abicheck.buildsource.type_graph_names import _base_type_name, _is_excluded_type
 
 
 def test_base_type_name_strips_pointer_and_cv() -> None:
@@ -51,3 +55,87 @@ def test_base_type_name_strips_callback_signature_argument() -> None:
     # existing stripping rule, so "Impl ()" was looked up as a type literally
     # named that (Codex review).
     assert _base_type_name("detail::Impl ()") == "detail::Impl"
+
+
+# --- Builtin exclusion is independent of the producer's spelling ----------
+#
+# Oracle: C11 6.7.2p2's list of valid arithmetic type-specifier multisets,
+# written out here independently of the implementation. Each may appear in
+# any order, and producers do differ: clang's ``qualType`` writes ``long``,
+# CastXML/GCC write ``long int`` / ``long unsigned int``. Before the fix the
+# CastXML-fed header graph kept ``long int`` as a type node, so a function
+# using ``long`` as both parameter and return read as a
+# ``public_dependency_role_changed`` (formal/RET_FRAGMENT.md, 112 of 1176
+# cases when ``clang`` was not on PATH).
+
+_C11_SPECIFIER_MULTISETS = (
+    ("void",),
+    ("char",),
+    ("signed", "char"),
+    ("unsigned", "char"),
+    ("short",),
+    ("signed", "short"),
+    ("short", "int"),
+    ("signed", "short", "int"),
+    ("unsigned", "short"),
+    ("unsigned", "short", "int"),
+    ("int",),
+    ("signed",),
+    ("signed", "int"),
+    ("unsigned",),
+    ("unsigned", "int"),
+    ("long",),
+    ("signed", "long"),
+    ("long", "int"),
+    ("signed", "long", "int"),
+    ("unsigned", "long"),
+    ("unsigned", "long", "int"),
+    ("long", "long"),
+    ("signed", "long", "long"),
+    ("long", "long", "int"),
+    ("signed", "long", "long", "int"),
+    ("unsigned", "long", "long"),
+    ("unsigned", "long", "long", "int"),
+    ("float",),
+    ("double",),
+    ("long", "double"),
+    ("_Bool",),
+    ("float", "_Complex"),
+    ("double", "_Complex"),
+    ("long", "double", "_Complex"),
+    # GNU extensions both producers emit for x86-64.
+    ("__int128",),
+    ("unsigned", "__int128"),
+)
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    sorted(
+        {
+            " ".join(p)
+            for ms in _C11_SPECIFIER_MULTISETS
+            for p in itertools.permutations(ms)
+        }
+    ),
+)
+def test_every_fundamental_spelling_is_excluded(spelling: str) -> None:
+    assert _is_excluded_type(spelling)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "s1",
+        "s10",
+        "long_t",
+        "int_wrapper",
+        "longer",
+        "ns::long",
+        "unsigned_char",
+        "Widget",
+        "std::size_t_like",
+    ],
+)
+def test_record_and_typedef_names_are_not_excluded(name: str) -> None:
+    assert not _is_excluded_type(name)

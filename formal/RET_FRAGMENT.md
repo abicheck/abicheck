@@ -190,6 +190,21 @@ The 21 that do not write into the sentinel.
   (ret:trivial → ret:trivial)`. Both structs are trivial; what changed is
   registers → memory, which the text does not say.
 
+* **The exact report match depended on `clang` being on PATH (fixed).**
+  The header graph is built from `clang -ast-dump=json` when clang is
+  available and from the CastXML-parsed snapshot otherwise. The two spell
+  fundamental types differently (`long` vs `long int`), and the builtin
+  filter knew only clang's spellings, so without clang `long int` became a
+  graph node. Every case where one side uses `long` as both a parameter and
+  the return (e.g. `void f(long)` → `long f(long)`) then carried an extra
+  `public_dependency_role_changed` (`param` → `param, return`): 112 of 1176
+  cases, first ids 113, 120, 126, 127, 128. Call observations and verdicts
+  were unaffected. The filter now recognises any spelling made only of
+  fundamental-type keywords; both lanes give 1176/1176 exact matches.
+  Regression: `tests/test_type_graph_names.py` (every permutation of
+  C11 6.7.2p2's specifier multisets). To run the CastXML lane, put a PATH
+  without `clang` in front of the experiment.
+
 ## Struct member layouts (E14b)
 
 E14 compares struct returns of *different* classes only. A change that keeps
