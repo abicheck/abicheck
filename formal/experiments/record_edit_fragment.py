@@ -44,6 +44,7 @@ writes OUT_DIR/summary.json and OUT_DIR/cases.jsonl (one line per case).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import itertools
 import json
 import math
@@ -416,6 +417,14 @@ def _cc(cc: str, *args: str) -> None:
         raise SystemExit(f"infrastructure_error: {cc} {' '.join(args[-3:])}")
 
 
+def lib_hashes(out: Path, cc: str) -> dict[str, str]:
+    """sha256 of each -g library a dwarf-lane report is computed from."""
+    return {
+        side: hashlib.sha256((out / f"lib{side}_{cc}_g.so").read_bytes()).hexdigest()
+        for side in ("old", "new")
+    }
+
+
 def _build(out: Path, cc: str) -> dict:
     """Both sides with and without -g, the layout probes and the consumer."""
     res: dict = {"layout": {}}
@@ -699,6 +708,12 @@ def check_batch(
         t1 = time.perf_counter()
         b = _build(out, cc)
         t2 = time.perf_counter()
+        # which library pair this batch's reports describe (read by
+        # record_edit_competitors.py, which refuses a report for other libraries)
+        hashes_file = out / "lib_hashes.json"
+        hashes = json.loads(hashes_file.read_text()) if hashes_file.exists() else {}
+        hashes[cc] = lib_hashes(out, cc)
+        hashes_file.write_text(json.dumps(hashes, indent=1))
         cres: dict = {"seconds_build_probe_consumer": round(t2 - t1, 2), "lanes": {}}
         lay_bad = [
             (r["id"], s)

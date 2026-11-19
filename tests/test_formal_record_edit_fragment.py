@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import importlib.util
 import itertools
+import json
 import platform
 import shutil
 import sys
@@ -318,6 +319,9 @@ def test_one_unreadable_report_does_not_stop_the_others(
 ) -> None:
     for side in ("old", "new"):
         (tmp_path / f"lib{side}_gcc_g.so").write_bytes(b"")
+    (tmp_path / "lib_hashes.json").write_text(
+        json.dumps({"gcc": FRAG.lib_hashes(tmp_path, "gcc")})
+    )
     (tmp_path / "compare_gcc_dwarf.json").write_text(body)
     (tmp_path / "abidiff_gcc.txt").write_text(
         "  in pointed to type 'struct s0' at new.h:1:1:\n    type size changed from 8 to 16 (in bits)\n"
@@ -339,18 +343,21 @@ def test_abicc_output_that_is_not_a_report_is_a_parse_error(
     assert parsed["abicc"] is None and errors["abicc"].startswith("parse_error")
 
 
-def test_report_older_than_either_library_is_stale(tmp_path: Path) -> None:
-    import os
-
-    rep = tmp_path / "compare_gcc_dwarf.json"
-    rep.write_text('{"changes": []}')
-    for side, age in (("old", 0), ("new", -100)):
-        lib = tmp_path / f"lib{side}_gcc_g.so"
-        lib.write_bytes(b"")
-        os.utime(lib, (rep.stat().st_mtime - age, rep.stat().st_mtime - age))
-    # the old library was rebuilt after the report: a mixed pair
-    os.utime(tmp_path / "libold_gcc_g.so", (rep.stat().st_mtime + 10,) * 2)
+@pytest.mark.parametrize("rebuilt", ["old", "new"])
+def test_report_for_another_library_pair_is_stale(tmp_path: Path, rebuilt: str) -> None:
+    """The batch records the libraries' hashes; rebuilding either one after
+    the report (an interrupted batch) makes the report stale."""
+    for side in ("old", "new"):
+        (tmp_path / f"lib{side}_gcc_g.so").write_bytes(side.encode())
+    (tmp_path / "lib_hashes.json").write_text(
+        json.dumps({"gcc": FRAG.lib_hashes(tmp_path, "gcc")})
+    )
+    (tmp_path / "compare_gcc_dwarf.json").write_text('{"changes": []}')
     status = {"abidiff": {"ok": False}, "abicc": {"ok": False}}
+    assert (
+        COMP._parse_all(tmp_path, "gcc", status)[0]["abicheck"] == {}
+    )  # control: current
+    (tmp_path / f"lib{rebuilt}_gcc_g.so").write_bytes(b"rebuilt")
     parsed, errors = COMP._parse_all(tmp_path, "gcc", status)
     assert parsed["abicheck"] is None and errors["abicheck"].startswith("stale")
 
