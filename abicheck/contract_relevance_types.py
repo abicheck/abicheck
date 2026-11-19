@@ -296,7 +296,7 @@ CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
             "snapshot carries a symbol table to bind it (a PE or Mach-O "
             "target), so the name alone does not prove the library does not "
             "export it. The finding is not excluded: its relevance stands and "
-            "its assurance is partial, so it keeps gating (ADR-089 A8)."
+            "its assurance is partial, so it keeps gating."
         ),
         "dependency_internal_unreachable": (
             "The entity is declared in a dependency (a header-only or vendored "
