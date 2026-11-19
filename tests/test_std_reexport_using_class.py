@@ -113,3 +113,64 @@ def test_removed_using_reexport_is_an_api_break_through_the_typed_api(
         f"removed using-declaration of a {kind}: kinds {sorted(kinds)}, "
         f"expected exactly {sorted(EXPECTED_KINDS)}"
     )
+
+
+@pytest.mark.known_gap_canary
+def test_private_bare_name_collision_keeps_the_reexport_finding(tmp_path: Path) -> None:
+    """Known gap: a private ``detail::abs`` shares the bare tail of ``std::abs``.
+
+    The origin is keyed by bare name, so the collision keeps the finding in
+    surface scope. The answer is a false positive, never a missed break: the
+    removed ``krx::abs`` is still reported as an API break. Gapped answer
+    asserted here; it changes if the origin is keyed by qualified name.
+    """
+    _require_toolchain()
+    priv = tmp_path / "priv.h"
+    priv.write_text("namespace detail { struct abs { int v; }; }\n", encoding="utf-8")
+
+    def build(stem: str, public: str) -> tuple[Path, Path]:
+        d = tmp_path / stem
+        d.mkdir(parents=True, exist_ok=True)
+        hdr = d / "pub.h"
+        hdr.write_text('#include "priv.h"\n' + public + "\n", encoding="utf-8")
+        src = d / "lib.cpp"
+        src.write_text(
+            '#include "pub.h"\n#include <cstdlib>\n'
+            "namespace krx { int krx_f(int a) { return std::abs(a) + detail::abs{a}.v; } }\n",
+            encoding="utf-8",
+        )
+        so = d / "libx.so"
+        subprocess.run(
+            [
+                "g++",
+                "-shared",
+                "-fPIC",
+                "-std=c++17",
+                "-I",
+                str(tmp_path),
+                "-I",
+                str(d),
+                str(src),
+                "-o",
+                str(so),
+            ],
+            check=True,
+        )
+        return so, hdr
+
+    old_so, old_hdr = build(
+        "old", "#include <cstdlib>\nnamespace krx { using std::abs; int krx_f(int a); }"
+    )
+    new_so, new_hdr = build(
+        "new", "#include <cstdlib>\nnamespace krx { int krx_f(int a); }"
+    )
+    opts = f"-I{tmp_path}"
+    old_snap = checker.snapshot(
+        old_so, [old_hdr], version="1", is_cxx=True, backend="castxml", gcc_options=opts
+    )
+    new_snap = checker.snapshot(
+        new_so, [new_hdr], version="2", is_cxx=True, backend="castxml", gcc_options=opts
+    )
+    verdict, kinds = checker.answer(old_snap, new_snap)
+    assert verdict == BREAK
+    assert kinds == EXPECTED_KINDS
