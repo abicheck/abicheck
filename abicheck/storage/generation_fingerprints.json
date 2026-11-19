@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "256a6f0c64890268207596cefe89a66ccefab13f5cae1a611f964aab094807bf",
+      "abicheck/dumper.py": "4e3e367c4951ab0674da1a10dc8172c6b97143161e1c34bd8ce185fa92ba24ec",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
       "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
@@ -18,7 +18,7 @@
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
       "abicheck/extract/archive_integrity.py": "8d2b9fb73980bf646972da75431adf6437335bd83aa7b14678d531b1084995cb",
       "abicheck/extract/binary_dialect.py": "be8a71c557287ee47f63a49ea98306ac2d44877987cbadd9a554bd3f50119bc2",
-      "abicheck/extract/binary_format.py": "7c5f31dba9fab2884f8e91b5263d871c4cc38c6c56307eb46d782cd76b8ae2f8",
+      "abicheck/extract/binary_format.py": "8e52ae9369fd96416daaf8ff612d733343141679f1d1b2a5711fba3935ef9653",
       "abicheck/extract/binary_identity.py": "6e4f7c0e55443ab906c75d67b5ca11629e2e6fcd59ea0f28976b8eb6651a392b",
       "abicheck/extract/build_mode_capture.py": "e4975d7c6e28a64d17550912d2ee40d808c8c8c72a22be9accc89a485ae4262f",
       "abicheck/extract/builtin_abi.py": "3e1bdb87490b3078d19d172a9cf241d40daee753575714daaf1931e0baf5095d",
@@ -247,9 +247,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "3e5c8cd60ad615b2168228ec7157790ca61f4e25d48ba9311847d085115cab25",
+    "fingerprint": "91442756be2d28ab4b75615b08f1b12ec0e2ef7c470ce096a2a13173645b0fa6",
     "generation": 87,
-    "reason": "87: the typed dump() attaches the default header-only graph the CLI records (one owner, workflows/dump/default_header_graph.py). Spelling row 87 is audited; the generation-86 corpus is frozen from origin/main; the CLI output is unchanged."
+    "reason": "Behaviour-preserving move: _detect_format moved unchanged from dumper.py to extract/binary_format.py as detect_format(path, handlers), and effective_public_scope moved from dump() to workflows/dump/default_header_graph.py. No extraction or resolution semantics change; generation 87 stays."
   },
   "resolver": {
     "files": {
