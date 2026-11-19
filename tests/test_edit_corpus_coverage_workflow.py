@@ -2,10 +2,10 @@
 
 ``needs.integration.result`` reads ``failure`` when one matrix leg failed and
 another was cancelled, so the floor job once ran on a superseded run whose
-corpus shard had been cancelled and failed with "neither Linux shard uploaded
+corpus shard had been cancelled and failed with "no Linux shard uploaded
 edit corpus coverage records". Each Linux shard now leaves a
 ``shard-N.done`` marker when its integration step finished; the floor is
-judged only with both markers. These tests execute the steps themselves.
+judged only with every shard's marker. These tests execute the steps themselves.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def _stub_bsd_wc(bindir: Path) -> None:
     (bindir / "wc").chmod(0o755)
 
 
-@pytest.mark.parametrize("shard", ["1", "2"])
+@pytest.mark.parametrize("shard", ["1", "2", "3"])
 @pytest.mark.parametrize(
     ("has_records", "report_rc", "step_rc"),
     [(False, 1, 0), (True, 0, 0), (True, 1, 1)],
@@ -85,29 +85,31 @@ def test_a_finished_shard_leaves_its_marker(
     ("markers", "records", "rc", "message"),
     [
         # A cancelled shard: not judged, whatever was uploaded.
-        ((), False, 0, "only 0 of 2 Linux shards finished"),
-        (("1",), False, 0, "only 1 of 2 Linux shards finished"),
-        (("2",), True, 0, "only 1 of 2 Linux shards finished"),
-        # Both finished and neither recorded the PR tier: a real failure.
+        ((), False, 0, "only 0 of 3 Linux shards finished"),
+        (("1",), False, 0, "only 1 of 3 Linux shards finished"),
+        (("2",), True, 0, "only 1 of 3 Linux shards finished"),
+        (("1", "3"), True, 0, "only 2 of 3 Linux shards finished"),
+        # All finished and none recorded the PR tier: a real failure.
         (
-            ("1", "2"),
+            ("1", "2", "3"),
             False,
             1,
-            "neither Linux shard uploaded edit corpus coverage records",
+            "no Linux shard uploaded edit corpus coverage records",
         ),
-        # Both finished with records: the report decides (a stub that fails).
-        (("1", "2"), True, 1, ""),
+        # All finished with records: the report decides (a stub that fails).
+        (("1", "2", "3"), True, 1, ""),
     ],
     ids=[
         "none-finished",
         "shard1-only",
         "shard2-only-with-records",
-        "both-no-records",
-        "both-report-fails",
+        "two-of-three",
+        "all-no-records",
+        "all-report-fails",
     ],
 )
 @pytest.mark.parametrize("bsd_wc", [False, True], ids=["gnu-wc", "bsd-wc"])
-def test_the_floor_is_judged_only_when_both_shards_finished(
+def test_the_floor_is_judged_only_when_every_shard_finished(
     tmp_path: Path,
     markers: tuple[str, ...],
     records: bool,

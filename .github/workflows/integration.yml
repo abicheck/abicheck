@@ -371,7 +371,7 @@ jobs:
           # A shard whose test files hold no corpus cells uploads no records; the
           # pair of shards must still have recorded the PR tier somewhere.
           if [ -z "$(find edit-corpus-coverage -name '*.json' -print -quit 2>/dev/null)" ]; then
-            echo "::error::neither Linux shard uploaded edit corpus coverage records"
+            echo "::error::no Linux shard uploaded edit corpus coverage records"
             exit 1
           fi
           python -m abiforge.coverage report edit-corpus-coverage \
