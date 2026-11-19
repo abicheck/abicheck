@@ -45,8 +45,11 @@ _WRAPPER_TAGS = frozenset({"CvQualifiedType", "Typedef", "ElaboratedType"})
 _MAX_DEPTH = 64
 
 
-def castxml_return_by_value_fact(ctx: Any, type_id: str) -> Fact[bool] | None:
-    """``Fact.present(True/False)`` for a return type id, or ``None`` if undetermined."""
+def castxml_return_by_value_fact(ctx: Any, type_id: str | None) -> Fact[bool] | None:
+    """``Fact.present(True/False)`` for a return type id, or ``None`` if
+    undetermined (including a function with no return type id)."""
+    if not type_id:
+        return None
     answer = _by_value(ctx, type_id, 0)
     return None if answer is None else Fact.present(answer)
 

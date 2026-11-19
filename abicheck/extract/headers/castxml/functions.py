@@ -653,9 +653,7 @@ def parse_function_element(
             type_identities(ctx, ret_id) if ret_id else ()
         ),
         return_type_abi_fact=castxml_type_abi_fact(ctx, ret_id) if ret_id else None,
-        return_by_value_fact=castxml_return_by_value_fact(ctx, ret_id)
-        if ret_id
-        else None,
+        return_by_value_fact=castxml_return_by_value_fact(ctx, ret_id),
         params=params,
         visibility=visibility_,
         **header_ast_surface_facts(

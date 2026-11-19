@@ -109,7 +109,7 @@
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/explicit_instantiation.py": "02efd130ec0654aa7e4fb684b83c2be6c2273c85d58a6b6ca8fd1c90221e1616",
       "abicheck/extract/headers/castxml/function_type_cc.py": "629328f9a0e9c3842ef43c05e11ef3f781b9f5c351e3f14638ce54b91e36405a",
-      "abicheck/extract/headers/castxml/functions.py": "7f598b8d87f2d45b9989ebe497d236f3625c4441514c53a0093d099195ca4661",
+      "abicheck/extract/headers/castxml/functions.py": "241e84de19312a91dd8b8d1b4f076ac419685605c8399202bea8d3fa48d363e9",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -120,7 +120,7 @@
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "154b766dafc01b3ceec3d95312396a174cc39f17947902ce40f4be4011318493",
-      "abicheck/extract/headers/castxml/return_by_value.py": "4a71d9600c6ae71b4f7d3f9f7b4c22ea32f81155fab213cb80454b19689567f0",
+      "abicheck/extract/headers/castxml/return_by_value.py": "1a5acb0ba917521e4fab437ac846f17e7e065fcc6948867a94797d20c0e5a6fe",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
@@ -248,7 +248,7 @@
       "abicheck/workflows/dump/native.py": "3c1b3a3505f83d2d82e85e1c156bd08fadd724cd010fae27c718a56557d9d219",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "8f292194d1f1f40b4edfe38acbeab06454b3db753ed5757e3ad1a79417991864",
+    "fingerprint": "46ff8280ff167ecef5ff364479e9421f51953a95795ad3fc5421580dca8d49cf",
     "generation": 87,
     "reason": "Function.return_by_value_fact (castxml and clang) and the indirection kind on every ABI fact; pointer members carry an ABI fact"
   },
