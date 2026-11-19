@@ -43,7 +43,6 @@ from ..model.declarations import Function
 from ..model.entities import RecordType, TypeField
 from ..model.semantic_ir import CanonicalEntity
 from ..model.semantic_ir_record_layout import entity_layout
-from .record_member_abi import member_abi
 
 __all__ = [
     "record_return_convention_changes",
@@ -66,14 +65,18 @@ class LayoutIndex(Protocol):
 
 
 def member_class(member: TypeField) -> tuple[int, str] | None:
-    """``(size_bytes, class)`` of a scalar member, or ``None`` if undecided.
+    """``(size_bytes, class)`` of a scalar member from its ABI fact, or ``None``.
 
-    A float up to eight bytes is SSE; any other scalar (an integer, enum,
-    bool or pointer) is INTEGER. A vector, a float wider than eight bytes
-    (``long double``, x87), or an undetermined member is undecided.
+    The fact (``TypeField.type_abi_fact``) is the header backend's reading of
+    the declared type: a fundamental, an enumeration, or a pointer. A vector,
+    a float wider than eight bytes (``long double``, x87), or a member with no
+    fact is undecided.
     """
-    abi = member_abi(member)
-    if abi is None or abi.lanes:
+    fact = member.type_abi_fact
+    if fact is None or not fact.is_present or fact.value is None:
+        return None
+    abi = fact.value
+    if abi.lanes:
         return None
     if abi.encoding is FundamentalEncoding.FLOAT:
         return (abi.size, "SSE") if abi.size <= 8 else None
