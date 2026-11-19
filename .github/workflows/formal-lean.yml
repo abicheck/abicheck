@@ -19,7 +19,11 @@ name: formal (Lean / TLA+)
 #   * job `tlc` runs TLC itself (tla2tools.jar pinned by release and sha256,
 #     Temurin JRE pinned by version) on every formal/tla/MC_*.cfg and compares
 #     TLC's reachable state graph with the Python BFS checkers'
-#     (formal/tla/compare_tlc.py); any difference turns it red.
+#     (formal/tla/compare_tlc.py); any difference turns it red;
+#   * job `e16-full` (nightly and on dispatch only) runs the full E16
+#     record-edit space (9252 cases x gcc/clang x three evidence lanes,
+#     ~15-30 min), which is opt-in (ABICHECK_E16_FULL=1) everywhere else
+#     because it exceeds the 600 s per-test timeout; PRs run the reduced set.
 
 on:
   pull_request:
@@ -39,6 +43,7 @@ on:
       - 'tests/test_formal_ret_fragment.py'
       - 'tests/test_formal_struct_ret_fragment.py'
       - 'tests/test_formal_member_fragment.py'
+      - 'tests/test_formal_record_edit_fragment.py'
       - '.github/workflows/formal-lean.yml'
   push:
     branches: [main]
@@ -58,7 +63,13 @@ on:
       - 'tests/test_formal_ret_fragment.py'
       - 'tests/test_formal_struct_ret_fragment.py'
       - 'tests/test_formal_member_fragment.py'
+      - 'tests/test_formal_record_edit_fragment.py'
       - '.github/workflows/formal-lean.yml'
+  schedule:
+    # 02:41 UTC daily: off the hour, outside the 06:00-09:00 PT busy window.
+    # Only `e16-full` runs on the schedule; the other jobs keep their
+    # PR/push triggers.
+    - cron: "41 2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -71,6 +82,7 @@ permissions:
 jobs:
   lean-and-tla:
     name: lean build, table drift, TLA+ disposition
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -235,6 +247,7 @@ jobs:
 
   tlc:
     name: TLC model check + TLC/Python state-graph correspondence
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -307,6 +320,7 @@ jobs:
     # the spec (a finding vanishing, a bucket shrinking, a ledger record
     # lost) turns this job red. Seeded-wrong traces must be rejected by both.
     name: TLA+ trace validation of the real disposition pipeline (E11)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -358,3 +372,48 @@ jobs:
 
       - name: Seeded-wrong traces are rejected by both checkers
         run: python formal/tla/check_trace.py "${RUNNER_TEMP}/traces.json" --mutants --tlc "$TLA2TOOLS_JAR"
+
+  e16-full:
+    # The whole E16 record-edit space through the public CLI: layout,
+    # typed findings and values, consumer probe, affected_symbols and
+    # controls on every (compiler, lane) cell (formal/RECORD_EDIT_FRAGMENT.md).
+    # Report-only: scheduled runs are on main; a red run is a disagreement
+    # with the Lean oracle on some case.
+    name: E16 full record-edit space (nightly)
+    if: >-
+      (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Install gcc and clang
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ clang
+
+      - uses: ./.github/actions/setup-castxml
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install abicheck
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Full E16 space
+        env:
+          ABICHECK_E16_FULL: "1"
+          # The test skips without gcc and clang; a skip must not read green.
+          ABICHECK_MIN_EXECUTED: "1"
+        run: >-
+          python -m pytest tests/test_formal_record_edit_fragment.py
+          -m integration -k test_full_space_matches_oracle_on_every_lane
+          --timeout 4800 -q -rs --durations=5
