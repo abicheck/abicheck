@@ -144,8 +144,11 @@ from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
 from .storage.ast_cache_location import reference_scratch_scoped
 from .storage.header_ast_cache import _cache_path as _cache_path
-from .workflows import memory_trace, snapshot_factory
-from .workflows.dump.default_header_graph import effective_public_scope
+from .workflows import memory_trace
+from .workflows.dump.default_header_graph import (
+    effective_public_scope,
+    finish_scoped_dump,
+)
 from .workflows.dump.elf_fallback import (
     # DWARF/symbol-only fallback snapshot builders live in the sibling module
     # (dumper.py is at the file-size cap); re-exported here so
@@ -412,48 +415,23 @@ def dump(
         dump_manifest=dump_manifest,
     )
 
-    # Tag declaration provenance (source_header + origin). Always derives
-    # source_header from the parsed source location; origin is only
-    # classified when a public-header set is supplied (ADR-015, D4).
-    #
-    # include_search_dirs=public_include_search_dirs folds those directories
-    # into the public-directory set once a real -H/--public-header-dir set
-    # already opted classification in: a header-AST dump only ever parses
-    # declarations reachable by #include from its own -H root(s), so a
-    # header living elsewhere under the same include root that the umbrella
-    # header pulled in transitively is not a private implementation detail
-    # merely because it isn't the literal -H file (defect: every
-    # transitively-included header classified private-header, silently
-    # dropping real breaking findings out of the compared surface).
-    #
-    # Deliberately NOT `extra_includes` (Codex review, real regression found
-    # via the example suite): `extra_includes` is the FULL compile include
-    # path, which also carries directories this function (or a caller's own
-    # P3 `resolve_inferred_header_roots` step) auto-derives purely so an
-    # umbrella -H header's own relative #includes resolve -- typically the
-    # umbrella header's own directory. That directory can just as easily
-    # hold a genuinely *private* sibling header (case184_internal_enum_
-    # churn_scoped's own v1_internal.h, next to the public v1.h) -- folding
-    # it into the public-directory set defeated the entire private-header
-    # scoping example that test exists to cover. `public_include_search_
-    # dirs` is a separate, caller-supplied parameter carrying ONLY the
-    # directories the caller can positively attest are a real, explicit
-    # dependency-search declaration (a literal `-I`/`--include`), never an
-    # internal #include-resolution auto-add.
-    #
-    # Explicit is still not the same as *owned*, though: `apply_provenance`
-    # keeps only the roots this run's own declared public headers live
-    # underneath. An `-I` a library passes purely so a dependency's
-    # `#include <dep.h>` resolves stays compile context -- see
-    # `extract.public_root_ownership` for the rule and the MKL/MPI case that forced it.
-    return snapshot_factory.finish_binary_dump(
+    return finish_scoped_dump(
         snapshot,
         effective_public_headers,
         effective_public_header_dirs,
         include_search_dirs=public_include_search_dirs,
         read_dwarf=not (symbols_only or debug_presence_only),  # shallow: .comment only
         debug_info_path=debug_info_path,
-        graph_inputs=(headers, extra_includes or [], lang, dwarf_only or symbols_only),
+        headers=headers,
+        extra_includes=extra_includes or [],
+        lang=lang,
+        suppressed=dwarf_only or symbols_only,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
     )
 
 

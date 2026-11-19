@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING, Any
 from ..model import AbiSnapshot
 
 if TYPE_CHECKING:
+    from ..compile_context import CompileContext
     from ..model.ownership_rules import OwnershipRequest
 
 __all__ = [
@@ -179,14 +180,18 @@ def finish_binary_dump(
     include_search_dirs: Sequence[Path] | None = None,
     read_dwarf: bool = True,
     debug_info_path: Path | None = None,
-    graph_inputs: tuple[list[Path], list[Path], str | None, bool] | None = None,
+    graph_inputs: (
+        tuple[list[Path], list[Path], str | None, bool]
+        | tuple[list[Path], list[Path], str | None, bool, CompileContext | None]
+        | None
+    ) = None,
 ) -> AbiSnapshot:
     """``dumper.dump``'s shared tail for every binary format: record the
     image's own build mode (ELF ``DW_AT_producer``/``DW_AT_language``/
     ``.comment``, falling back to the detached *debug_info_path*; Mach-O
     dSYM/``__DWARF``; see :mod:`abicheck.extract.build_mode_capture`), then
     :func:`finish_provenance`, then the default header-only graph when
-    *graph_inputs* is ``(headers, includes, lang, suppressed)``. The -H headers
+    *graph_inputs* is ``(headers, includes, lang, suppressed[, compile])``. The -H headers
     are the public surface for the graph when no narrower set is given, as the
     CLI's dump treats them."""
     from ..extract.build_mode_capture import capture_build_mode
@@ -202,7 +207,8 @@ def finish_binary_dump(
         return snapshot
     from .dump.default_header_graph import attach_typed_header_graph
 
-    headers, includes, lang, suppressed = graph_inputs
+    headers, includes, lang, suppressed, *rest = graph_inputs
+    compile_ctx = rest[0] if rest else None
     return attach_typed_header_graph(
         snapshot,
         headers=headers,
@@ -212,6 +218,7 @@ def finish_binary_dump(
         public_header_dirs=public_header_dirs,
         include_search_dirs=include_search_dirs,
         enabled=not suppressed,
+        compile=compile_ctx,
     )
 
 
