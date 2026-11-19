@@ -704,6 +704,8 @@ def check_batch(
     res: dict = {"cases": len(rows), "controls": len(ctrl), "compilers": {}}
     res["seconds_generate"] = round(time.perf_counter() - t0, 2)
     lines = []
+    case_names = {f"s{r['id']}" for r in rows}
+    ctrl_names = {f"c{r['id']}" for r in ctrl}
     for cc in compilers:
         t1 = time.perf_counter()
         # A report and its library pair stay together: drop this compiler's
@@ -754,12 +756,21 @@ def check_batch(
                     examples.append(
                         {"id": r["id"], "old": r["old_body"], "new": r["new_body"], **j}
                     )
-            ctrl_hits = sorted(k for k in by if k.startswith("c"))
+            ctrl_hits = sorted(k for k in by if k in ctrl_names)
+            # every report group must be a generated record: a finding on a
+            # function (use_s0) or any other entity is a mismatch, even when
+            # each record's own findings agree
+            stray = sorted(k for k in by if k not in case_names and k not in ctrl_names)
             cres["lanes"][lane] = {
                 "outcomes": dict(outcomes),
                 "affected_symbols": dict(aff),
                 "controls_with_findings": len(ctrl_hits),
                 "control_examples": ctrl_hits[:5],
+                "unexpected_groups": len(stray),
+                "unexpected_examples": [
+                    {"group": k, "kinds": sorted({c["kind"] for c in by[k]})}
+                    for k in stray[:5]
+                ],
                 "detected_total": rep["disposition_audit"]["detected_total"],
                 "deduplicated": rep["disposition_audit"]["counts"]["deduplicated"],
                 "examples": examples,

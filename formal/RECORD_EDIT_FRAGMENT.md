@@ -313,7 +313,11 @@ timings), `cases.jsonl.gz` (one line per case and compiler: every lane's
 observed and expected `kind:field_name` multiset, typed-value
 disagreements, affected-symbol verdict, consumer read/write changes),
 `competitors.json`, `percase_summary.json`, `reduced_summary.json`.
-Disagreements: none (every list in those files is empty).
+Disagreements: none (every list in those files is empty). Findings outside the generated records (a function, another entity):
+none in any of the six reports. The harness now counts these per lane
+(`unexpected_groups`); for this receipt the count was taken from the six
+stored reports after the run, and each report's finding total also equals
+the Lean total for its lane (25963 with headers, 24217 DWARF-only).
 
 * **Code that ran.** Started on `a972438a2`; two commits landed during the
   run, touching only `record_edit_competitors.py`'s error handling (loaded

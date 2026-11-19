@@ -389,6 +389,19 @@ def test_a_report_without_its_library_record_is_not_scored(tmp_path: Path) -> No
     assert parsed["abicheck"] is None and "no library record" in errors["abicheck"]
 
 
+def test_a_missing_library_is_an_abicheck_error(tmp_path: Path) -> None:
+    (tmp_path / "libold_gcc_g.so").write_bytes(b"old")  # libnew_gcc_g.so missing
+    (tmp_path / "compare_gcc_dwarf.json").write_text('{"changes": []}')
+    (tmp_path / "compare_gcc_dwarf.libs.json").write_text('{"old": "x", "new": "y"}')
+    (tmp_path / "abidiff_gcc.txt").write_text(
+        "  in pointed to type 'struct s0' at n.h:1:1:\n"
+    )
+    status = {"abidiff": {"ok": True}, "abicc": {"ok": False}}
+    parsed, errors = COMP._parse_all(tmp_path, "gcc", status)
+    assert parsed["abicheck"] is None and "missing or unreadable" in errors["abicheck"]
+    assert parsed["abidiff"]["s0"]["flagged"] is True
+
+
 def test_a_truncated_library_record_is_an_abicheck_error(tmp_path: Path) -> None:
     for side in ("old", "new"):
         (tmp_path / f"lib{side}_gcc_g.so").write_bytes(side.encode())
@@ -451,8 +464,9 @@ _LP64 = pytest.mark.skipif(
 
 
 def _tools() -> tuple[str, ...]:
-    if shutil.which("castxml") is None or shutil.which("abicheck") is None:
-        pytest.skip("castxml and abicheck required")
+    # abicheck itself runs as ``sys.executable -m abicheck``: no console script needed
+    if shutil.which("castxml") is None:
+        pytest.skip("castxml required")
     ccs = tuple(cc for cc in ("gcc", "clang") if shutil.which(cc))
     if not ccs:
         pytest.skip("gcc or clang required")
@@ -467,6 +481,7 @@ def _assert_all_agree(res: dict, n: int, compilers: tuple[str, ...]) -> None:
         for lane, v in r["lanes"].items():
             assert v["outcomes"] == {"agree": n}, (cc, lane, v["examples"][:3])
             assert v["controls_with_findings"] == 0, (cc, lane, v["control_examples"])
+            assert v["unexpected_groups"] == 0, (cc, lane, v["unexpected_examples"])
         cons = r["consumer"]["counts"]
         assert cons["model_ok"] == n and "unexplained" not in cons, (cc, r["consumer"])
 

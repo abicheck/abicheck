@@ -332,6 +332,13 @@ def _read(path: Path, parse):  # type: ignore[no-untyped-def]
         return None, f"parse_error: {type(e).__name__}: {e}"
 
 
+def _current_hashes(out: Path, cc: str) -> dict[str, str] | None:
+    try:
+        return frag.lib_hashes(out, cc)
+    except OSError:
+        return None
+
+
 def _parse_all(out: Path, cc: str, status: dict) -> tuple[dict, dict]:
     """Each tool's per-record claims, or None with the reason in *errors*.
     One tool's unreadable output never stops the others being scored."""
@@ -349,7 +356,9 @@ def _parse_all(out: Path, cc: str, status: dict) -> tuple[dict, dict]:
         errors["abicheck"] = f"unavailable: library record unreadable ({sidecar_err})"
     elif recorded is None:
         errors["abicheck"] = "unavailable: dwarf-lane report has no library record"
-    elif recorded != frag.lib_hashes(out, cc):
+    elif (current := _current_hashes(out, cc)) is None:
+        errors["abicheck"] = "unavailable: a -g library is missing or unreadable"
+    elif recorded != current:
         # the report was computed from a library pair other than the one on
         # disk (an earlier or interrupted batch)
         errors["abicheck"] = (
