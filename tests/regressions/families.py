@@ -748,6 +748,7 @@ _F14 = (
 _F15 = (
     "extraction.castxml_vector_element_not_modelled",
     "extraction.castxml_function_type_collapsed_to_opaque_tag",
+    "extraction.castxml_explicit_specialization_unrecorded",
 )
 _F16 = (
     "report.shared_display_budget_starvation",

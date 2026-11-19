@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from seed_observable_forms_g3 import G3_FORMS
 from seed_observable_forms_ws1 import WS1_FORMS
 
 REPO = Path(__file__).resolve().parent.parent
@@ -56,12 +57,6 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
     "B:MACHO": ((("B",),), "", ("macho",), "_OBS_B_MACHO"),
     "B:PE": ((("B",),), "", ("pe",), "_OBS_B_PE"),
     "B:ELF_MACHO": ((("B",),), "", ("elf", "macho"), "_OBS_B_ELF_MACHO"),
-    "BH": (
-        (("B", "H"),),
-        "declared in the public header and present in the export table",
-        (),
-        "_OBS_BH",
-    ),
     "BHDOC": (
         (("B", "H"),),
         "the ratio counts exports against public-header declarations; a binary alone has no header records to compare with",
@@ -97,12 +92,6 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         "a header-level fact: the public header declares the opaque type or typedef; neither the export table nor DWARF carries it",
         (),
         "_OBS_H_HEADER",
-    ),
-    "D:PRESENCE": (
-        (("B", "D"),),
-        "DWARF presence on the old side: only a debug-info read sees it",
-        (),
-        "_OBS_D_PRESENCE",
     ),
     "D1": (
         (("B", "D"),),
@@ -164,18 +153,6 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
         ("elf", "pe"),
         "_OBS_DH_ELFPE",
     ),
-    "BH:PE": (
-        (("B", "H"),),
-        "declared in the public header and present in the export table",
-        ("pe",),
-        "_OBS_BH_PE",
-    ),
-    "BH:ELFPE": (
-        (("B", "H"),),
-        "declared in the public header and present in the export table",
-        ("elf", "pe"),
-        "_OBS_BH_ELFPE",
-    ),
     "DH:C": (
         (("B", "D"), ("B", "H")),
         "a C parameter change keeps the symbol: DWARF or the header carries it",
@@ -230,6 +207,8 @@ UNCLASSIFIED_REASONS: dict[str, str] = {
     "suppression_*": "policy disposition facts (ADR-067), not observation facts",
     "kabi_*": "kernel ABI symbol metadata: not covered by the ELF/PE/Mach-O sets",
 }
+
+FORMS.update(G3_FORMS)  # header-graph and DWARF-deleted families; see seed_observable_forms_g3.py
 
 FORM_CODES = frozenset(FORMS)
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from itertools import product
 from pathlib import Path
 
 import pytest
@@ -63,10 +62,8 @@ def test_unconfirmed_is_judged_on_the_observed_verdict_only_without_evidence(
         assert observed in note and "UNCONFIRMED" in note
 
 
-@pytest.mark.parametrize(
-    ("verdict", "variant"),
-    list(product(("BREAKING", "API_BREAK", *CLAIMS), ve.ARTIFACT_VARIANTS)),
-)
+@pytest.mark.parametrize("variant", ve.ARTIFACT_VARIANTS)
+@pytest.mark.parametrize("verdict", ("BREAKING", "API_BREAK", *CLAIMS))
 def test_a_confirmed_verdict_passes_through_unchanged(
     verdict: str, variant: str, monkeypatch
 ) -> None:
