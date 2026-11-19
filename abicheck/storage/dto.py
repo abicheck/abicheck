@@ -205,9 +205,9 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     # `bundle_composition_to_dto`) so a pre-S2 reader keeps opening it.
     BUNDLE_COMPOSITION_SECTION_KIND: 2,
     BASELINE_SET_SECTION_KIND: 1,
-    # Generation 82: each variable may carry ``initializer_hex`` (the section
-    # bytes of an exported read-only object). Absent reads as not-read.
-    DECLARATIONS_SECTION_KIND: 3,
+    # v2 gen 82 initializer_hex; v3 gen 85 member_kind_fact; v4 gen 87 return_by_value_fact
+    # + ABI-fact indirection (dto_declarations_migration.py). Absent: not read/collected.
+    DECLARATIONS_SECTION_KIND: 4,
 }
 
 

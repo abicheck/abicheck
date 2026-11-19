@@ -1,0 +1,30 @@
+{
+  "artifact_ids": [
+    "linux-x86_64-gcc.libcorpus.so",
+    "linux-x86_64-gcc.libextra.so"
+  ],
+  "captured": {
+    "binary_format": "elf",
+    "elf_class": "64",
+    "elf_machine": "EM_X86_64",
+    "header_frontend": "castxml",
+    "language_standard": "probed:__cplusplus=201703L"
+  },
+  "declared": {
+    "compiler_family": "gcc",
+    "target_triple": "x86_64-linux-gnu",
+    "threads": "true"
+  },
+  "ref_schema_version": 1,
+  "sections": {
+    "bundle_composition": {
+      "digest": "sha256:6f9985489842a224afc4dabd844416ced6d898ce4769b977e632334e5b590fe1",
+      "kind": "bundle_composition"
+    },
+    "bundle_variant_spec": {
+      "digest": "sha256:77f50010798545ddb20bf76f60a768fd3e89cf41b19f708bc950730148d22357",
+      "kind": "bundle_variant_spec"
+    }
+  },
+  "variant_id": "linux-x86_64-gcc"
+}

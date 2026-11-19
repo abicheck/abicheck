@@ -72,6 +72,7 @@ from ....model.name_decoration.macho_underscore import (
     strip_darwin_itanium_decoration as _strip_darwin_itanium_decoration,
 )
 from ...builtin_abi import BuiltinAbi, builtin_type_fact
+from ..member_kind import clang_member_kind
 from ..scope_segments import strip_record_scopes
 from .ast_inner import ast_inner
 from .attributes import clang_contract_attributes as _clang_contract_attributes
@@ -693,8 +694,7 @@ def parse_functions(
                     if not entry.in_friend
                     else (Fact.present("::".join(entry.scope)) if entry.scope else None)
                 ),
-                # clang stamps "variadic": true on FunctionDecl; the
-                # qualtype spelling ("void (int, ...)") is the fallback.
+                # "variadic" on FunctionDecl; the qualtype spelling is the fallback.
                 is_variadic=is_variadic,
                 contract_attributes=_clang_contract_attributes(
                     node, target_triple=target_triple
@@ -731,8 +731,8 @@ def parse_functions(
                 template_param_defaults_fact=function_template_defaults_fact(
                     entry.node, function_template_defaults
                 ),
-                # Explicit-instantiation kind (explicit_instantiation.py).
                 explicit_instantiation_fact=(explicit_facts or {}).get(id(entry.node)),
+                member_kind_fact=clang_member_kind(node),
                 # ADR-063 Phase 2. `mangled_name` is offered here only when
                 # `raw_mangled` is genuinely present -- NOT when `mangled`
                 # (which may itself be the bare-`name` fallback) is merely

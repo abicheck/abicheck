@@ -496,6 +496,26 @@ TYPE_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="Function",
+        field="member_kind",
+        value_type="MemberKind",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.call_interface:_implicit_this",),
+        notes=(
+            "Persisted fact_codec key, no legacy sibling: free function, non-static or static "
+            "member, constructor or destructor, from the declaration's AST node kind "
+            "(extract/headers/member_kind.py). The call axis reads it for the "
+            "implicit this argument; unset (DWARF, GCC plugin, older snapshots) keeps the "
+            "axis UNKNOWN for a function that is not provably C linkage."
+        ),
+    ),
+    _E(
+        owner="Function",
         field="template_param_defaults",
         value_type="tuple[str | None, ...]",
         producing_backends=("clang",),

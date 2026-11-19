@@ -2,11 +2,11 @@
   "artifact_refs": [
     {
       "id": "linux-x86_64-gcc.libcorpus.so",
-      "ref_digest": "sha256:07232df2ef64b2c32799920c4211b69974fad9704b86dc958664de41566770d7"
+      "ref_digest": "sha256:3a7e636aada3b1deafd71dbc91c33542ecf3bcb48a0ff24e08115473a4d8aadc"
     },
     {
       "id": "linux-x86_64-gcc.libextra.so",
-      "ref_digest": "sha256:6f1ee30a165fafdd778f4e6cb5a566e4098e9b514c5b08632dd7832e6f800f39"
+      "ref_digest": "sha256:97422906f000008a31c0bbf90b01250410c97da4e1b7ddfccd193a0c277aaf42"
     }
   ],
   "variant_refs": [
@@ -33,6 +33,6 @@
       "semantic_ir": 2,
       "types": 1
     },
-    "source_schema_version": 70
+    "source_schema_version": 69
   }
 }

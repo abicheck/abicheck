@@ -37,9 +37,24 @@ read from a register the old caller never set, so the call is ``BROKEN``. A
 rename is indistinguishable from an insertion plus a removal; it is reported
 as one, which only ever errs towards ``BROKEN``.
 
+A non-static member function's implicit ``this`` is the leading slot
+``this`` (:class:`ImplicitThis`): on Itanium x86-64 it is passed exactly as a
+first declared pointer argument, after any hidden sret pointer, so the proved
+``locAt``/``argLoc`` placement covers it unchanged (``formal/MEMBER_FRAGMENT.md``,
+confirmed by execution). Whether a function is such a member is read from
+``Function.member_kind_fact``; without it the axis is ``UNKNOWN``.
+
 The answer is checked case by case against the proved model on every case of
-the E13 and E14 fragments (``tests/test_call_interface_fragments.py``). This
-module decides no verdict; ADR-094 D9's shadow comparison and switch do.
+the E13 and E14 fragments (``tests/test_call_interface_fragments.py``). A
+result is intact when every piece the old caller reads is left in the same
+register bits as the same kind of value (``ret_image``), and a result in
+caller memory did not grow; for struct returns that is proved equal to the
+member-read oracle (``formal/lean/AbiLean/StructRetFragment.lean``) and
+checked against execution on every case of
+``formal/experiments/struct_ret_fragment.py``
+(``tests/test_formal_struct_ret_fragment.py``). Struct *parameters* are
+not modelled: a by-value record parameter has no :class:`Rep`, so the axis is
+``UNKNOWN``. This module decides no verdict; ADR-094 D9's shadow comparison and switch do.
 """
 
 from __future__ import annotations
@@ -47,27 +62,34 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ..model.availability import FactStatus
 from ..model.call_interface import (
     MAX_INTEGER_ARGS,
     MAX_SSE_ARGS,
     SYSV_AMD64,
     ArgClass,
     ArgSlot,
+    Member,
+    Rep,
     RetShape,
     arg_locations,
+    ret_image,
     ret_location,
     ret_shape_of,
     slot_rep,
 )
 from ..model.cc_attributes import is_cc_attribute
 from ..model.declarations import Function
+from ..model.member_kind import MemberKind
 from ..model.owner_recovery import is_mangled_identity
 from ..model.snapshot import AbiSnapshot
+from ..model.sysv_aggregate import StructReturn
 
 __all__ = [
     "AxisStatus",
     "CallAxis",
     "CallSignature",
+    "ImplicitThis",
     "assess_call_interface",
     "call_signature_of",
     "linkage_evidence_reliable",
@@ -90,6 +112,27 @@ class CallAxis:
     reason: str
 
 
+class ImplicitThis(StrEnum):
+    """Whether a call passes an implicit ``this`` that ``params`` does not list.
+
+    ``PRESENT`` for a non-static member function: on x86-64 SysV (Itanium C++
+    ABI) ``this`` is an object pointer passed exactly like a first declared
+    pointer argument -- the first INTEGER register, or the second after a
+    hidden sret pointer (``formal/MEMBER_FRAGMENT.md``). ``ABSENT`` for a free
+    or static member function. ``UNKNOWN`` when the evidence cannot say.
+    """
+
+    ABSENT = "absent"
+    PRESENT = "present"
+    UNKNOWN = "unknown"
+
+
+#: The name the implicit ``this`` takes among the slots. A C++ keyword, so no
+#: declared parameter can carry it; a function that gains or loses ``this``
+#: therefore gains or loses a parameter.
+THIS_SLOT = "this"
+
+
 @dataclass(frozen=True, slots=True)
 class CallSignature:
     """A signature reduced to what the convention sees.
@@ -99,15 +142,21 @@ class CallSignature:
     it is unknown whether the function takes ``...``. ``convention`` is ``""``
     for the platform default, a calling-convention attribute (``ms_abi``) when
     one is declared, and ``None`` when attributes were not captured.
-    ``maybe_member`` is true when the function may receive an implicit
-    ``this`` argument, which ``params`` does not list.
+    ``implicit_this`` says whether the call passes an implicit ``this``;
+    when it is ``PRESENT``, ``params`` starts with the ``this`` slot.
+    ``unknown_reason`` says why it is ``UNKNOWN``. ``ret_members`` and
+    ``ret_size`` (bits) are a struct return's flattened member layout and
+    size, ``None`` when unknown (:mod:`abicheck.model.sysv_aggregate`).
     """
 
     params: tuple[ArgSlot, ...] | None
     ret: RetShape | None
     variadic: bool | None
     convention: str | None = ""
-    maybe_member: bool = False
+    implicit_this: ImplicitThis = ImplicitThis.ABSENT
+    unknown_reason: str = ""
+    ret_members: tuple[Member, ...] | None = None
+    ret_size: int | None = None
 
 
 #: The extractor generation from which the clang header backend records a
@@ -133,43 +182,80 @@ def linkage_evidence_reliable(snapshot: AbiSnapshot) -> bool:
 
 
 def call_signature_of(
-    fn: Function, ret: RetShape | None = None, *, linkage_reliable: bool
+    fn: Function,
+    ret: RetShape | StructReturn | None = None,
+    *,
+    linkage_reliable: bool,
 ) -> CallSignature:
     """Reduce *fn* to a :class:`CallSignature` from its recorded facts.
 
     *ret* overrides the return shape for a struct return whose classification
-    the caller knows; otherwise a scalar or ``void`` return is read from the
+    the caller knows -- a bare :class:`RetShape`, or a
+    :class:`StructReturn` (``sysv_aggregate.struct_returns_in``) that also
+    carries the member layout; otherwise a scalar or ``void`` return is read from the
     return slot's ABI fact. *linkage_reliable* is required, and is
     :func:`linkage_evidence_reliable` of the snapshot *fn* came from: there is
     no default, so a caller cannot forget it and trust a stale flag. When it
     is false, no function is taken to have C linkage.
     """
     convention = _convention(fn.contract_attributes)
-    # A non-static member function receives an implicit `this` that `params`
-    # does not list, and no single recorded fact identifies a member: not
-    # `is_static` (for a free function it means internal linkage), not the
-    # name (extractors store the leaf, `f`), not the symbol alone (clang gives
-    # an uninstantiated template method its bare name), and not `is_extern_c`
-    # alone (clang propagates an `extern "C" { struct ... }` block into the
-    # record's members). Two together do: a C-linkage function is flagged
-    # `is_extern_c` AND has an unmangled symbol, because a linkage
-    # specification never changes a member's `_Z` symbol. Only those
-    # functions are modelled.
-    c_linkage = (
-        linkage_reliable and fn.is_extern_c and not is_mangled_identity(fn.mangled)
-    )
-    maybe_member = not c_linkage
-    if ret is None:
-        ret = ret_shape_of(
+    this, why = _implicit_this(fn, linkage_reliable)
+    members: tuple[Member, ...] | None = None
+    size: int | None = None
+    shape: RetShape | None
+    if isinstance(ret, StructReturn):
+        shape, members, size = ret.shape, ret.members, ret.size
+    else:
+        shape = ret
+    if shape is None:
+        shape = ret_shape_of(
             fn.return_type_abi_fact, fn.return_pointer_depth, fn.return_type
         )
-    slots = []
+    slots = [ArgSlot(THIS_SLOT, Rep.I64)] if this is ImplicitThis.PRESENT else []
+    params: tuple[ArgSlot, ...] | None = None
     for p in fn.params:
         rep = slot_rep(p.type_abi_fact, p.pointer_depth, p.type)
         if rep is None:
-            return CallSignature(None, ret, fn.is_variadic, convention, maybe_member)
+            break
         slots.append(ArgSlot(p.name, rep))
-    return CallSignature(tuple(slots), ret, fn.is_variadic, convention, maybe_member)
+    else:
+        params = tuple(slots)
+    return CallSignature(
+        params, shape, fn.is_variadic, convention, this, why, members, size
+    )
+
+
+def _implicit_this(fn: Function, linkage_reliable: bool) -> tuple[ImplicitThis, str]:
+    """Whether *fn*'s call passes an implicit ``this``, and why not known.
+
+    A C-linkage function (``is_extern_c`` AND an unmangled symbol: a linkage
+    specification never changes a member's ``_Z`` symbol) has none. Otherwise
+    only ``member_kind_fact`` decides: no older recorded fact identifies a
+    member (``is_static`` means internal linkage on a free function, the name
+    is the leaf, an uninstantiated template method's symbol is its bare name).
+    A virtual function is modelled like any non-static member: a call through
+    the vtable passes the same registers, and where the slot sits is the
+    vtable's concern, not this axis's. ``const``/``volatile``/ref-qualifiers
+    do not change the argument registers (they change the symbol, a ``load``
+    axis question). Constructors and destructors stay unknown: their symbol
+    variants (C1/C2, D0/D1/D2) differ, and the base-object variant of a class
+    with virtual bases takes a hidden VTT argument after ``this``.
+    """
+    if linkage_reliable and fn.is_extern_c and not is_mangled_identity(fn.mangled):
+        return ImplicitThis.ABSENT, ""
+    fact = fn.member_kind_fact
+    if fact is None or fact.status is not FactStatus.PRESENT:
+        return ImplicitThis.UNKNOWN, (
+            "member kind not recorded: a possible member function's implicit this is not modelled"
+        )
+    kind = fact.value
+    if kind in (MemberKind.FREE, MemberKind.STATIC):
+        return ImplicitThis.ABSENT, ""
+    if kind is MemberKind.INSTANCE:
+        return ImplicitThis.PRESENT, ""
+    return ImplicitThis.UNKNOWN, (
+        f"a {kind}: ABI variants and a possible VTT argument are not modelled"
+    )
 
 
 def _convention(attributes: list[str] | None) -> str | None:
@@ -193,8 +279,8 @@ def _domain_gap(old: CallSignature, new: CallSignature, abi: str) -> str | None:
             return "calling-convention attributes not captured"
         if sig.convention:
             return f"non-default calling convention ({sig.convention})"
-        if sig.maybe_member:
-            return "not a C-linkage function: a possible member function's implicit this is not modelled"
+        if sig.implicit_this is ImplicitThis.UNKNOWN:
+            return sig.unknown_reason or "implicit this unknown"
     if old.variadic is not False or new.variadic is not False:
         return "variadic or unprototyped function"
     if old.params is None or new.params is None:
@@ -247,22 +333,77 @@ def assess_call_interface(old: CallSignature, new: CallSignature, abi: str) -> C
                 AxisStatus.BROKEN,
                 "the new function returns through a hidden pointer the old caller never passed",
             )
-    elif old.ret is new.ret and old.ret in _AGGREGATE_SHAPES:
-        # Same class, but the shape does not carry the member layout: two
-        # INT2 structs can be {long, long} and {int, int, long}.
-        return _unknown(
-            "two struct returns of the same class; member layouts not compared"
-        )
-    elif old.ret is not new.ret:
-        return CallAxis(
-            AxisStatus.BROKEN,
-            f"the old caller reads its result from {ret_location(old.ret)} as {old.ret}, "
-            f"the new function leaves it in {ret_location(new.ret)} as {new.ret}",
-        )
+    else:
+        broken = _result_broken(old, new)
+        if broken is None:
+            return _unknown(
+                "two struct returns in overlapping places; a member layout is unknown"
+            )
+        if broken:
+            return CallAxis(AxisStatus.BROKEN, broken)
     return CallAxis(AxisStatus.PRESERVED, _preserved_reason(old, new))
 
 
-_AGGREGATE_SHAPES = frozenset({RetShape.INT2, RetShape.SSE2, RetShape.MEMORY})
+def _result_broken(old: CallSignature, new: CallSignature) -> str | None:
+    """Why an old non-``void`` caller misreads the new result, ``""`` when it
+    reads it intact, ``None`` when that cannot be decided.
+
+    Intact iff every piece the old caller reads (:func:`ret_image`) is one
+    the new function leaves in the same register bits, as the same kind of
+    value -- and, for a result in caller memory, the new struct is no larger
+    than the buffer the old caller provides. Members the old caller does not
+    read (a new trailing field in padding) do not matter.
+    """
+    assert old.ret is not None and new.ret is not None
+    differ = (
+        f"the old caller reads its result from {ret_location(old.ret)} as {old.ret}, "
+        f"the new function leaves it in {ret_location(new.ret)} as {new.ret}"
+    )
+    old_img = ret_image(old.ret, old.ret_members)
+    new_img = ret_image(new.ret, new.ret_members)
+    if old_img is None or new_img is None:
+        if old.ret.is_aggregate != new.ret.is_aggregate:
+            return differ  # a scalar reader never gets a struct member
+        if not _places(old.ret) <= _places(new.ret):
+            return differ  # the old caller reads a register the new one never sets
+        if (
+            old.ret is RetShape.MEMORY
+            and new.ret is RetShape.MEMORY
+            and old.ret_size is not None
+            and new.ret_size is not None
+            and new.ret_size > old.ret_size
+        ):
+            return _grew(old.ret_size, new.ret_size)
+        return None
+    lost = old_img - new_img
+    if lost:
+        tag, reg, off, size, cls = min(lost, key=lambda p: (p[1], p[2]))
+        if old.ret is not new.ret:
+            return differ
+        return (
+            f"struct return ({old.ret}): the old caller reads a {size}-bit {cls} "
+            f"{tag} at {reg} bit {off}, which the new layout does not place there"
+        )
+    if old.ret.is_sret and (
+        old.ret_size is None or new.ret_size is None or new.ret_size > old.ret_size
+    ):
+        if old.ret_size is None or new.ret_size is None:
+            return None
+        return _grew(old.ret_size, new.ret_size)
+    return ""
+
+
+def _grew(old_size: int, new_size: int) -> str:
+    return (
+        f"struct return in memory grew from {old_size // 8} to "
+        f"{new_size // 8} bytes: the new function writes past the old caller's buffer"
+    )
+
+
+def _places(shape: RetShape) -> frozenset[str]:
+    loc = ret_location(shape)
+    return frozenset({"rax" if r == "eax" else r for r in loc.split(":")})
+
 
 _INT_REGS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
 

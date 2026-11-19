@@ -86,6 +86,7 @@ _RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
 _SPECIALIZATION_KEY = "specialization_declared_fact"
 _TEMPLATE_PARAM_DEFAULTS_KEY = "template_param_defaults_fact"
 _EXPLICIT_INSTANTIATION_KEY = "explicit_instantiation_fact"
+_MEMBER_KIND_KEY = "member_kind_fact"
 #: Schema v69: a fundamental-typed slot's ABI fact, written only where a producer
 #: determined it (model/abi_fundamental.py).
 _TYPE_ABI_KEY = "type_abi_fact"
@@ -131,6 +132,8 @@ def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
         _drop_uncaptured(fn, _TEMPLATE_PARAM_DEFAULTS_KEY)
         # Schema v65: written only when the clang text pass recorded the kind.
         _drop_uncaptured(fn, _EXPLICIT_INSTANTIATION_KEY)
+        # member_kind_fact: written only when a header backend recorded the kind.
+        _drop_uncaptured(fn, _MEMBER_KIND_KEY)
         _drop_uncaptured(fn, _RETURN_TYPE_ABI_KEY)
         _drop_uncaptured(fn, _RETURN_BY_VALUE_KEY)
         for param in fn.get("params", ()):

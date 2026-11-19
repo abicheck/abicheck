@@ -432,6 +432,10 @@ class DiffResult(ReportSideFacts):
     # exit code. Appended at the true end, same positional-field-safety
     # convention as every other block above.
     pattern_preprocessor_scan: object | None = field(default=None, kw_only=True)
+    # Report schema 7.6, ADR-094 D9: the shadow `call` axis per function a
+    # signature finding names (`workflows/call_axis_shadow.py`). Advisory;
+    # never read by the verdict, severity or exit code. None when not computed.
+    call_axis_shadow: list[dict[str, object]] | None = field(default=None, kw_only=True)
     # Per binary-only side (``"old"``/``"new"``; a header-derived side is not
     # listed), whether its dependency-internal types were classified (``True``)
     # or could not be read at all (``False``). ``None`` when no side is binary

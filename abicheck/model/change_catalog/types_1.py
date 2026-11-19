@@ -103,6 +103,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "cpo_kind_changed",
         _B,
+        observable_at=(_OBS_B,),
         impact="A public customization point object (CPO) changed kind: "
         "what used to be a free function is now a function-object "
         "(variable of an unspecified class type), or vice versa. "
@@ -131,6 +132,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.REMOVED,
+        observable_at=(_OBS_B,),
     ),
     _E(
         "func_virtual_became_pure",
@@ -247,6 +249,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "secondary_vtable_group_changed",
         _B,
+        observable_at=(_OBS_DH,),
         impact="A polymorphic class's set of *secondary* vtable groups changed even "
         "though its own base declaration list did not — a direct or virtual "
         "base gained or lost virtual functions, so it started or stopped "
