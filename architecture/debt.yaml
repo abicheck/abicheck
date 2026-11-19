@@ -399,7 +399,7 @@
     },
     {
       "path": "abicheck/contract_evaluation.py",
-      "baseline_lines": 1504,
+      "baseline_lines": 1499,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
