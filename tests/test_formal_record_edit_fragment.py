@@ -307,6 +307,25 @@ def test_probe_values_convert_like_c() -> None:
     assert FRAG.probe_value(1, 3, 0) == -3.5
 
 
+COMP = _load(FORMAL / "experiments" / "record_edit_competitors.py")
+
+
+@pytest.mark.parametrize("body", ["{}", '{"changes": [1]}', "{trunc"])
+def test_one_unreadable_report_does_not_stop_the_others(
+    tmp_path: Path, body: str
+) -> None:
+    (tmp_path / "libnew_gcc_g.so").write_bytes(b"")
+    (tmp_path / "compare_gcc_dwarf.json").write_text(body)
+    (tmp_path / "abidiff_gcc.txt").write_text(
+        "  in pointed to type 'struct s0' at new.h:1:1:\n    type size changed from 8 to 16 (in bits)\n"
+    )
+    status = {"abidiff": {"ok": True}, "abicc": {"ok": False}}
+    parsed, errors = COMP._parse_all(tmp_path, "gcc", status)
+    assert parsed["abicheck"] is None and errors["abicheck"].startswith("parse_error")
+    assert parsed["abidiff"]["s0"]["size"] is True
+    assert parsed["abicc"] is None and errors["abicc"] == "error_or_unavailable"
+
+
 # ------------------------------------------------------ compilers + abicheck
 
 _LP64 = pytest.mark.skipif(

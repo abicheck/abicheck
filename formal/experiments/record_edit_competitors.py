@@ -314,7 +314,16 @@ def run_tools(out: Path, cc: str) -> dict[str, dict]:
 def _read(path: Path, parse):  # type: ignore[no-untyped-def]
     try:
         return parse(path.read_text()), None
-    except (OSError, ValueError, ET.ParseError) as e:  # ValueError: JSON
+    # ValueError: bad JSON; KeyError/TypeError/AttributeError: valid JSON or
+    # XML of the wrong structure (a report without "changes", say)
+    except (
+        OSError,
+        ValueError,
+        ET.ParseError,
+        KeyError,
+        TypeError,
+        AttributeError,
+    ) as e:
         return None, f"parse_error: {type(e).__name__}: {e}"
 
 
