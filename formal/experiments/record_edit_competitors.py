@@ -45,9 +45,10 @@ import shutil
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
+
+from defusedxml import ElementTree as ET
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -103,43 +104,60 @@ def _empty() -> dict:
 _FIELD = re.compile(r"'(?:[\w ]+?) f(\d+)'")
 
 
+_DELETIONS = re.compile(r"\d+ data member deletions?:")
+_CHANGES = re.compile(r"\d+ data member (changes?|insertions?)")
+
+
+class _AbidiffRecord:
+    """Line-by-line reader of one ``in pointed to type 'struct sN'`` block."""
+
+    def __init__(self, rec: dict) -> None:
+        self.rec = rec
+        self.mode: str | None = (
+            None  # None: record level; "removed"/"changed": member list
+        )
+        self.last: int | None = None  # the member a continuation line refers to
+
+    def feed(self, s: str) -> None:
+        if "type size changed" in s and self.mode is None:
+            # Record level only: the same words also appear under a member's
+            # "type of 'char f0' changed:" block, about the field's size.
+            self.rec["size"] = True
+        elif _DELETIONS.match(s):
+            self.mode = "removed"
+        elif _CHANGES.match(s):
+            self.mode = "changed"
+        else:
+            self._member(s)
+
+    def _member(self, s: str) -> None:
+        m = _FIELD.match(s)
+        if self.mode == "removed" and m:
+            self.rec["removed"].add(int(m.group(1)))
+        elif s.startswith("type of ") and (m := _FIELD.search(s)):
+            self.last = int(m.group(1))
+            self.rec["retyped"].add(self.last)
+        elif s.startswith("and offset changed from") and self.last is not None:
+            # "type of 'char f1' changed: ... and offset changed from 8 to 16"
+            self.rec["moved"].add(self.last)
+        elif "offset changed from" in s and m:
+            self.rec["moved"].add(int(m.group(1)))
+
+
 def parse_abidiff(text: str) -> dict[str, dict]:
     """Per record (``s<N>``): the members abidiff names and whether size changed."""
     out: dict[str, dict] = defaultdict(_empty)
-    cur = None
-    mode = None
-    last: int | None = None  # the member a continuation line refers to
+    cur: _AbidiffRecord | None = None
     for line in text.splitlines():
         m = re.search(r"in pointed to type 'struct (s\d+)'", line)
-        if m:
-            cur = m.group(1)
-            out[cur]["flagged"] = True
-            mode = None
-            continue
-        if cur is None:
-            continue
         s = line.strip()
-        if s.startswith("[C]") or s.startswith("[A]") or s.startswith("[D]"):
+        if m:
+            cur = _AbidiffRecord(out[m.group(1)])
+            cur.rec["flagged"] = True
+        elif s[:3] in ("[C]", "[A]", "[D]"):
             cur = None
-            continue
-        if "type size changed" in s and mode is None:
-            # Record-level only: the same words also appear under a member's
-            # "type of 'char f0' changed:" block, about the field's size.
-            out[cur]["size"] = True
-        elif re.match(r"\d+ data member deletions?:", s):
-            mode = "removed"
-        elif re.match(r"\d+ data member (changes?|insertions?)", s):
-            mode = "changed"
-        elif mode == "removed" and (m := _FIELD.match(s)):
-            out[cur]["removed"].add(int(m.group(1)))
-        elif s.startswith("type of ") and (m := _FIELD.search(s)):
-            last = int(m.group(1))
-            out[cur]["retyped"].add(last)
-        elif s.startswith("and offset changed from") and last is not None:
-            # "type of 'char f1' changed: ... and offset changed from 8 to 16"
-            out[cur]["moved"].add(last)
-        elif "offset changed from" in s and (m := _FIELD.match(s)):
-            out[cur]["moved"].add(int(m.group(1)))
+        elif cur is not None:
+            cur.feed(s)
     return dict(out)
 
 

@@ -139,14 +139,40 @@ _DECL = re.compile(r"(unsigned int|\w+) f(\d+);")
 _TYPE_OF = {t[0]: i for i, t in enumerate(TYPES)}
 
 
+def _read_decls(body: str) -> list[tuple[int, int]] | None:
+    """The generator's declarations in *body*, or None unless it is exactly
+    the generator's spelling of them."""
+    found = [(int(j), _TYPE_OF.get(t)) for t, j in _DECL.findall(body)]
+    if any(t is None for _, t in found):
+        return None
+    decls_ = [(j, t) for j, t in found if t is not None]
+    return decls_ if _body(decls_) == body else None
+
+
+def _decode_edit(
+    old: list[tuple[int, int]], new: list[tuple[int, int]]
+) -> tuple[int, int, int] | None:
+    """The one edit that turns *old* into *new*, or None."""
+    n = len(old)
+    if len(new) == n - 1:
+        gone = sorted(set(range(n)) - {j for j, _ in new})
+        ok = len(gone) == 1 and new == [d for d in old if d[0] != gone[0]]
+        return (0, gone[0], 0) if ok else None
+    if len(new) != n:
+        return None
+    diff = [i for i in range(n) if new[i] != old[i]]
+    if len(diff) == 1 and new[diff[0]][0] == diff[0]:
+        return (2, diff[0], new[diff[0]][1])
+    if len(diff) == 2 and new[diff[0]] == old[diff[1]] and new[diff[1]] == old[diff[0]]:
+        return (1, diff[0], diff[1])
+    return None
+
+
 def decode(p: Program) -> tuple[tuple[int, ...], tuple[int, int, int]] | None:
     """Parse a program pair back to ``(base, edit)``, or None unless it is
     exactly what the generator emits for some case of the space."""
-    old = [(int(j), _TYPE_OF.get(t)) for t, j in _DECL.findall(p.old_body)]
-    new = [(int(j), _TYPE_OF.get(t)) for t, j in _DECL.findall(p.new_body)]
-    if any(t is None for _, t in old + new):
-        return None
-    if _body(old) != p.old_body or _body(new) != p.new_body:  # type: ignore[arg-type]
+    old, new = _read_decls(p.old_body), _read_decls(p.new_body)
+    if old is None or new is None:
         return None
     n = len(old)
     if not 1 <= n <= MAX_FIELDS or [j for j, _ in old] != list(range(n)):
@@ -154,22 +180,8 @@ def decode(p: Program) -> tuple[tuple[int, ...], tuple[int, int, int]] | None:
     base = tuple(t for _, t in old)
     if any(t not in BASE for t in base):
         return None
-    if len(new) == n - 1 and n >= 2:
-        gone = sorted(set(range(n)) - {j for j, _ in new})
-        if len(gone) == 1 and new == [d for d in old if d[0] != gone[0]]:
-            return base, (0, gone[0], 0)
-        return None
-    if len(new) != n:
-        return None
-    diff = [i for i in range(n) if new[i] != old[i]]
-    if len(diff) == 1 and new[diff[0]][0] == diff[0]:
-        k = diff[0]
-        return base, (2, k, new[k][1])  # type: ignore[return-value]
-    if len(diff) == 2:
-        i, j = diff
-        if new[i] == old[j] and new[j] == old[i]:
-            return base, (1, i, j)
-    return None
+    edit = _decode_edit(old, new)
+    return (base, edit) if edit is not None else None
 
 
 def fnv1a64(programs: list[Program]) -> int:
