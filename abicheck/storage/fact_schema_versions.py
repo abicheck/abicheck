@@ -189,3 +189,9 @@ _MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS = 69
 # (ADR-062 D19): written only when recorded, and a missing key reads as
 # NOT_COLLECTED at v69 and above (an older reader ignores the key).
 _MIN_SCHEMA_VERSION_FOR_MEMBER_KIND_FACT = 69
+
+# Schema v70: ``Function.return_by_value_fact`` -- whether the return type is a
+# record passed by value (Fact[bool]). Written only where a producer determined
+# it (castxml today); an absent key reads as NOT_COLLECTED at v70 and above and
+# as unset below. An unset fact never fires the return-convention check.
+_MIN_SCHEMA_VERSION_FOR_RETURN_BY_VALUE_FACT = 70

@@ -58,9 +58,14 @@ from ..model.semantic_ir_legacy_adapter import (
 )
 from ..model.semantic_ir_record_layout import entity_layout
 from .declined_comparisons import record_declined
+from .record_return_convention import (
+    record_return_convention_changes,
+    returned_by_value_records,
+)
 
 if TYPE_CHECKING:
     from ..model.change import Change
+    from ..model.declarations import Function
     from ..model.entities import RecordType
 
 __all__ = ["RecordLayoutIndex", "record_layout_changes", "record_layout_index"]
@@ -75,6 +80,11 @@ class RecordLayoutIndex:
     index: SemanticIRIndex
     ir: SemanticIR
     by_record: dict[int, OccurrenceId] = field(default_factory=dict)
+    # Whether this side is an LP64 x86_64 ELF, the model the return-convention
+    # table assumes (compare/record_return_convention.py).
+    lp64_x86_64: bool = False
+    # Record spellings some declared function returns by value.
+    returned_by_value: frozenset[str] = frozenset()
 
     def entity_for(self, record: RecordType) -> CanonicalEntity | None:
         occ_id = self.by_record.get(id(record))
@@ -86,14 +96,19 @@ class RecordLayoutIndex:
 
 
 def record_layout_index(
-    semantic_ir: SemanticIR | None, records: Iterable[RecordType]
+    semantic_ir: SemanticIR | None,
+    records: Iterable[RecordType],
+    elf: object | None,
+    functions: Iterable[Function],
 ) -> RecordLayoutIndex:
     """One side's layout index -- see the module docstring for the rule.
 
     *records* is that side's own record collection, used only for the
     adapter projection (a side with no record occurrences) and for records
     no producer gave an identity. The caller must pass the same record
-    objects it later pairs: the adapter half is keyed by object.
+    objects it later pairs: the adapter half is keyed by object. *elf* and
+    *functions* are the side's own bound metadata and declarations, passed in
+    so the layout index never re-reads the snapshot.
     """
     records = list(records)
     if semantic_ir is not None and semantic_ir_covers_kind(
@@ -115,6 +130,11 @@ def record_layout_index(
         index=SemanticIRIndex(ir),
         ir=ir,
         by_record={id(r): occ for r, occ in zip(projected, order)},
+        lp64_x86_64=(
+            getattr(elf, "machine", None) == "EM_X86_64"
+            and getattr(elf, "elf_class", None) == 64
+        ),
+        returned_by_value=returned_by_value_records(functions),
     )
 
 
@@ -165,3 +185,4 @@ def record_layout_changes(
                 entity_id=entity_id,
             )
         )
+    record_return_convention_changes(changes, name, t_old, t_new, old_index, new_index)

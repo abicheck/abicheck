@@ -91,6 +91,8 @@ _MEMBER_KIND_KEY = "member_kind_fact"
 #: determined it (model/abi_fundamental.py).
 _TYPE_ABI_KEY = "type_abi_fact"
 _RETURN_TYPE_ABI_KEY = "return_type_abi_fact"
+#: Schema v70: ``Function.return_by_value_fact``, written only when determined.
+_RETURN_BY_VALUE_KEY = "return_by_value_fact"
 
 
 def _encode_advanced_extraction_status(d: dict[str, Any]) -> None:
@@ -133,6 +135,7 @@ def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
         # member_kind_fact: written only when a header backend recorded the kind.
         _drop_uncaptured(fn, _MEMBER_KIND_KEY)
         _drop_uncaptured(fn, _RETURN_TYPE_ABI_KEY)
+        _drop_uncaptured(fn, _RETURN_BY_VALUE_KEY)
         for param in fn.get("params", ()):
             _drop_uncaptured(param, _TYPE_IDENTITY_KEY)
             _drop_uncaptured(param, _TYPE_ABI_KEY)

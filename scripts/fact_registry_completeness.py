@@ -724,7 +724,7 @@ def _decode_wired_fact_attrs() -> set[tuple[str, str]]:
     any owner.
     """
     wired: set[tuple[str, str]] = set()
-    for path in (_FACT_CODEC_PATH, _SERIALIZATION_PATH, _SNAPSHOT_PLATFORM_BLOCKS_PATH):
+    for path in (*sorted(_FACT_CODEC_PATH.parent.glob("fact_codec*.py")), _SERIALIZATION_PATH, _SNAPSHOT_PLATFORM_BLOCKS_PATH):
         source = _read(path)
         if not source:
             continue
