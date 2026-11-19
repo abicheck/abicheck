@@ -145,10 +145,7 @@ from .model import AbiSnapshot, RecordType
 from .storage.ast_cache_location import reference_scratch_scoped
 from .storage.header_ast_cache import _cache_path as _cache_path
 from .workflows import memory_trace
-from .workflows.dump.default_header_graph import (
-    effective_public_scope,
-    finish_scoped_dump,
-)
+from .workflows.dump.default_header_graph import effective_public_scope
 from .workflows.dump.elf_fallback import (
     # DWARF/symbol-only fallback snapshot builders live in the sibling module
     # (dumper.py is at the file-size cap); re-exported here so
@@ -159,7 +156,7 @@ from .workflows.dump.elf_fallback import (
     _try_dwarf_snapshot as _try_dwarf_snapshot,
 )
 from .workflows.dump.pe import pe_pdb_debug_kwargs
-from .workflows.snapshot_factory import new_snapshot
+from .workflows.snapshot_factory import finish_scoped_dump, new_snapshot
 
 log = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "4e3e367c4951ab0674da1a10dc8172c6b97143161e1c34bd8ce185fa92ba24ec",
+      "abicheck/dumper.py": "6d6df4f72968133150ac026bf88846cabd8e44ed8185a88a9fb71451c8fb0864",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
       "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
@@ -247,9 +247,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "91442756be2d28ab4b75615b08f1b12ec0e2ef7c470ce096a2a13173645b0fa6",
-    "generation": 87,
-    "reason": "Behaviour-preserving move: _detect_format moved unchanged from dumper.py to extract/binary_format.py as detect_format(path, handlers), and effective_public_scope moved from dump() to workflows/dump/default_header_graph.py. No extraction or resolution semantics change; generation 87 stays."
+    "fingerprint": "d941626632140f8a40f8340d149d4acee53989b6b12de53725439ee8c330b2d7",
+    "generation": 88,
+    "reason": "Pure move at generation 88: finish_scoped_dump moved from dumper.py dump() into workflows/snapshot_factory.py with its rationale. It derives nothing beyond what generation 88 (compile-context threading) already records."
   },
   "resolver": {
     "files": {

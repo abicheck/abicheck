@@ -768,4 +768,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "facts it did not record before. The CLI output is unchanged. An older typed snapshot "
         "carries no such graph and reads as not collected; no rewrite applies."
     ),
+    88: GenerationSpellingChange(
+        "Typed dump() header graph: no stored type or name spelling changes. The graph is "
+        "parsed with the dump's own compile options (-D, -I, sysroot, nostdinc), so a "
+        "declaration gated by a macro is in the graph exactly when the snapshot's header "
+        "parse sees it. A snapshot dumped with options before this generation recorded a "
+        "graph without them; no rewrite applies."
+    ),
 }
