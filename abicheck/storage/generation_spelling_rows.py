@@ -747,6 +747,21 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "as stored (the call axis declines to trust it), and no rewrite applies."
     ),
     85: GenerationSpellingChange(
+        "Member kind: no stored type or name spelling changes. The clang and castxml "
+        "header backends record Function.member_kind_fact (free, instance, static, "
+        "constructor, destructor) from the declaration's AST node kind. "
+        "An older snapshot carries no such fact, which reads as not collected, and the "
+        "call axis keeps a function that is not provably C linkage UNKNOWN; no rewrite "
+        "applies."
+    ),
+    86: GenerationSpellingChange(
+        "castxml header backend: an explicit specialization is recorded as "
+        "explicit_instantiation_fact SPECIALIZATION, read from its template<> line. No stored "
+        "type or name spelling changes; a removed explicit specialization is now judged as a "
+        "removed declaration (func_removed), not an export loss, on the castxml route. "
+        "An older snapshot carries no such fact, which reads as no evidence, and no rewrite applies."
+    ),
+    87: GenerationSpellingChange(
         "Return-by-value and pointer facts: no stored type or name spelling changes. Function.return_by_value_fact is a new fact (castxml's type graph; clang's desugared return type resolved through the record and enum declarations), and a pointer member now carries an ABI fact (castxml's PointerType size; clang's probed void * size). Names, symbols and type spellings are unchanged; the return-convention and packing checks read these facts instead of spellings."
     ),
 }

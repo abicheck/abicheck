@@ -259,7 +259,7 @@ integer_model_changed            DBD
 long_double_abi_changed          DBD  # plan A3
 lto_mode_changed                 DBD
 struct_packing_mode_changed      DBD
-struct_return_convention_changed DH   # plan: STRUCT_RETURN_CONVENTION
+struct_return_convention_changed  DH:ELF_X86_64  # plan: STRUCT_RETURN_CONVENTION
 stdlib_debug_mode_changed        DBD
 target_isa_changed               DBD  # plan A3
 threadsafe_statics_mode_changed  DBD
@@ -339,6 +339,8 @@ instantiation_missing_from_binary  B  # diff_templates / template_instance_absen
 overload_set_rerouted  B  # diff_types: an overload set rerouted under the same mangled name family; the stripped binary pair emits it (tag oracle), so B
 abi_equivalent_type_changed  DH  # compare/abi_equivalent_retype.py: a retype the compiler passes identically (long -> long long on LP64) needs the declared types (header or DWARF); header and DWARF pairs emit it, a stripped binary does not
 typedef_version_sentinel  H:HEADER  # types_2.py: a typedef name carrying a release version; the header pair emits it, the stripped and DWARF-only pairs do not (the typedef is never exported)
+secondary_vtable_group_changed  DH  # diff_vtable_layout.py: fires when a direct base's polymorphism flips (first virtual added) and the class's base list is unchanged; needs base and vtable facts (castxml/clang headers or DWARF); the header pair and the gcc DWARF-only pair emit it, a stripped binary does not
+cpo_kind_changed  B  # diff_templates.py:789-808: a public name that is a function in one side and a variable (function object) in the other, from the export table's symbol types; the stripped binary pair emits it in both directions
 
 # -- WS-1 domain families: build, numpy, wheel, bundle (ADR-093 batch 6) --
 # Each row: a real-artifact oracle through the public compare (see
@@ -363,3 +365,14 @@ bundle_manifest_instantiation_removed  B:SCOPE
 sanitizer_runtime_required  B:ELF  # compare/runtime_requirements.py:134-170: DT_NEEDED on a sanitizer runtime and reserved __asan_/__ubsan_ imports, both binary facts. Real-compile oracle (g++ -shared -fPIC -fsanitize=address vs none, binary-only dumps): the sanitized build emits it; the uninstrumented pair does not
 rtti_mode_changed  BBD  # buildsource/build_diff.py:57: the -frtti/-fno-rtti compile flag comes from the compile database only. Real-compile oracle: compare with --build-info dumps at --depth build emits it; binary-only dumps and same-flag build-info dumps do not
 undocumented_export_ratio_increased  BHDOC  # diff_surface_metrics.py:109-120: the ratio counts exports against public-header declarations. Real-compile oracle: with -H headers on both sides and an undocumented export added, emitted; binary-only dumps emit nothing
+func_deleted_dwarf  D:DELETED  # diff_symbols.py:490 + function_lifecycle.deletion_kind: a deleted member has no export symbol; only DW_AT_deleted in the DWARF DIE (gcc and clang) yields FUNC_DELETED_DWARF; without -g the pair gives FUNC_REMOVED_ELF_ONLY
+stdlib_implementation_changed  B  # diff_stdlib_impl.py:393-441: the build mode resolves from the export table's mangled std:: namespace (std::__1 vs std::__cxx11), so the binary pair alone emits it on the typed compare path; observed gap: CLI dump then compare omits it, cause unresolved until the CLI dispatch is traced
+cpu_dispatch_isa_dropped  B  # diff_cpp_patterns.py:440-478: clusters removed export-table names by ISA suffix (avx2) and their surviving stems under another ISA; a binary-only pair (no headers, no DWARF) emits <isa:avx2> with four removed members
+
+# -- WS-1 Linux batch (ADR-093): namesake, alignment, inline-namespace, surface growth --
+# Each row: a real-artifact oracle through the public compare (g++/gcc builds, stripped and -g,
+# with and without --header). func_deleted_elf_fallback needs the header on both sides.
+func_deleted_elf_fallback  BH:ELF
+exported_object_alignment_reduced  B:ELF
+inline_namespace_moved  B:ELF
+abi_surface_explosion  B:ELF

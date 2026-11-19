@@ -360,6 +360,7 @@ class ObservableSpec:
     alternatives: frozenset[frozenset[str]]
     platform: frozenset[str] | None = None
     language: frozenset[str] | None = None
+    arch: frozenset[str] | None = None
 
 
 def default_verdict(kind_name: str) -> str | None:
@@ -408,6 +409,11 @@ def observable_at(kind_name: str) -> tuple[ObservableSpec, ...] | None:
                 None
                 if obs.condition is None or obs.condition.language is None
                 else frozenset(str(x.value) for x in obs.condition.language)
+            ),
+            arch=(
+                None
+                if obs.condition is None or obs.condition.arch is None
+                else frozenset(str(a.value) for a in obs.condition.arch)
             ),
         )
         for obs in meta.observable_at

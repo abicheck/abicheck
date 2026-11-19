@@ -153,6 +153,23 @@ are checked against, `observable_at`. abiforge's `min_evidence`,
 inherited through `abiforge/checkers/abicheck.py` (the only abiforge module
 allowed to import abicheck).
 
+### D7 — Processor-conditioned observability (amendment, 2026-11-18)
+
+`ObservabilityCondition` gains a third axis, `arch` (an `Arch` enum: `x86_64`,
+`aarch64`), next to `platform` and `language`. `None` on an axis means every
+value of it, and an unknown run arch (`None`) matches, as for the other axes.
+
+A kind takes an `arch` condition only when its emission depends on the
+processor, not on the binary format or language. The first is the x86-64
+System V struct-return convention (`struct_return_convention_changed`): the
+rule that decides whether an aggregate is returned in registers or through a
+hidden pointer is an x86-64 psABI fact, so an aarch64 cell does not expect the
+kind. `struct_packing_changed` is not conditioned on `arch` here: its detector
+(`dwarf_advanced._diff_struct_packing`) has no architecture gate, so no
+processor-specific claim is made for it. A kind is conditioned on `arch` only
+with an oracle that shows it is absent on the other architecture, and a new
+`Arch` value is added only when a kind first needs it.
+
 ## Consequences
 
 - Adding a `ChangeKind` gains one step: declare `observable_at` (and any

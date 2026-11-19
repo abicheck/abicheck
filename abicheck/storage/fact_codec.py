@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..model import (
     AccessLevel,
+    ExplicitInstantiation,
     Fact,
     FactStatus,
     ParamKind,
@@ -51,7 +52,6 @@ from .fact_backfill import (
     evidenced_producers as evidenced_producers,
 )
 from .fact_codec_function import (
-    explicit_instantiation_value,
     surface_facts_or_legacy_bridge,
 )
 from .fact_decode import (
@@ -175,6 +175,7 @@ _FUNCTION_FACT_KEYS = (
     "contract_attributes_fact",
     "template_param_defaults_fact",
     "explicit_instantiation_fact",
+    "member_kind_fact",
     "is_explicit_fact",
     "is_hidden_friend_fact",
     "source_header_fact",
@@ -473,12 +474,11 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
                     min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
                 )
             ),
-            "explicit_instantiation_fact": explicit_instantiation_value(
-                decode_fact(
-                    v.get("explicit_instantiation_fact"),
-                    schema_version,
-                    _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
-                )
+            "explicit_instantiation_fact": decode_fact(
+                v.get("explicit_instantiation_fact"),
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT,
+                value_decoder=ExplicitInstantiation,
             ),
         },
     )

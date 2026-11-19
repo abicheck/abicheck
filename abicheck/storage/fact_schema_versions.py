@@ -182,6 +182,14 @@ _MIN_SCHEMA_VERSION_FOR_EXPLICIT_INSTANTIATION_FACT = 65
 # old baseline keeps its pre-v69 classification.
 _MIN_SCHEMA_VERSION_FOR_TYPE_ABI_FACTS = 69
 
+# ``Function.member_kind_fact`` (extractor generation 85) -- free function,
+# non-static or static member, constructor or destructor, read from the
+# declaration's AST kind by the clang and castxml header backends
+# (model/member_kind.py). A per-record fact_codec key, not a schema bump
+# (ADR-062 D19): written only when recorded, and a missing key reads as
+# NOT_COLLECTED at v69 and above (an older reader ignores the key).
+_MIN_SCHEMA_VERSION_FOR_MEMBER_KIND_FACT = 69
+
 # Schema v70: ``Function.return_by_value_fact`` -- whether the return type is a
 # record passed by value (Fact[bool]). Written only where a producer determined
 # it (castxml today); an absent key reads as NOT_COLLECTED at v70 and above and

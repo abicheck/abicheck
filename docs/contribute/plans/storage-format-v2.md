@@ -1340,7 +1340,7 @@ bytes/objects actually loaded.
 
 | Module | Contract |
 |---|---|
-| `abicheck/storage/dto_declarations_migration.py` | `declarations_v1_to_v2` — the declarations section v1 -> v2 step (generation 82, G7) |
+| `abicheck/storage/dto_declarations_migration.py` | `DECLARATIONS_MIGRATIONS`, `declarations_v1_to_v2`, `declarations_v2_to_v3`, `declarations_v3_to_v4` — the declarations section v1 -> v2 step (generation 82, G7), v2 -> v3 step (generation 85, `Function.member_kind_fact`) and v3 -> v4 step (generation 87, `Function.return_by_value_fact` and the ABI fact's indirection kind) |
 | `abicheck/storage/availability_ledger.py` | `FactStatus`, `Confidence`, `FactAvailability`, `AvailabilityLedger` (A0.1) |
 | `abicheck/storage/fact_availability.py` | `FactAvailability` — internal record leaf, re-exported by `availability.py` |
 | `abicheck/storage/availability_status.py` | `FactStatus`, `Confidence`, `COMPARABLE_STATUSES`, `GAP_STATUSES`, `ASSERTS_NO_PRODUCER`, `STATUS_ORDER`, `CONFIDENCE_ORDER`, `worse_status`, `worse_confidence` — internal vocabulary leaf, re-exported by `availability.py` only for `FactStatus`/`Confidence` |
@@ -1349,7 +1349,7 @@ bytes/objects actually loaded.
 | `abicheck/storage/canonical.py` | `canonical_form`, `canonical_json`, `raw_digest`, `semantic_digest`, `strip_capture_metadata`, `CAPTURE_METADATA_KEY` (A0.4; `raw_digest` A1.1) |
 | `abicheck/storage/versioning.py` | `PACKAGE_FORMAT_VERSION`, `COMPARISON_CONTRACT_VERSION`, `UNSTATED_VERSION`, `StorageVersions`, `ProducerIdentity`, `ReaderCompatibility`, `check_reader_compatibility` (A0.5), `EXTRACTOR_GENERATION`, `RESOLVER_GENERATION`, `SOURCE_GENERATION`, `GENERATION_DRIFT_NOTICE_MARKER`, `reader_generation_compatibility` (D2 generation drift) |
 | `abicheck/storage/fact_decode.py` | `decode_fact`, `decode_fact_with_legacy_presence`, `decode_abi_slot_fact`, `abi_fundamental_from_json` (the one-`Fact[T]` JSON decode and its legacy-presence variant, moved out of `fact_codec.py`, which re-exports them; the schema v69 ABI-fact rebuild) — internal, not re-exported by the package |
-| `abicheck/storage/fact_codec_function.py` | `decode_function_facts`, `explicit_instantiation_value`, `surface_facts_or_legacy_bridge` (the function-declaration decoders, split out of `fact_codec.py` for its line cap; schema v70 return-by-value fact) — internal, not re-exported by the package |
+| `abicheck/storage/fact_codec_function.py` | `decode_function_facts`, `surface_facts_or_legacy_bridge` (the function-declaration decoders, split out of `fact_codec.py` for its line cap; schema v70 return-by-value fact) — internal, not re-exported by the package |
 | `abicheck/storage/fact_payload_validation.py` | `validated_identities`, `validated_template_param_defaults` (ADR-085 D1; the decoded-payload checks `fact_codec.py` applies to tuple-valued facts) — internal, not re-exported by the package |
 | `abicheck/storage/guards.py` | `identity_text`, `binary_buffer`, `decision_key`, `key_collection`, `required_field`, `row_sequence`, `item_iterable`, `provenance_text`, `diagnostics_from`, `mapping`, `enum_member`, `instance_of`, `strict_int` (ADR-063 Phase 2) — internal, not re-exported by the package |
 

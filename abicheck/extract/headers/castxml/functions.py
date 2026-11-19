@@ -42,12 +42,14 @@ from ....model.cc_attributes import is_cc_attribute
 from ....model.export_index import ExportMatch
 from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
+from ..member_kind import castxml_member_kind
 from .abi_fundamental import castxml_type_abi_fact
 from .calling_convention import source_calling_conventions
 from .clang_semantics_join import function_decl_key, special_member_key
 from .context import CastxmlParserContext
 from .cxx_header_evidence import cxx_only_files
 from .duplicate_declarations import collapse_benign_duplicates
+from .explicit_instantiation import castxml_explicit_instantiation_fact
 from .location import (
     access_level,
     contract_attributes as _extract_contract_attributes,
@@ -665,9 +667,11 @@ def parse_function_element(
             Fact.not_collected() if noexcept is None else Fact.present(noexcept)
         ),
         is_extern_c=is_extern_c,
+        explicit_instantiation_fact=castxml_explicit_instantiation_fact(ctx, el),
         vtable_index=vtable_index,
         source_location=source_loc,
         is_static=el.get("static") == "1",
+        member_kind_fact=castxml_member_kind(el.tag, el.get("static") == "1"),
         is_const=is_const,
         is_volatile=is_volatile,
         is_pure_virtual=el.get("pure_virtual") == "1",

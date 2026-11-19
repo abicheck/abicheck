@@ -1109,4 +1109,22 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "overloads": ("unique", "overloaded"),
         },
     ),
+    BugClass(
+        id="extraction.castxml_explicit_specialization_unrecorded",
+        invariant=(
+            "An explicit specialization a header spells is recorded as one on every "
+            "header backend, so a removed specialization is judged as a removed "
+            "declaration on castxml as on clang, and an implicit instance is never "
+            "recorded as an explicit one."
+        ),
+        fixed_by=(2141,),
+        seed_tests=(
+            "tests/test_castxml_explicit_specialization_parity.py",
+            "tests/test_castxml_explicit_specialization_detector.py",
+        ),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "form": ("specialization", "implicit_instance"),
+        },
+    ),
 )

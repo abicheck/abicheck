@@ -265,8 +265,9 @@ class TestSlottingDidNotChangeBehaviour:
         # abicheck.noexcept_unobserved extension fact, not a record key.
         # 56: `is_final` (extractor generation 69), carried by the
         # abicheck.final_member_functions extension fact, not a record key.
-        # 57: schema v70 added `return_by_value_fact` (same encode rule).
-        assert len(dataclasses.fields(Function)) == 57
+        # 57: `member_kind_fact` (extractor generation 85), a fact_codec key.
+        # 58: schema v70 added `return_by_value_fact` (same encode rule).
+        assert len(dataclasses.fields(Function)) == 58
         # 9: ADR-063 Phase 10 retired `is_va_list` to an InitVar view.
         # 10: schema v54 added `type_identities_fact`, same encode rule.
         # 11: schema v69 added `type_abi_fact`, same encode rule.

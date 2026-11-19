@@ -227,6 +227,16 @@ _EXPORT_GAINED = (
         "a function and a variable the header already declared gain a "
         "definition: an export appears; nothing existing changes",
         expected=frozenset({"FUNC_EXPORT_ADDED", "VAR_EXPORT_ADDED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence != "headers",
+                {"expected": frozenset({"FUNC_ADDED", "VAR_ADDED"})},
+                "without headers nothing records the old declaration: the old "
+                "library defines neither, so its DWARF has no DIE for them "
+                "(unlike a hidden-to-exported flip, where it does) and the "
+                "evidence shows two plain additions",
+            ),
+        ),
         **_COMPAT_ONLY,
         **_HEADERS,
     ),

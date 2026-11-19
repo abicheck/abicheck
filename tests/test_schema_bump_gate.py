@@ -33,11 +33,11 @@ def _bumped(source: str, to: int) -> str:
 
 
 def _with_rows(source: str, rows: str) -> str:
-    anchor = "SCHEMA_BUMP_REASONS: dict[int, SchemaBump] = {}"
-    assert anchor in source
-    return source.replace(
-        anchor, f"SCHEMA_BUMP_REASONS: dict[int, SchemaBump] = {{{rows}}}"
-    )
+    """Add ``rows`` to the registry, keeping the rows it already holds (the
+    repository's own bumps past the baseline)."""
+    anchor = "SCHEMA_BUMP_REASONS: dict[int, SchemaBump] = {"
+    assert source.count(anchor) == 1
+    return source.replace(anchor, f"{anchor}{rows}, ", 1)
 
 
 def test_repository_state_passes() -> None:

@@ -26,6 +26,7 @@ from .explicit_instantiation import ExplicitInstantiation
 from .extraction_scope import EntityOwnership
 from .fact import Fact, _Omitted, bridge_legacy_and_fact, retire_bridge_fields
 from .identity import EntityId
+from .member_kind import MemberKind
 from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visibility
 
 # ADR-063 Phase 0: private omission sentinel for Param.is_va_list's Fact[T]
@@ -330,6 +331,13 @@ class Function:
     # explicit_instantiation.py``); castxml leaves it unset (``NOT_CAPTURED``).
     # Read by ``compare/template_instance_absence.py``. Persisted since v65.
     explicit_instantiation_fact: Fact[ExplicitInstantiation] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # Free function, non-static/static member, constructor or destructor, read
+    # from the declaration's AST kind by a header backend (model/member_kind.py).
+    # Unset for a producer that does not read it (DWARF, an older snapshot).
+    # Read by the call axis (compare/call_interface.py). Persisted as a fact_codec key (absent: not collected).
+    member_kind_fact: Fact[MemberKind] | None = field(
         default=None, kw_only=True, compare=False
     )
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
