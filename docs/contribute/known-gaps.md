@@ -606,6 +606,12 @@ per-item status in the
 
 ### False-positive risk
 
+#### A Mach-O weak copy of a C++ runtime symbol is not bound by its weak flag, so it gates as a name-only finding (2026-11-19)
+
+**Status (2026-11-19): OPEN.** A name-only runtime match is excluded from contract only when a snapshot carries a symbol table (ADR-089 A8). A Mach-O snapshot has no ELF table, so a removed `std::`/`__gnu_cxx::` weak copy keeps gating at partial assurance (`toolchain_runtime_name_unbound`) even when its `N_WEAK_DEF` / weak-definition export flag marks it as a copy every consumer instantiates itself. The contract path does not read the Mach-O weak flags (`model/macho_facts.py`), so the binding that would exclude it is not used. The result is an over-severe gating finding on macOS, not a missed break. Owner: `policy/contract_toolchain_origin.py` with the Mach-O export read in `extract/`.
+`false-positive` — over-severity on Mach-O toolchain copies; no fixture yet.
+<!-- no-canary: needs a Mach-O fixture built with a weak libc++ instantiation, and the Linux runner cannot link one -->
+
 #### A header-proven std re-export's public origin is keyed by its bare name, so a private declaration sharing that name could keep a finding in scope (not reproduced, 2026-11-19)
 
 **Status (2026-11-19): NEGATIVE_RESULT, not observed.** `policy/public_surface_index.py` records each `std_reexports` entry under its qualified name and its bare tail (`abs` for `std::abs`). The contract lookup needs the bare tail, and qualified-only keys were tried and reverted (the function re-export class then scores `NO_CHANGE`). Three probes found no false positive: a private `detail::abs` beside a removed `using std::abs;` stays `API_BREAK` with `STD_REEXPORT_REMOVED` (`GATING`, `public_root_membership`); a changed private `detail::abs` outside the public headers reads `NO_CHANGE`; and a changed private struct inside an included header reads as its own change, not a re-export finding. A bare-name collision that keeps a private finding in scope has not been observed. Owner: `policy/public_surface_index.py`.
