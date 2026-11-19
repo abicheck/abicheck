@@ -309,6 +309,10 @@ def test_probe_values_convert_like_c() -> None:
 
 
 COMP = _load(FORMAL / "experiments" / "record_edit_competitors.py")
+_LP64_EARLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux") or platform.machine() != "x86_64",
+    reason="Linux ELF, x86-64 LP64 SysV fragment",
+)
 
 
 @pytest.mark.parametrize(
@@ -319,8 +323,8 @@ def test_one_unreadable_report_does_not_stop_the_others(
 ) -> None:
     for side in ("old", "new"):
         (tmp_path / f"lib{side}_gcc_g.so").write_bytes(b"")
-    (tmp_path / "lib_hashes.json").write_text(
-        json.dumps({"gcc": FRAG.lib_hashes(tmp_path, "gcc")})
+    (tmp_path / "compare_gcc_dwarf.libs.json").write_text(
+        json.dumps(FRAG.lib_hashes(tmp_path, "gcc"))
     )
     (tmp_path / "compare_gcc_dwarf.json").write_text(body)
     (tmp_path / "abidiff_gcc.txt").write_text(
@@ -342,8 +346,8 @@ def test_main_scores_the_valid_tool_and_writes_the_summary(
     row = next(r for r in ROWS if r["rep"] and r["edit"][0] == 0)
     for side in ("old", "new"):
         (tmp_path / f"lib{side}_gcc_g.so").write_bytes(side.encode())
-    (tmp_path / "lib_hashes.json").write_text(
-        json.dumps({"gcc": FRAG.lib_hashes(tmp_path, "gcc")})
+    (tmp_path / "compare_gcc_dwarf.libs.json").write_text(
+        json.dumps(FRAG.lib_hashes(tmp_path, "gcc"))
     )
     (tmp_path / "built_rows.json").write_text(json.dumps([row["id"]]))
     (tmp_path / "compare_gcc_dwarf.json").write_text('{"changes": {}}')
@@ -374,14 +378,43 @@ def test_abicc_output_that_is_not_a_report_is_a_parse_error(
     assert parsed["abicc"] is None and errors["abicc"].startswith("parse_error")
 
 
+def test_a_report_without_its_library_record_is_not_scored(tmp_path: Path) -> None:
+    """A report left by a batch that rebuilt nothing after it, or by an older
+    harness, carries no sidecar: unavailable, never scored."""
+    for side in ("old", "new"):
+        (tmp_path / f"lib{side}_gcc_g.so").write_bytes(side.encode())
+    (tmp_path / "compare_gcc_dwarf.json").write_text('{"changes": []}')
+    status = {"abidiff": {"ok": False}, "abicc": {"ok": False}}
+    parsed, errors = COMP._parse_all(tmp_path, "gcc", status)
+    assert parsed["abicheck"] is None and "no library record" in errors["abicheck"]
+
+
+@pytest.mark.integration
+@_LP64_EARLY
+def test_a_narrower_batch_in_the_same_directory_drops_the_old_dwarf_report(
+    tmp_path: Path,
+) -> None:
+    """Directory reuse: a full-lane batch, then an hdr-only batch over the
+    same directory. The second rebuilds the libraries and must not leave the
+    first batch's dwarf report (or its record) behind."""
+    if not (shutil.which("gcc") and shutil.which("castxml")):
+        pytest.skip("gcc and castxml required")
+    picks = [r for r in ROWS if r["rep"]][:2]
+    FRAG.check_batch(tmp_path, picks, CLASSES, ("gcc",), ("dwarf",), [])
+    assert (tmp_path / "compare_gcc_dwarf.libs.json").exists()
+    FRAG.check_batch(tmp_path, picks, CLASSES, ("gcc",), ("hdr",), [])
+    assert not (tmp_path / "compare_gcc_dwarf.json").exists()
+    assert not (tmp_path / "compare_gcc_dwarf.libs.json").exists()
+
+
 @pytest.mark.parametrize("rebuilt", ["old", "new"])
 def test_report_for_another_library_pair_is_stale(tmp_path: Path, rebuilt: str) -> None:
     """The batch records the libraries' hashes; rebuilding either one after
     the report (an interrupted batch) makes the report stale."""
     for side in ("old", "new"):
         (tmp_path / f"lib{side}_gcc_g.so").write_bytes(side.encode())
-    (tmp_path / "lib_hashes.json").write_text(
-        json.dumps({"gcc": FRAG.lib_hashes(tmp_path, "gcc")})
+    (tmp_path / "compare_gcc_dwarf.libs.json").write_text(
+        json.dumps(FRAG.lib_hashes(tmp_path, "gcc"))
     )
     (tmp_path / "compare_gcc_dwarf.json").write_text('{"changes": []}')
     status = {"abidiff": {"ok": False}, "abicc": {"ok": False}}

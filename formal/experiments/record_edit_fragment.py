@@ -706,14 +706,14 @@ def check_batch(
     lines = []
     for cc in compilers:
         t1 = time.perf_counter()
+        # A report and its library pair stay together: drop this compiler's
+        # earlier reports and their sidecars before rebuilding, so an
+        # interrupted or narrower batch never leaves an old report beside
+        # new libraries (record_edit_competitors.py reads the sidecar).
+        for stale in out.glob(f"compare_{cc}_*.json"):
+            stale.unlink()
         b = _build(out, cc)
         t2 = time.perf_counter()
-        # which library pair this batch's reports describe (read by
-        # record_edit_competitors.py, which refuses a report for other libraries)
-        hashes_file = out / "lib_hashes.json"
-        hashes = json.loads(hashes_file.read_text()) if hashes_file.exists() else {}
-        hashes[cc] = lib_hashes(out, cc)
-        hashes_file.write_text(json.dumps(hashes, indent=1))
         cres: dict = {"seconds_build_probe_consumer": round(t2 - t1, 2), "lanes": {}}
         lay_bad = [
             (r["id"], s)
@@ -729,6 +729,12 @@ def check_batch(
             t3 = time.perf_counter()
             _, rep = _compare(out, cc, lane)
             secs = round(time.perf_counter() - t3, 2)
+            if lane == "dwarf":
+                # written only after a successful compare: the libraries the
+                # report was computed from
+                (out / f"compare_{cc}_dwarf.libs.json").write_text(
+                    json.dumps(lib_hashes(out, cc))
+                )
             by = _by_record(rep)
             outcomes: Counter = Counter()
             aff: Counter = Counter()
