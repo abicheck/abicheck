@@ -574,7 +574,7 @@ def judge(
     else:
         outcome = "agree"
     aff = sorted({a for c in changes for a in c.get("affected_symbols") or []})
-    own = {f"use_s{row['id']}", f"fill_s{row['id']}"}
+    own = {f"{fn}_s{row['id']}" for fn in ("use", "fill", "show")}
     return {
         "outcome": outcome,
         "got": got,
