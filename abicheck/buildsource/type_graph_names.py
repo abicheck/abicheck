@@ -161,8 +161,43 @@ def _base_type_name(qual_type: str) -> str:
     return s.strip()
 
 
+#: Keywords a fundamental type is spelled from. Producers spell the same
+#: type differently -- clang's ``qualType`` writes ``long``/``unsigned long``,
+#: CastXML/GCC write ``long int``/``long unsigned int`` -- so a spelling made
+#: only of these keywords, in any order, names a builtin.
+_FUNDAMENTAL_KEYWORDS = frozenset(
+    {
+        "void",
+        "bool",
+        "_Bool",
+        "char",
+        "wchar_t",
+        "char8_t",
+        "char16_t",
+        "char32_t",
+        "short",
+        "int",
+        "long",
+        "signed",
+        "unsigned",
+        "float",
+        "double",
+        "__int128",
+        "__int128_t",
+        "__uint128_t",
+        "__float128",
+        "_Float16",
+        "__bf16",
+        "_Complex",
+    }
+)
+
+
 def _is_excluded_type(name: str) -> bool:
-    return name in _BUILTIN_TYPES
+    if name in _BUILTIN_TYPES:
+        return True
+    words = name.split()
+    return bool(words) and all(w in _FUNDAMENTAL_KEYWORDS for w in words)
 
 
 def _split_top_level_commas(s: str) -> list[str]:

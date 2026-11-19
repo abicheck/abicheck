@@ -179,11 +179,11 @@ the castxml parse dominate small batches. Generating and proving costs:
 
 ### A side observation outside the observable
 
-`affected_symbols` is not part of the observable, and it is wrong in this
-corpus: the change to `struct s1` lists `use_s10 … use_s199` as affected,
-because the enrichment matches type names as substrings
-(`diff_filtering._build_type_to_funcs` / `_SubstringMatcher`). Recorded in
-`docs/contribute/known-gaps.md`; not fixed here.
+`affected_symbols` is not part of the observable. It was wrong in this
+corpus: the change to `struct s1` listed `use_s10 … use_s199` as affected,
+because the enrichment matched type names as substrings. Fixed on
+2026-11-19 (whole-identifier matching, `compare/type_name_boundary.py`);
+E16 measures it on every case ([`RECORD_EDIT_FRAGMENT.md`](RECORD_EDIT_FRAGMENT.md)).
 
 ## Reproduce
 

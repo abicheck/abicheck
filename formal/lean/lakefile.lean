@@ -6,3 +6,6 @@ package «abi-lean» where
 
 @[default_target]
 lean_lib AbiLean where
+  -- RecordEditFragment checks its 9252-case space with `decide +kernel`,
+  -- which needs a larger elaboration thread stack than the default.
+  moreLeanArgs := #["--tstack=4000000"]

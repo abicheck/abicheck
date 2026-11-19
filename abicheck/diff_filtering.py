@@ -42,6 +42,7 @@ from .compare.opaque_types import (
     is_impl_source,
 )
 from .compare.public_surface import impact_candidate_functions
+from .compare.type_name_boundary import bounded_hits, occurs_as_identifier
 from .model import AbiSnapshot, Function
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -332,8 +333,8 @@ def _resolve_ancestor_functions(
         else:
             parent_funcs: list[tuple[str, str]] = []
             for _m, func in old_pub.items():
-                func_types_used = {func.return_type} | {p.type for p in func.params}
-                if any(parent in ft for ft in func_types_used if ft):
+                used = {func.return_type} | {p.type for p in func.params}
+                if any(occurs_as_identifier(parent, t) for t in used if t):
                     parent_funcs.append((func.name, func.mangled))
             ancestor_func_cache[parent] = parent_funcs
             for fname, mname in parent_funcs:
@@ -429,9 +430,8 @@ def _build_type_to_funcs(
     O(types × functions × refs) and goes quadratic when a header refactor or a
     versioned upgrade churns many distinct types (typedef/union/vtable churn was
     ≈O(n²), ~7–9 s at n=4000). Replace the inner type loop with a single
-    Aho-Corasick pass per ref (:class:`_SubstringMatcher`): the set of affected
-    types occurring as a substring of a ref is found in O(len(ref)) regardless
-    of how many types are tracked, with **identical** substring semantics.
+    Aho-Corasick pass per ref (:class:`_SubstringMatcher`), O(len(ref)); its
+    hits count only as whole identifiers (``compare/type_name_boundary``).
     """
     type_to_funcs: dict[str, set[str]] = {t: set() for t in affected_types}
     type_to_mangled: dict[str, set[str]] = {t: set() for t in affected_types}
@@ -439,7 +439,7 @@ def _build_type_to_funcs(
     for _mangled, func in old_pub.items():
         matched: set[str] = set()
         for ft in _collect_function_type_refs(func):
-            matched |= ac.find(ft)
+            matched |= bounded_hits(ac.find(ft), ft)
         for tname in matched:
             type_to_funcs[tname].add(func.name)
             type_to_mangled[tname].add(func.mangled)
@@ -456,7 +456,7 @@ def _build_type_embed_index(
     ac = matcher if matcher is not None else _SubstringMatcher(affected_types)
     for t in old.declarations.types:
         for fld in t.fields:
-            for tname in ac.find(fld.type):
+            for tname in bounded_hits(ac.find(fld.type), fld.type):
                 type_embeds.setdefault(tname, set()).add(t.name)
     return type_embeds
 
