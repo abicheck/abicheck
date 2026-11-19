@@ -16,9 +16,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **215**
+- Kinds with at least one real source: **216**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 106
+- Kinds per source: catalog 159, field_shapes 9, integration 108
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 120 | 98 |
+| unmapped | 120 | 97 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -87,7 +87,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `elf_machine_changed` | BREAKING | 0 | 0 | 0 |
 | `elf_osabi_changed` | RISK | 0 | 0 | 0 |
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
-| `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
+| `exported_object_alignment_reduced` | RISK | 0 | 0 | 6 |
 | `func_added` | COMPATIBLE | 9 | 0 | 9 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
@@ -103,7 +103,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `imported_symbol_added` | RISK | 0 | 0 | 0 |
 | `imported_symbol_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `imported_symbol_unprovided` | BREAKING | 0 | 0 | 1 |
-| `inline_namespace_moved` | BREAKING | 1 | 0 | 0 |
+| `inline_namespace_moved` | BREAKING | 1 | 0 | 1 |
 | `interpreter_changed` | RISK | 0 | 0 | 0 |
 | `kabi_crc_changed` | BREAKING | 1 | 0 | 0 |
 | `kabi_export_type_changed` | API_BREAK | 0 | 0 | 0 |
@@ -403,7 +403,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
-| `abi_surface_explosion` | COMPATIBLE | 0 | 0 | 0 |
+| `abi_surface_explosion` | COMPATIBLE | 0 | 0 | 1 |
 | `anon_field_changed` | BREAKING | 0 | 0 | 0 |
 | `api_depends_on_consumer_env` | RISK | 0 | 0 | 0 |
 | `behavioural_default_changed` | RISK | 0 | 0 | 0 |
@@ -435,7 +435,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_became_inline` | RISK | 0 | 0 | 0 |
 | `func_deleted` | BREAKING | 0 | 0 | 1 |
 | `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
-| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 1 |
+| `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 3 |
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |

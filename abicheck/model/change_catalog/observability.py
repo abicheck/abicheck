@@ -77,40 +77,70 @@ class Language(StrEnum):
     CXX = "cxx"
 
 
+class Arch(StrEnum):
+    """Processor architecture a condition can restrict to (ADR-093 amendment).
+
+    Only the architectures a kind's emission depends on are listed; add a
+    value when a kind is first conditioned on one.
+    """
+
+    X86_64 = "x86_64"
+    AARCH64 = "aarch64"
+
+
 @dataclass(frozen=True, slots=True)
 class ObservabilityCondition:
-    """Restricts an :class:`Observability` to some platforms and/or languages.
+    """Restricts an :class:`Observability` to some platforms, languages and/or arches.
 
-    ``None`` on an axis means "every value of that axis".
+    ``None`` on an axis means "every value of that axis". A condition restricts
+    at least one axis; ``arch`` (ADR-093 amendment) lets a kind whose emission
+    depends on the processor (struct-return and struct-layout rules) be declared
+    for that architecture only.
     """
 
     platform: frozenset[Platform] | None = None
     language: frozenset[Language] | None = None
+    arch: frozenset[Arch] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
-        if self.platform is None and self.language is None:
+        if self.platform is None and self.language is None and self.arch is None:
             raise ValueError("an ObservabilityCondition must restrict an axis")
-        for axis in (self.platform, self.language):
+        for axis in (self.platform, self.language, self.arch):
             if axis is not None and not axis:
                 raise ValueError("an ObservabilityCondition axis may not be empty")
 
     def overlaps(self, other: ObservabilityCondition | None) -> bool:
-        """Whether some (platform, language) point satisfies both conditions."""
+        """Whether some (platform, language, arch) point satisfies both conditions."""
         if other is None:
             return True
-        return _axis_overlaps(self.platform, other.platform) and _axis_overlaps(
-            self.language, other.language
+        return (
+            _axis_overlaps(self.platform, other.platform)
+            and _axis_overlaps(self.language, other.language)
+            and _axis_overlaps(self.arch, other.arch)
         )
 
-    def matches(self, platform: Platform | None, language: Language | None) -> bool:
-        """Whether a run on *platform*/*language* falls under this condition.
+    def matches(
+        self,
+        platform: Platform | None,
+        language: Language | None,
+        arch: Arch | None = None,
+    ) -> bool:
+        """Whether a run on *platform*/*language*/*arch* falls under this condition.
 
         An unknown run axis (``None``) matches, so a condition never hides a
-        kind from a run that did not state its platform or language.
+        kind from a run that did not state its platform, language or arch.
         """
-        return _axis_matches(self.platform, platform) and _axis_matches(
-            self.language, language
+        return (
+            _axis_matches(self.platform, platform)
+            and _axis_matches(self.language, language)
+            and _axis_matches(self.arch, arch)
         )
+
+
+#: The ELF x86-64 restriction: the LP64 psABI facts (ADR-093 amendment, D7).
+ELF_X86_64 = ObservabilityCondition(
+    platform=frozenset({Platform.ELF}), arch=frozenset({Arch.X86_64})
+)
 
 
 def _axis_overlaps(a: frozenset[Any] | None, b: frozenset[Any] | None) -> bool:

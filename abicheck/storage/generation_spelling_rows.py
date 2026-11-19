@@ -755,6 +755,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "applies."
     ),
     86: GenerationSpellingChange(
+        "castxml header backend: an explicit specialization is recorded as "
+        "explicit_instantiation_fact SPECIALIZATION, read from its template<> line. No stored "
+        "type or name spelling changes; a removed explicit specialization is now judged as a "
+        "removed declaration (func_removed), not an export loss, on the castxml route. "
+        "An older snapshot carries no such fact, which reads as no evidence, and no rewrite applies."
+    ),
+    87: GenerationSpellingChange(
         "Typed dump(): no stored type or name spelling changes. The typed API now attaches "
         "the same default header-only graph the CLI attaches, through one owner "
         "(workflows/dump/default_header_graph.py), so a typed snapshot records header-graph "
