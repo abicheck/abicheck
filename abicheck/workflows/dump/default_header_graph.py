@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from ...compile_context import CompileContext
+    from ...dump_manifest import DumpManifest
     from ...model import AbiSnapshot
     from ...service_header_graph_attach import HeaderGraphAst
 
@@ -59,7 +60,7 @@ def header_graph_suppressed() -> Iterator[None]:
 
 
 def effective_public_scope(
-    dump_manifest: object | None,
+    dump_manifest: DumpManifest | None,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
 ) -> tuple[list[Path] | None, list[Path] | None]:
@@ -71,8 +72,8 @@ def effective_public_scope(
     """
     if dump_manifest is not None:
         return (
-            list(dump_manifest.public_header_paths),  # type: ignore[attr-defined]
-            list(dump_manifest.public_header_dirs),  # type: ignore[attr-defined]
+            list(dump_manifest.public_header_paths),
+            list(dump_manifest.public_header_dirs),
         )
     return public_headers, public_header_dirs
 

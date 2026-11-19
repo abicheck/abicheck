@@ -36,9 +36,10 @@ EXPECTED_KINDS = frozenset({"STD_REEXPORT_REMOVED"})
 
 
 def _require_toolchain() -> None:
-    """Fail loudly rather than skip: the lane is only meaningful with the tools."""
+    """Skip only when a tool is absent; the integration lane installs both."""
     for tool in ("g++", "castxml"):
-        assert shutil.which(tool), f"{tool} must be on PATH for this integration test"
+        if shutil.which(tool) is None:
+            pytest.skip(f"{tool} is not on PATH; this integration test needs it")
 
 
 def _build(tmp: Path, stem: str, header: str, source: str) -> tuple[Path, Path]:
@@ -115,14 +116,12 @@ def test_removed_using_reexport_is_an_api_break_through_the_typed_api(
     )
 
 
-@pytest.mark.known_gap_canary
 def test_private_bare_name_collision_keeps_the_reexport_finding(tmp_path: Path) -> None:
     """Known gap: a private ``detail::abs`` shares the bare tail of ``std::abs``.
 
-    The origin is keyed by bare name, so the collision keeps the finding in
-    surface scope. The answer is a false positive, never a missed break: the
-    removed ``krx::abs`` is still reported as an API break. Gapped answer
-    asserted here; it changes if the origin is keyed by qualified name.
+    The origin is keyed by bare name, so the collision could keep the finding in
+    surface scope. Either way the removed ``krx::abs`` must still be reported as
+    an API break: this is the correct answer, asserted as an ordinary regression.
     """
     _require_toolchain()
     priv = tmp_path / "priv.h"

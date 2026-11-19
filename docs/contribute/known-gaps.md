@@ -606,11 +606,11 @@ per-item status in the
 
 ### False-positive risk
 
-#### A header-proven std re-export's public origin is keyed by its bare name, so it can outrank a private declaration that shares that name (2026-11-19)
+#### A header-proven std re-export's public origin is keyed by its bare name, so a private declaration sharing that name could keep a finding in scope (not reproduced, 2026-11-19)
 
-**Status (2026-11-19): OPEN, bounded to the false-positive side.** `policy/public_surface_index.py` records each `std_reexports` entry under both its qualified name and its bare tail (`abs` for `std::abs`). The contract lookup keys origins by bare name, so an unrelated private declaration with the same bare name can take the `PUBLIC_HEADER` origin in the merge. Probe: a private `detail::abs` struct beside a removed `using std::abs;` stays `API_BREAK` with `STD_REEXPORT_REMOVED` (`GATING`, `public_root_membership`). Qualified-only keys were tried and reverted: the function re-export class then scores `NO_CHANGE`, because the contract lookup needs the bare tail. The limit can only keep a finding that a stricter key would have dropped; it does not hide a break. Owner: `policy/public_surface_index.py`.
-`false-positive` — a private declaration sharing a re-exported name's bare tail can be kept in surface scope. The re-export itself is still reported.
-<!-- canary: tests/test_std_reexport_using_class.py::test_private_bare_name_collision_keeps_the_reexport_finding -->
+**Status (2026-11-19): NEGATIVE_RESULT, not observed.** `policy/public_surface_index.py` records each `std_reexports` entry under its qualified name and its bare tail (`abs` for `std::abs`). The contract lookup needs the bare tail, and qualified-only keys were tried and reverted (the function re-export class then scores `NO_CHANGE`). Three probes found no false positive: a private `detail::abs` beside a removed `using std::abs;` stays `API_BREAK` with `STD_REEXPORT_REMOVED` (`GATING`, `public_root_membership`); a changed private `detail::abs` outside the public headers reads `NO_CHANGE`; and a changed private struct inside an included header reads as its own change, not a re-export finding. A bare-name collision that keeps a private finding in scope has not been observed. Owner: `policy/public_surface_index.py`.
+`false-positive` — latent: a private declaration sharing a re-exported name's bare tail could be kept in scope if a probe shape exposes it. The removed re-export itself is still reported.
+<!-- no-canary: no spurious finding has been observed in any probe shape, so there is no gapped answer to pin; tests/test_std_reexport_using_class.py asserts the correct answer for the collision shape -->
 
 #### A C parameter or return-type edit that keeps the call interface gates as an ABI break (2026-11-17)
 
