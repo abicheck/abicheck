@@ -246,7 +246,18 @@ jobs:
           # (abiforge/coverage.py); the next step reports them.
           ABICHECK_EDIT_CORPUS_COVERAGE_DIR: edit-corpus-coverage
           PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/3 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml -v -o faulthandler_timeout=420
-        run: python scripts/verify.py --profile full --only integration --require-complete
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # The shard marker is written here, once the test command has
+          # returned (passed or failed), and never by a later step: a step the
+          # timeout kills also reports `failure`, so a follow-up step could not
+          # tell an interrupted shard from a finished one. The floor job judges
+          # a run only when all three markers exist.
+          rc=0
+          python scripts/verify.py --profile full --only integration --require-complete || rc=$?
+          mkdir -p edit-corpus-coverage
+          : > "edit-corpus-coverage/shard-${SHARD}.done"
+          exit "$rc"
       - name: Edit corpus coverage (Linux)
         # ChangeKinds this shard's corpus cells verified and the language space
         # they ran, in the step summary. Reported only: the `pr` verified floor
@@ -256,15 +267,9 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          # This shard's integration step finished (passed or failed): the
-          # floor job judges a run only when every shard left this marker, so a
-          # cancelled shard is never read as missing records. Written first, so
-          # a failing report below fails this step without hiding the shard.
-          had_records=0
-          [ -d edit-corpus-coverage ] && had_records=1
-          mkdir -p edit-corpus-coverage
-          : > "edit-corpus-coverage/shard-${SHARD}.done"
-          if [ "$had_records" = 1 ]; then
+          # The shard marker is written by the test step itself; records exist
+          # only when a corpus cell ran.
+          if find edit-corpus-coverage -type f ! -name 'shard-*.done' 2>/dev/null | grep -q .; then
             python -m abiforge.coverage report edit-corpus-coverage \
               --title "Edit corpus PR-tier coverage (shard ${SHARD}/3)" \
               --summary "$GITHUB_STEP_SUMMARY"
