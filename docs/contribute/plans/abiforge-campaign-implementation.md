@@ -91,3 +91,21 @@ experiment adapter with explicit fragment/version inputs, then add a report-only
 campaign manifest and evidence-lane status to abiforge. Preserve dense replay.
 Do not lower CI floors until dense-versus-selected conformance passes for each
 claimed observation and evidence lane. No full-ABI closure is claimed here.
+
+
+## Independent scopes and resumable execution
+
+The [nested configuration campaign](abiforge-nested-config-campaign.md) adds
+256 independently packed inner/outer configurations plus48 explicit-alignas
+configurations. A single shared pack cap cannot represent the96 measured cases
+with outer cap below inner cap. Add distinct type-definition and containing-record
+placement contexts to campaign descriptors; do not overwrite completed inner size
+or array stride with outer packing. Preserve nested member observations independently
+of outer extents. Selected checker audits passed; this establishes a generator-model
+extension, not a new production checker defect.
+
+The [runner prototype](abiforge-campaign-runner-prototype.md) implements manifest,
+resume, atomic receipts and completeness audit outside production abiforge. Integrate
+through existing run/cells and report seams only after schema review. Keep completion
+(all planned cells have valid terminal receipts) separate from success (all required
+observations pass); an unknown timeout must never close an observation obligation.
