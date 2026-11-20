@@ -73,3 +73,21 @@ The packing receipt establishes bounded scalar layout and DWARF size/offset conf
 
 
 See the [configuration campaign](abiforge-configuration-campaign.md) for measured results and executable reproduction scripts.
+
+
+## Implemented research prototypes
+
+The [evidence and certificate campaign](abiforge-evidence-certificate-campaign.md) now provides executable finite certificate build/verify and negative tests. Matching headers close all1360 measured alignment availability gaps; this remains distinct from integration into production abiforge.
+
+
+The [packing/enum interaction campaign](abiforge-interaction-campaign.md) adds
+64 configurations and31 checker audits. Thirty of48 four-corner comparisons have
+non-additive layout effects. Implementation acceptance must include joint edits,
+nested member offsets at unchanged outer size, and width-preserving flag controls.
+The12 storage signatures do not replace enum-value or flag-provenance coverage.
+
+Next integration slice: move the finite certificate prototype into the formal
+experiment adapter with explicit fragment/version inputs, then add a report-only
+campaign manifest and evidence-lane status to abiforge. Preserve dense replay.
+Do not lower CI floors until dense-versus-selected conformance passes for each
+claimed observation and evidence lane. No full-ABI closure is claimed here.
