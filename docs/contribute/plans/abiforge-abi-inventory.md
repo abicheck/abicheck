@@ -151,3 +151,12 @@ ABI mechanism while retaining explicit boundaries.
 - [GCC 14.2 ABI options](https://gcc.gnu.org/onlinedocs/gcc-14.2.0/gcc/C_002b_002b-Dialect-Options.html): ABI version and compatibility aliases.
 - [GNU ld symbol versions](https://sourceware.org/binutils/docs/ld/VERSION.html): provider/consumer version binding.
 - [libstdc++ dual ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html): ABI macro is independent of the language-standard switch.
+
+## First interaction evidence
+
+The [call ABI experiment](abiforge-call-abi-experiment.md) exercises C1/C3 and
+R2 x C1 with 693 bounded cells and 2,079 payload executions. It includes public
+checker audits and a 99-to-9 prefix-grid selector checked against a placement
+model. These remain partial evidence; no inventory row is closed by this pilot.
+The [array header extension](abiforge-array-checker-experiment.md) separately
+closes the measured alignment-evidence gap on five ordinary C layout profiles.
