@@ -444,3 +444,87 @@ if __name__ == "__main__":
     raise SystemExit(bool(results["mismatches"] or not results["repetition_witness"]))
 
 ```
+
+## R3: Boolean array-tail observation admits finite length representatives
+
+For a fixed old/new element-layout pair, let S0,S1 be its sizes, A0,A1
+its alignments, P the common prefix length, T the common scalar tail alignment,
+and N the common positive array length. Assume ordinary layout, alignments in
+{1,2,4,8}, no packing/overalignment and no arithmetic overflow. The observed offset is
+
+`tail_i(N) = alignUp(alignUp(P, Ai) + N * Si, T)`.
+
+**Claim (mathematical argument with solver-checked arithmetic lemmas):** for the
+single Boolean observation `tail_0(N) != tail_1(N)`, lengths 1 through 15 suffice
+as representatives of all positive lengths for each fixed layout pair.
+
+- When S0=S1, replacing N with `1+(N-1)%8` preserves equality: both inputs to
+  final alignment decrease by the same multiple of 8, which is divisible by T.
+- When S0 differs from S1, replace N by `min(N,15)`. For N>=15 the larger-size
+  operand exceeds the other before final rounding by at least N-7>=8. Prefix
+  alignment can alter their difference by at most 7. Rounding to T<=8 cannot
+  erase a gap of 8, so the two tail offsets are necessarily different.
+
+This is a sufficient bound, not a minimality claim. Negative size changes are
+handled by exchanging old and new. Exact offsets remain unbounded; this reduction
+preserves only equality. It is not a proof that an arbitrary checker has no bugs
+that depend on large lengths, and does not cover leaf fields, total size, calling
+conventions, changed tail types or unequal old/new array lengths.
+
+Experiment: 6,144 insertion/prefix/tail profiles, 1,591,296 Boolean comparisons
+(lengths 1..256 plus 1024, one million and one billion), zero counterexamples.
+A separate compiled sample used 2,304 pairs with lengths 7,15,16,31,255,1024:
+41,472 sizeof/alignof/offsetof observations matched GCC 14.2 on x86-64. These
+compiled observations check the arithmetic model, not abicheck detection.
+Z3 5.4.1 returned UNSAT for the negations of 13 supporting arithmetic lemmas
+(rounding slack, separation, translation for four alignments; positive size gap).
+The full aggregate theorem has not yet been mechanized in Lean.
+
+Reproduction: save the previous nested probe as `nested/run.py` and the script
+below as its sibling `array-boolean/run.py`, then run the latter. It writes
+`array-boolean/results.json`. Only Python, GCC and z3-solver are required.
+
+```python
+"""Finite length representatives for the offset of the first field after an array."""
+import importlib.util, itertools, json
+from pathlib import Path
+import z3
+HERE=Path(__file__).resolve().parent
+spec=importlib.util.spec_from_file_location('nested',HERE.parent/'nested/run.py')
+m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+def up(x,a): return (x+a-1)//a*a
+def tail(p,s,a,n,t):return up(up(p,a)+n*s,t)
+checks=0; bad=[]; profiles=0
+for first,second,insert,pos,p,t in itertools.product((1,2,4,8),(1,2,4,8),(1,2,4,8),range(3),range(8),(1,2,4,8)):
+ old=[('a',first,first),('b',second,second)];new=old.copy();new.insert(pos,('added',insert,insert))
+ so,ao,_=m.record(old);sn,an,_=m.record(new);profiles+=1
+ for n in list(range(1,257))+[1024,1000000,1000000000]:
+  representative=(n-1)%8+1 if so==sn else min(n,15)
+  moved=tail(p,so,ao,n,t)!=tail(p,sn,an,n,t)
+  predicted=tail(p,so,ao,representative,t)!=tail(p,sn,an,representative,t)
+  checks+=1
+  if moved!=predicted:bad.append([first,second,insert,pos,p,t,n,representative])
+# Solver checks the sufficient inequalities, independently of concrete profiles.
+obligations=[]
+def prove(name,assumptions,claim):
+ solver=z3.Solver();solver.set(timeout=10000);solver.add(*assumptions,z3.Not(claim));r=solver.check()
+ obligations.append({'name':name,'negated_claim':str(r)})
+ assert r==z3.unsat,(name,r)
+x,y,n,d=z3.Ints('x y n d')
+for a in (1,2,4,8):
+ rounded=lambda v:((v+a-1)/a)*a
+ prove('rounding_slack_'+str(a),[x>=0],z3.And(rounded(x)-x>=0,rounded(x)-x<=7))
+ prove('separation_'+str(a),[x>=0,y>=x+8],rounded(y)>rounded(x))
+ prove('translation_'+str(a),[x>=0,n>=0],rounded(x+8*n)==rounded(x)+8*n)
+prove('positive_size_gap',[n>=15,d>=1],n*d-7>=8)
+# Additional compiled sample: same generator, lengths outside prior short corpus.
+m.COUNTS=(7,15,16,31,255,1024)
+compiled=m.run('gcc')
+assert not compiled['mismatches']
+result={'profiles':profiles,'boolean_checks':checks,'counterexamples':bad,'z3':z3.get_version_string(),'obligations':obligations,'compiled':compiled,'representative_rule':'same element size: 1+(N-1)%8; different element size: min(N,15)','scope':'first scalar tail offset; identical prefix length and tail alignment; element alignments divide 8; positive N; ordinary layout; no packing or overflow'}
+(HERE/'results.json').write_text(json.dumps(result,indent=2)+'\n')
+assert not bad
+print(json.dumps({k:v for k,v in result.items() if k not in ('compiled','obligations')},indent=2))
+print('compiled pairs',compiled['pairs'],'observations',compiled['observations'])
+
+```
