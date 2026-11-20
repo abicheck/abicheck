@@ -674,3 +674,10 @@ See [the executable experiment](abiforge-array-checker-experiment.md) for script
 and machine-readable receipts. Next close the missing alignment evidence with a
 header-backed lane, extend to more edit families, and mechanize the selector's
 correspondence rather than inferring implementation correctness from these runs.
+
+## Whole-profile scope accounting
+
+The [P0 ABI inventory](abiforge-abi-inventory.md) defines a first fixed profile,
+40 local obligation families and 12 initial interactions. Its 208 fixture-role
+slots are a pilot budget, not a completeness estimate. It separates this backlog
+from checker ChangeKinds and from already-proved local representative counts.
