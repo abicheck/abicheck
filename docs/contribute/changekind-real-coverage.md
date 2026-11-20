@@ -16,13 +16,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **217**
+- Kinds with at least one real source: **218**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 111
+- Kinds per source: catalog 159, field_shapes 9, integration 112
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 65 |
+| L0 | 129 | 64 |
 | L1 | 66 | 7 |
 | L2 | 79 | 38 |
 | L3 | 15 | 5 |
@@ -49,11 +49,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `support_promise_component_retired` | BREAKING | L0 |
 | `symbol_version_defined_removed` | BREAKING | L0 |
 | `type_visibility_changed` | BREAKING | L0 |
-| `var_visibility_changed` | BREAKING | L0 |
 | `vtable_thunk_set_changed` | BREAKING | L0 |
 | `func_pure_virtual_added` | BREAKING | L1 |
 | `struct_field_type_changed` | BREAKING | L1 |
 | `time64_abi_changed` | BREAKING | L1 |
+| `virtual_base_offset_changed` | BREAKING | L1 |
 
 ## Tier L0
 
@@ -92,7 +92,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
-| `func_removed` | BREAKING | 15 | 1 | 23 |
+| `func_removed` | BREAKING | 15 | 1 | 24 |
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 8 |
 | `func_visibility_changed` | BREAKING | 2 | 0 | 3 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
@@ -178,7 +178,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `var_export_added` | COMPATIBLE | 0 | 0 | 0 |
 | `var_removed` | BREAKING | 1 | 0 | 0 |
 | `var_removed_elf_only` | BREAKING | 0 | 0 | 1 |
-| `var_visibility_changed` | BREAKING | 0 | 0 | 0 |
+| `var_visibility_changed` | BREAKING | 0 | 0 | 1 |
 | `versioned_symbol_scheme_detected` | RISK | 1 | 0 | 0 |
 | `vtable_slot_count_changed` | BREAKING | 1 | 0 | 3 |
 | `vtable_thunk_offset_changed` | BREAKING | 1 | 0 | 1 |
@@ -229,7 +229,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `polymorphic_type_non_virtual_dtor` | RISK | 1 | 0 | 0 |
 | `secondary_vtable_group_changed` | BREAKING | 1 | 0 | 0 |
 | `struct_field_type_changed` | BREAKING | 0 | 0 | 0 |
-| `struct_packing_changed` | BREAKING | 1 | 0 | 0 |
+| `struct_packing_changed` | BREAKING | 1 | 0 | 5 |
 | `struct_return_convention_changed` | BREAKING | 1 | 0 | 3 |
 | `struct_size_changed` | BREAKING | 1 | 0 | 2 |
 | `suppression_reachability_unknown` | RISK | 0 | 0 | 0 |

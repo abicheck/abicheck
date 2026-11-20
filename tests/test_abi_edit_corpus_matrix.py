@@ -73,6 +73,7 @@ from abiforge.run.tiers import (
     DEPENDENCY_PR,
     KIND_REACH_PR,
     SOURCE_EVIDENCE_PR,
+    STRIPPED_HEADERS,
     Cell,
     pairwise,
     pr_cells,
@@ -661,7 +662,9 @@ def test_pr_tier_guards_every_axis() -> None:
     # (DEPENDENCY_PR) and the rows that reach a corner-only kind
     # (KIND_REACH_PR, each naming its kind).
     extra = len(BUILD_DATA_PR) + len(SOURCE_EVIDENCE_PR) + len(DEPENDENCY_PR)
-    assert len(_PR) - extra - len(KIND_REACH_PR) <= 20
+    # Four stripped {B,H} guards (C and C++, gcc and clang: the primary
+    # configuration is an axis value of its own) sit on top of the 20.
+    assert len(_PR) - extra - len(KIND_REACH_PR) <= 24
     assert len(KIND_REACH_PR) <= 8
     assert {op for op, _, _, _ in BUILD_DATA_PR} == {
         op.name for op in BUILD_DATA_OPERATORS
@@ -780,13 +783,44 @@ def test_known_entries_record_the_exact_finding() -> None:
         assert not k.matches(k.cls, k.issues, "NOT_A_VERDICT")
 
 
+def _config_satisfying(k) -> Config:
+    """A config inside the entry's ``when`` predicate, built from the entry's seed.
+
+    The entry's own expectation depends on the config it covers (a layout flag
+    changes what the edit's kinds are), so the independent derivation must take
+    the expectation from a config the entry actually matches, not a fixed one.
+    The grid spans both producer families, the layout flags, and the stripped
+    and unstripped headers builds; the first config inside ``when`` is used.
+    """
+    lang = SEED_BY_NAME[next(iter(k.seeds))].lang
+    for producer in (GCC, CLANG):
+        for flags in (
+            Flags(),
+            Flags(pack=1),
+            Flags(short_enums=True),
+        ):
+            for stripped in (False, True):
+                for backend in ("castxml", "clang"):
+                    cfg = replace(
+                        default_config(lang, producer),
+                        flags=flags,
+                        evidence="headers",
+                        stripped=stripped,
+                        header_backend=backend,
+                    )
+                    if k.when(cfg):
+                        return cfg
+    raise AssertionError(f"no grid config satisfies the when of {k.op}")
+
+
 def test_a_false_clean_degrades_to_its_verdict_class_without_execution() -> None:
     # Reconcile the recorded issues with no execution signal and check the
-    # class the registry predicts for that host (independent derivation).
+    # class the registry predicts for that host (independent derivation). The
+    # expectation comes from a config the entry covers, per entry.
     for k in KNOWN:
         if k.cls != "false-clean":
             continue
-        exp = OP_BY_NAME[k.op].expect(_cfg("c++"))
+        exp = OP_BY_NAME[k.op].expect(_config_satisfying(k))
         verdict = next(iter(k.verdicts))
         got = reconcile(_NONE, exp, verdict, frozenset())
         assert got.cls == k.expected_cls(execution_available=False), k.op
@@ -913,9 +947,17 @@ def _write_report(cell: Cell, report: str) -> None:
         (Path(out) / f"{safe}.txt").write_text(report + "\n", encoding="utf-8")
 
 
+def _pr_row_id(op: str, seed: str, family: str, changes: dict[str, object]) -> str:
+    """The row's pytest id; a stripped row says so, since it shares its three names."""
+    stripped = (
+        "-headers.stripped" if changes.get("evidence") == STRIPPED_HEADERS else ""
+    )
+    return f"{op}-{seed}-{family}{stripped}"
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "index", range(len(_PR)), ids=[f"{o}-{s}-{f}" for o, s, f, _ in _PR]
+    "index", range(len(_PR)), ids=[_pr_row_id(o, s, f, c) for o, s, f, c in _PR]
 )
 def test_pr_tier_cell(index: int, cell_ctx: CellContext) -> None:
     cell = pr_cells()[index]

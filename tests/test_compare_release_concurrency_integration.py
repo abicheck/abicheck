@@ -382,14 +382,14 @@ class TestInstrumentedParallelReleaseMatchesStored:
 
         import abicheck.workflows.release_members as pairwise  # noqa: PLC0415
         from abicheck.workflows import memory_trace, release_jobs  # noqa: PLC0415
-        from abicheck.workflows.dump import native  # noqa: PLC0415
+        from abicheck.workflows.dump import default_header_graph  # noqa: PLC0415
         from tests.test_compare_release import _invoke_combined  # noqa: PLC0415
 
         old_dir, new_dir, headers = release
         header = str(headers / "common.h")
 
         censuses: list[tuple[bool, int | None]] = []
-        real_attach = native._attach_header_graph
+        real_attach = default_header_graph._attach_header_graph
 
         def attach(snap, *args, **kwargs):  # type: ignore[no-untyped-def]
             snap = real_attach(snap, *args, **kwargs)
@@ -401,7 +401,7 @@ class TestInstrumentedParallelReleaseMatchesStored:
             )
             return snap
 
-        monkeypatch.setattr(native, "_attach_header_graph", attach)
+        monkeypatch.setattr(default_header_graph, "_attach_header_graph", attach)
         # The census hook is a worker-*thread* hazard; a forked member child
         # is single-threaded and its `censuses` appends would not reach here.
         monkeypatch.setenv("ABICHECK_MEMBER_PROCESSES", "0")

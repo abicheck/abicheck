@@ -58,6 +58,7 @@ from ..model.semantic_ir_legacy_adapter import (
 )
 from ..model.semantic_ir_record_layout import entity_layout
 from .declined_comparisons import record_declined
+from .record_packing import record_packing_changes
 from .record_return_convention import (
     record_return_convention_changes,
     returned_by_value_records,
@@ -186,3 +187,4 @@ def record_layout_changes(
             )
         )
     record_return_convention_changes(changes, name, t_old, t_new, old_index, new_index)
+    record_packing_changes(changes, name, t_old, t_new, old_index, new_index)

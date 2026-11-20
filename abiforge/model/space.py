@@ -79,10 +79,18 @@ AXES: tuple[str, ...] = (
 )
 
 #: The evidence axis: ``headers`` once per header backend.
+# The stripped {B,H} primary configuration is a header-evidence value of its own
+# (``Config.space_evidence``: ``headers.stripped.<backend>``), so each backend
+# has a stripped spelling as well as the unstripped one.
 SPACE_EVIDENCE: tuple[str, ...] = tuple(
     ev
     for e in EVIDENCE
-    for ev in ([f"headers.{b}" for b in HEADER_BACKENDS] if e == "headers" else [e])
+    for ev in (
+        [f"headers.{b}" for b in HEADER_BACKENDS]
+        + [f"headers.stripped.{b}" for b in HEADER_BACKENDS]
+        if e == "headers"
+        else [e]
+    )
 )
 
 # The corpus builds and runs Linux ELF shared libraries only.

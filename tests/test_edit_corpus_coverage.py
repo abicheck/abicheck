@@ -37,7 +37,7 @@ from abiforge.model.opkit import SONAME_ADVISORY
 from abiforge.model.seeds import SEED_BY_NAME, SEEDS
 from abiforge.operators import OP_BY_NAME, OPERATORS
 from abiforge.run.cells import seed_conflict
-from abiforge.run.tiers import _PR
+from abiforge.run.tiers import _PR, evidence_fields
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 CLANG = Toolchain("clang", 18, "clang", "clang++")
@@ -329,6 +329,9 @@ def _pr_tier_declared() -> set[str]:
             elif key == "consumer":
                 other = CLANG if value == "clang" else GCC
                 cfg = cfg.with_(consumers=(Consumer(toolchain=other),))
+            elif key == "evidence":
+                evidence, stripped = evidence_fields(str(value))
+                cfg = cfg.with_(evidence=evidence, stripped=stripped)
             else:
                 cfg = cfg.with_(**{key: value})
         out |= cov.expectation_kinds(OP_BY_NAME[op_name].expect(cfg))
@@ -665,8 +668,8 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
         * len(STANDARDS)
         * n_cfg
         * len(FAMILIES) ** 2
-        # headers counts once per header backend.
-        * (len(EVIDENCE) - 1 + len(HEADER_BACKENDS))
+        # headers counts once per header backend, unstripped and stripped.
+        * (len(EVIDENCE) - 1 + 2 * len(HEADER_BACKENDS))
     )
 
 
@@ -923,6 +926,9 @@ def test_every_pr_tier_cell_runs_a_feasible_point() -> None:
                 cfg = cfg.with_(std=STANDARD_BY_NAME[str(value)])
             elif key == "consumer":
                 cfg = cfg.with_(consumers=(Consumer(toolchain=CLANG),))
+            elif key == "evidence":
+                evidence, stripped = evidence_fields(str(value))
+                cfg = cfg.with_(evidence=evidence, stripped=stripped)
             else:
                 cfg = cfg.with_(**{key: value})
         for p in space.cell_points(OP_BY_NAME[op_name], cfg, _all_ran(cfg)):
@@ -1045,6 +1051,10 @@ def test_header_backend_is_part_of_the_build_only_for_headers(
     assert cfg.id.endswith("headers" if backend == "castxml" else f"headers.{backend}")
     assert cfg.space_evidence == f"headers.{backend}"
     assert cfg.space_evidence in space.SPACE_EVIDENCE
+    # The stripped primary configuration is a registered header-evidence value too.
+    stripped = base.with_(header_backend=backend, stripped=True)
+    assert stripped.space_evidence == f"headers.stripped.{backend}"
+    assert stripped.space_evidence in space.SPACE_EVIDENCE
 
 
 def test_an_unknown_header_backend_is_refused() -> None:

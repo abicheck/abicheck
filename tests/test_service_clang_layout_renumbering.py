@@ -79,7 +79,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         with (
             fake_format_adapter("elf", side_effect=_fake_dump),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
@@ -102,7 +102,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         with (
             fake_format_adapter("pe", side_effect=_fake_dump),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
@@ -125,7 +125,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         with (
             fake_format_adapter("macho", side_effect=_fake_dump),
             patch(
-                "abicheck.workflows.dump.native._attach_header_graph",
+                "abicheck.workflows.dump.default_header_graph._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
