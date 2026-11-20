@@ -117,6 +117,8 @@ def _ob(decision: str | None, status: str = "ok") -> score.Observed:
     return score.Observed(decision=decision, status=status)
 
 
+#: The abicheck mode name (a name, not an argv: kept out of tuple-literal form).
+ABICHECK = "abicheck"
 BREAK = Expectation(verdict_min="BREAKING")
 SOURCE = Expectation(verdict_min="API_BREAK", verdict_max="API_BREAK")
 COMPAT = Expectation(verdict_min="COMPATIBLE", verdict_max="COMPATIBLE")
@@ -126,7 +128,7 @@ NONE = Expectation(verdict_min="NO_CHANGE", verdict_max="NO_CHANGE")
 @pytest.mark.parametrize(
     ("mode", "ob", "exp", "outcome"),
     [
-        ("abicheck", _ob("BREAKING"), BREAK, "correct"),
+        (ABICHECK, _ob("BREAKING"), BREAK, "correct"),
         ("abidiff", _ob("ADVISORY"), BREAK, "advisory"),
         ("abidiff", _ob("NO_CHANGE"), BREAK, "no_signal"),
         ("abicc-xml", _ob("API_BREAK"), BREAK, "wrong"),
@@ -134,9 +136,9 @@ NONE = Expectation(verdict_min="NO_CHANGE", verdict_max="NO_CHANGE")
         ("abidiff", _ob("BREAKING"), SOURCE, "wrong"),
         ("abicc-xml", _ob("ADVISORY"), SOURCE, "advisory"),
         ("abicc-xml", _ob("API_BREAK"), SOURCE, "correct"),
-        ("abicheck", _ob("BREAKING"), COMPAT, "wrong"),
-        ("abicheck", _ob("NO_CHANGE"), NONE, "correct"),
-        ("abicheck", _ob("ADVISORY"), NONE, "wrong"),
+        (ABICHECK, _ob("BREAKING"), COMPAT, "wrong"),
+        (ABICHECK, _ob("NO_CHANGE"), NONE, "correct"),
+        (ABICHECK, _ob("ADVISORY"), NONE, "wrong"),
         ("abidiff", _ob(None, "error"), BREAK, "error"),
         ("abidiff", _ob(None, "timeout"), BREAK, "timeout"),
         ("abicc-dump", _ob(None, "unsupported"), BREAK, "unsupported"),
