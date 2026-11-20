@@ -81,8 +81,16 @@ any checker. A checker plugs in through `checkers/<name>.py`, which provides
 `snapshot`, `answer`, `kind_names`, `kind_catalog` and
 `header_backend_problem` (see `checkers/abicheck.py`). Today the operators'
 expectations are spelled in abicheck's `ChangeKind` vocabulary; evaluating a
-second checker (libabigail, ABICC) needs a translation of that vocabulary
-into its findings, plus its adapter.
+second checker needs a translation of that vocabulary into its findings,
+plus its adapter.
+
+`checkers/abidiff.py` and `checkers/abicc.py` do that for libabigail and
+ABICC at the level all tools share: a maintainer decision (break, source-only
+break, compatible, unchanged) and explanation details (entity, fields, size,
+offsets, affected functions). `python -m abiforge.run.competitors OUT
+--select pilot` runs abicheck, abidiff, ABI Dumper→ABICC and ABICC on XML
+descriptors on the same built pairs (`dwarf+headers` and
+`stripped+headers`); receipts in `receipts/competitors/`.
 
 ## Boundaries
 

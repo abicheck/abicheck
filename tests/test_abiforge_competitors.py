@@ -17,7 +17,13 @@ import pytest
 from abiforge.checkers import abicc, abidiff
 from abiforge.model.expect import Expectation
 from abiforge.run import competitor_score as score
-from abiforge.run.competitor_truth import _decls, entities, expected_class, members, records
+from abiforge.run.competitor_truth import (
+    _decls,
+    entities,
+    expected_class,
+    members,
+    records,
+)
 
 DATA = Path(__file__).with_name("data") / "abiforge_competitors"
 
@@ -96,7 +102,10 @@ def test_abicc_constant_change_is_not_an_incompatibility() -> None:
 def test_abicc_input_descriptor_is_not_an_output_report() -> None:
     """The input descriptor and the output report are different XML formats."""
     desc = abicc.descriptor("1.0", [Path("/x/a.h")], [Path("/x/liba.so")], "-std=c17")
-    assert "<headers>\n/x/a.h\n</headers>" in desc and "<libs>\n/x/liba.so\n</libs>" in desc
+    assert (
+        "<headers>\n/x/a.h\n</headers>" in desc
+        and "<libs>\n/x/liba.so\n</libs>" in desc
+    )
     with pytest.raises(ValueError):
         abicc.parse(f"<descriptor>{desc}</descriptor>")
 
@@ -133,7 +142,9 @@ NONE = Expectation(verdict_min="NO_CHANGE", verdict_max="NO_CHANGE")
         ("abicc-dump", _ob(None, "unsupported"), BREAK, "unsupported"),
     ],
 )
-def test_decision_outcomes(mode: str, ob: score.Observed, exp: Expectation, outcome: str) -> None:
+def test_decision_outcomes(
+    mode: str, ob: score.Observed, exp: Expectation, outcome: str
+) -> None:
     assert score.decision_outcome(mode, ob, exp) == outcome
 
 
@@ -149,11 +160,19 @@ def test_expected_class_from_bounds() -> None:
 
 
 def test_header_model_reads_members_in_order() -> None:
-    assert list(members(" int id; double weight; char tag[8]; ")) == ["id", "weight", "tag"]
-    assert records("struct point { int y; int x; };") == {"point": {"y": "int y", "x": "int x"}}
+    assert list(members(" int id; double weight; char tag[8]; ")) == [
+        "id",
+        "weight",
+        "tag",
+    ]
+    assert records("struct point { int y; int x; };") == {
+        "point": {"y": "int y", "x": "int x"}
+    }
     assert entities("int add3(int a);") == {"add3"}
     assert entities("extern const int g_obj;") == {"g_obj"}
-    changed = _decls("struct rec make_rec(int id);") ^ _decls("struct rec make_rec(int id);\nint add3(int a);")
+    changed = _decls("struct rec make_rec(int id);") ^ _decls(
+        "struct rec make_rec(int id);\nint add3(int a);"
+    )
     assert changed == {"int add3(int a);"}
 
 
@@ -174,19 +193,34 @@ _TOOLS = ("abidiff", "abi-dumper", "abi-compliance-checker", "gcc", "readelf")
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(any(shutil.which(t) is None for t in _TOOLS), reason="needs abidiff, abi-dumper, ABICC, gcc")
+@pytest.mark.skipif(
+    any(shutil.which(t) is None for t in _TOOLS),
+    reason="needs abidiff, abi-dumper, ABICC, gcc",
+)
 def test_runner_gives_every_mode_the_same_pair(tmp_path: Path) -> None:
     from abiforge.run import competitors
 
-    assert competitors.main([str(tmp_path), "--select", "struct_swap_fields", "--jobs", "2"]) == 0
-    rows = [json.loads(line) for line in (tmp_path / "pairs.jsonl").read_text().splitlines()]
-    swap = [r for r in rows if r["op"] == "struct_swap_fields" and r["seed"] == "c_core"]
+    assert (
+        competitors.main(
+            [str(tmp_path), "--select", "struct_swap_fields", "--jobs", "2"]
+        )
+        == 0
+    )
+    rows = [
+        json.loads(line) for line in (tmp_path / "pairs.jsonl").read_text().splitlines()
+    ]
+    swap = [
+        r for r in rows if r["op"] == "struct_swap_fields" and r["seed"] == "c_core"
+    ]
     assert {r["config"] for r in swap} == set(competitors.CONFIGS)
     for r in swap:
         assert r["status"] == "ran"
         assert r["details_expected"]["offsets_moved"] == ["x", "y"]  # compiler probe
         for argv in (s["argv"] for m in r["modes"].values() for s in m["run"]["steps"]):
-            assert any(r["inputs"]["new"]["so"] in a or "desc.xml" in a or ".dump" in a for a in argv)
+            assert any(
+                r["inputs"]["new"]["so"] in a or "desc.xml" in a or ".dump" in a
+                for a in argv
+            )
         stripped = r["config"] == "stripped+headers"
         assert (r["inputs"]["old"]["debug_sections"] == 0) is stripped
         assert r["modes"]["abicc-xml"]["inputs_verified"]["received_header"] is True

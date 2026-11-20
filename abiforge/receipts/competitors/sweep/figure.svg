@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="370" font-family="sans-serif" font-size="12">
+<rect width="100%" height="100%" fill="white"/>
+<text x="10" y="22" font-size="14" font-weight="bold">Decision outcomes per pair, abiforge all selection (408 cases)</text>
+<text x="292" y="61" text-anchor="end">dwarf+headers · ABI Dumper + ABICC (n=366)</text>
+<rect x="300.0" y="45" width="257.2" height="22" fill="#2e7d32"><title>correct: 181</title></rect>
+<text x="428.6" y="61" fill="white" text-anchor="middle">181</text>
+<rect x="557.2" y="45" width="31.3" height="22" fill="#c62828"><title>wrong: 22</title></rect>
+<text x="572.8" y="61" fill="white" text-anchor="middle">22</text>
+<rect x="588.4" y="45" width="48.3" height="22" fill="#f9a825"><title>advisory: 34</title></rect>
+<text x="612.6" y="61" fill="white" text-anchor="middle">34</text>
+<rect x="636.7" y="45" width="181.9" height="22" fill="#9e9e9e"><title>no_signal: 128</title></rect>
+<text x="727.7" y="61" fill="white" text-anchor="middle">128</text>
+<rect x="818.6" y="45" width="1.4" height="22" fill="#6d4c41"><title>error: 1</title></rect>
+<text x="292" y="91" text-anchor="end">dwarf+headers · ABICC (XML descriptors) (n=366)</text>
+<rect x="300.0" y="75" width="265.7" height="22" fill="#2e7d32"><title>correct: 187</title></rect>
+<text x="432.8" y="91" fill="white" text-anchor="middle">187</text>
+<rect x="565.7" y="75" width="32.7" height="22" fill="#c62828"><title>wrong: 23</title></rect>
+<text x="582.0" y="91" fill="white" text-anchor="middle">23</text>
+<rect x="598.4" y="75" width="55.4" height="22" fill="#f9a825"><title>advisory: 39</title></rect>
+<text x="626.1" y="91" fill="white" text-anchor="middle">39</text>
+<rect x="653.8" y="75" width="163.4" height="22" fill="#9e9e9e"><title>no_signal: 115</title></rect>
+<text x="735.5" y="91" fill="white" text-anchor="middle">115</text>
+<rect x="817.2" y="75" width="2.8" height="22" fill="#6d4c41"><title>error: 2</title></rect>
+<text x="292" y="121" text-anchor="end">dwarf+headers · abicheck compare (n=366)</text>
+<rect x="300.0" y="105" width="515.7" height="22" fill="#2e7d32"><title>correct: 363</title></rect>
+<text x="557.9" y="121" fill="white" text-anchor="middle">363</text>
+<rect x="815.7" y="105" width="2.8" height="22" fill="#9e9e9e"><title>no_signal: 2</title></rect>
+<rect x="818.6" y="105" width="1.4" height="22" fill="#6d4c41"><title>error: 1</title></rect>
+<text x="292" y="151" text-anchor="end">dwarf+headers · libabigail abidiff (n=366)</text>
+<rect x="300.0" y="135" width="179.0" height="22" fill="#2e7d32"><title>correct: 126</title></rect>
+<text x="389.5" y="151" fill="white" text-anchor="middle">126</text>
+<rect x="479.0" y="135" width="17.0" height="22" fill="#c62828"><title>wrong: 12</title></rect>
+<text x="487.5" y="151" fill="white" text-anchor="middle">12</text>
+<rect x="496.1" y="135" width="132.1" height="22" fill="#f9a825"><title>advisory: 93</title></rect>
+<text x="562.1" y="151" fill="white" text-anchor="middle">93</text>
+<rect x="628.2" y="135" width="150.6" height="22" fill="#9e9e9e"><title>no_signal: 106</title></rect>
+<text x="703.5" y="151" fill="white" text-anchor="middle">106</text>
+<rect x="778.8" y="135" width="41.2" height="22" fill="#5c6bc0"><title>unsupported: 29</title></rect>
+<text x="799.4" y="151" fill="white" text-anchor="middle">29</text>
+<text x="292" y="181" text-anchor="end">stripped+headers · ABI Dumper + ABICC (n=365)</text>
+<rect x="300.0" y="165" width="520.0" height="22" fill="#5c6bc0"><title>unsupported: 365</title></rect>
+<text x="560.0" y="181" fill="white" text-anchor="middle">365</text>
+<text x="292" y="211" text-anchor="end">stripped+headers · ABICC (XML descriptors) (n=365)</text>
+<rect x="300.0" y="195" width="265.0" height="22" fill="#2e7d32"><title>correct: 186</title></rect>
+<text x="432.5" y="211" fill="white" text-anchor="middle">186</text>
+<rect x="565.0" y="195" width="32.8" height="22" fill="#c62828"><title>wrong: 23</title></rect>
+<text x="581.4" y="211" fill="white" text-anchor="middle">23</text>
+<rect x="597.8" y="195" width="52.7" height="22" fill="#f9a825"><title>advisory: 37</title></rect>
+<text x="624.1" y="211" fill="white" text-anchor="middle">37</text>
+<rect x="650.5" y="195" width="166.7" height="22" fill="#9e9e9e"><title>no_signal: 117</title></rect>
+<text x="733.8" y="211" fill="white" text-anchor="middle">117</text>
+<rect x="817.2" y="195" width="2.8" height="22" fill="#6d4c41"><title>error: 2</title></rect>
+<text x="292" y="241" text-anchor="end">stripped+headers · abicheck compare (n=365)</text>
+<rect x="300.0" y="225" width="500.1" height="22" fill="#2e7d32"><title>correct: 351</title></rect>
+<text x="550.0" y="241" fill="white" text-anchor="middle">351</text>
+<rect x="800.1" y="225" width="1.4" height="22" fill="#c62828"><title>wrong: 1</title></rect>
+<rect x="801.5" y="225" width="18.5" height="22" fill="#9e9e9e"><title>no_signal: 13</title></rect>
+<text x="810.7" y="241" fill="white" text-anchor="middle">13</text>
+<text x="292" y="271" text-anchor="end">stripped+headers · libabigail abidiff (n=365)</text>
+<rect x="300.0" y="255" width="156.7" height="22" fill="#2e7d32"><title>correct: 110</title></rect>
+<text x="378.4" y="271" fill="white" text-anchor="middle">110</text>
+<rect x="456.7" y="255" width="11.4" height="22" fill="#c62828"><title>wrong: 8</title></rect>
+<rect x="468.1" y="255" width="14.2" height="22" fill="#f9a825"><title>advisory: 10</title></rect>
+<rect x="482.4" y="255" width="296.3" height="22" fill="#9e9e9e"><title>no_signal: 208</title></rect>
+<text x="630.5" y="271" fill="white" text-anchor="middle">208</text>
+<rect x="778.7" y="255" width="41.3" height="22" fill="#5c6bc0"><title>unsupported: 29</title></rect>
+<text x="799.3" y="271" fill="white" text-anchor="middle">29</text>
+<rect x="10" y="295" width="12" height="12" fill="#2e7d32"/><text x="26" y="306">correct</text>
+<rect x="130" y="295" width="12" height="12" fill="#c62828"/><text x="146" y="306">wrong</text>
+<rect x="250" y="295" width="12" height="12" fill="#f9a825"/><text x="266" y="306">advisory</text>
+<rect x="370" y="295" width="12" height="12" fill="#9e9e9e"/><text x="386" y="306">no signal</text>
+<rect x="490" y="295" width="12" height="12" fill="#5c6bc0"/><text x="506" y="306">unsupported</text>
+<rect x="610" y="295" width="12" height="12" fill="#6d4c41"/><text x="626" y="306">error</text>
+<rect x="730" y="295" width="12" height="12" fill="#000000"/><text x="746" y="306">timeout</text>
+</svg>
