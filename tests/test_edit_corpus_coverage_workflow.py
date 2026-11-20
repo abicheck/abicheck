@@ -77,17 +77,36 @@ def test_a_returned_test_command_leaves_its_marker(
     assert outside_is_intact(tmp_path)
 
 
+_NEEDS_PROC = pytest.mark.skipif(
+    not Path("/proc/self/stat").exists(), reason="needs Linux /proc"
+)
+
+
+def _stub_script(tmp_path: Path, body: str) -> Path:
+    """A ``python`` on PATH running *body* (a ``/bin/sh`` script)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    (bindir / "python").write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    (bindir / "python").chmod(0o755)
+    return bindir
+
+
+@_NEEDS_PROC
 def test_a_killed_test_command_leaves_no_marker(tmp_path: Path) -> None:
-    # Negative control: a command that never returns (the timeout's SIGTERM
-    # stands in as the kill) leaves no marker.
+    # Negative control: the step shell killed mid-command (what a runner
+    # timeout does) leaves no marker. The stub walks up to the shell running
+    # the step body, wherever nice/setsid sit between.
     require_bash()
     ws = make_workspace(tmp_path)
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    (bindir / "python").write_text(
-        "#!/bin/sh\nkill -TERM $PPID\nsleep 5\n", encoding="utf-8"
+    bindir = _stub_script(
+        tmp_path,
+        "p=$PPID\n"
+        "while [ \"$p\" -gt 1 ] && ! tr '\\0' ' ' </proc/$p/cmdline | grep -q _step_body; do\n"
+        "  p=$(cut -d' ' -f4 /proc/$p/stat)\n"
+        "done\n"
+        '[ "$p" -gt 1 ] && kill -TERM "$p"\n'
+        "sleep 5\n",
     )
-    (bindir / "python").chmod(0o755)
     result = run_step(
         _TEST_STEP,
         workspace=ws,
@@ -97,23 +116,17 @@ def test_a_killed_test_command_leaves_no_marker(tmp_path: Path) -> None:
     assert "edit-corpus-coverage/shard-2.done" not in result.tree()
 
 
-@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="needs Linux /proc")
-def test_the_test_command_runs_niced_without_waiting_on_the_sampler(
-    tmp_path: Path,
-) -> None:
+@_NEEDS_PROC
+def test_the_test_command_runs_niced_in_its_own_session(tmp_path: Path) -> None:
     # The tests run below the runner agent's priority, so a fully busy machine
-    # still lets the agent heartbeat; the load sampler must neither delay the
-    # step's end nor outlive it (it polls once a minute).
-    require_bash()
-    ws = make_workspace(tmp_path)
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    (bindir / "python").write_text(
-        "#!/bin/sh\ncut -d' ' -f19 /proc/self/stat\n", encoding="utf-8"
-    )
-    (bindir / "python").chmod(0o755)
+    # still lets the agent heartbeat, and in their own session, so a signal a
+    # test sends to "its" group or session cannot reach the runner. The load
+    # sampler must neither delay the step's end nor outlive it.
     import time
 
+    require_bash()
+    ws = make_workspace(tmp_path)
+    bindir = _stub_script(tmp_path, "awk '{print $19, $1, $6}' /proc/$$/stat\n")
     started = time.monotonic()
     result = run_step(
         _TEST_STEP,
@@ -121,8 +134,11 @@ def test_the_test_command_runs_niced_without_waiting_on_the_sampler(
         env={"SHARD": "1", "PATH": f"{bindir}:/usr/bin:/bin"},
     )
     assert result.returncode == 0, result.stderr
-    base = int(Path("/proc/self/stat").read_text().split()[18])
-    assert int(result.stdout.split()[0]) == min(base + 10, 19)
+    own = Path("/proc/self/stat").read_text().split()
+    nice, pid, session = (int(x) for x in result.stdout.split()[:3])
+    assert nice == min(int(own[18]) + 10, 19)
+    assert session == pid
+    assert session != int(own[5])
     assert time.monotonic() - started < 30
 
 
