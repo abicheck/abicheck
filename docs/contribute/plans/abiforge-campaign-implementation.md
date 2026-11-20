@@ -109,3 +109,37 @@ resume, atomic receipts and completeness audit outside production abiforge. Inte
 through existing run/cells and report seams only after schema review. Keep completion
 (all planned cells have valid terminal receipts) separate from success (all required
 observations pass); an unknown timeout must never close an observation obligation.
+
+
+## Main reconciliation and precision follow-up
+
+Read-only review of main691862f6740c5e5bfc66326e29925dff56de3d91 confirms
+entity-level Finding/EntityClaim and shared checker adapters already exist (#2152,
+#2150). Reuse these instead of implementing a second entity-claim mechanism.
+No abicheck production files changed between the experimental baseline and this
+main revision; experiments remain explicitly pinned to their recorded baseline.
+
+A scoped mutation audit loaded main's `abiforge/model/finding.py` and projected a
+real field-offset finding through Finding(kind,symbol,impact). Changing the record
+name failed EntityClaim as expected; changing only field_name, old_value or new_value
+left the projection identical and passed the same entity claim. This is a limitation
+of this projection, not a claim that every abiforge oracle misses the mutation.
+Extend the campaign adapter with field identity, units and exact old/new payload
+obligations; retain the current entity checks. Acceptance: all three payload/member
+mutants fail the new audit while the valid baseline passes.
+
+The [nested reduction certificate](abiforge-nested-reduction-certificate.md) now
+verifies256 configurations against30 full-layout representatives. A shared-pack-only
+mapping fails on96 cases; omitting inner alignment creates80 colliding unordered
+pairs. Omitting stride alone creates none in this matrix because inner size already
+determines stride. This is finite observation preservation, not checker-report or
+whole-ABI equivalence.
+
+The runner prototype now supports explicit `env_allowlist`: controlled cells inherit
+only declared present variables, whose values and presence enter the binding.
+Environment changes reject stale resume/audit. Legacy specs remain inherited and
+therefore retain the old limitation. Host/kernel and transitive toolchain identity
+still require additional provenance. Eleven runner and seven nested-certificate
+tests passed independently in the parent session.
+
+Reproduce the [finding projection audit](abiforge-finding-projection-audit.md).

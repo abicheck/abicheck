@@ -53,12 +53,38 @@ when the interpreter or declared inputs change.
   audit incomplete. A timeout is a recorded execution with unknown outcome.
 
 Fingerprints cover the declared argv, working directory, timeout, resolved
-executable path and bytes, and declared input bytes. The runner inherits the
-process environment without automatically fingerprinting environment variables.
-An environment change can leave a prior pass eligible for reuse if the binding
-still matches. The spec author must name relevant files. Checksums are unsigned.
-Git provenance, transitive toolchain dependencies, produced artifact hashes,
-shard merges, and abiforge oracle and evidence linkage are outside the prototype.
+executable path and bytes, and declared input bytes. The spec author must name
+relevant files. Checksums are unsigned.
+
+## Environment binding
+
+Set a cell's `env_allowlist` to opt into a controlled subprocess environment.
+The list accepts unique names such as `PATH` and `LANG`. The runner passes only
+declared variables present in its own environment. An empty list passes an
+empty environment. It resolves bare executable names using the same captured
+`PATH` as the launch environment, with relative entries interpreted from the
+cell's working directory. When `PATH` is absent, executable lookup uses
+Python's POSIX default search path. The demo declares `PATH` so its build
+helper can relaunch the selected Python interpreter.
+
+The manifest stores an SHA-256 fingerprint over the declared names and their
+values, using a distinct marker for absent variables. Empty strings count as
+present. Run and audit reject a changed binding before reusing a recorded
+pass. To adopt changed values, generate a fresh manifest and receipt. Avoid
+allowlisting secrets because predictable values can be guessed from the digest
+and child output is recorded in receipts.
+
+Cells that omit `env_allowlist` retain legacy behavior and the existing
+manifest and receipt format. They inherit the runner's environment, and an
+environment-only change can leave a prior pass eligible for reuse when the
+other binding fields still match. Add an explicit allowlist and replan to
+enable environment binding for an existing cell.
+
+Controlled mode scopes the environment supplied at launch. Programs and
+runtimes can synthesize variables, modify descendant environments, and read
+host state such as locale data or configuration files. Git provenance,
+transitive toolchain dependencies, produced artifact hashes, shard merges,
+and abiforge oracle and evidence linkage are outside the prototype.
 
 ## Observed run
 
@@ -77,10 +103,11 @@ passed, and the certificate suite passed all 11 tests.
 
 The `execution receipt` retains the command output and
 attempt history. The `audit receipt` reports complete
-coverage. The `runner test log` records seven passing
-tests, including a real SIGINT followed by resume, input and receipt tampering,
-missing and duplicate records, an empty plan, and an injected atomic-write
-failure.
+coverage. The `runner test log` records 11 passing
+tests. They cover environment-only value and presence changes, isolation from
+undeclared variables, relative `PATH` lookup, validation of allowlists, and
+legacy compatibility. They also exercise SIGINT recovery, input and receipt
+tampering, incomplete audits, and an injected atomic-write failure.
 
 ## campaign.py
 
@@ -193,7 +220,20 @@ def local_path(root, name):
 
 
 def bind(root, spec):
-    fields(spec, "id argv cwd inputs timeout_seconds")
+    spec_fields = "id argv cwd inputs timeout_seconds"
+    controlled = isinstance(spec, dict) and "env_allowlist" in spec
+    fields(spec, spec_fields + (" env_allowlist" if controlled else ""))
+    environment = os.environ.copy()
+    if controlled:
+        names = spec["env_allowlist"]
+        if not isinstance(names, list) or not all(
+            isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+            for name in names
+        ):
+            raise ValueError(f"invalid env_allowlist for {spec['id']}")
+        if len(set(names)) != len(names):
+            raise ValueError(f"duplicate env_allowlist name for {spec['id']}")
+        environment = {name: environment[name] for name in names if name in environment}
     argv, inputs, timeout = spec["argv"], spec["inputs"], spec["timeout_seconds"]
     if not isinstance(argv, list) or not argv or not all(
         isinstance(arg, str) and "\0" not in arg for arg in argv
@@ -210,19 +250,24 @@ def bind(root, spec):
     if len(set(paths.values())) != len(inputs):
         raise ValueError(f"duplicate input paths for {spec['id']}")
     # Resolve PATH relative to the child's cwd, including empty PATH entries.
-    search = os.pathsep.join(str(cwd / item) for item in os.get_exec_path())
+    search = os.pathsep.join(str(cwd / item) for item in os.get_exec_path(environment))
     command = str(cwd / argv[0]) if "/" in argv[0] else argv[0]
     found = shutil.which(command, path=search)
     if found is None:
         raise ValueError(f"executable unavailable for {spec['id']}: {argv[0]}")
     executable = Path(found).absolute()
-    return {
+    binding = {
         "spec": spec,
         "resolved_cwd": cwd.relative_to(root).as_posix(),
         "executable": str(executable),
         "executable_sha256": file_digest(executable),
         "input_sha256": {name: file_digest(path) for name, path in paths.items()},
     }
+    if controlled:
+        binding["environment_sha256"] = fingerprint({
+            name: environment.get(name) for name in names
+        })
+    return binding, environment
 
 
 def plan(root, source, manifest_path):
@@ -230,7 +275,7 @@ def plan(root, source, manifest_path):
     specs = index_rows(source["cells"], "planned")
     cells = []
     for cell_id, spec in specs.items():
-        binding = bind(root, spec)
+        binding, _ = bind(root, spec)
         cells.append({"id": cell_id, "binding": binding, "fingerprint": fingerprint(binding)})
     manifest = {"version": VERSION, "cells": cells}
     with locked(manifest_path):
@@ -249,8 +294,10 @@ def validate_manifest(root, manifest):
     cells = index_rows(manifest["cells"], "planned")
     for cell_id, cell in cells.items():
         fields(cell, "id binding fingerprint")
-        fields(cell["binding"], "spec resolved_cwd executable executable_sha256 input_sha256")
-        current = bind(root, cell["binding"]["spec"])
+        binding = cell["binding"]
+        if not isinstance(binding, dict) or "spec" not in binding:
+            raise ValueError(f"invalid binding for {cell_id}")
+        current, _ = bind(root, binding["spec"])
         if (current["spec"]["id"] != cell_id or current != cell["binding"]
                 or fingerprint(current) != cell["fingerprint"]):
             raise ValueError(f"fingerprint mismatch for {cell_id}")
@@ -322,14 +369,14 @@ def kill_group(process):
         pass
 
 
-def execute(root, binding):
+def execute(root, binding, environment):
     spec = binding["spec"]
     start = time.monotonic()
     try:
         process = subprocess.Popen(
             spec["argv"], executable=binding["executable"], cwd=root / binding["resolved_cwd"],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True,
+            start_new_session=True, env=environment,
         )
     except OSError as error:
         return outcome("unknown", "launch-error", duration=time.monotonic() - start,
@@ -378,11 +425,13 @@ def run(root, manifest, receipt_path, retry_failed=False):
                 if attempts[-1]["status"] == "fail" and not retry_failed:
                     continue
             binding = cell["binding"]
-            if bind(root, binding["spec"]) != binding:
+            current, environment = bind(root, binding["spec"])
+            if current != binding:
                 raise ValueError(f"fingerprint changed before execution: {cell_id}")
             record(receipt_path, receipt, results, cell, [*attempts, outcome("unknown", "interrupted")])
-            attempt = execute(root, binding)
-            if bind(root, binding["spec"]) != binding:
+            attempt = execute(root, binding, environment)
+            current, _ = bind(root, binding["spec"])
+            if current != binding:
                 raise ValueError(f"fingerprint changed during execution: {cell_id}")
             record(receipt_path, receipt, results, cell, [*attempts, attempt])
     return summarize(cells, results)
@@ -571,6 +620,77 @@ if not marker.exists():
         self.assertEqual(self.receipt.read_bytes(), previous)
         self.assertEqual(self.audit().returncode, 2)
 
+    def test_environment_change_blocks_resume_and_audit(self):
+        name = "CAMPAIGN_TEST_VALUE"
+        for index, (before, after) in enumerate([
+            ("original", "changed"), (None, ""), ("", None),
+        ]):
+            with self.subTest(before=before, after=after):
+                self.manifest = self.root / f"plan-{index}.json"
+                self.receipt = self.root / f"receipt-{index}.json"
+                spec = dict(self.cell("checked", "pass"), env_allowlist=[name])
+                with patch.dict(campaign.os.environ):
+                    if before is None:
+                        campaign.os.environ.pop(name, None)
+                    else:
+                        campaign.os.environ[name] = before
+                    manifest = self.plan(spec)
+                    self.assertEqual(campaign.run(self.root, manifest, self.receipt)["pass"], 1)
+                    self.assertEqual(self.audit().returncode, 0)
+                    previous = self.receipt.read_bytes()
+                    if after is None:
+                        del campaign.os.environ[name]
+                    else:
+                        campaign.os.environ[name] = after
+                    with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                        campaign.run(self.root, manifest, self.receipt)
+                    self.assertEqual(self.receipt.read_bytes(), previous)
+                    self.assertEqual(self.audit().returncode, 2)
+
+    def test_controlled_environment_is_independent_of_undeclared_variables(self):
+        spec = self.cell("checked", """
+import os
+print(os.environ["CAMPAIGN_TEST_VALUE"])
+assert "CAMPAIGN_TEST_NOISE" not in os.environ
+assert "CAMPAIGN_TEST_MISSING" not in os.environ
+""")
+        spec["env_allowlist"] = ["PATH", "CAMPAIGN_TEST_VALUE", "CAMPAIGN_TEST_MISSING"]
+        spec["argv"][0] = "campaign-python"
+        (self.root / "bin").mkdir()
+        (self.root / "bin" / "campaign-python").symlink_to(Path(sys.executable).resolve())
+        env = {"PATH": "bin", "CAMPAIGN_TEST_VALUE": "declared-value", "CAMPAIGN_TEST_NOISE": "first"}
+        with patch.dict(campaign.os.environ, env, clear=True):
+            manifest = self.plan(spec)
+            self.assertNotIn("declared-value", self.manifest.read_text())
+        with patch.dict(campaign.os.environ, dict(env, CAMPAIGN_TEST_NOISE="second"), clear=True):
+            self.assertEqual(self.plan(spec), manifest)
+            self.assertEqual(campaign.run(self.root, manifest, self.receipt)["pass"], 1)
+
+        attempt, = campaign.read_json(self.receipt)["results"][0]["attempts"]
+        self.assertEqual(attempt["stdout"], "declared-value\n")
+
+    def test_legacy_spec_retains_inherited_environment_and_binding_shape(self):
+        spec = self.cell("legacy", """
+import os
+assert os.environ["CAMPAIGN_TEST_VALUE"] == "legacy-value"
+""")
+        with patch.dict(campaign.os.environ, {"CAMPAIGN_TEST_VALUE": "legacy-value"}):
+            manifest = self.plan(spec)
+            self.assertEqual(set(manifest["cells"][0]["binding"]), {
+                "spec", "resolved_cwd", "executable", "executable_sha256", "input_sha256",
+            })
+            self.assertEqual(campaign.run(self.root, manifest, self.receipt)["pass"], 1)
+        with patch.dict(campaign.os.environ, {"CAMPAIGN_TEST_VALUE": "changed"}):
+            self.assertEqual(campaign.run(self.root, manifest, self.receipt)["pass"], 1)
+            self.assertEqual(self.audit().returncode, 0)
+
+    def test_rejects_invalid_environment_allowlists(self):
+        for allowlist in (None, "PATH", ["PATH", "PATH"], ["BAD=NAME"], [42]):
+            with self.subTest(allowlist=allowlist):
+                spec = dict(self.cell("invalid", "pass"), env_allowlist=allowlist)
+                with self.assertRaisesRegex(ValueError, "env_allowlist"):
+                    self.plan(spec)
+
     def test_audit_rejects_tampered_duplicate_conflicting_and_missing_results(self):
         manifest = self.plan(self.cell("checked", "print('ok')"))
         campaign.run(self.root, manifest, self.receipt)
@@ -658,7 +778,7 @@ if __name__ == "__main__":
 
 ## demo-spec.json
 
-Save under `research/campaign-runner/`; adjust repository paths before planning on another checkout.
+Save under `research/campaign-runner/`.
 
 ```json
 {
@@ -671,6 +791,7 @@ Save under `research/campaign-runner/`; adjust repository paths before planning 
         "research/campaign-runner/demo_build.py"
       ],
       "cwd": ".",
+      "env_allowlist": ["PATH"],
       "inputs": [
         "research/reduction-cert/certificate.py",
         "research/reduction-cert/certificate.json",
@@ -688,6 +809,7 @@ Save under `research/campaign-runner/`; adjust repository paths before planning 
         "verify"
       ],
       "cwd": ".",
+      "env_allowlist": ["PATH"],
       "inputs": [
         "research/reduction-cert/certificate.py",
         "research/reduction-cert/certificate.json",
@@ -710,6 +832,7 @@ Save under `research/campaign-runner/`; adjust repository paths before planning 
         "-v"
       ],
       "cwd": ".",
+      "env_allowlist": ["PATH"],
       "inputs": [
         "research/reduction-cert/certificate.py",
         "research/reduction-cert/certificate.json",
@@ -727,6 +850,7 @@ Save under `research/campaign-runner/`; adjust repository paths before planning 
         "import sys; print('intentional failure', file=sys.stderr); sys.exit(7)"
       ],
       "cwd": ".",
+      "env_allowlist": ["PATH"],
       "inputs": [],
       "timeout_seconds": 20
     },
@@ -739,6 +863,7 @@ Save under `research/campaign-runner/`; adjust repository paths before planning 
         "import time; print('before timeout', flush=True); time.sleep(30)"
       ],
       "cwd": ".",
+      "env_allowlist": ["PATH"],
       "inputs": [],
       "timeout_seconds": 0.5
     }
