@@ -588,3 +588,207 @@ for s in summary:
  if s['caller']!=s['provider'] and 'identity' not in s['profile']: print(s)
 
 ```
+
+## Compiler flag as the ABI mutation
+
+A GCC 14.2 follow-up holds source text fixed and changes only
+`-fpack-struct=1`, separately at O0 and O2. The exported probe takes a pointer
+and returns the second field through an unchanged scalar result protocol.
+This isolates object layout from aggregate argument/return classification.
+
+| Structure | Default size/alignment/value offset | Packed | Cross-library result | DWARF checker |
+|---|---|---|---|---|
+| unsigned char + unsigned long long | 16 / 8 / 8 | 9 / 1 / 1 | incorrect at O0 and O2 | BREAKING |
+| two unsigned char fields | 2 / 1 / 1 | 2 / 1 / 1 | correct at O0 and O2 | COMPATIBLE |
+
+Twelve payload executions comprise eight matched-build controls, two unchanged
+layout cross-build controls and two changed-layout cross-build mutations. All
+ten controls returned 42. Both mutations returned 3026418949592973312.
+The old object is zero-filled, with value 42 at offset 8; the packed reader
+loads eight bytes from offset 1. This explains the observed value on this host.
+Loader resolution was asserted for every run. Only default-client/packed-library
+replacement was exercised, avoiding a reverse read beyond the smaller object.
+These are intentionally incompatible calls, not defined cross-version C++ behavior.
+
+Four public checker comparisons used DWARF dumps. Changed-layout reports include
+`struct_packing_changed`, `type_field_offset_changed`, `type_size_changed` and
+`toolchain_flag_drift`. Unchanged-layout reports include only `toolchain_flag_drift`.
+Thus flag drift alone did not become an ABI-breaking verdict in these controls.
+This is a scoped conformance result, not a new checker defect or complete coverage.
+
+For estimating the configuration space, use flag applicability to contract types
+rather than assuming that every flag change creates a distinct ABI. The preceding
+optimization experiment varies observability; this experiment varies the layout
+contract itself. Neither experiment proves a general configuration quotient.
+
+Save as `research/packing-pilot/run.py` and execute in the pinned checkout.
+
+```python
+from pathlib import Path
+import subprocess as sp,json,os,sys
+P=Path(__file__).resolve().parent;ROOT=P.parents[1]
+rows=[];checks=[]
+def run(args,env=None):
+ r=sp.run(list(map(str,args)),cwd=ROOT,env=env,capture_output=True,text=True,timeout=60)
+ if r.returncode: raise RuntimeError((args,r.stderr))
+ return r.stdout.strip()
+for opt in ['O0','O2']:
+ for shape,fields in [('padded','unsigned char tag; unsigned long long value;'),('bytes','unsigned char tag; unsigned char value;')]:
+  base=P/opt/shape
+  for mode,extra in [('default',[]),('packed',['-fpack-struct=1'])]:
+   d=base/mode;d.mkdir(parents=True,exist_ok=True)
+   (d/'api.hpp').write_text('struct T {'+fields+'};\nextern "C" unsigned long long probe(const T*);\n')
+   (d/'provider.cpp').write_text('#include "api.hpp"\nextern "C" unsigned long long probe(const T* p) { return p->value; }\n')
+   (d/'client.cpp').write_text('#include "api.hpp"\n#include <cstdio>\n#include <cstring>\n#include <cstddef>\nint main(){T t; std::memset(&t,0,sizeof t);t.tag=7;t.value=42;std::printf("%zu %zu %zu %llu\\n",sizeof(T),alignof(T),offsetof(T,value),probe(&t));}\n')
+   flags=['g++','-std=c++20','-'+opt,'-g']+extra
+   run(flags+['-shared','-fPIC',d/'provider.cpp','-o',d/'libprobe.so'])
+   run(flags+[d/'client.cpp','-L'+str(d),'-lprobe','-o',d/'client'])
+   run([sys.executable,'-m','abicheck','dump',d/'libprobe.so','-o',d/'dump.json'])
+  for c,l in [('default','default'),('packed','packed'),('default','packed')]:
+   env=os.environ|{'LD_LIBRARY_PATH':str(base/l)}
+   loader=run(['ldd',base/c/'client'],env); assert f'libprobe.so => {base/l}/libprobe.so ' in loader
+   out=run([base/c/'client'],env)
+   rows.append(dict(opt=opt,shape=shape,client=c,library=l,output=out))
+   if c==l or shape=='bytes':assert out.split()[-1]=='42'
+  result=base/'compare.json'
+  r=sp.run([sys.executable,'-m','abicheck','compare',str(base/'default/dump.json'),str(base/'packed/dump.json'),'-o','json='+str(result)],cwd=ROOT,capture_output=True,text=True,timeout=60)
+  assert r.returncode in [0,1,2,4],r.stderr
+  report=json.loads(result.read_text())
+  checks.append(dict(opt=opt,shape=shape,verdict=report['verdict'],kinds=sorted({c['kind'] for c in report['changes']})))
+(P/'results.json').write_text(json.dumps(dict(runtime=rows,checker=checks),indent=2))
+print(json.dumps(dict(runtime=rows,checker=checks),indent=2))
+
+```
+
+Recorded results:
+
+```json
+{
+  "runtime": [
+    {
+      "opt": "O0",
+      "shape": "padded",
+      "client": "default",
+      "library": "default",
+      "output": "16 8 8 42"
+    },
+    {
+      "opt": "O0",
+      "shape": "padded",
+      "client": "packed",
+      "library": "packed",
+      "output": "9 1 1 42"
+    },
+    {
+      "opt": "O0",
+      "shape": "padded",
+      "client": "default",
+      "library": "packed",
+      "output": "16 8 8 3026418949592973312"
+    },
+    {
+      "opt": "O0",
+      "shape": "bytes",
+      "client": "default",
+      "library": "default",
+      "output": "2 1 1 42"
+    },
+    {
+      "opt": "O0",
+      "shape": "bytes",
+      "client": "packed",
+      "library": "packed",
+      "output": "2 1 1 42"
+    },
+    {
+      "opt": "O0",
+      "shape": "bytes",
+      "client": "default",
+      "library": "packed",
+      "output": "2 1 1 42"
+    },
+    {
+      "opt": "O2",
+      "shape": "padded",
+      "client": "default",
+      "library": "default",
+      "output": "16 8 8 42"
+    },
+    {
+      "opt": "O2",
+      "shape": "padded",
+      "client": "packed",
+      "library": "packed",
+      "output": "9 1 1 42"
+    },
+    {
+      "opt": "O2",
+      "shape": "padded",
+      "client": "default",
+      "library": "packed",
+      "output": "16 8 8 3026418949592973312"
+    },
+    {
+      "opt": "O2",
+      "shape": "bytes",
+      "client": "default",
+      "library": "default",
+      "output": "2 1 1 42"
+    },
+    {
+      "opt": "O2",
+      "shape": "bytes",
+      "client": "packed",
+      "library": "packed",
+      "output": "2 1 1 42"
+    },
+    {
+      "opt": "O2",
+      "shape": "bytes",
+      "client": "default",
+      "library": "packed",
+      "output": "2 1 1 42"
+    }
+  ],
+  "checker": [
+    {
+      "opt": "O0",
+      "shape": "padded",
+      "verdict": "BREAKING",
+      "kinds": [
+        "struct_packing_changed",
+        "toolchain_flag_drift",
+        "type_field_offset_changed",
+        "type_size_changed"
+      ]
+    },
+    {
+      "opt": "O0",
+      "shape": "bytes",
+      "verdict": "COMPATIBLE",
+      "kinds": [
+        "toolchain_flag_drift"
+      ]
+    },
+    {
+      "opt": "O2",
+      "shape": "padded",
+      "verdict": "BREAKING",
+      "kinds": [
+        "struct_packing_changed",
+        "toolchain_flag_drift",
+        "type_field_offset_changed",
+        "type_size_changed"
+      ]
+    },
+    {
+      "opt": "O2",
+      "shape": "bytes",
+      "verdict": "COMPATIBLE",
+      "kinds": [
+        "toolchain_flag_drift"
+      ]
+    }
+  ]
+}
+```
