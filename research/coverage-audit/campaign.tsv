@@ -1,0 +1,39 @@
+area	consumer obligation	target scenarios
+ELF	resolve required function or data symbol	4
+ELF	resolve required version or retained alias	4
+ELF	select provider under weak binding and visibility	4
+ELF	load SONAME and transitive dependency in target environment	4
+ELF	access TLS across DSO boundaries	4
+ELF	apply required runtime relocation including copy relocation	4
+data	read or write field at compiled offset	4
+data	allocate and index array at compiled size and alignment	4
+data	read bitfield with compiled mask and position	4
+data	use enum width and signed representation	4
+data	use union member storage through pointer	2
+data	access flexible array tail and embedded aggregates	4
+call	pass scalar integer or floating value	4
+call	pass one-eightbyte union across register exhaustion	4
+call	pass mixed two-eightbyte aggregate with rollback	6
+call	pass large or unaligned aggregate on stack	4
+call	pass variadic arguments through va_list	6
+call	pass vectors and over-aligned arguments with target flags	6
+call	pass nontrivial C++ value via invisible reference	4
+return	receive scalar or two-register aggregate	6
+return	handle register-to-hidden-result transition	4
+return	place explicit arguments after hidden result pointer	4
+return	receive floating complex or vector result	4
+object	access primary and secondary base subobjects	4
+object	locate virtual base from derived object	4
+object	handle tail padding or empty base reuse in derived object	4
+object	apply pointer to data member	4
+object	invoke pointer to member function	4
+dispatch	read correct virtual slot	4
+dispatch	call secondary or virtual base override with adjusted this	6
+dispatch	receive covariant result through base interface	4
+dispatch	call base and complete constructors or destructors	4
+dispatch	delete polymorphic object across DSO	4
+runtime	link C++ mangled template or tagged entity	4
+runtime	share emitted inline static or guard state across DSO	4
+runtime	resolve RTTI identity and dynamic_cast across bases	6
+runtime	match catch handler and run cleanup across DSO	6
+runtime	destroy arrays with matching cookie and element stride	4
