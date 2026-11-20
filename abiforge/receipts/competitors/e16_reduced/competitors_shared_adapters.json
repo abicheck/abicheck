@@ -1,0 +1,449 @@
+{
+ "cases": 88,
+ "compilers": {
+  "gcc": {
+   "tool_status": {
+    "abidiff": {
+     "exit": 4,
+     "ok": true,
+     "stderr": "",
+     "seconds": 0.18,
+     "version": "abidiff: 2.4.0"
+    },
+    "abicc": {
+     "exit": 1,
+     "ok": true,
+     "stderr": "",
+     "seconds": 1.461,
+     "version": "2.3"
+    }
+   },
+   "tools": {
+    "abicheck": {
+     "claims": {
+      "flagged": {
+       "match": 88
+      },
+      "edit_member": {
+       "match": 88
+      },
+      "size": {
+       "match": 88
+      },
+      "offset_moved": {
+       "match": 88
+      },
+      "position_moved": {
+       "unsupported": 88
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 26
+      },
+      "remove/flagged": {
+       "match": 26
+      },
+      "remove/offset_moved": {
+       "match": 26
+      },
+      "remove/position_moved": {
+       "unsupported": 26
+      },
+      "remove/size": {
+       "match": 26
+      },
+      "replace/edit_member": {
+       "match": 37
+      },
+      "replace/flagged": {
+       "match": 37
+      },
+      "replace/offset_moved": {
+       "match": 37
+      },
+      "replace/position_moved": {
+       "unsupported": 37
+      },
+      "replace/size": {
+       "match": 37
+      },
+      "swap/edit_member": {
+       "match": 25
+      },
+      "swap/flagged": {
+       "match": 25
+      },
+      "swap/offset_moved": {
+       "match": 25
+      },
+      "swap/position_moved": {
+       "unsupported": 25
+      },
+      "swap/size": {
+       "match": 25
+      }
+     },
+     "miss_examples": []
+    },
+    "abidiff": {
+     "claims": {
+      "flagged": {
+       "match": 88
+      },
+      "edit_member": {
+       "match": 88
+      },
+      "size": {
+       "match": 88
+      },
+      "offset_moved": {
+       "match": 88
+      },
+      "position_moved": {
+       "unsupported": 88
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 26
+      },
+      "remove/flagged": {
+       "match": 26
+      },
+      "remove/offset_moved": {
+       "match": 26
+      },
+      "remove/position_moved": {
+       "unsupported": 26
+      },
+      "remove/size": {
+       "match": 26
+      },
+      "replace/edit_member": {
+       "match": 37
+      },
+      "replace/flagged": {
+       "match": 37
+      },
+      "replace/offset_moved": {
+       "match": 37
+      },
+      "replace/position_moved": {
+       "unsupported": 37
+      },
+      "replace/size": {
+       "match": 37
+      },
+      "swap/edit_member": {
+       "match": 25
+      },
+      "swap/flagged": {
+       "match": 25
+      },
+      "swap/offset_moved": {
+       "match": 25
+      },
+      "swap/position_moved": {
+       "unsupported": 25
+      },
+      "swap/size": {
+       "match": 25
+      }
+     },
+     "miss_examples": []
+    },
+    "abicc": {
+     "claims": {
+      "flagged": {
+       "match": 88
+      },
+      "edit_member": {
+       "match": 88
+      },
+      "size": {
+       "match": 88
+      },
+      "offset_moved": {
+       "unsupported": 88
+      },
+      "position_moved": {
+       "n/a": 63,
+       "match": 25
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 26
+      },
+      "remove/flagged": {
+       "match": 26
+      },
+      "remove/offset_moved": {
+       "unsupported": 26
+      },
+      "remove/position_moved": {
+       "n/a": 26
+      },
+      "remove/size": {
+       "match": 26
+      },
+      "replace/edit_member": {
+       "match": 37
+      },
+      "replace/flagged": {
+       "match": 37
+      },
+      "replace/offset_moved": {
+       "unsupported": 37
+      },
+      "replace/position_moved": {
+       "n/a": 37
+      },
+      "replace/size": {
+       "match": 37
+      },
+      "swap/edit_member": {
+       "match": 25
+      },
+      "swap/flagged": {
+       "match": 25
+      },
+      "swap/offset_moved": {
+       "unsupported": 25
+      },
+      "swap/position_moved": {
+       "match": 25
+      },
+      "swap/size": {
+       "match": 25
+      }
+     },
+     "miss_examples": []
+    }
+   }
+  },
+  "clang": {
+   "tool_status": {
+    "abidiff": {
+     "exit": 4,
+     "ok": true,
+     "stderr": "",
+     "seconds": 0.17,
+     "version": "abidiff: 2.4.0"
+    },
+    "abicc": {
+     "exit": 1,
+     "ok": true,
+     "stderr": "",
+     "seconds": 1.409,
+     "version": "2.3"
+    }
+   },
+   "tools": {
+    "abicheck": {
+     "claims": {
+      "flagged": {
+       "match": 88
+      },
+      "edit_member": {
+       "match": 88
+      },
+      "size": {
+       "match": 88
+      },
+      "offset_moved": {
+       "match": 88
+      },
+      "position_moved": {
+       "unsupported": 88
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 26
+      },
+      "remove/flagged": {
+       "match": 26
+      },
+      "remove/offset_moved": {
+       "match": 26
+      },
+      "remove/position_moved": {
+       "unsupported": 26
+      },
+      "remove/size": {
+       "match": 26
+      },
+      "replace/edit_member": {
+       "match": 37
+      },
+      "replace/flagged": {
+       "match": 37
+      },
+      "replace/offset_moved": {
+       "match": 37
+      },
+      "replace/position_moved": {
+       "unsupported": 37
+      },
+      "replace/size": {
+       "match": 37
+      },
+      "swap/edit_member": {
+       "match": 25
+      },
+      "swap/flagged": {
+       "match": 25
+      },
+      "swap/offset_moved": {
+       "match": 25
+      },
+      "swap/position_moved": {
+       "unsupported": 25
+      },
+      "swap/size": {
+       "match": 25
+      }
+     },
+     "miss_examples": []
+    },
+    "abidiff": {
+     "claims": {
+      "flagged": {
+       "match": 88
+      },
+      "edit_member": {
+       "match": 88
+      },
+      "size": {
+       "match": 88
+      },
+      "offset_moved": {
+       "match": 88
+      },
+      "position_moved": {
+       "unsupported": 88
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 26
+      },
+      "remove/flagged": {
+       "match": 26
+      },
+      "remove/offset_moved": {
+       "match": 26
+      },
+      "remove/position_moved": {
+       "unsupported": 26
+      },
+      "remove/size": {
+       "match": 26
+      },
+      "replace/edit_member": {
+       "match": 37
+      },
+      "replace/flagged": {
+       "match": 37
+      },
+      "replace/offset_moved": {
+       "match": 37
+      },
+      "replace/position_moved": {
+       "unsupported": 37
+      },
+      "replace/size": {
+       "match": 37
+      },
+      "swap/edit_member": {
+       "match": 25
+      },
+      "swap/flagged": {
+       "match": 25
+      },
+      "swap/offset_moved": {
+       "match": 25
+      },
+      "swap/position_moved": {
+       "unsupported": 25
+      },
+      "swap/size": {
+       "match": 25
+      }
+     },
+     "miss_examples": []
+    },
+    "abicc": {
+     "claims": {
+      "flagged": {
+       "match": 88
+      },
+      "edit_member": {
+       "match": 88
+      },
+      "size": {
+       "match": 88
+      },
+      "offset_moved": {
+       "unsupported": 88
+      },
+      "position_moved": {
+       "n/a": 63,
+       "match": 25
+      }
+     },
+     "per_operation": {
+      "remove/edit_member": {
+       "match": 26
+      },
+      "remove/flagged": {
+       "match": 26
+      },
+      "remove/offset_moved": {
+       "unsupported": 26
+      },
+      "remove/position_moved": {
+       "n/a": 26
+      },
+      "remove/size": {
+       "match": 26
+      },
+      "replace/edit_member": {
+       "match": 37
+      },
+      "replace/flagged": {
+       "match": 37
+      },
+      "replace/offset_moved": {
+       "unsupported": 37
+      },
+      "replace/position_moved": {
+       "n/a": 37
+      },
+      "replace/size": {
+       "match": 37
+      },
+      "swap/edit_member": {
+       "match": 25
+      },
+      "swap/flagged": {
+       "match": 25
+      },
+      "swap/offset_moved": {
+       "unsupported": 25
+      },
+      "swap/position_moved": {
+       "match": 25
+      },
+      "swap/size": {
+       "match": 25
+      }
+     },
+     "miss_examples": []
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,682 @@
+{
+ "agreement": [
+  {
+   "a": "abicc-dump",
+   "b": "abicc-xml",
+   "both_correct": 10,
+   "config": "dwarf+headers",
+   "pairs": 17,
+   "same_decision": 15,
+   "same_details": 17,
+   "same_outcome": 16
+  },
+  {
+   "a": "abicc-dump",
+   "b": "abicheck",
+   "both_correct": 10,
+   "config": "dwarf+headers",
+   "pairs": 17,
+   "same_decision": 9,
+   "same_details": 15,
+   "same_outcome": 10
+  },
+  {
+   "a": "abicc-dump",
+   "b": "abidiff",
+   "both_correct": 6,
+   "config": "dwarf+headers",
+   "pairs": 17,
+   "same_decision": 11,
+   "same_details": 14,
+   "same_outcome": 11
+  },
+  {
+   "a": "abicc-xml",
+   "b": "abicheck",
+   "both_correct": 10,
+   "config": "dwarf+headers",
+   "pairs": 17,
+   "same_decision": 10,
+   "same_details": 15,
+   "same_outcome": 10
+  },
+  {
+   "a": "abicc-xml",
+   "b": "abidiff",
+   "both_correct": 6,
+   "config": "dwarf+headers",
+   "pairs": 17,
+   "same_decision": 9,
+   "same_details": 14,
+   "same_outcome": 10
+  },
+  {
+   "a": "abicheck",
+   "b": "abidiff",
+   "both_correct": 8,
+   "config": "dwarf+headers",
+   "pairs": 17,
+   "same_decision": 5,
+   "same_details": 15,
+   "same_outcome": 8
+  },
+  {
+   "a": "abicc-dump",
+   "b": "abicc-xml",
+   "both_correct": 0,
+   "config": "stripped+headers",
+   "pairs": 17,
+   "same_decision": 0,
+   "same_details": 10,
+   "same_outcome": 0
+  },
+  {
+   "a": "abicc-dump",
+   "b": "abicheck",
+   "both_correct": 0,
+   "config": "stripped+headers",
+   "pairs": 17,
+   "same_decision": 0,
+   "same_details": 10,
+   "same_outcome": 0
+  },
+  {
+   "a": "abicc-dump",
+   "b": "abidiff",
+   "both_correct": 0,
+   "config": "stripped+headers",
+   "pairs": 17,
+   "same_decision": 0,
+   "same_details": 10,
+   "same_outcome": 0
+  },
+  {
+   "a": "abicc-xml",
+   "b": "abicheck",
+   "both_correct": 10,
+   "config": "stripped+headers",
+   "pairs": 17,
+   "same_decision": 10,
+   "same_details": 15,
+   "same_outcome": 10
+  },
+  {
+   "a": "abicc-xml",
+   "b": "abidiff",
+   "both_correct": 6,
+   "config": "stripped+headers",
+   "pairs": 17,
+   "same_decision": 7,
+   "same_details": 11,
+   "same_outcome": 8
+  },
+  {
+   "a": "abicheck",
+   "b": "abidiff",
+   "both_correct": 8,
+   "config": "stripped+headers",
+   "pairs": 17,
+   "same_decision": 5,
+   "same_details": 11,
+   "same_outcome": 8
+  }
+ ],
+ "coverage": {
+  "per_mode": {
+   "abicc-dump": {
+    "operators_answered": 15,
+    "pairs_answered": 17,
+    "pairs_run": 34
+   },
+   "abicc-xml": {
+    "operators_answered": 15,
+    "pairs_answered": 34,
+    "pairs_run": 34
+   },
+   "abicheck": {
+    "operators_answered": 15,
+    "pairs_answered": 34,
+    "pairs_run": 34
+   },
+   "abidiff": {
+    "operators_answered": 15,
+    "pairs_answered": 34,
+    "pairs_run": 34
+   }
+  },
+  "registry": {
+   "edit_model_classes": 168,
+   "edit_model_constructs": 10,
+   "operator_seed_pairs_declared": 399,
+   "operators_declared": 364
+  },
+  "this_run": {
+   "cases_selected": 17,
+   "operators_built": 15,
+   "operators_selected": 15,
+   "pairs_build_failed": 0,
+   "pairs_built": 34,
+   "pairs_infeasible": 0,
+   "pairs_selected": 34,
+   "pairs_with_detail_expectation": 14,
+   "pairs_with_independent_expectation": 34
+  }
+ },
+ "meta": {
+  "compiler": "gcc",
+  "configs": [
+   "dwarf+headers",
+   "stripped+headers"
+  ],
+  "environment": {
+   "abi-compliance-checker": "2.3",
+   "abi-dumper": "1.2",
+   "abidiff": "abidiff: 2.4.0",
+   "commit": "b0b8793989c150a5b05f48e4e999a7df4219365a",
+   "gcc": "13.3.0",
+   "platform": "Linux x86_64",
+   "python": "3.13.18"
+  },
+  "modes": [
+   "abicheck",
+   "abidiff",
+   "abicc-dump",
+   "abicc-xml"
+  ],
+  "pilot_rule": {
+   "classes": [
+    "abi_break",
+    "source_break",
+    "compatible",
+    "risk",
+    "unchanged"
+   ],
+   "extra": [
+    "glibc_floor_raised"
+   ],
+   "filter": "no rules, rebuild, carrier, new_evidence, libstdc++ need, host arch or licence",
+   "per_class": 3,
+   "seeds": [
+    "c_core",
+    "c_elf"
+   ]
+  },
+  "select": "pilot"
+ },
+ "table": [
+  {
+   "by_class": {
+    "abi_break": {
+     "advisory": 1,
+     "correct": 2
+    },
+    "compatible": {
+     "correct": 3
+    },
+    "risk": {
+     "no_signal": 4
+    },
+    "source_break": {
+     "advisory": 1,
+     "correct": 1,
+     "no_signal": 1
+    },
+    "unchanged": {
+     "correct": 4
+    }
+   },
+   "config": "dwarf+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "match": 7,
+     "n/a": 10
+    },
+    "fields": {
+     "match": 2,
+     "n/a": 15
+    },
+    "functions": {
+     "match": 6,
+     "n/a": 11
+    },
+    "offsets": {
+     "n/a": 16,
+     "unsupported": 1
+    },
+    "size": {
+     "match": 2,
+     "n/a": 15
+    }
+   },
+   "mode": "abicc-dump",
+   "outcomes": {
+    "advisory": 2,
+    "correct": 10,
+    "error": 0,
+    "no_signal": 5,
+    "timeout": 0,
+    "unsupported": 0,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 6.13
+  },
+  {
+   "by_class": {
+    "abi_break": {
+     "advisory": 1,
+     "correct": 2
+    },
+    "compatible": {
+     "correct": 3
+    },
+    "risk": {
+     "no_signal": 4
+    },
+    "source_break": {
+     "advisory": 2,
+     "correct": 1
+    },
+    "unchanged": {
+     "correct": 4
+    }
+   },
+   "config": "dwarf+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "match": 7,
+     "n/a": 10
+    },
+    "fields": {
+     "match": 2,
+     "n/a": 15
+    },
+    "functions": {
+     "match": 6,
+     "n/a": 11
+    },
+    "offsets": {
+     "n/a": 16,
+     "unsupported": 1
+    },
+    "size": {
+     "match": 2,
+     "n/a": 15
+    }
+   },
+   "mode": "abicc-xml",
+   "outcomes": {
+    "advisory": 3,
+    "correct": 10,
+    "error": 0,
+    "no_signal": 4,
+    "timeout": 0,
+    "unsupported": 0,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 10.01
+  },
+  {
+   "by_class": {
+    "abi_break": {
+     "correct": 3
+    },
+    "compatible": {
+     "correct": 3
+    },
+    "risk": {
+     "correct": 4
+    },
+    "source_break": {
+     "correct": 3
+    },
+    "unchanged": {
+     "correct": 4
+    }
+   },
+   "config": "dwarf+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "match": 7,
+     "n/a": 10
+    },
+    "fields": {
+     "match": 2,
+     "n/a": 15
+    },
+    "functions": {
+     "match": 5,
+     "miss": 1,
+     "n/a": 11
+    },
+    "offsets": {
+     "match": 1,
+     "n/a": 16
+    },
+    "size": {
+     "match": 2,
+     "n/a": 15
+    }
+   },
+   "mode": "abicheck",
+   "outcomes": {
+    "advisory": 0,
+    "correct": 17,
+    "error": 0,
+    "no_signal": 0,
+    "timeout": 0,
+    "unsupported": 0,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 20.09
+  },
+  {
+   "by_class": {
+    "abi_break": {
+     "advisory": 3
+    },
+    "compatible": {
+     "correct": 2,
+     "no_signal": 1
+    },
+    "risk": {
+     "correct": 2,
+     "no_signal": 2
+    },
+    "source_break": {
+     "advisory": 2,
+     "no_signal": 1
+    },
+    "unchanged": {
+     "correct": 4
+    }
+   },
+   "config": "dwarf+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "match": 5,
+     "miss": 2,
+     "n/a": 10
+    },
+    "fields": {
+     "match": 2,
+     "n/a": 15
+    },
+    "functions": {
+     "match": 5,
+     "miss": 1,
+     "n/a": 11
+    },
+    "offsets": {
+     "match": 1,
+     "n/a": 16
+    },
+    "size": {
+     "match": 2,
+     "n/a": 15
+    }
+   },
+   "mode": "abidiff",
+   "outcomes": {
+    "advisory": 5,
+    "correct": 8,
+    "error": 0,
+    "no_signal": 4,
+    "timeout": 0,
+    "unsupported": 0,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 0.11
+  },
+  {
+   "by_class": {
+    "abi_break": {
+     "unsupported": 3
+    },
+    "compatible": {
+     "unsupported": 3
+    },
+    "risk": {
+     "unsupported": 4
+    },
+    "source_break": {
+     "unsupported": 3
+    },
+    "unchanged": {
+     "unsupported": 4
+    }
+   },
+   "config": "stripped+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "n/a": 10,
+     "unsupported": 7
+    },
+    "fields": {
+     "n/a": 15,
+     "unsupported": 2
+    },
+    "functions": {
+     "n/a": 11,
+     "unsupported": 6
+    },
+    "offsets": {
+     "n/a": 16,
+     "unsupported": 1
+    },
+    "size": {
+     "n/a": 15,
+     "unsupported": 2
+    }
+   },
+   "mode": "abicc-dump",
+   "outcomes": {
+    "advisory": 0,
+    "correct": 0,
+    "error": 0,
+    "no_signal": 0,
+    "timeout": 0,
+    "unsupported": 17,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 1.88
+  },
+  {
+   "by_class": {
+    "abi_break": {
+     "advisory": 1,
+     "correct": 2
+    },
+    "compatible": {
+     "correct": 3
+    },
+    "risk": {
+     "no_signal": 4
+    },
+    "source_break": {
+     "advisory": 2,
+     "correct": 1
+    },
+    "unchanged": {
+     "correct": 4
+    }
+   },
+   "config": "stripped+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "match": 7,
+     "n/a": 10
+    },
+    "fields": {
+     "match": 2,
+     "n/a": 15
+    },
+    "functions": {
+     "match": 6,
+     "n/a": 11
+    },
+    "offsets": {
+     "n/a": 16,
+     "unsupported": 1
+    },
+    "size": {
+     "match": 2,
+     "n/a": 15
+    }
+   },
+   "mode": "abicc-xml",
+   "outcomes": {
+    "advisory": 3,
+    "correct": 10,
+    "error": 0,
+    "no_signal": 4,
+    "timeout": 0,
+    "unsupported": 0,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 9.52
+  },
+  {
+   "by_class": {
+    "abi_break": {
+     "correct": 3
+    },
+    "compatible": {
+     "correct": 3
+    },
+    "risk": {
+     "correct": 4
+    },
+    "source_break": {
+     "correct": 3
+    },
+    "unchanged": {
+     "correct": 4
+    }
+   },
+   "config": "stripped+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "match": 7,
+     "n/a": 10
+    },
+    "fields": {
+     "match": 2,
+     "n/a": 15
+    },
+    "functions": {
+     "match": 5,
+     "miss": 1,
+     "n/a": 11
+    },
+    "offsets": {
+     "match": 1,
+     "n/a": 16
+    },
+    "size": {
+     "match": 2,
+     "n/a": 15
+    }
+   },
+   "mode": "abicheck",
+   "outcomes": {
+    "advisory": 0,
+    "correct": 17,
+    "error": 0,
+    "no_signal": 0,
+    "timeout": 0,
+    "unsupported": 0,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 18.7
+  },
+  {
+   "by_class": {
+    "abi_break": {
+     "no_signal": 3
+    },
+    "compatible": {
+     "correct": 2,
+     "no_signal": 1
+    },
+    "risk": {
+     "correct": 2,
+     "no_signal": 2
+    },
+    "source_break": {
+     "no_signal": 3
+    },
+    "unchanged": {
+     "correct": 4
+    }
+   },
+   "config": "stripped+headers",
+   "control_advisory": 0,
+   "control_false_positive": 0,
+   "controls": 4,
+   "details": {
+    "entity": {
+     "match": 1,
+     "miss": 6,
+     "n/a": 10
+    },
+    "fields": {
+     "miss": 2,
+     "n/a": 15
+    },
+    "functions": {
+     "match": 1,
+     "miss": 5,
+     "n/a": 11
+    },
+    "offsets": {
+     "miss": 1,
+     "n/a": 16
+    },
+    "size": {
+     "miss": 2,
+     "n/a": 15
+    }
+   },
+   "mode": "abidiff",
+   "outcomes": {
+    "advisory": 0,
+    "correct": 8,
+    "error": 0,
+    "no_signal": 9,
+    "timeout": 0,
+    "unsupported": 0,
+    "wrong": 0
+   },
+   "pairs": 17,
+   "seconds": 0.14
+  }
+ ]
+}
