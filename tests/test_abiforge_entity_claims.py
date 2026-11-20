@@ -276,3 +276,27 @@ def test_witness_never_reaches_an_edited_entity(op, seed) -> None:
 )
 def test_builtin_only(proto, ok) -> None:
     assert _builtin_only(*proto) is ok
+
+
+def test_unpinned_witness_is_undecided_never_agree(monkeypatch) -> None:
+    """When no witness can be pinned (nm cannot read the pair: PE, a missing
+    tool), the claim about the untouched function is unknown: the cell reads
+    ``evidence-limited``, even if the report blames g."""
+    from pathlib import Path
+
+    from abiforge.run import witness
+
+    monkeypatch.setattr(witness, "exported_functions", lambda _lib: None)
+    op = OP_BY_NAME["func_remove"]
+    exp = witness.with_witnesses(
+        op.expect(_cfg()), op, SEED_BY_NAME["c_core"], Path("old"), Path("new")
+    )
+    assert "nm could not read" in exp.undecided
+    got = _judge(exp, _BROKE, "BREAKING", (_F, _G, _SONAME))
+    assert got.cls == "evidence-limited", got
+    # An operator that asks for no witness is untouched.
+    plain = OP_BY_NAME["struct_append_field"]
+    exp2 = witness.with_witnesses(
+        plain.expect(_cfg()), plain, SEED_BY_NAME["c_core"], Path("o"), Path("n")
+    )
+    assert exp2 == plain.expect(_cfg())

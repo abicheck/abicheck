@@ -19,9 +19,10 @@ neither reads the checker's answer:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from abiforge.model.expect import Expectation
 from abiforge.model.finding import EntityClaim, EntityRef
 from abiforge.model.opkit import EditOp
 from abiforge.model.seeds import BUILD_ROLES, Seed
@@ -155,10 +156,17 @@ def confirm(
 def witness_claims(
     op: EditOp, seed: Seed, old_so: Path, new_so: Path
 ) -> tuple[tuple[EntityClaim, ...], tuple[str, ...]]:
-    """Forbidden claims for *op*'s witnesses: no public-break finding on them."""
+    """(forbidden claims for *op*'s witnesses, why a witness could not be pinned).
+
+    A non-empty reason with no claim means the witness claim is undecided:
+    ``with_witnesses`` reports such a cell as ``evidence-limited``."""
     if op.witnesses <= 0:
         return (), ()
     refs, dropped = confirm(candidates(op, seed), old_so, new_so, op.witnesses)
+    if not refs:
+        # The operator asks for a witness, none could be pinned: the claim
+        # about an untouched function is unknown here, never passed.
+        dropped = dropped or ("no candidate function",)
     claims = tuple(
         EntityClaim(
             ref,
@@ -168,3 +176,19 @@ def witness_claims(
         for ref in refs
     )
     return claims, dropped
+
+
+def with_witnesses(
+    exp: Expectation, op: EditOp, seed: Seed, old_so: Path, new_so: Path
+) -> Expectation:
+    """*exp* plus *op*'s witness claims; undecided when none could be pinned."""
+    claims, dropped = witness_claims(op, seed, old_so, new_so)
+    if claims:
+        exp = replace(exp, claims=exp.claims + claims)
+    if dropped:
+        why = f"witness dropped: {'; '.join(dropped)}"
+        if claims:
+            exp = replace(exp, note=f"{exp.note} [{why}]".strip())
+        else:
+            exp = replace(exp, undecided="; ".join(filter(None, (exp.undecided, why))))
+    return exp

@@ -20,7 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from abiforge.checkers import abicheck as checker
@@ -480,11 +480,9 @@ def run_operator(
     facts = binary_facts(old.so, new.so) if op.licences else {}
     exp = op.expect(cfg, facts)
     # ... and the same entity claims, witnesses included.
-    from abiforge.run.witness import witness_claims
+    from abiforge.run.witness import with_witnesses
 
-    witnesses, _dropped = witness_claims(op, seed, old.so, new.so)
-    if witnesses:
-        exp = replace(exp, claims=exp.claims + witnesses)
+    exp = with_witnesses(exp, op, seed, old.so, new.so)
     failures = tuple(exp.problems(verdict, kinds, findings))
     if not failures:
         return Outcome(verdict=verdict, kinds=kinds, failures=failures)

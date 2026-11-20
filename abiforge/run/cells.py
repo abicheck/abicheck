@@ -54,7 +54,7 @@ from abiforge.run.toolchains import (
     unavailable,
     uses_libstdcxx,
 )
-from abiforge.run.witness import witness_claims
+from abiforge.run.witness import with_witnesses
 
 
 @dataclass
@@ -301,13 +301,7 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
     # need binutils, and the reader is ELF-or-Mach-O (see run/binfacts.py).
     facts = binary_facts(old.so, new.so) if op.licences else {}
     exp = op.expect(config, facts)
-    witnesses, dropped = witness_claims(op, seed, old.so, new.so)
-    if witnesses:
-        exp = replace(exp, claims=exp.claims + witnesses)
-    if dropped:
-        exp = replace(
-            exp, note=f"{exp.note} [witness dropped: {'; '.join(dropped)}]".strip()
-        )
+    exp = with_witnesses(exp, op, seed, old.so, new.so)
     if ctx.execute:
         truth = ctx.oracle.truth(
             seed,

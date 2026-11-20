@@ -84,7 +84,11 @@ def test_witness_exported_by_both_libraries(tmp_path: Path) -> None:
     cell = _run("func_remove", "c_core", tmp_path)
     if cell.status != "ran":
         pytest.skip(cell.reason)
-    built = [p for p in tmp_path.rglob("libedit.so*") if p.is_file()]
+    built = [
+        p
+        for p in tmp_path.rglob("libedit.*")
+        if p.is_file() and p.suffix in (".so", ".dylib") and ".dSYM" not in str(p)
+    ]
     assert built, "no built library found"
     for lib in built:
         syms = exported_functions(lib)

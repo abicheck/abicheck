@@ -105,16 +105,23 @@ def binary_facts(old: Path, new: Path) -> dict[str, bool]:
 def exported_functions(lib: Path) -> dict[str, str] | None:
     """*lib*'s defined exported functions as ``{symbol: demangled}``, or None.
 
-    ELF only (``nm -D --defined-only``, text symbols ``T``/``W`` and GNU
-    indirect ``i``); demangling is ``c++filt``'s, so a C symbol maps to
-    itself. ``None`` covers another format, a missing tool and a failure:
-    never an empty mapping, which would read as "nothing exported".
+    ELF reads the dynamic table (``nm -D --defined-only``), Mach-O the
+    defined external symbols (``nm -g -U``, the leading ``_`` removed so the
+    names match the ELF spelling); text symbols ``T``/``W`` and GNU indirect
+    ``i``. Demangling is ``c++filt``'s, so a C symbol maps to itself. ``None``
+    covers PE, a missing tool and a failure: never an empty mapping, which
+    would read as "nothing exported".
     """
-    if library_format(lib) != "elf":
+    fmt = library_format(lib)
+    if fmt == "elf":
+        argv = ["nm", "-D", "--defined-only", "-P", str(lib)]
+    elif fmt == "macho":
+        argv = ["nm", "-g", "-U", "-P", str(lib)]
+    else:
         return None
     try:
         out = subprocess.run(
-            ["nm", "-D", "--defined-only", "-P", str(lib)],
+            argv,
             check=True,
             capture_output=True,
             text=True,
@@ -125,7 +132,10 @@ def exported_functions(lib: Path) -> dict[str, str] | None:
     for line in out.splitlines():
         fields = line.split()
         if len(fields) >= 2 and fields[1] in ("T", "W", "i"):
-            syms.append(fields[0].split("@", 1)[0])
+            name = fields[0].split("@", 1)[0]
+            if fmt == "macho" and name.startswith("_"):
+                name = name[1:]
+            syms.append(name)
     if not syms:
         return {}
     try:
