@@ -89,3 +89,10 @@ into its findings, plus its adapter.
 `tests/test_abiforge_boundaries.py` (in the abicheck repository) checks that
 abiforge never imports `tests` or `pytest`, and that only `checkers/` imports
 `abicheck`. That is what keeps it movable to its own repository.
+
+## Research plan
+
+The [compatibility-space reduction research plan](../docs/contribute/plans/abiforge-space-reduction-research.md)
+collects prior work, proof obligations, experiments and acceptance criteria for
+reducing validation cost beyond bounded enumeration. It distinguishes model
+coverage from checker conformance and product-specific coverage.
