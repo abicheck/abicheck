@@ -259,6 +259,13 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "alt.time": "typedef",
     "alt.inl": "inline_function",
     "alt": "function",
+    # c_opaque / c_byval (entity-attributed layout edits)
+    "opq.s": "struct",
+    "opq.api": "function",
+    "opq": "function",
+    "bv.s": "struct",
+    "bv.api": "function",
+    "bv": "function",
     # cxx_alt
     "xa.uniq": "inline_function",
     "xa.str": "std_string",
@@ -350,7 +357,9 @@ ROLE_CONSTRUCT: dict[str, str] = {
 }
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
-GATE_ROLES = frozenset({"alt.gate", "xa.gate", "src.gate", "tree.gate"})
+GATE_ROLES = frozenset(
+    {"alt.gate", "xa.gate", "src.gate", "tree.gate", "opq.gate", "bv.gate"}
+)
 
 # Language feature an operator needs -> the construct it exercises.
 FEATURE_CONSTRUCT: dict[str, str] = {
@@ -463,6 +472,10 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         # Holder embeds detail::Impl by value; Impl grows, moving Holder::x: a
         # member whose type grew, not a member appended at the tail.
         "internal_type_grew": "retype_grows",
+        # One mid-record insertion, judged per exposure (operators/attribution).
+        "private_record_grew": "insert_middle_shifts",
+        "public_record_grew": "insert_middle_shifts",
+        "func_removed_and_private_record_grew": "insert_middle_shifts",
         "by_value_struct_became_nontrivial": "record_triviality_change",
         "field_inserted_at_head": "insert_head_shifts",
         "field_inserted_in_middle": "insert_middle_shifts",
@@ -547,6 +560,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "allocator_replacement_added": "function_added",
         "std_template_instance_exported": "function_added",
         "func_remove": "function_removed",
+        "func_removed_and_private_record_grew": "function_removed",
         "src_default_argument_changed": "default_argument_changed",
         "src_public_entry_calls_internal": "body_change",
         "src_public_entry_depends_on_hidden": "body_change",

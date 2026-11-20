@@ -3803,5 +3803,36 @@
   "observable": true,
   "verdict_max": "COMPATIBLE_WITH_RISK",
   "verdict_min": "COMPATIBLE_WITH_RISK"
+ },
+ "private_record_grew|c_opaque": {
+  "expected": [],
+  "any_of": [],
+  "verdict_min": "NO_CHANGE",
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "observable": true
+ },
+ "public_record_grew|c_byval": {
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "any_of": [
+   [
+    "TYPE_FIELD_OFFSET_CHANGED",
+    "TYPE_SIZE_CHANGED"
+   ]
+  ],
+  "verdict_min": "BREAKING",
+  "verdict_max": null,
+  "observable": true
+ },
+ "func_removed_and_private_record_grew|c_opaque": {
+  "expected": [
+   "FUNC_REMOVED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "any_of": [],
+  "verdict_min": "BREAKING",
+  "verdict_max": null,
+  "observable": true
  }
 }

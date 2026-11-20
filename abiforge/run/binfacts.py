@@ -100,3 +100,44 @@ def binary_facts(old: Path, new: Path) -> dict[str, bool]:
         "stack_chk_fail_dropped": STACK_CHK_FAIL in old_undef
         and STACK_CHK_FAIL not in new_undef,
     }
+
+
+def exported_functions(lib: Path) -> dict[str, str] | None:
+    """*lib*'s defined exported functions as ``{symbol: demangled}``, or None.
+
+    ELF only (``nm -D --defined-only``, text symbols ``T``/``W`` and GNU
+    indirect ``i``); demangling is ``c++filt``'s, so a C symbol maps to
+    itself. ``None`` covers another format, a missing tool and a failure:
+    never an empty mapping, which would read as "nothing exported".
+    """
+    if library_format(lib) != "elf":
+        return None
+    try:
+        out = subprocess.run(
+            ["nm", "-D", "--defined-only", "-P", str(lib)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    syms: list[str] = []
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] in ("T", "W", "i"):
+            syms.append(fields[0].split("@", 1)[0])
+    if not syms:
+        return {}
+    try:
+        dem = subprocess.run(
+            ["c++filt"],
+            input="\n".join(syms) + "\n",
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    if len(dem) != len(syms):
+        return None
+    return dict(zip(syms, dem, strict=True))

@@ -38,6 +38,7 @@ from abiforge.model.expect import (
     Reconciled,
     reconcile,
 )
+from abiforge.model.finding import Finding
 from abiforge.model.seeds import Seed
 from abiforge.model.space import seed_constructs, seed_flags_conflict
 from abiforge.operators import EditOp
@@ -53,6 +54,7 @@ from abiforge.run.toolchains import (
     unavailable,
     uses_libstdcxx,
 )
+from abiforge.run.witness import witness_claims
 
 
 @dataclass
@@ -86,6 +88,8 @@ class CellResult:
     expectation: Expectation | None = None
     exec_truth: ExecTruth | None = None
     reconciled: Reconciled | None = None
+    # Each finding with the entity it is attributed to (``model.finding``).
+    findings: tuple[Finding, ...] = ()
 
     @property
     def cls(self) -> str:
@@ -128,7 +132,12 @@ class CellResult:
         return (
             f"{self.op} on {self.seed} [{self.config.id}] -> {self.cls}\n"
             f"  abicheck: verdict={self.verdict} kinds={sorted(self.kinds)}\n"
-            f"  expect:   {self.expectation}\n"
+            + (
+                "  findings: " + "; ".join(f.describe() for f in self.findings) + "\n"
+                if self.findings
+                else ""
+            )
+            + f"  expect:   {self.expectation}\n"
             f"  execute:  {exec_txt}\n"
             + "".join(
                 f"    [{self.config.build_id} x {p.consumer}] {p.outcome}"
@@ -282,12 +291,23 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
     old = ctx.cache.get(seed, config)
     new = ctx.new_cache.get(op, seed, config)
     # The verdict depends on the library pair alone, never on the consumers.
-    verdict, kinds, disclosed = abicheck_judgement(old, new)
+    judgement = abicheck_judgement(old, new)
+    verdict, kinds, disclosed = judgement[:3]
+    # Structured findings (kind + entity); an adapter that gives only kinds
+    # leaves the entity claims unjudged, never passed by default.
+    findings = judgement[3] if len(judgement) > 3 else None
     # The licences read the built pair with binutils, never abicheck's answer.
     # Read the pair only when the operator licenses something: most cells never
     # need binutils, and the reader is ELF-or-Mach-O (see run/binfacts.py).
     facts = binary_facts(old.so, new.so) if op.licences else {}
     exp = op.expect(config, facts)
+    witnesses, dropped = witness_claims(op, seed, old.so, new.so)
+    if witnesses:
+        exp = replace(exp, claims=exp.claims + witnesses)
+    if dropped:
+        exp = replace(
+            exp, note=f"{exp.note} [witness dropped: {'; '.join(dropped)}]".strip()
+        )
     if ctx.execute:
         truth = ctx.oracle.truth(
             seed,
@@ -317,7 +337,9 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
             kinds,
             disclosed=disclosed,
             evidence=config.evidence_set.atoms,
+            findings=findings,
         ),
+        findings=findings or (),
     )
 
 

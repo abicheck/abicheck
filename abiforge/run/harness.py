@@ -20,7 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from abiforge.checkers import abicheck as checker
@@ -31,6 +31,7 @@ from abiforge.model.config import (
     Toolchain,
     default_config,
 )
+from abiforge.model.finding import Finding
 from abiforge.model.seeds import BuildArgs, RoleText, Seed
 from abiforge.operators import EditOp
 from abiforge.run.binfacts import binary_facts
@@ -456,8 +457,8 @@ REFUSED = "REFUSED"
 
 def abicheck_judgement(
     old: Built, new: Built
-) -> tuple[str, frozenset[str], frozenset[str]]:
-    """(verdict, kinds, disclosed kinds) from the checker adapter."""
+) -> tuple[str, frozenset[str], frozenset[str], tuple[Finding, ...]]:
+    """(verdict, kinds, disclosed kinds, structured findings) from the checker adapter."""
     return checker.judged(old.snapshot, new.snapshot)
 
 
@@ -474,10 +475,17 @@ def run_operator(
     cfg = _as_config(seed, config)
     old = cache.get(seed, cfg)
     new = build_new(op, seed, cfg, root)
-    verdict, kinds = abicheck_answer(old, new)
+    verdict, kinds, _disclosed, findings = abicheck_judgement(old, new)
     # The same binary facts run_cell reads: a licensed edit is judged alike on both paths.
     facts = binary_facts(old.so, new.so) if op.licences else {}
-    failures = tuple(op.expect(cfg, facts).problems(verdict, kinds))
+    exp = op.expect(cfg, facts)
+    # ... and the same entity claims, witnesses included.
+    from abiforge.run.witness import witness_claims
+
+    witnesses, _dropped = witness_claims(op, seed, old.so, new.so)
+    if witnesses:
+        exp = replace(exp, claims=exp.claims + witnesses)
+    failures = tuple(exp.problems(verdict, kinds, findings))
     if not failures:
         return Outcome(verdict=verdict, kinds=kinds, failures=failures)
     return Outcome(

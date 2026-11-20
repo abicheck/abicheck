@@ -69,6 +69,7 @@ from abiforge.run.cells import (
 from abiforge.run.exec import probe_expressions
 from abiforge.run.tiers import (
     _PR,
+    ATTRIBUTION_PR,
     BUILD_DATA_PR,
     DEPENDENCY_PR,
     KIND_REACH_PR,
@@ -661,7 +662,12 @@ def test_pr_tier_guards_every_axis() -> None:
     # operator (SOURCE_EVIDENCE_PR), the dependency-resolution guards
     # (DEPENDENCY_PR) and the rows that reach a corner-only kind
     # (KIND_REACH_PR, each naming its kind).
-    extra = len(BUILD_DATA_PR) + len(SOURCE_EVIDENCE_PR) + len(DEPENDENCY_PR)
+    extra = (
+        len(BUILD_DATA_PR)
+        + len(SOURCE_EVIDENCE_PR)
+        + len(DEPENDENCY_PR)
+        + len(ATTRIBUTION_PR)
+    )
     # Four stripped {B,H} guards (C and C++, gcc and clang: the primary
     # configuration is an axis value of its own) sit on top of the 20.
     assert len(_PR) - extra - len(KIND_REACH_PR) <= 24

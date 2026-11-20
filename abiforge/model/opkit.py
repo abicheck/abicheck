@@ -29,6 +29,7 @@ from abiforge.model.expect import (
     binary_depth_cap,
     observability_floor,
 )
+from abiforge.model.finding import EntityClaim
 from abiforge.model.seeds import RoleText, Seed
 from abiforge.model.space import feature_standards
 
@@ -104,6 +105,14 @@ class EditOp:
     # is confirmed (``model.expect.BinaryLicence``): an -O2 rebuild may be a
     # RISK only where nm shows the canary import actually lost.
     licences: tuple[BinaryLicence, ...] = ()
+    # Per-entity claims (``model.finding.EntityClaim``): what the report must
+    # attribute to the entity the edit changed, and must not attribute to an
+    # entity it left alone. Judged only on structured findings.
+    claims: tuple[EntityClaim, ...] = ()
+    # How many witness functions (``run.witness``) to pin: public functions
+    # the edit provably leaves alone and ``nm`` finds in both libraries, each
+    # a forbidden claim. 0 = none (every operator written before claims).
+    witnesses: int = 0
 
     def applies_to(self, seed: Seed) -> bool:
         if seed.gate_role is not None and seed.gate_role not in self.roles:
@@ -170,6 +179,7 @@ class EditOp:
             any_of=self.any_of,
             verdict_min=self.verdict_min,
             verdict_max=self.verdict_max,
+            claims=self.claims,
         )
 
     def expect(
