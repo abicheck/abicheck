@@ -256,8 +256,30 @@ jobs:
           # timeout kills also reports `failure`, so a follow-up step could not
           # tell an interrupted shard from a finished one. The floor job judges
           # a run only when all three markers exist.
+          # The tests run niced: with every core busy compiling, the runner
+          # agent can miss its heartbeat, and GitHub then drops the runner --
+          # the job is cancelled past both timeouts and its log is lost
+          # (BlobNotFound), which is how shard 3/3 kept ending while the same
+          # shard finishes in ~15 min at 6 GB peak on an equal 4-core/16 GB
+          # machine. A one-line load/memory sample per minute shows the
+          # pressure in any log that survives; the sampler exits with this shell.
+          # `setsid` gives the tests their own session and process group: shard
+          # 3/3 died at the same point (~13 min, 77%) on several runs with exit
+          # 143 and "the runner has received a shutdown signal", the signature
+          # of a SIGTERM sent to the step's whole group reaching the runner's
+          # worker. In its own session such a signal can end only this step,
+          # whose `-v` log then names the test that sent it.
+          # Polls its own parent pid, not `kill -0`: a killed shell lingers as
+          # a zombie until reaped, while its children are reparented at once.
+          parent=$$
+          ( n=0; while [ "$(cut -d' ' -f4 "/proc/$BASHPID/stat")" = "$parent" ]; do
+              sleep 5 </dev/null >/dev/null 2>&1; n=$((n + 1))
+              [ $((n % 12)) -eq 0 ] && echo "[load] $(cut -d' ' -f1-3 /proc/loadavg) $(free -m | awk '/Mem:/{print "mem_used_mb="$3" avail_mb="$7}')"
+            done ) &
+          monitor=$!
           rc=0
-          python scripts/verify.py --profile full --only integration --require-complete || rc=$?
+          nice -n 10 setsid --wait python scripts/verify.py --profile full --only integration --require-complete || rc=$?
+          kill "$monitor" 2>/dev/null || true
           mkdir -p edit-corpus-coverage
           : > "edit-corpus-coverage/shard-${SHARD}.done"
           exit "$rc"
