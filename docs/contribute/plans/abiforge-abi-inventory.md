@@ -168,3 +168,8 @@ size and alignment. Its reproduction and receipts distinguish protocol differenc
 from accidental output agreement. The call experiment now also contains a Lean
 proof for arbitrary prefix counts in the bounded-register-demand resource model;
 this proves a capacity predicate, not complete calling-convention correctness.
+
+
+The [configuration campaign](abiforge-configuration-campaign.md) records the bounded packing universe, per-fact checker audit, alignment evidence gap and implementation acceptance criteria. These extend partial evidence without closing the whole layout family.
+
+The [implementation roadmap](abiforge-campaign-implementation.md) maps existing generator and checker seams to work packages and acceptance criteria.
