@@ -143,3 +143,22 @@ still require additional provenance. Eleven runner and seven nested-certificate
 tests passed independently in the parent session.
 
 Reproduce the [finding projection audit](abiforge-finding-projection-audit.md).
+
+
+## Adversarial campaign and repair acceptance
+
+The [adversarial campaign](abiforge-adversarial-campaign.md) exercised327 distinct
+variants:240 exact finding score iterations,59 certificate mutations/controls and
+28 runner stress variants. These reuse existing compiler evidence and must not
+increase the compiled ABI coverage denominator. Repeating the28 stress variants
+after the fix is a validation rerun, not28 new distinct scenarios.
+
+Exact field/payload/cardinality scoring rejected all208 mutated reports and accepted
+32 valid/reordered controls. A coarse kind/entity set baseline accepted120 mutants;
+this is not an assessment of all existing abiforge oracles. Certificate verifiers
+rejected51 invalid inputs and accepted8 harmless changes, with no unexpected result.
+The runner stress found and repaired one false-completeness defect: later cells can
+invalidate earlier inputs, so final success must revalidate all planned bindings.
+All28 stress variants and12 runner unit tests passed after repair. Preserve this
+regression when integrating manifests into abiforge. Continue treating environment,
+input integrity, terminal execution and semantic-obligation success as distinct.

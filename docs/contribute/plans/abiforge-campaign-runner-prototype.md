@@ -47,6 +47,10 @@ when the interpreter or declared inputs change.
   finishes and the inputs are checked again. SIGINT and timeout kill the
   child's process group. After hard termination of the runner, a pending
   attempt can still have child side effects. Use trusted, rerunnable commands.
+- Before returning a summary, the runner revalidates every planned binding
+  under the receipt lock. If a later command changes an earlier cell's declared
+  input, the CLI exits 2 without emitting a completeness summary. The receipt
+  retains the recorded attempts, and audit rejects it while the binding is stale.
 - Audit requires a unique result per planned ID. It rejects missing,
   unexpected, duplicate, conflicting, or fingerprint-mismatched records.
   Pending interruptions, launch errors, and zero executed cells make the
@@ -108,6 +112,15 @@ tests. They cover environment-only value and presence changes, isolation from
 undeclared variables, relative `PATH` lookup, validation of allowlists, and
 legacy compatibility. They also exercise SIGINT recovery, input and receipt
 tampering, incomplete audits, and an injected atomic-write failure.
+
+## Cross-cell input drift regression
+
+The baseline stress campaign found one counterexample in 28 variants. A later
+cell changed an earlier cell's declared input after it passed. The baseline run
+exited 0 and reported complete, and the subsequent audit rejected the earlier
+fingerprint. With final manifest validation, the initial run, audit, and resume
+all exit 2 with the fingerprint mismatch. All 12 runner tests and all 28 stress
+variants passed after the fix. See the `before and after results`.
 
 ## campaign.py
 
@@ -434,7 +447,9 @@ def run(root, manifest, receipt_path, retry_failed=False):
             if current != binding:
                 raise ValueError(f"fingerprint changed during execution: {cell_id}")
             record(receipt_path, receipt, results, cell, [*attempts, attempt])
-    return summarize(cells, results)
+        # A later command can change a binding for a cell already processed.
+        validate_manifest(root, manifest)
+        return summarize(cells, results)
 
 
 def summarize(cells, results):
@@ -619,6 +634,31 @@ if not marker.exists():
             campaign.run(self.root, manifest, self.receipt)
         self.assertEqual(self.receipt.read_bytes(), previous)
         self.assertEqual(self.audit().returncode, 2)
+
+    def test_later_cell_mutating_earlier_input_invalidates_run_and_audit(self):
+        source = self.root / "input"
+        source.write_text("original")
+        first = dict(self.cell("first", "print(open('input').read())", ["input"]), env_allowlist=[])
+        later = dict(self.cell("later", "open('input', 'w').write('changed')"), env_allowlist=[])
+        self.plan(first, later)
+
+        run = subprocess.run(
+            [sys.executable, str(SCRIPT), "--root", str(self.root), "run",
+             self.manifest, self.receipt],
+            capture_output=True, text=True, timeout=10, env={},
+        )
+        self.assertEqual(source.read_text(), "changed")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("fingerprint mismatch for first", run.stderr)
+
+        rows = campaign.read_json(self.receipt)["results"]
+        self.assertEqual([(row["id"], row["attempts"][-1]["reason"]) for row in rows],
+                         [("first", "exit-zero"), ("later", "exit-zero")])
+        audit = self.audit()
+        self.assertEqual(audit.returncode, 2, audit.stdout + audit.stderr)
+        self.assertEqual(audit.stdout, "")
+        self.assertIn("fingerprint mismatch for first", audit.stderr)
 
     def test_environment_change_blocks_resume_and_audit(self):
         name = "CAMPAIGN_TEST_VALUE"
