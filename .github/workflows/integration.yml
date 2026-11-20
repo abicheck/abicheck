@@ -227,6 +227,13 @@ jobs:
       # consumer, so coverage stays -- only its serial cost goes.
       - name: Integration tests (Linux, with coverage)
         if: (success() || failure()) && runner.os == 'Linux'
+        # A step timeout below the job's: a stalled shard then fails this step
+        # with its log kept, where the job-level cancel discards the log
+        # (shard 2/2's main cancellations left none, BlobNotFound). `-v` names
+        # each finished test per worker, and faulthandler_timeout dumps every
+        # thread's stack for a test still running after 7 min, so the log
+        # shows where a stall sits.
+        timeout-minutes: 28
         env:
           # Linux's ELF integration count is known (~900), so it gets a real
           # floor; the step's own default is the host-agnostic '1'. Each shard
@@ -238,7 +245,7 @@ jobs:
           # The edit corpus's PR tier writes one coverage record per cell
           # (abiforge/coverage.py); the next step reports them.
           ABICHECK_EDIT_CORPUS_COVERAGE_DIR: edit-corpus-coverage
-          PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/3 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
+          PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/3 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml -v -o faulthandler_timeout=420
         run: python scripts/verify.py --profile full --only integration --require-complete
       - name: Edit corpus coverage (Linux)
         # ChangeKinds this shard's corpus cells verified and the language space
