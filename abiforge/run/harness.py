@@ -325,20 +325,34 @@ def make_dsym(so: Path) -> Path:
     return dsym
 
 
-def build(
+@dataclass(frozen=True)
+class Library:
+    """One built side before any checker reads it: the files and the header
+    frontend options a dump of it is given. Every checker of a pair reads the
+    same ``Library`` (``abiforge.run.competitors``), so the tools compare one
+    build, never two."""
+
+    dir: Path
+    so: Path
+    header: Path
+    headers: tuple[Path, ...]
+    is_cxx: bool
+    gcc_options: str
+    config: Config
+
+
+def build_library(
     seed: Seed,
     config: Config,
     out_dir: Path,
     overrides: dict[str, RoleText] | None = None,
     flags: Flags | None = None,
     link: LinkSpec = LinkSpec(),
-) -> Built:
-    """Render *seed* (with *overrides*), compile it under *config* and snapshot it.
+) -> Library:
+    """Render *seed* (with *overrides*) and compile it under *config*; no dump.
 
     *flags* replaces the config's producer flags (a rebuild edit's new side);
     *link* adds link options (an edit's version script, SONAME, extra libs).
-    The config is this side's: an asymmetric-evidence edit passes its new side's
-    config (``EditOp.new_side_config``).
     """
     fl = flags or config.flags
     if config.sources:
@@ -363,8 +377,7 @@ def build(
         seed.render_extra(overrides),
     )
     header = out_dir / seed.header_name
-    is_cxx = seed.lang == "c++"
-    headers = [header] if config.evidence == "headers" else []
+    headers = (header,) if config.evidence == "headers" else ()
     std = dump_std_spelling(config)
     # The header frontend gets what a distributed header carries: the standard,
     # the include directory, and the public macro definitions. A build role's
@@ -380,19 +393,50 @@ def build(
     options = [f"-std={std}", f"-I{out_dir}", *defines]
     if {"D", "BD"} & config.evidence_set.atoms:
         options += fl.layout_flags(config.producer, seed.lang)
-    gcc_options = " ".join(options)
-    snap = checker.snapshot(
-        so,
-        headers,
-        version=out_dir.name,
-        is_cxx=is_cxx,
+    return Library(
+        dir=out_dir,
+        so=so,
+        header=header,
+        headers=headers,
+        is_cxx=seed.lang == "c++",
+        gcc_options=" ".join(options),
+        config=config,
+    )
+
+
+def snapshot_library(lib: Library) -> object:
+    """abicheck's snapshot of a built side, through the checker adapter."""
+    config = lib.config
+    return checker.snapshot(
+        lib.so,
+        list(lib.headers),
+        version=lib.dir.name,
+        is_cxx=lib.is_cxx,
         backend=config.header_backend,
-        gcc_options=gcc_options,
-        build_info=out_dir / COMPILE_DB if config.build_data else None,
-        sources=out_dir if config.sources else None,
+        gcc_options=lib.gcc_options,
+        build_info=lib.dir / COMPILE_DB if config.build_data else None,
+        sources=lib.dir if config.sources else None,
         follow_deps=config.follow_deps,
     )
-    return Built(dir=out_dir, so=so, header=header, snapshot=snap)
+
+
+def build(
+    seed: Seed,
+    config: Config,
+    out_dir: Path,
+    overrides: dict[str, RoleText] | None = None,
+    flags: Flags | None = None,
+    link: LinkSpec = LinkSpec(),
+) -> Built:
+    """Render *seed* (with *overrides*), compile it under *config* and snapshot it.
+
+    The config is this side's: an asymmetric-evidence edit passes its new side's
+    config (``EditOp.new_side_config``).
+    """
+    lib = build_library(seed, config, out_dir, overrides, flags, link)
+    return Built(
+        dir=lib.dir, so=lib.so, header=lib.header, snapshot=snapshot_library(lib)
+    )
 
 
 class BaselineCache:

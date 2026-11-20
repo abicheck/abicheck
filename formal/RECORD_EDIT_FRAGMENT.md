@@ -303,7 +303,7 @@ pytest tests/test_formal_record_edit_fragment.py -q                    # fast ch
 pytest tests/test_formal_record_edit_fragment.py -q -m integration     # + compilers, lanes (full space: ABICHECK_E16_FULL=1)
 # CI: formal-lean.yml job `e16-full` runs the full space nightly (02:41 UTC) and on dispatch.
 python formal/experiments/record_edit_fragment.py OUT [--reduced] [--per-case] [--repeat N]
-python formal/experiments/record_edit_competitors.py OUT               # after a batch run into OUT
+python formal/experiments/record_edit_competitors.py OUT               # after a batch run into OUT (tools run via abiforge/checkers adapters)
 ```
 
 ## Receipt

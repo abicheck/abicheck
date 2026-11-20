@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<reports>
+<report kind="binary" version="1.2">
+
+<test_info>
+  <library>edit</library>
+  <version1>
+    <number>1.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version1>
+  <version2>
+    <number>2.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version2>
+</test_info>
+
+<test_results>
+  <headers>
+    <name>edit_seed.h</name>
+  </headers>
+  <libs>
+    <name>libedit.so</name>
+  </libs>
+  <symbols>8</symbols>
+  <types>7</types>
+  <verdict>incompatible</verdict>
+  <affected>12.5</affected>
+</test_results>
+
+<problem_summary>
+  <added_symbols>0</added_symbols>
+  <removed_symbols>0</removed_symbols>
+  <problems_with_types>
+    <high>0</high>
+    <medium>1</medium>
+    <low>1</low>
+    <safe>0</safe>
+  </problems_with_types>
+  <problems_with_symbols>
+    <high>0</high>
+    <medium>0</medium>
+    <low>0</low>
+    <safe>0</safe>
+  </problems_with_symbols>
+  <problems_with_constants>
+    <low>0</low>
+  </problems_with_constants>
+</problem_summary>
+
+
+<added_symbols>
+</added_symbols>
+
+<removed_symbols>
+</removed_symbols>
+
+<problems_with_types severity="High">
+</problems_with_types>
+
+<problems_with_symbols severity="High">
+</problems_with_symbols>
+
+<problems_with_types severity="Medium">
+  <header name="edit_seed.h">
+    <type name="struct rec">
+      <problem id="Removed_Field_And_Size">
+        <change target="tag">Field @target has been removed from this type.</change>
+        <effect>1) Applications will access incorrect memory when attempting to access this field.2) Size of the inclusive type has been changed.</effect>
+      </problem>
+      <affected>
+        <symbol name="fill_rec" param="r">
+          <comment>1st parameter @param (pointer) has base type struct rec.</comment>
+        </symbol>
+        <symbol name="make_rec" param="retval">
+          <comment>Return value is of type struct rec.</comment>
+        </symbol>
+      </affected>
+    </type>
+  </header>
+</problems_with_types>
+
+<problems_with_symbols severity="Medium">
+</problems_with_symbols>
+
+<problems_with_types severity="Low">
+  <header name="edit_seed.h">
+    <type name="struct rec">
+      <problem id="DataType_Size">
+        <change old_size="192" new_size="128">Size of this type has been changed from @old_size to @new_size.</change>
+        <effect>The fields or parameters of such data type may be incorrectly initialized or accessed by old client applications.</effect>
+      </problem>
+      <affected>
+        <symbol name="fill_rec" param="r">
+          <comment>1st parameter @param (pointer) has base type struct rec.</comment>
+        </symbol>
+        <symbol name="make_rec" param="retval">
+          <comment>Return value is of type struct rec.</comment>
+        </symbol>
+      </affected>
+    </type>
+  </header>
+</problems_with_types>
+
+<problems_with_symbols severity="Low">
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+<problems_with_types severity="Safe">
+</problems_with_types>
+
+<problems_with_symbols severity="Safe">
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+</report>
+<report kind="source" version="1.2">
+
+<test_info>
+  <library>edit</library>
+  <version1>
+    <number>1.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version1>
+  <version2>
+    <number>2.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version2>
+</test_info>
+
+<test_results>
+  <headers>
+    <name>edit_seed.h</name>
+  </headers>
+  <libs>
+    <name>libedit.so</name>
+  </libs>
+  <symbols>8</symbols>
+  <types>7</types>
+  <verdict>incompatible</verdict>
+  <affected>25</affected>
+</test_results>
+
+<problem_summary>
+  <added_symbols>0</added_symbols>
+  <removed_symbols>0</removed_symbols>
+  <problems_with_types>
+    <high>1</high>
+    <medium>0</medium>
+    <low>0</low>
+    <safe>0</safe>
+  </problems_with_types>
+  <problems_with_symbols>
+    <high>0</high>
+    <medium>0</medium>
+    <low>0</low>
+    <safe>0</safe>
+  </problems_with_symbols>
+  <problems_with_constants>
+    <low>0</low>
+  </problems_with_constants>
+</problem_summary>
+
+
+<added_symbols>
+</added_symbols>
+
+<removed_symbols>
+</removed_symbols>
+
+<problems_with_types severity="High">
+  <header name="edit_seed.h">
+    <type name="struct rec">
+      <problem id="Removed_Field">
+        <change target="tag">Field @target has been removed from this type.</change>
+        <effect type_name="struct rec" target="tag">Recompilation of a client program may be broken with the error message: '@type_name' has no member named '@target'.</effect>
+      </problem>
+      <affected>
+        <symbol name="fill_rec" param="r">
+          <comment>1st parameter @param (pointer) has base type struct rec.</comment>
+        </symbol>
+        <symbol name="make_rec" param="retval">
+          <comment>Return value is of type struct rec.</comment>
+        </symbol>
+      </affected>
+    </type>
+  </header>
+</problems_with_types>
+
+<problems_with_symbols severity="High">
+</problems_with_symbols>
+
+<problems_with_types severity="Medium">
+</problems_with_types>
+
+<problems_with_symbols severity="Medium">
+</problems_with_symbols>
+
+<problems_with_types severity="Low">
+</problems_with_types>
+
+<problems_with_symbols severity="Low">
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+<problems_with_types severity="Safe">
+</problems_with_types>
+
+<problems_with_symbols severity="Safe">
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+</report>
+</reports>
