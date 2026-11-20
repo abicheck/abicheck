@@ -1462,6 +1462,91 @@ TREE_SEED = Seed(
     ),
 )
 
+# One record, two exposures, for entity-attributed layout edits
+# (``abiforge.operators.attribution``). ``c_opaque``: ``struct S`` is defined
+# only in the library's source; the header names it through an opaque handle
+# the library allocates and frees, so its layout is no part of the public
+# contract. ``c_byval``: the same ``struct S`` is defined in the header and
+# passed by value, so a client depends on its size and offsets. Each seed also
+# carries two builtin-only functions: ``f`` (an edit may remove it) and ``g``
+# (a witness no edit touches). Gated: only the attribution operators edit them.
+OPAQUE_S = "struct S { int a; int b; };"
+_OPAQUE_ROLES: dict[str, RoleText] = {
+    "opq.gate": ("", ""),
+    "opq.s": ("", OPAQUE_S),
+    "opq.api": (
+        "typedef struct S S;\nS *s_new(int a, int b);\nint s_sum(const S *s);\n"
+        "void s_free(S *s);",
+        "S *s_new(int a, int b) { S *s = (S *)calloc(1, sizeof *s); s->a = a; "
+        "s->b = b; return s; }\nint s_sum(const S *s) { return s->a * 3 + s->b; }\n"
+        "void s_free(S *s) { free(s); }",
+    ),
+    "opq.f": ("int opq_f(int x);", "int opq_f(int x) { return x * 5; }"),
+    "opq.g": ("int opq_g(int x);", "int opq_g(int x) { return x + 7; }"),
+}
+
+OPAQUE_SEED = Seed(
+    name="c_opaque",
+    lang="c",
+    header_template=(
+        "#ifndef EDIT_SEED_OPQ_H",
+        "#define EDIT_SEED_OPQ_H",
+        _VIS_OPEN,
+        "@@opq.api@@",
+        "@@opq.f@@",
+        "@@opq.g@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "#include <stdlib.h>",
+        "@@opq.s@@",
+        "@@opq.api@@",
+        "@@opq.f@@",
+        "@@opq.g@@",
+    ),
+    roles=_OPAQUE_ROLES,
+    gate_role="opq.gate",
+)
+
+_BYVAL_ROLES: dict[str, RoleText] = {
+    "bv.gate": ("", ""),
+    "bv.s": (OPAQUE_S, ""),
+    "bv.api": (
+        "void s_init(struct S *s, int a, int b);\nint s_sum(struct S s);",
+        "void s_init(struct S *s, int a, int b) { memset(s, 0x11, sizeof *s); "
+        "s->a = a; s->b = b; }\nint s_sum(struct S s) { return s.a * 3 + s.b; }",
+    ),
+    "bv.f": ("int bv_f(int x);", "int bv_f(int x) { return x * 5; }"),
+    "bv.g": ("int bv_g(int x);", "int bv_g(int x) { return x + 7; }"),
+}
+
+BYVAL_SEED = Seed(
+    name="c_byval",
+    lang="c",
+    header_template=(
+        "#ifndef EDIT_SEED_BV_H",
+        "#define EDIT_SEED_BV_H",
+        _VIS_OPEN,
+        "@@bv.s@@",
+        "@@bv.api@@",
+        "@@bv.f@@",
+        "@@bv.g@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "#include <string.h>",
+        "@@bv.api@@",
+        "@@bv.f@@",
+        "@@bv.g@@",
+    ),
+    roles=_BYVAL_ROLES,
+    gate_role="bv.gate",
+)
+
 SEEDS: tuple[Seed, ...] = (
     C_SEED,
     CXX_SEED,
@@ -1472,5 +1557,7 @@ SEEDS: tuple[Seed, ...] = (
     XA_SEED,
     SRC_SEED,
     TREE_SEED,
+    OPAQUE_SEED,
+    BYVAL_SEED,
 )
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}

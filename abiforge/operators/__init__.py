@@ -24,6 +24,7 @@ from collections.abc import Callable
 
 from abiforge.model.config import Config
 from abiforge.model.expect import VERDICT_RANK, BinaryLicence, Rule
+from abiforge.model.finding import EntityClaim, EntityRef
 from abiforge.model.opkit import (
     _ALIGN,
     _ENUM_SIZE,
@@ -43,6 +44,7 @@ from abiforge.model.opkit import (
 )
 from abiforge.model.seeds import SEEDS, RoleText, Seed
 from abiforge.operators.aliases import ALIAS_OPERATORS
+from abiforge.operators.attribution import ATTRIBUTION_OPERATORS
 from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.operators.cxx import CXX_OPERATORS
 from abiforge.operators.dependencies import DEPENDENCY_OPERATORS
@@ -587,6 +589,17 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
             ),
         ),
         touches=("func.count",),
+        # Entity claims: the removal is attributed to get_count, and to no
+        # function the edit left alone (a witness, ``run.witness``).
+        claims=(
+            EntityClaim(
+                EntityRef("get_count"),
+                required=True,
+                kinds=_REMOVED,
+                why="the edit deletes get_count",
+            ),
+        ),
+        witnesses=1,
     ),
     EditOp(
         "func_add",
@@ -1055,6 +1068,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *RUNTIME_FLOOR_OPERATORS,
     *SOURCE_EVIDENCE_OPERATORS,
     *SOURCE_TREE_OPERATORS,
+    *ATTRIBUTION_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

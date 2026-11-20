@@ -100,3 +100,54 @@ def binary_facts(old: Path, new: Path) -> dict[str, bool]:
         "stack_chk_fail_dropped": STACK_CHK_FAIL in old_undef
         and STACK_CHK_FAIL not in new_undef,
     }
+
+
+def exported_functions(lib: Path) -> dict[str, str] | None:
+    """*lib*'s defined exported functions as ``{symbol: demangled}``, or None.
+
+    ELF reads the dynamic table (``nm -D --defined-only``), Mach-O the
+    defined external symbols (``nm -g -U``, the leading ``_`` removed so the
+    names match the ELF spelling); text symbols ``T``/``W`` and GNU indirect
+    ``i``. Demangling is ``c++filt``'s, so a C symbol maps to itself. ``None``
+    covers PE, a missing tool and a failure: never an empty mapping, which
+    would read as "nothing exported".
+    """
+    fmt = library_format(lib)
+    if fmt == "elf":
+        argv = ["nm", "-D", "--defined-only", "-P", str(lib)]
+    elif fmt == "macho":
+        argv = ["nm", "-g", "-U", "-P", str(lib)]
+    else:
+        return None
+    try:
+        out = subprocess.run(
+            argv,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    syms: list[str] = []
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] in ("T", "W", "i"):
+            name = fields[0].split("@", 1)[0]
+            if fmt == "macho" and name.startswith("_"):
+                name = name[1:]
+            syms.append(name)
+    if not syms:
+        return {}
+    try:
+        dem = subprocess.run(
+            ["c++filt"],
+            input="\n".join(syms) + "\n",
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    if len(dem) != len(syms):
+        return None
+    return dict(zip(syms, dem, strict=True))

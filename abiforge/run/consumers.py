@@ -302,6 +302,56 @@ int main() {
 }
 """
 
+# c_opaque: the handle lifecycle (create, use, free) and the free functions,
+# as separate shapes so a removed f breaks only the shape that calls it.
+_OPQ_HANDLE = r"""#include <stdio.h>
+#include "edit_seed.h"
+int main(void) {
+  int i, total = 0;
+  for (i = 0; i < 64; i++) {
+    S *s = s_new(i, 2 * i + 1);
+    total += s_sum(s);
+    s_free(s);
+  }
+  printf("total=%d g=%d\n", total, opq_g(3));
+  return 0;
+}
+"""
+
+_OPQ_CALL = r"""#include <stdio.h>
+#include "edit_seed.h"
+int main(void) {
+  printf("f=%d g=%d\n", opq_f(4), opq_g(4));
+  return 0;
+}
+"""
+
+# c_byval: the client owns S (stack storage, by-value passing).
+_BV_VALUE = r"""#include <stdio.h>
+#include <string.h>
+#include "edit_seed.h"
+union box { struct S s; unsigned char b[sizeof(struct S) + 16]; };
+int main(void) {
+  union box u;
+  size_t i;
+  memset(u.b, 0xAB, sizeof u.b);
+  s_init(&u.s, 1, 2);
+  for (i = sizeof(struct S); i < sizeof u.b; i++) {
+    if (u.b[i] != 0xAB) { printf("overrun_at=%lu\n", (unsigned long)i); break; }
+  }
+  printf("sum=%d a=%d b=%d g=%d\n", s_sum(u.s), u.s.a, u.s.b, bv_g(3));
+  return 0;
+}
+"""
+
+_BV_CALL = r"""#include <stdio.h>
+#include "edit_seed.h"
+int main(void) {
+  printf("f=%d g=%d\n", bv_f(4), bv_g(4));
+  return 0;
+}
+"""
+
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
@@ -314,6 +364,8 @@ CONSUMERS: dict[str, dict[str, str]] = {
         "symbols": _MORE_SYMBOLS,
     },
     "cxx_alt": {"call": _XA_CALL},
+    "c_opaque": {"handle": _OPQ_HANDLE, "call": _OPQ_CALL},
+    "c_byval": {"value": _BV_VALUE, "call": _BV_CALL},
     "cxx_src": {"call": _SRC_CALL},
     "cxx_tree": {"call": _TREE_CALL},
 }

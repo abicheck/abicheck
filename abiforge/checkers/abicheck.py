@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from abiforge.model.finding import Finding
+
 if TYPE_CHECKING:
     from abicheck.checker_types import DiffResult
     from abicheck.model.change import Change
@@ -205,10 +207,12 @@ def _judge(old: AbiSnapshot, new: AbiSnapshot) -> DiffResult:
 
 def judged(
     old: AbiSnapshot, new: AbiSnapshot
-) -> tuple[str, frozenset[str], frozenset[str]]:
-    """(verdict name, ChangeKind names, kinds whose ADR-084 downgrade is disclosed).
+) -> tuple[str, frozenset[str], frozenset[str], tuple[Finding, ...]]:
+    """(verdict name, ChangeKind names, kinds whose ADR-084 downgrade is
+    disclosed, each finding with the entity it is attributed to).
 
-    ``REFUSED`` plus the error type on refusal, with nothing disclosed.
+    ``REFUSED`` plus the error type on refusal, with nothing disclosed and no
+    findings.
     """
     from abicheck.errors import AbicheckError
     from abicheck.policy.binary_gate_marker import BINARY_GATE_RULE_ID
@@ -217,14 +221,43 @@ def judged(
     try:
         result = _judge(old, new)
     except AbicheckError as exc:
-        return REFUSED, frozenset({type(exc).__name__}), frozenset()
+        return REFUSED, frozenset({type(exc).__name__}), frozenset(), ()
     kinds = frozenset(ch.kind.name for ch in result.changes)
     disclosed = frozenset(
         ch.kind.name
         for ch in result.changes
         if ch.modulation_rule == BINARY_GATE_RULE_ID
     )
-    return result.verdict.name, kinds, disclosed
+    return result.verdict.name, kinds, disclosed, _findings(result)
+
+
+def _findings(result: DiffResult) -> tuple[Finding, ...]:
+    """Each reported change as a structured ``Finding``: kind, the entity it is
+    attributed to (the change's symbol and resolved qualified name) and the
+    verdict category it contributes, read from the typed result."""
+    from abicheck.checker_policy import (
+        API_BREAK_KINDS,
+        BREAKING_KINDS,
+        COMPATIBLE_KINDS,
+        RISK_KINDS,
+    )
+    from abicheck.policy.classification import effective_category
+
+    sets = (
+        frozenset(BREAKING_KINDS),
+        frozenset(API_BREAK_KINDS),
+        frozenset(COMPATIBLE_KINDS),
+        frozenset(RISK_KINDS),
+    )
+    return tuple(
+        Finding(
+            kind=ch.kind.name,
+            symbol=ch.symbol,
+            qualified_name=ch.qualified_name,
+            impact=effective_category(ch, *sets).name,
+        )
+        for ch in result.changes
+    )
 
 
 def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
@@ -233,7 +266,7 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     A refusal (``abicheck.errors.AbicheckError``, e.g. a profile mismatch) is
     abicheck's answer, not a harness failure: it is neither clean nor a break.
     """
-    verdict, kinds, _disclosed = judged(old, new)
+    verdict, kinds, _disclosed, _findings_ = judged(old, new)
     return verdict, kinds
 
 

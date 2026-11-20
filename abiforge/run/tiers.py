@@ -173,6 +173,17 @@ KIND_REACH_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("time_bits_64", "c_elf_alt", "gcc", {"flags": Flags(bits=32)}),
 )
 
+#: The PR tier's entity-attribution guards (``abiforge.operators.attribution``):
+#: one record mutation per exposure, at the primary {B,H} configuration that
+#: decides the privacy claims, plus the mixed case at DWARF evidence, where the
+#: claim on the private record is undecided (``evidence-limited``).
+ATTRIBUTION_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
+    ("private_record_grew", "c_opaque", "gcc", {}),
+    ("public_record_grew", "c_byval", "clang", {}),
+    ("func_removed_and_private_record_grew", "c_opaque", "clang", {}),
+    ("func_removed_and_private_record_grew", "c_opaque", "gcc", {"evidence": "dwarf"}),
+)
+
 #: The evidence axis value of the stripped primary configuration (plan §4 B0):
 #: ``headers`` evidence on a stripped library. A row or factor names it as one
 #: value, so it is one more axis value in every pair draw, not a side flag.
@@ -223,6 +234,7 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     *SOURCE_EVIDENCE_PR,
     *DEPENDENCY_PR,
     *KIND_REACH_PR,
+    *ATTRIBUTION_PR,
 )
 
 

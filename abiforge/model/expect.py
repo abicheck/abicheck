@@ -22,7 +22,12 @@ and classifies the cell. Classes, most severe first:
 - ``false-positive``: abicheck is stronger than the benign ceiling and
   execution ran and shows nothing (without execution it is ``wrong-verdict``).
 - ``wrong-verdict``: any other verdict outside the expected bounds.
-- ``wrong-kind``: the verdict is right, an expected kind is missing.
+- ``false-attribution``: the verdict is right, but the report attributes a
+  finding to an entity the edit cannot have affected (``EntityClaim``): an
+  unchanged function reported removed, a private type blamed for a public
+  ABI break.
+- ``wrong-kind``: the verdict is right, an expected kind is missing (or a
+  required kind is not attributed to the entity the edit changed).
 - ``refused``: abicheck declined to compare (e.g. a profile mismatch). Not
   clean and not a pass: the run proved nothing about this edit.
 
@@ -35,11 +40,12 @@ given evidence cannot show it, abicheck stayed clean).
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
-from abiforge.checkers.abicheck import observable_at
+from abiforge.checkers.abicheck import default_verdict, observable_at
 from abiforge.model.config import Config
+from abiforge.model.finding import EntityClaim, Finding
 from abiforge.model.producer_capabilities import dwarf_witness_present
 
 # Verdict names in increasing severity (see abicheck.checker_types.Verdict).
@@ -56,6 +62,7 @@ MISMATCH_CLASSES = (
     "false-clean",
     "false-positive",
     "wrong-verdict",
+    "false-attribution",
     "wrong-kind",
     "refused",
 )
@@ -70,6 +77,14 @@ class Expectation:
     verdict_max: str | None = None
     observable: bool = True
     note: str = ""
+    # Per-entity claims (``model.finding``): judged only when the checker
+    # gave structured findings, so an operator without claims and a kind-only
+    # answer behave exactly as before.
+    claims: tuple[EntityClaim, ...] = ()
+    # Why the evidence cannot decide part of this expectation (a claim whose
+    # ``needs`` are absent): a run that is otherwise clean is reported as
+    # ``evidence-limited`` (unknown), never as ``agree``.
+    undecided: str = ""
 
     @property
     def benign(self) -> bool:
@@ -91,8 +106,17 @@ class Expectation:
             and VERDICT_RANK[self.verdict_max] < VERDICT_RANK["API_BREAK"]
         )
 
-    def problems(self, verdict: str, kinds: frozenset[str]) -> list[str]:
-        """How an abicheck answer departs from this expectation."""
+    def problems(
+        self,
+        verdict: str,
+        kinds: frozenset[str],
+        findings: tuple[Finding, ...] | None = None,
+    ) -> list[str]:
+        """How an abicheck answer departs from this expectation.
+
+        *findings* (each kind with the entity it is attributed to) lets the
+        ``claims`` be judged; without them only kinds and verdict are.
+        """
         if verdict == "REFUSED":
             return [f"abicheck refused to compare ({', '.join(sorted(kinds))})"]
         out: list[str] = []
@@ -109,7 +133,23 @@ class Expectation:
             out.append(
                 f"verdict {verdict} stronger than benign maximum {self.verdict_max}"
             )
+        if findings is not None and self.claims:
+            impact_of = _impacts(f.kind for f in findings)
+            for claim in self.claims:
+                if (why := claim.violation(findings, impact_of)) is not None:
+                    out.append(why)
         return out
+
+
+def _impacts(kinds: Iterable[str]) -> dict[str, str]:
+    """Each kind's catalog default verdict (an unknown kind fails safe to BREAKING)."""
+    out: dict[str, str] = {}
+    for k in kinds:
+        try:
+            out[k] = default_verdict(k) or "BREAKING"
+        except KeyError:
+            out[k] = "BREAKING"
+    return out
 
 
 @dataclass(frozen=True)
@@ -208,11 +248,17 @@ def observability_floor(
         # where a header-level kind would otherwise be observable.
         seen = frozenset()
     hidden = edit - seen
+    claims, undecided = _floor_claims(exp.claims, config)
+    if undecided:
+        exp = replace(
+            exp, undecided="; ".join(filter(None, (exp.undecided, undecided)))
+        )
     if edit and not seen:
         return replace(
             exp,
             expected=frozenset(),
             any_of=(),
+            claims=tuple(c for c in claims if not c.required),
             verdict_min="NO_CHANGE",
             observable=False,
             note=(
@@ -221,18 +267,46 @@ def observability_floor(
             ),
         )
     if not hidden:
-        return exp
+        return replace(exp, claims=claims)
     expected = (exp.expected & seen) | (exp.expected & ADVISORY_KINDS)
     any_of = tuple(kept for group in exp.any_of if (kept := group & seen))
     return replace(
         exp,
         expected=expected,
         any_of=any_of,
+        claims=claims,
         note=(
             f"{exp.note} "
             f"[reduced: {sorted(hidden)} not observable at {config.evidence_label}]"
         ).strip(),
     )
+
+
+def _floor_claims(
+    claims: tuple[EntityClaim, ...], config: Config
+) -> tuple[tuple[EntityClaim, ...], str]:
+    """(the claims *config* can decide, why the rest are undecided).
+
+    A claim whose ``needs`` atoms *config* lacks is undecided. A required
+    claim keeps only the kinds *config* observes, and is dropped when it
+    observes none; a forbidden claim otherwise always stands."""
+    out: list[EntityClaim] = []
+    undecided: list[str] = []
+    atoms = config.evidence_set.atoms
+    for c in claims:
+        if not c.needs <= atoms:
+            undecided.append(
+                f"claim on {c.entity.label} needs {sorted(c.needs)} evidence, "
+                f"absent at {config.evidence_label}"
+            )
+            continue
+        if not c.required:
+            out.append(c)
+            continue
+        seen = frozenset(k for k in c.kinds if kind_observable(k, config))
+        if seen:
+            out.append(replace(c, kinds=seen))
+    return tuple(out), "; ".join(undecided)
 
 
 def binary_depth_cap(exp: Expectation, config: Config) -> Expectation:
@@ -340,6 +414,7 @@ def reconcile(
     *,
     disclosed: frozenset[str] = frozenset(),
     evidence: frozenset[str] | None = None,
+    findings: tuple[Finding, ...] | None = None,
 ) -> Reconciled:
     """Classify one cell against the execution oracle.
 
@@ -349,7 +424,7 @@ def reconcile(
     """
     if verdict == "REFUSED":
         return Reconciled("refused", tuple(exp.problems(verdict, kinds)))
-    problems = tuple(exp.problems(verdict, kinds))
+    problems = tuple(exp.problems(verdict, kinds, findings))
     rank = VERDICT_RANK[verdict]
     broke = exec_truth.available and (
         exec_truth.binary_break or exec_truth.source_break
@@ -398,8 +473,17 @@ def reconcile(
         return Reconciled("wrong-verdict", problems)
     if any(p.startswith("verdict") for p in problems):
         return Reconciled("wrong-verdict", problems)
+    if any(p.startswith("false claim") for p in problems):
+        return Reconciled(
+            "false-attribution",
+            problems,
+            "the verdict is within bounds, but the report attributes a finding "
+            "to an entity the edit cannot have affected",
+        )
     if problems:
         return Reconciled("wrong-kind", problems)
+    if exp.undecided:
+        return Reconciled("evidence-limited", problems, exp.undecided)
     if (
         exec_truth.available
         and not broke
@@ -434,6 +518,12 @@ def issue_keys(problems: tuple[str, ...] | list[str]) -> frozenset[str]:
             keys.add(f"weaker-than:{m.group(1)}")
         elif m := re.fullmatch(r"verdict \w+ stronger than benign maximum (\w+)", p):
             keys.add(f"stronger-than:{m.group(1)}")
+        elif m := re.fullmatch(r"false claim (\w+) on (\S+)", p):
+            keys.add(f"false-claim:{m.group(2)}:{m.group(1)}")
+        elif m := re.fullmatch(
+            r"missing claim on (\S+): none of \[.*\] attributed to it", p
+        ):
+            keys.add(f"missing-claim:{m.group(1)}")
         elif m := re.fullmatch(r"abicheck refused to compare \((.*)\)", p):
             keys |= {f"refused:{e.strip()}" for e in m.group(1).split(",")}
         else:
