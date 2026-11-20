@@ -1,0 +1,128 @@
+{
+ "select": "pilot",
+ "modes": [
+  "abicheck",
+  "abidiff",
+  "abicc-dump",
+  "abicc-xml"
+ ],
+ "configs": [
+  "dwarf+headers",
+  "stripped+headers"
+ ],
+ "compiler": "gcc",
+ "cases": [
+  {
+   "op": "struct_append_field",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_remove_trailing_field",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_swap_fields",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "typedef_retarget",
+   "seed": "c_core",
+   "cls": "source_break"
+  },
+  {
+   "op": "object_became_const",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "header_constant_changed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_append_member",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_add",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "param_rename_header_only",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "soname_changed",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "soname_dropped",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "symbolic_binding",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "comment_only",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "reorder_declarations",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "glibc_floor_raised",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "control_identity",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "c_elf",
+   "cls": "unchanged"
+  }
+ ],
+ "environment": {
+  "commit": "b0b8793989c150a5b05f48e4e999a7df4219365a",
+  "python": "3.13.18",
+  "platform": "Linux x86_64",
+  "gcc": "13.3.0",
+  "abidiff": "abidiff: 2.4.0",
+  "abi-dumper": "1.2",
+  "abi-compliance-checker": "2.3"
+ },
+ "pilot_rule": {
+  "seeds": [
+   "c_core",
+   "c_elf"
+  ],
+  "classes": [
+   "abi_break",
+   "source_break",
+   "compatible",
+   "risk",
+   "unchanged"
+  ],
+  "per_class": 3,
+  "extra": [
+   "glibc_floor_raised"
+  ],
+  "filter": "no rules, rebuild, carrier, new_evidence, libstdc++ need, host arch or licence"
+ }
+}

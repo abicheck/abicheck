@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<reports>
+<report kind="binary" version="1.2">
+
+<test_info>
+  <library>edit</library>
+  <version1>
+    <number>1.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version1>
+  <version2>
+    <number>2.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version2>
+</test_info>
+
+<test_results>
+  <headers>
+    <name>edit_seed.h</name>
+  </headers>
+  <libs>
+    <name>libedit.so</name>
+  </libs>
+  <symbols>36</symbols>
+  <types>14</types>
+  <verdict>compatible</verdict>
+  <affected>0</affected>
+</test_results>
+
+<problem_summary>
+  <added_symbols>0</added_symbols>
+  <removed_symbols>0</removed_symbols>
+  <problems_with_types>
+    <high>0</high>
+    <medium>0</medium>
+    <low>0</low>
+    <safe>0</safe>
+  </problems_with_types>
+  <problems_with_symbols>
+    <high>0</high>
+    <medium>0</medium>
+    <low>1</low>
+    <safe>0</safe>
+  </problems_with_symbols>
+  <problems_with_constants>
+    <low>0</low>
+  </problems_with_constants>
+</problem_summary>
+
+
+<added_symbols>
+</added_symbols>
+
+<removed_symbols>
+</removed_symbols>
+
+<problems_with_types severity="High">
+</problems_with_types>
+
+<problems_with_symbols severity="High">
+</problems_with_symbols>
+
+<problems_with_types severity="Medium">
+</problems_with_types>
+
+<problems_with_symbols severity="Medium">
+</problems_with_symbols>
+
+<problems_with_types severity="Low">
+</problems_with_types>
+
+<problems_with_symbols severity="Low">
+  <header name="edit_seed.h">
+    <library name="">
+      <symbol name="EDIT_LIMIT">
+        <problem id="Global_Data_Value_Changed">
+          <change old_value="16" new_value="32">The initial value of this global data has been changed from @old_value to @new_value.</change>
+          <effect>Applications will use an old value of this data instead of the new one. This may cause incorrect behavior of applications.</effect>
+        </problem>
+      </symbol>
+    </library>
+  </header>
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+<problems_with_types severity="Safe">
+</problems_with_types>
+
+<problems_with_symbols severity="Safe">
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+</report>
+<report kind="source" version="1.2">
+
+<test_info>
+  <library>edit</library>
+  <version1>
+    <number>1.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version1>
+  <version2>
+    <number>2.0</number>
+    <arch>x86_64</arch>
+    <gcc>13</gcc>
+  </version2>
+</test_info>
+
+<test_results>
+  <headers>
+    <name>edit_seed.h</name>
+  </headers>
+  <libs>
+    <name>libedit.so</name>
+  </libs>
+  <symbols>37</symbols>
+  <types>14</types>
+  <verdict>compatible</verdict>
+  <affected>0</affected>
+</test_results>
+
+<problem_summary>
+  <added_symbols>0</added_symbols>
+  <removed_symbols>0</removed_symbols>
+  <problems_with_types>
+    <high>0</high>
+    <medium>0</medium>
+    <low>0</low>
+    <safe>0</safe>
+  </problems_with_types>
+  <problems_with_symbols>
+    <high>0</high>
+    <medium>0</medium>
+    <low>0</low>
+    <safe>1</safe>
+  </problems_with_symbols>
+  <problems_with_constants>
+    <low>0</low>
+  </problems_with_constants>
+</problem_summary>
+
+
+<added_symbols>
+</added_symbols>
+
+<removed_symbols>
+</removed_symbols>
+
+<problems_with_types severity="High">
+</problems_with_types>
+
+<problems_with_symbols severity="High">
+</problems_with_symbols>
+
+<problems_with_types severity="Medium">
+</problems_with_types>
+
+<problems_with_symbols severity="Medium">
+</problems_with_symbols>
+
+<problems_with_types severity="Low">
+</problems_with_types>
+
+<problems_with_symbols severity="Low">
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+<problems_with_types severity="Safe">
+</problems_with_types>
+
+<problems_with_symbols severity="Safe">
+  <header name="edit_seed.h">
+    <library name="">
+      <symbol name="EDIT_LIMIT">
+        <problem id="Global_Data_Value_Changed">
+          <change old_value="16" new_value="32">The initial value of this global data has been changed from @old_value to @new_value.</change>
+          <effect>No effect.</effect>
+        </problem>
+      </symbol>
+    </library>
+  </header>
+</problems_with_symbols>
+
+<problems_with_constants severity="Low">
+</problems_with_constants>
+
+</report>
+</reports>

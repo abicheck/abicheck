@@ -1,0 +1,2066 @@
+{
+ "select": "all",
+ "modes": [
+  "abicheck",
+  "abidiff",
+  "abicc-dump",
+  "abicc-xml"
+ ],
+ "configs": [
+  "dwarf+headers",
+  "stripped+headers"
+ ],
+ "compiler": "gcc",
+ "cases": [
+  {
+   "op": "struct_append_field",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_append_field",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_remove_trailing_field",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_remove_trailing_field",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_swap_fields",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_swap_fields",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_field_widen",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_field_widen",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_array_grow",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_array_grow",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_append_member",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_append_member",
+   "seed": "cxx_classes",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_remove_member",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_remove_member",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_change_value",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_change_value",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_class_append",
+   "seed": "cxx_classes",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_class_remove",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_class_change_value",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "typedef_retarget",
+   "seed": "c_core",
+   "cls": "source_break"
+  },
+  {
+   "op": "typedef_retarget",
+   "seed": "cxx_classes",
+   "cls": "source_break"
+  },
+  {
+   "op": "func_param_type_change",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_type_change",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_type_change",
+   "seed": "cxx_stdlib",
+   "cls": "abi_break"
+  },
+  {
+   "op": "params_reordered",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "params_reordered",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_append",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_append",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_append",
+   "seed": "cxx_stdlib",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_remove",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_remove",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_param_remove",
+   "seed": "cxx_stdlib",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_return_type_change",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_return_type_change",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_remove",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_remove",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_add",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_add",
+   "seed": "cxx_classes",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_out_of_line_to_inline",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "param_rename_header_only",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "param_rename_header_only",
+   "seed": "cxx_classes",
+   "cls": "compatible"
+  },
+  {
+   "op": "param_rename_header_only",
+   "seed": "cxx_stdlib",
+   "cls": "compatible"
+  },
+  {
+   "op": "var_type_change",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "var_type_change",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "comment_only",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "comment_only",
+   "seed": "cxx_classes",
+   "cls": "unchanged"
+  },
+  {
+   "op": "reorder_declarations",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "reorder_declarations",
+   "seed": "cxx_classes",
+   "cls": "unchanged"
+  },
+  {
+   "op": "static_inline_helper_added",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "static_inline_helper_added",
+   "seed": "cxx_classes",
+   "cls": "compatible"
+  },
+  {
+   "op": "virtual_method_add",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "virtual_reorder",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "virtual_remove",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "virtual_become_pure",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "method_const_drop",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "method_noexcept_add",
+   "seed": "cxx_classes",
+   "cls": "source_break"
+  },
+  {
+   "op": "base_class_add",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "template_default_arg_change",
+   "seed": "cxx_classes",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_append_wide_value",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_append_wide_value",
+   "seed": "cxx_classes",
+   "cls": "compatible"
+  },
+  {
+   "op": "struct_array_shrink_in_padding",
+   "seed": "c_core",
+   "cls": "source_break"
+  },
+  {
+   "op": "struct_array_shrink_in_padding",
+   "seed": "cxx_classes",
+   "cls": "source_break"
+  },
+  {
+   "op": "func_lose_default_visibility",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "func_lose_default_visibility",
+   "seed": "cxx_classes",
+   "cls": "unchanged"
+  },
+  {
+   "op": "enum_underlying_narrow",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_underlying_narrow",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_class_underlying_narrow",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "no_unique_address_added",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "concept_constraint_added",
+   "seed": "cxx_classes",
+   "cls": "source_break"
+  },
+  {
+   "op": "concept_constraint_relaxed",
+   "seed": "cxx_classes",
+   "cls": "risk"
+  },
+  {
+   "op": "rebuild_short_enums",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "rebuild_short_enums",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "rebuild_pack_struct",
+   "seed": "c_core",
+   "cls": "abi_break"
+  },
+  {
+   "op": "rebuild_pack_struct",
+   "seed": "cxx_classes",
+   "cls": "abi_break"
+  },
+  {
+   "op": "rebuild_cxx11_abi_off",
+   "seed": "cxx_stdlib",
+   "cls": "abi_break"
+  },
+  {
+   "op": "rebuild_against_libcxx",
+   "seed": "cxx_stdlib",
+   "cls": "abi_break"
+  },
+  {
+   "op": "rebuild_hidden_visibility",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "rebuild_hidden_visibility",
+   "seed": "cxx_classes",
+   "cls": "unchanged"
+  },
+  {
+   "op": "rebuild_hidden_visibility",
+   "seed": "cxx_stdlib",
+   "cls": "unchanged"
+  },
+  {
+   "op": "rebuild_optimized",
+   "seed": "c_core",
+   "cls": "compatible"
+  },
+  {
+   "op": "rebuild_optimized",
+   "seed": "cxx_classes",
+   "cls": "compatible"
+  },
+  {
+   "op": "rebuild_optimized",
+   "seed": "cxx_stdlib",
+   "cls": "compatible"
+  },
+  {
+   "op": "version_node_added_for_new_symbol",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "version_script_dropped",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "version_node_renamed",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "symbol_moved_version_node",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "symbol_moved_version_node_keeping_alias",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "soname_changed",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "soname_dropped",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "needed_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "needed_removed",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "needed_reordered",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "rpath_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "runpath_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "executable_stack",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "relro_disabled",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "bind_now_dropped",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "symbolic_binding",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "gnu_hash_dropped",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "stack_protector_dropped",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "tls_initial_exec",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "char_made_unsigned",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "relr_packed_relocs",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "cet_disabled",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "cet_enabled",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "nodelete_flag",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "no_common_spelled",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_became_weak",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "weak_became_global",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_became_protected",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "object_became_protected",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "object_hidden",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "object_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "object_removed",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "object_became_const",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "object_lost_const",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "const_object_value_changed",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "object_array_grew",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "const_string_object_grew",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "tls_object_grew",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "object_became_tls",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_became_ifunc",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "header_constant_changed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "header_constant_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "header_constant_removed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "union_member_added",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "union_member_removed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "union_member_retyped",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_became_bitfield",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_renamed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "field_became_const",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "field_became_volatile",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "field_became_atomic",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "flexible_array_member",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "record_became_opaque",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "record_became_packed",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_became_union",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "record_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "record_removed",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "typedef_removed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_member_renamed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_sentinel_moved",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "api_deprecated",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "api_undeprecated",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_became_variadic",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_lost_variadic",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "param_restrict_added",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "param_pointer_level_changed",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "return_pointer_level_changed",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "param_pointee_const_added",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "return_pointee_const_added",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "rebuild_m32",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "rebuild_x32",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "text_relocation_introduced",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "writable_executable_segment",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "init_fini_dropped",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "x86_isa_level_raised",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "target_isa_raised",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "debug_info_dropped",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "vector_math_abi_changed",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "short_wchar",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "object_alignment_reduced",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "field_became_bit_int",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "imported_symbol_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "glibc_version_required_added",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "glibc_older_version_required",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "export_surface_exploded",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "unversioned_export_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "declared_but_not_exported",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "exported_but_undeclared",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "export_localized_header_kept",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "executable_stack_removed",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "bind_now_dropped_without_relro",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "relr_relocs_unpacked",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "rpath_became_runpath",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "soname_added",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "text_relocation_removed",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "static_tls_removed",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "ifunc_removed",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "imported_symbol_removed",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "glibc_version_requirement_dropped",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "fortified_call_dropped",
+   "seed": "c_elf_alt",
+   "cls": "risk"
+  },
+  {
+   "op": "empty_version_node_dropped",
+   "seed": "c_elf_alt",
+   "cls": "compatible"
+  },
+  {
+   "op": "api_version_suffix_bumped",
+   "seed": "c_elf_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "returned_struct_grew_past_registers",
+   "seed": "c_elf_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "long_double_made_64bit",
+   "seed": "c_elf_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "integer_typedef_widened",
+   "seed": "c_elf_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "time_bits_64",
+   "seed": "c_elf_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "header_only_function_params_changed",
+   "seed": "c_elf_alt",
+   "cls": "source_break"
+  },
+  {
+   "op": "internal_helper_hidden",
+   "seed": "c_elf_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "gnu_unique_disabled",
+   "seed": "cxx_alt",
+   "cls": "risk"
+  },
+  {
+   "op": "allocator_replacement_removed",
+   "seed": "cxx_alt",
+   "cls": "risk"
+  },
+  {
+   "op": "std_string_abi_flipped",
+   "seed": "cxx_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "by_value_struct_became_nontrivial",
+   "seed": "cxx_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "internal_type_grew",
+   "seed": "cxx_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "header_inline_removed",
+   "seed": "cxx_alt",
+   "cls": "source_break"
+  },
+  {
+   "op": "char_param_became_char8",
+   "seed": "cxx_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "internal_template_instance_dropped",
+   "seed": "cxx_alt",
+   "cls": "abi_break"
+  },
+  {
+   "op": "gnu_unique_static_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "allocator_replacement_added",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "std_template_instance_exported",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "class_rtti_became_protected",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "ctor_explicit_removed",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "ctor_explicit_added",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "class_became_final",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "class_lost_final",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "override_specifier_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "member_noexcept_removed",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "method_access_narrowed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "field_access_narrowed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "field_became_mutable",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "hidden_friend_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "hidden_friend_removed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_became_scoped",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_lost_scoped",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "method_became_static",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "method_ref_qualified",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "method_deleted",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "const_overload_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "overload_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "pure_virtual_added",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "inline_namespace_bumped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "abi_tag_added",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "base_became_virtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "bases_reordered",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "primary_base_grew",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "vptr_introduced",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "method_became_pure_virtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_lost_mutable",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "field_lost_const",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "field_lost_volatile",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "static_member_access_narrowed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "type_lost_abstract",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "override_specifier_removed",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "field_default_initializer_changed",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "field_default_initializer_removed",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "field_deprecated_removed",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "static_member_access_widened",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "param_default_value_changed",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "param_default_value_removed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "param_restrict_removed",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "extern_c_linkage_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "virtual_noexcept_added",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "converting_ctor_overload_added",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "vtt_grew",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_added_in_tail_padding",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "field_inserted_in_padding",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "field_removed_without_shrink",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "default_argument_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_became_extern_c",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "source_only_export_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "record_lost_trivially_copyable",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "record_lost_standard_layout",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "field_inserted_at_head",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_inserted_in_middle",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_removed_at_head",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_removed_in_middle",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_removed_into_tail_padding",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_retyped_same_layout",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_retyped_smaller",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_retyped_alignment_only",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "array_shrunk_shifting",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "array_grown_into_padding",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "bitfield_width_within_unit",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "bitfield_width_crosses_unit",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "bitfield_became_field",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "record_alignment_raised",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "cxx_record_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "base_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "base_added_nonvirtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "base_became_nonvirtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "base_access_narrowed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "return_pointee_const_removed",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "return_deep_pointee_const_removed",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "param_pointee_const_to_volatile",
+   "seed": "c_elf",
+   "cls": "source_break"
+  },
+  {
+   "op": "var_alignment_raised",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "source_only_var_export_added",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "func_became_ms_abi",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "func_contract_attribute_added",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "func_contract_attribute_removed",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "func_exception_spec_widened",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "declared_exports_defined",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "inline_function_outlined",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "param_became_va_list",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "param_lost_va_list",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "serialization_tag_swapped",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "symbols_prefixed_batch",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "internal_table_grown",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "virtual_bases_reordered",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "secondary_base_became_polymorphic",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "reserved_field_used",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "inline_namespace_version_bumped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "experimental_api_graduated",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "experimental_api_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "function_became_customization_object",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "template_return_argument_changed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "template_param_argument_changed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "field_retyped_abi_equivalent",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "declared_function_lost_definition",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "declared_function_export_became_c_namesake",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "deduced_lambda_return_named",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "std_reexport_dropped",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "unnamed_type_api_added",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "pimpl_member_renamed_under_inline_body",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "cpu_dispatch_variants_dropped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "handle_typedef_retargeted",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "opaque_record_defined",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "overload_retyped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "version_sentinel_typedef_bumped",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "explicit_instantiation_dropped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "exported_instantiation_default_changed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "struct_became_class",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "tag_type_renamed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "mandatory_template_param_added",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "nonpod_field_added_in_tail_padding",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "polymorphic_type_added_without_virtual_dtor",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "stl_by_value_api_added",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "class_visibility_hidden",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "new_side_dumped_without_headers",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "virtual_appended_after_last_slot",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "method_became_virtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "method_became_nonvirtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "override_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "override_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "virtual_became_final",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "virtual_lost_final",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "destructor_became_virtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "destructor_became_nonvirtual",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "key_function_inlined",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "override_return_became_covariant",
+   "seed": "cxx_more",
+   "cls": "risk"
+  },
+  {
+   "op": "last_virtual_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_enumerator_alias_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_removed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "fixed_enum_enumerator_appended",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "fixed_enum_enumerator_inserted",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "fixed_enum_enumerator_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "fixed_enum_enumerator_value_changed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "fixed_enum_enumerator_values_swapped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "fixed_enum_enumerator_renamed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "fixed_enum_enumerator_alias_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "fixed_enum_became_scoped",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "fixed_enum_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "fixed_enum_removed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "fixed_enum_became_opaque",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_class_enumerator_inserted",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_class_enumerator_values_swapped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "enum_class_enumerator_renamed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_class_enumerator_alias_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_class_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "enum_class_removed",
+   "seed": "cxx_more",
+   "cls": "source_break"
+  },
+  {
+   "op": "enum_class_became_opaque",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "object_shrank",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "object_retyped_same_size",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "object_became_weak",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "object_renamed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "object_became_inline_variable",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "object_moved_version_node",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "typedef_retargeted_same_size",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "typedef_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "typedef_respelled_as_alias",
+   "seed": "cxx_more",
+   "cls": "unchanged"
+  },
+  {
+   "op": "template_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "template_param_added_defaulted",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "template_param_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "template_nontype_param_retyped",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "template_instantiation_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "template_specialization_added",
+   "seed": "cxx_more",
+   "cls": "compatible"
+  },
+  {
+   "op": "template_specialization_removed",
+   "seed": "cxx_more",
+   "cls": "abi_break"
+  },
+  {
+   "op": "l3_exceptions_enabled",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_tls_model_local_dynamic",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_lto_enabled",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_sanitizer_enabled",
+   "seed": "c_elf",
+   "cls": "compatible"
+  },
+  {
+   "op": "l3_asan_enabled",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "l3_struct_packing_8",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_language_standard_raised",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_threadsafe_statics_disabled",
+   "seed": "cxx_alt",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_rtti_disabled",
+   "seed": "cxx_alt",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_stdlib_assertions",
+   "seed": "cxx_alt",
+   "cls": "risk"
+  },
+  {
+   "op": "l3_whole_program_vtables",
+   "seed": "cxx_alt",
+   "cls": "risk"
+  },
+  {
+   "op": "import_left_unprovided",
+   "seed": "c_elf",
+   "cls": "abi_break"
+  },
+  {
+   "op": "glibc_floor_raised",
+   "seed": "c_elf",
+   "cls": "risk"
+  },
+  {
+   "op": "src_macro_value_changed",
+   "seed": "cxx_src",
+   "cls": "risk"
+  },
+  {
+   "op": "src_macro_removed",
+   "seed": "cxx_src",
+   "cls": "source_break"
+  },
+  {
+   "op": "src_default_argument_changed",
+   "seed": "cxx_src",
+   "cls": "risk"
+  },
+  {
+   "op": "src_inline_body_changed",
+   "seed": "cxx_src",
+   "cls": "risk"
+  },
+  {
+   "op": "src_template_body_changed",
+   "seed": "cxx_src",
+   "cls": "risk"
+  },
+  {
+   "op": "src_uninstantiated_template_removed",
+   "seed": "cxx_src",
+   "cls": "source_break"
+  },
+  {
+   "op": "src_public_entry_calls_internal",
+   "seed": "cxx_src",
+   "cls": "compatible"
+  },
+  {
+   "op": "src_public_entry_depends_on_hidden",
+   "seed": "cxx_src",
+   "cls": "compatible"
+  },
+  {
+   "op": "src_virtual_dispatch_target_added",
+   "seed": "cxx_src",
+   "cls": "compatible"
+  },
+  {
+   "op": "src_public_function_added",
+   "seed": "cxx_src",
+   "cls": "compatible"
+  },
+  {
+   "op": "src_public_function_removed",
+   "seed": "cxx_src",
+   "cls": "abi_break"
+  },
+  {
+   "op": "src_undocumented_export_added",
+   "seed": "cxx_src",
+   "cls": "compatible"
+  },
+  {
+   "op": "tree_internal_rtti_exported",
+   "seed": "cxx_tree",
+   "cls": "risk"
+  },
+  {
+   "op": "tree_private_declaration_exported",
+   "seed": "cxx_tree",
+   "cls": "risk"
+  },
+  {
+   "op": "tree_type_definition_diverges_per_tu",
+   "seed": "cxx_tree",
+   "cls": "risk"
+  },
+  {
+   "op": "tree_anonymous_type_coordinates_shifted",
+   "seed": "cxx_tree",
+   "cls": "compatible"
+  },
+  {
+   "op": "tree_pointee_type_renamed",
+   "seed": "cxx_tree",
+   "cls": "source_break"
+  },
+  {
+   "op": "tree_private_pointee_type_renamed",
+   "seed": "cxx_tree",
+   "cls": "risk"
+  },
+  {
+   "op": "control_identity",
+   "seed": "c_core",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "cxx_classes",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "cxx_stdlib",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "c_elf",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "c_elf_alt",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "cxx_alt",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "cxx_more",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "cxx_src",
+   "cls": "unchanged"
+  },
+  {
+   "op": "control_identity",
+   "seed": "cxx_tree",
+   "cls": "unchanged"
+  }
+ ],
+ "environment": {
+  "commit": "273a526278a327da35f8daaae9cc1f7d22ae4f90",
+  "python": "3.13.18",
+  "platform": "Linux x86_64",
+  "gcc": "13.3.0",
+  "abidiff": "abidiff: 2.4.0",
+  "abi-dumper": "1.2",
+  "abi-compliance-checker": "2.3"
+ },
+ "pilot_rule": null
+}

@@ -41,10 +41,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import subprocess
 import sys
-import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -52,7 +50,12 @@ from defusedxml import ElementTree as ET
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(1, str(HERE.parents[1]))  # the repository root: abiforge
 import record_edit_fragment as frag  # noqa: E402
+
+import abiforge.checkers.abicc as abicc_adapter  # noqa: E402
+import abiforge.checkers.abidiff as abidiff_adapter  # noqa: E402
+from abiforge.checkers.tools import tool_version  # noqa: E402
 
 CLAIMS = ("flagged", "edit_member", "size", "offset_moved", "position_moved")
 SUPPORTS = {
@@ -250,69 +253,48 @@ def score(tool: str, row: dict, rec: dict | None) -> dict[str, str]:
 
 
 def run_tools(out: Path, cc: str) -> dict[str, dict]:
+    """Run both tools through abiforge's shared adapters (``abiforge.checkers``):
+    the commands, file names and status fields are E16's own."""
     status: dict[str, dict] = {}
     old, new = out / f"libold_{cc}_g.so", out / f"libnew_{cc}_g.so"
-    if shutil.which("abidiff"):
-        t0 = time.perf_counter()
-        p = _run(["abidiff", str(old), str(new)])
-        (out / f"abidiff_{cc}.txt").write_text(p.stdout)
-        ok = p.returncode in (0, 4, 12) and p.returncode & 1 == 0
-        status["abidiff"] = {
-            "exit": p.returncode,
-            "ok": ok,
-            "stderr": p.stderr[-2000:],
-            "seconds": round(time.perf_counter() - t0, 2),
-            "version": _run(["abidiff", "--version"]).stdout.strip(),
-        }
-    else:
+    tr = abidiff_adapter.run(old, new, out, stem=f"abidiff_{cc}")
+    if tr.unavailable:
         status["abidiff"] = {"ok": False, "unavailable": True}
-    if shutil.which("abi-dumper") and shutil.which("abi-compliance-checker"):
-        t0 = time.perf_counter()
-        for side, lib, ver in (("old", old, "0"), ("new", new, "1")):
-            d = _run(
-                [
-                    "abi-dumper",
-                    str(lib),
-                    "-o",
-                    str(out / f"abicc_{cc}_{side}.dump"),
-                    "-lver",
-                    ver,
-                ]
-            )
-            if d.returncode:
-                status["abicc"] = {
-                    "ok": False,
-                    "exit": d.returncode,
-                    "stderr": d.stderr[-2000:],
-                }
-                return status
-        rep = out / f"abicc_{cc}.xml"
-        p = _run(
-            [
-                "abi-compliance-checker",
-                "-l",
-                "e16",
-                "-binary",
-                "-report-format",
-                "xml",
-                "-old",
-                str(out / f"abicc_{cc}_old.dump"),
-                "-new",
-                str(out / f"abicc_{cc}_new.dump"),
-                "-report-path",
-                str(rep),
-            ],
-            cwd=out,
-        )
-        status["abicc"] = {
-            "exit": p.returncode,
-            "ok": rep.exists() and p.returncode in (0, 1),
-            "stderr": p.stderr[-2000:],
-            "seconds": round(time.perf_counter() - t0, 2),
-            "version": _run(["abi-compliance-checker", "-dumpversion"]).stdout.strip(),
-        }
     else:
+        step = tr.steps[-1]
+        code = -1 if step.exit is None else step.exit
+        status["abidiff"] = {
+            "exit": code,
+            "ok": code in (0, 4, 12) and code & 1 == 0,
+            "stderr": step.stderr_tail,
+            "seconds": round(step.seconds, 2),
+            "version": tool_version("abidiff"),
+        }
+    rep = out / f"abicc_{cc}.xml"
+    tr = abicc_adapter.run_dumps(
+        old,
+        new,
+        out,
+        name="e16",
+        binary_only=True,
+        stem=f"abicc_{cc}",
+        report=rep,
+        versions=("0", "1"),
+    )
+    if tr.unavailable:
         status["abicc"] = {"ok": False, "unavailable": True}
+        return status
+    step = tr.steps[-1]
+    if step.argv[0] == "abi-dumper":
+        status["abicc"] = {"ok": False, "exit": step.exit, "stderr": step.stderr_tail}
+        return status
+    status["abicc"] = {
+        "exit": step.exit,
+        "ok": rep.exists() and step.exit in (0, 1),
+        "stderr": step.stderr_tail,
+        "seconds": tr.seconds,
+        "version": tool_version("abi-compliance-checker"),
+    }
     return status
 
 

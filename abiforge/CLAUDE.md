@@ -12,6 +12,12 @@ Purpose and claims: `README.md`.
 - Only `checkers/` imports `abicheck`. Core code reaches the checker through
   `checkers/abicheck.py` (`snapshot`, `answer`, `kind_names`, `kind_catalog`,
   `header_backend_problem`).
+- Third-party tools have their own adapters in `checkers/`: `abidiff.py`
+  (libabigail; exit-status bits plus report text), `abicc.py` (ABI Dumper ->
+  ABICC on dumps, and ABICC on two input XML descriptors; binary and source
+  output reports read apart), `abicheck_cli.py` (the `abicheck compare`
+  command), all run through `checkers/tools.py`. E16's competitor lane
+  (`formal/experiments/record_edit_competitors.py`) uses the same adapters.
 
 ## Ground truth
 
@@ -85,6 +91,17 @@ Read `docs/contribute/testing.md` "Generated ABI edit corpus coverage" first.
   holding a free function) also needs its real construct in `OP_CONSTRUCT`. Edit
   classes come from `model/edit_model.py`, never from the operators; a class
   with no operator stays in the model as a reported gap.
+
+## Comparing tools
+
+`python -m abiforge.run.competitors OUT --select pilot` builds each selected
+pair once per configuration (`dwarf+headers`, `stripped+headers`) and runs
+the four modes on those files (`run/competitors.py`). Expected decisions and
+details come from `run/competitor_truth.py` (operator rules, header diff,
+compiler `sizeof`/`offsetof` probe), never from a tool; `run/competitor_score.py`
+maps each tool's answer to a decision and detail outcomes;
+`run/competitor_report.py` writes `pairs.csv`, `summary.json`, `table.md`,
+`divergences.md`, `figure.svg`. Receipts: `receipts/competitors/`.
 
 ## Running
 
