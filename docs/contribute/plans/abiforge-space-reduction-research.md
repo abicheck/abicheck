@@ -221,3 +221,226 @@ product-specific unsupported-feature profiles. Label each with its own guarantee
 The next implementation PR should publish R2's proof, executable reproduction and
 negative controls together. It must not lower an existing test tier's coverage
 floor or claim a production speedup before the comparison study is complete.
+
+## R2 follow-up measurements (pinned exploratory run)
+
+Measured against b0b8793989c150a5b05f48e4e999a7df4219365a on Linux x86-64,
+GCC 14.2, C11 ordinary scalar structs. This fragment supplies a foundation for
+C++ work; it does not measure coverage of the entire C++ language.
+
+| Evidence route | Pair instances | Common member offsets | Offset mismatches |
+|---|---:|---:|---:|
+| ELF + DWARF | 3,981 | 19,678 | 0 |
+| Stripped ELF + CastXML headers | 1,293 | 10,030 | 0 |
+
+Suites overlap. Executed offsetof probes supplied expected offsets; the harness
+checked both extraction and exact findings, including unchanged members. Identity
+controls reported no record findings. Size/alignment/addition findings were
+recorded separately: absence of an offset change is not overall ABI compatibility.
+Four header suites also passed through the actual abiforge snapshot/answer adapter;
+its verdict and kind sets matched the public CLI. Supplementary Clang call/reference
+graphs were unavailable; only declaration graphs were collected.
+
+The exploratory Lean 4.15.0 proof checks trace preservation for arbitrary finite
+suffixes in the specified scalar layout model. Reachable state enumeration gives
+136 states and 544 transitions. This proves the model's moved/not-moved abstraction,
+not the implementation of GCC or abicheck. Exact offset agreement above is empirical.
+
+Mutation experiments expose the implementation-proof gap: 544 transition witnesses
+detected all 544 injected output flips but only 104/544 specified successor faults.
+Adding a byte continuation detected all 544 of that successor family. Neither
+short suite detected an artificial fault triggered only after eleven fields; longer
+held-out cases did. These are injected mutants, not discovered abicheck bugs.
+
+For eight prefix residues, four insertions and suffix length at most d, raw cases
+number 32 * sum(4**n for n in range(1, d+1)): 2,688 at d=3 and 2,796,192 at d=8.
+Do not turn this count ratio into a checker speedup: horizons and implementation
+coverage differ. The transferable result is the method of proving a sufficient
+state before selecting representatives.
+
+The proof/harness/receipts remain exploratory artifacts pending the R2 implementation
+PR; tracking boxes above deliberately remain open. Next test nested records and
+arrays, including size and alignment in the observable contract. An inner size
+change repeated by an array may invalidate the scalar displacement bound.
+
+## Nested-array counterexample and reproducible probe
+
+
+Run `python3 research/layout-cutoff-pilot/nested/run.py` from the repository root.
+The script generates C11 in a temporary directory, compiles it with GCC, executes
+the probe, and writes `results.json`. The JSON records the compiler, target,
+counts by array length, and concrete witnesses. The ground truth comes from
+compiled `sizeof`, `_Alignof`, and `offsetof` expressions. The Python model
+separately computes placement, record padding and array stride.
+
+On GCC 14.2.0 (x86_64-linux-gnu), all 55,296 observations agreed across 3,072
+pairs. The matrix crosses two original scalar sizes and an inserted scalar
+size (each from 1, 2, 4, 8), three insertion positions, eight array lengths
+(1, 2, 3, 4, 8, 16, 32, 64), and two tail sizes (1 and 8). The enclosing
+record has a byte prefix, the array, and the scalar tail.
+
+The scalar proof in exploratory LayoutCutoff.lean proof preserves a
+cursor displacement of at most 16 for an unchanged scalar continuation.
+That state invariant cannot carry over to an enclosing layout with a resized
+array element. With the following inner definitions, common member offsets
+and alignment stay fixed, while the inner size increases from 16 to 24 bytes.
+
+~~~c
+struct Old { uint8_t a; uint64_t b; };
+struct New { uint8_t a; uint64_t b; uint8_t added; };
+~~~
+
+With three elements, both arrays begin at offset 8. The byte tail moves from
+56 to 80 (24 bytes). Its shift for any representable positive length N under
+this layout model is 8*N. Separately, a change of inner alignment plus record
+padding can exceed 16 even at length 1. In the generated matrix, inserting
+uint64_t between two byte members changes inner size from 2 to 24 and moves
+the outer byte tail by 29 bytes.
+
+For a fixed grammar with finite bounds on lengths and depth, an exact model can
+retain each side's size and alignment and use size times length when composing
+arrays. If lengths are symbolic, 8*N shows why exact numeric displacement
+requires a symbolic quantity or a bound that depends on the length. This
+counterexample leaves open smaller finite abstractions for Boolean observations
+such as moved versus unchanged. The experiment checks ordinary sequential
+records with one level of nesting, one insertion, and a single compiler/target.
+It supplies no checker coverage measurement or mechanized aggregate proof.
+
+Save the following as `nested_probe.py` and run `python nested_probe.py`; only GCC and Python are required.
+
+```python
+"""Compare ordinary aggregate layout against executed C11 compiler probes."""
+import argparse
+from itertools import product
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+
+SCALARS = {1: "uint8_t", 2: "uint16_t", 4: "uint32_t", 8: "uint64_t"}
+COUNTS = (1, 2, 3, 4, 8, 16, 32, 64)
+
+
+def align(cursor, alignment):
+    return (cursor + alignment - 1) // alignment * alignment
+
+
+def record(fields):
+    cursor = 0
+    offsets = {}
+    alignment = max(a for _, _, a in fields)
+    for name, size, a in fields:
+        offsets[name] = align(cursor, a)
+        cursor = offsets[name] + size
+    return align(cursor, alignment), alignment, offsets
+
+
+def run(gcc):
+    declarations = ["#include <stdint.h>", "#include <stddef.h>",
+                    "#include <stdio.h>", "#include <limits.h>",
+                    '_Static_assert(CHAR_BIT == 8, "byte width");']
+    for size, ctype in SCALARS.items():
+        declarations.append(
+            f'_Static_assert(sizeof({ctype}) == {size} && '
+            f'_Alignof({ctype}) == {size}, "scalar layout");'
+        )
+    probes, cases = [], []
+    for first, second, inserted, pos, count, tail in product(
+        SCALARS, SCALARS, SCALARS, range(3), COUNTS, (1, 8)
+    ):
+        case = len(cases)
+        expected = []
+        for side in ("old", "new"):
+            members = [("a", first), ("b", second)]
+            if side == "new":
+                members.insert(pos, ("added", inserted))
+            inner, outer = f"I{case}_{side}", f"O{case}_{side}"
+            fields = " ".join(f"{SCALARS[s]} {name};" for name, s in members)
+            declarations.extend([
+                f"struct {inner} {{ {fields} }};",
+                f"struct {outer} {{ uint8_t prefix; struct {inner} items[{count}];"
+                f" {SCALARS[tail]} tail; }};",
+            ])
+            size, alignment, offsets = record([(name, s, s) for name, s in members])
+            osize, oa, oo = record([
+                ("prefix", 1, 1), ("items", size * count, alignment),
+                ("tail", tail, tail),
+            ])
+            expressions = [
+                f"sizeof(struct {inner})", f"_Alignof(struct {inner})",
+                f"offsetof(struct {inner}, a)", f"offsetof(struct {inner}, b)",
+                f"sizeof(struct {outer})", f"_Alignof(struct {outer})",
+                f"offsetof(struct {outer}, items)", f"offsetof(struct {outer}, tail)",
+                f"offsetof(struct {outer}, items[{count - 1}].b)",
+            ]
+            expected.append([size, alignment, offsets["a"], offsets["b"], osize,
+                             oa, oo["items"], oo["tail"],
+                             oo["items"] + (count - 1) * size + offsets["b"]])
+            probes.append('printf("' + " ".join(["%zu"] * len(expressions))
+                          + '\\n", ' + ", ".join(expressions) + ");")
+        cases.append(([first, second, inserted, pos, count, tail], expected))
+
+    with tempfile.TemporaryDirectory() as temporary:
+        source = Path(temporary) / "probe.c"
+        binary = source.with_suffix("")
+        source.write_text("\n".join(declarations + ["int main(void) {"] + probes + ["}"]))
+        subprocess.run([gcc, "-std=c11", "-pedantic-errors", "-O0",
+                        str(source), "-o", str(binary)], check=True)
+        rows = [list(map(int, line.split())) for line in
+                subprocess.check_output([binary], text=True).splitlines()]
+
+    assert len(rows) == 2 * len(cases) and all(len(row) == 9 for row in rows)
+    by_count = {}
+    witness = None
+    repetition_witness = None
+    mismatches = 0
+    for index, (inputs, expected) in enumerate(cases):
+        old, new = rows[2 * index:2 * index + 2]
+        mismatches += sum(a != b for actual, model in zip((old, new), expected)
+                          for a, b in zip(actual, model))
+        count = inputs[4]
+        stats = by_count.setdefault(count, dict(pairs=0, array_gap_gt_16=0,
+                                                tail_gap_gt_16=0, max_tail_gap=0))
+        array_gap = count * (new[0] - old[0])
+        tail_gap = new[7] - old[7]
+        stats["pairs"] += 1
+        stats["array_gap_gt_16"] += array_gap > 16
+        stats["tail_gap_gt_16"] += tail_gap > 16
+        stats["max_tail_gap"] = max(stats["max_tail_gap"], tail_gap)
+        if array_gap > 16 and tail_gap > 16 and (
+            witness is None or (count, old[0], new[0]) < tuple(witness["rank"])
+        ):
+            witness = dict(rank=[count, old[0], new[0]], inputs=inputs,
+                           old=old, new=new, array_gap=array_gap, tail_gap=tail_gap)
+        if (old[1] == new[1] and 0 < new[0] - old[0] <= 16
+                and array_gap > 16 and tail_gap > 16
+                and (repetition_witness is None or
+                     (count, old[0], new[0]) < tuple(repetition_witness["rank"]))):
+            repetition_witness = dict(
+                rank=[count, old[0], new[0]], inputs=inputs, old=old, new=new,
+                array_gap=array_gap, tail_gap=tail_gap,
+            )
+    return dict(
+        compiler=subprocess.check_output([gcc, "--version"], text=True).splitlines()[0],
+        target=subprocess.check_output([gcc, "-dumpmachine"], text=True).strip(),
+        input_order=["first_size", "second_size", "inserted_size",
+                     "insertion_index", "array_length", "tail_size"],
+        observation_order=["inner_size", "inner_alignment", "inner_a", "inner_b",
+                           "outer_size", "outer_alignment", "array_offset",
+                           "tail_offset", "last_element_b"],
+        pairs=len(cases), observations=len(rows) * 9, mismatches=mismatches,
+        max_inner_size_gap=max(rows[i+1][0]-rows[i][0] for i in range(0,len(rows),2)),
+        by_count=by_count, witness=witness, repetition_witness=repetition_witness,
+    )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--gcc", default="gcc")
+    parser.add_argument("--out", type=Path, default=Path(__file__).with_name("results.json"))
+    args = parser.parse_args()
+    results = run(args.gcc)
+    args.out.write_text(json.dumps(results, indent=2) + "\n")
+    raise SystemExit(bool(results["mismatches"] or not results["repetition_witness"]))
+
+```
