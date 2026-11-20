@@ -634,3 +634,43 @@ result={'profiles':len(pairs),'vector_checks':checks,'affine_vector_checks':affi
 (HERE/'results.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 
 ```
+
+## R3 public-checker experiment: dense versus selected lengths
+
+At pinned b0b8793989c150a5b05f48e4e999a7df4219365a, GCC 14.2 C11 ELF/DWARF,
+four concrete profiles were compared: late indexed-offset cancellation, identity,
+eight-byte growth and one-byte growth. The dense domain is N=1..128 per profile.
+The selector retained 35 pairs from the same domain versus 512 dense pairs,
+preserving each profile's seven-bit model equality-vector coverage.
+
+| Suite | Pairs | Direct offset checks | Size checks | Local wall seconds |
+|---|---:|---:|---:|---:|
+| Dense | 512 | 1,536 | 1,024 | 9.59 |
+| Selected | 35 | 105 | 70 | 3.62 |
+
+For scoped direct properties, both suites had zero missing, unexpected,
+wrong-valued or duplicate findings. Dense offsets: 512 changed / 1,024 unchanged;
+selected: 36 / 69. Dense sizes: 768 changed / 256 unchanged; selected: 54 / 16.
+The direct offset projection is inner x plus outer items/tail; other fields and
+finding kinds are deliberately outside its denominator. Independent executed
+GCC probes supply all expected numeric values. Neither aggregate verdict nor
+agreement between two checker runs serves as ground truth.
+
+First/last indexed offsets reconstructed from dump facts plus fixture N matched
+2,048 dense and 140 selected side-observations. These are derived values, not
+standalone public compare findings. Element alignment was unknown in all 1,024
+and 70 side-records respectively: this lane does NOT establish all seven
+observations through checker evidence. No alignment is imputed from equality.
+
+The 14.6x pair-count reduction is empirical for these four profiles. Wall time
+was a single batched run (about 2.65x), not a benchmark or universal improvement.
+Both libraries contain all cases in their suite. Compiler probes agree with the
+model; actual checker implementations still require held-out long-input testing.
+No real abicheck defect was found by these scoped checks. N=101 is retained in
+the selected late-cancellation profile; equal indexed offsets do not make the
+whole changed structure ABI-compatible.
+
+See [the executable experiment](abiforge-array-checker-experiment.md) for scripts
+and machine-readable receipts. Next close the missing alignment evidence with a
+header-backed lane, extend to more edit families, and mechanize the selector's
+correspondence rather than inferring implementation correctness from these runs.
