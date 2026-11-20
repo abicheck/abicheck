@@ -97,6 +97,35 @@ def test_a_killed_test_command_leaves_no_marker(tmp_path: Path) -> None:
     assert "edit-corpus-coverage/shard-2.done" not in result.tree()
 
 
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="needs Linux /proc")
+def test_the_test_command_runs_niced_without_waiting_on_the_sampler(
+    tmp_path: Path,
+) -> None:
+    # The tests run below the runner agent's priority, so a fully busy machine
+    # still lets the agent heartbeat; the load sampler must neither delay the
+    # step's end nor outlive it (it polls once a minute).
+    require_bash()
+    ws = make_workspace(tmp_path)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "python").write_text(
+        "#!/bin/sh\ncut -d' ' -f19 /proc/self/stat\n", encoding="utf-8"
+    )
+    (bindir / "python").chmod(0o755)
+    import time
+
+    started = time.monotonic()
+    result = run_step(
+        _TEST_STEP,
+        workspace=ws,
+        env={"SHARD": "1", "PATH": f"{bindir}:/usr/bin:/bin"},
+    )
+    assert result.returncode == 0, result.stderr
+    base = int(Path("/proc/self/stat").read_text().split()[18])
+    assert int(result.stdout.split()[0]) == min(base + 10, 19)
+    assert time.monotonic() - started < 30
+
+
 @pytest.mark.parametrize(
     ("has_records", "report_rc", "step_rc"),
     [(False, 1, 0), (True, 0, 0), (True, 1, 1)],
