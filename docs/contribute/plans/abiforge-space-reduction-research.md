@@ -528,3 +528,109 @@ print(json.dumps({k:v for k,v in result.items() if k not in ('compiled','obligat
 print('compiled pairs',compiled['pairs'],'observations',compiled['observations'])
 
 ```
+
+## R3 extension: a vector of observations needs data-dependent representatives
+
+The 1..15 rule is specific to the tail-offset observation. Expanding to arbitrary
+old/new element changes and observing the last element's common field yields a
+counterexample (this is a field reorder/array resize, not just the earlier insertion):
+
+```c
+struct Old { char pad[100]; char x; }; // size 101
+struct New { char x; char pad[101]; }; // size 102
+```
+
+For arrays starting at zero, the last x has offset difference N-101. It differs
+at N=15 but is equal at N=101. GCC confirmed old/new offsets 10200/10200 at 101;
+at 100 they are 10099/10098, and at 102 they are 10301/10302. The enclosing
+structure remains incompatible (its size differs); equality of this one offset
+must not be interpreted as overall compatibility. Replacing 100 with K moves
+the equality to N=K+1: no universal small maximum test length covers this family.
+
+A finite **number of data-dependent representatives** is still possible for the
+specified vector. For fixed element summaries, prefix and tail, partition N as
+r+8*k, r in 1..8, k>=0. Each numeric observation is affine in k because every
+rounding alignment divides 8. Therefore its old/new difference is b+d*k.
+A nonconstant difference has at most one integer nonnegative root; a constant
+one is either always zero or never zero. For each residue select all such roots
+and one non-root. This preserves the whole vector of equality/inequality bits.
+For m observations, 8*(m+1) representatives suffice (not necessarily minimally).
+Their numeric lengths can be arbitrarily large; this is not a uniform depth cutoff.
+
+The script below checks seven observations: element stride/alignment, array start,
+tail offset, enclosing size, first-element field offset and last-element field
+offset. Across 1,513 summary profiles and 391,867 sampled lengths, all affine
+identities and representative-vector comparisons passed. Each comparison has
+seven components. At most 15 representatives were selected in this sample; the
+proved-by-argument upper bound is 64 for seven observations. Summary profiles
+include arithmetic layouts not all instantiated as C definitions. Independently,
+seven compiled counterexample lengths agreed with model offsets and outer sizes.
+This is not another 391,867 compiler/checker runs.
+
+Scope: one-dimensional arrays, one common byte field, fixed old/new layout
+summaries, equal positive N and common prefix/tail, ordinary alignments dividing
+8, no overflow/packing. All internal fields, variable array indices, multidimensional
+arrays, inheritance and checker implementation conformance remain out of scope.
+The affine argument is not yet a mechanized Lean theorem. Next connect this
+selector to actual abiforge pairs and audit predictions against public checker
+findings, retaining long controls for implementation bugs.
+
+Self-contained reproduction: save as `array_vector.py`, run with Python and GCC.
+It writes `results.json` beside the script.
+
+```python
+"""Symbolic residue representatives for a vector of aggregate-layout equalities."""
+import itertools,json,subprocess,tempfile
+from pathlib import Path
+HERE=Path(__file__).resolve().parent
+def up(x,a):return (x+a-1)//a*a
+def obs(s,a,o,p,t,n):
+ start=up(p,a);tail=up(start+n*s,t)
+ return [s,a,start,tail,up(tail+t,max(a,t)),start+o,start+(n-1)*s+o]
+def diff(pair,n):
+ old,new,p,t=pair
+ return [y-x for x,y in zip(obs(*old,p,t,n),obs(*new,p,t,n))]
+def bits(pair,n):return [x!=0 for x in diff(pair,n)]
+def reps(pair):
+ result={}
+ for r in range(1,9):
+  b=diff(pair,r);d=[y-x for x,y in zip(b,diff(pair,r+8))]
+  roots={-x//s for x,s in zip(b,d) if s and (-x)%s==0 and -x//s>=0}
+  # Every non-root has the same equality vector; include one non-root.
+  other=0
+  while other in roots:other+=1
+  result[r]={'base':b,'slope':d,'roots':sorted(roots),'other':other}
+ return result
+checks=0;affine_checks=0;maximum=0
+# Summaries are valid layout arithmetic inputs, not all generated C type definitions.
+layouts=[(s,a,o) for a in (1,2,4,8) for s in range(a,33,a) for o in (0,s-1)]
+# Deterministic cross-section including arbitrary offset moves, size increases/decreases.
+pairs=[(layouts[i],layouts[j],p,t) for i in range(0,len(layouts),7) for j in range(0,len(layouts),9) for p in (0,1,7) for t in (1,8)]
+witness=((101,1,100),(102,1,0),0,1);pairs.append(witness)
+for pair in pairs:
+ table=reps(pair);maximum=max(maximum,sum(len(x['roots'])+1 for x in table.values()))
+ for n in list(range(1,258))+[1024,1000000]:
+  r=(n-1)%8+1;k=(n-r)//8;v=table[r]
+  assert diff(pair,n)==[b+k*d for b,d in zip(v['base'],v['slope'])]
+  affine_checks+=1
+  selected=k if k in v['roots'] else v['other']
+  assert bits(pair,n)==bits(pair,r+8*selected)
+  checks+=1
+# Independently compile the counterexample at and around its late equality.
+source=['#include <stddef.h>','#include <stdio.h>',
+ 'struct Old { char pad[100]; char x; };','struct New { char x; char pad[101]; };','int main(void){']
+lengths=(1,15,16,100,101,102,1000)
+for n in lengths:
+ source += [f'struct O{n} {{struct Old a[{n}];char tail;}};',f'struct N{n} {{struct New a[{n}];char tail;}};',f'printf("{n} %zu %zu %zu %zu\\n",offsetof(struct O{n},a[{n-1}].x),offsetof(struct N{n},a[{n-1}].x),sizeof(struct O{n}),sizeof(struct N{n}));']
+source+=['return 0;}']
+with tempfile.TemporaryDirectory() as tmp:
+ c=Path(tmp)/'probe.c';exe=Path(tmp)/'probe';c.write_text('\n'.join(source))
+ subprocess.run(['gcc','-std=c11',str(c),'-o',str(exe)],check=True)
+ rows=[list(map(int,line.split())) for line in subprocess.check_output([str(exe)],text=True).splitlines()]
+for n,old,new,os,ns in rows:
+ assert [new-old,ns-os]==[diff(witness,n)[6],diff(witness,n)[4]]
+assert bits(witness,15)[6] and not bits(witness,101)[6]
+result={'profiles':len(pairs),'vector_checks':checks,'affine_vector_checks':affine_checks,'observations_per_vector':7,'max_selected_lengths':maximum,'counterexample_compiler_rows':rows,'counterexample_columns':['N','old_last_x','new_last_x','old_size','new_size'],'compiler':subprocess.check_output(['gcc','--version'],text=True).splitlines()[0],'observation_order':['stride','element_alignment','array_start','tail_offset','outer_size','first_field_offset','last_field_offset'],'scope':'ordinary one-dimensional arrays, fixed old/new element summaries, same P/T/N, alignments divide 8, integer arithmetic, one common byte field'}
+(HERE/'results.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
+
+```
