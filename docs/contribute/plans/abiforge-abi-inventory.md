@@ -160,3 +160,11 @@ checker audits and a 99-to-9 prefix-grid selector checked against a placement
 model. These remain partial evidence; no inventory row is closed by this pilot.
 The [array header extension](abiforge-array-checker-experiment.md) separately
 closes the measured alignment-evidence gap on five ordinary C layout profiles.
+
+
+The [return ABI experiment](abiforge-return-abi-experiment.md) adds C2/R2
+interaction evidence under GCC at O0 and O2, with unchanged export names,
+size and alignment. Its reproduction and receipts distinguish protocol differences
+from accidental output agreement. The call experiment now also contains a Lean
+proof for arbitrary prefix counts in the bounded-register-demand resource model;
+this proves a capacity predicate, not complete calling-convention correctness.

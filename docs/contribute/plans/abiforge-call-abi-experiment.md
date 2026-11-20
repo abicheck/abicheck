@@ -733,3 +733,46 @@ for name,p in r['profiles'].items():
   }
 }
 ```
+
+## Mechanized register-capacity reduction
+
+Lean 4.15.0 now checks preservation of the aggregate spill predicate for arbitrary
+natural integer/floating prefix counts and payload requirements of at most two
+registers in each bank. This replaces bounded-grid evidence for this specific
+capacity predicate with a quantified theorem. Integer representatives are 0/5/6;
+floating representatives are 0/7/8, so their product has nine elements.
+
+The theorem assumes the six/eight-bank resource model and all-or-stack fallback.
+It does not derive those rules from machine code, prove full calling equivalence,
+cover stack offsets/prefix observations, or verify the checker implementation.
+It also does not prove the nontrivial indirect protocol model. Exact register
+indices are not preserved. No sorry/admit or added axiom; reported dependencies
+are propext, Classical.choice and Quot.sound.
+
+Save as RegisterCutoff.lean and run `lean RegisterCutoff.lean` with Lean 4.15.0.
+No Mathlib dependency.
+
+```lean
+import Std.Tactic
+
+def repI (i : Nat) : Nat := if i < 5 then 0 else if i < 6 then 5 else 6
+def repF (f : Nat) : Nat := if f < 7 then 0 else if f < 8 then 7 else 8
+
+theorem integer_capacity (i need : Nat) (h : need ≤ 2) :
+    (min i 6 + need > 6) ↔ (min (repI i) 6 + need > 6) := by
+  unfold repI
+  split <;> (try split) <;> omega
+
+theorem floating_capacity (f need : Nat) (h : need ≤ 2) :
+    (min f 8 + need > 8) ↔ (min (repF f) 8 + need > 8) := by
+  unfold repF
+  split <;> (try split) <;> omega
+
+theorem aggregate_spill (i f gi fp : Nat) (hg : gi ≤ 2) (hf : fp ≤ 2) :
+    ((min i 6 + gi > 6) ∨ (min f 8 + fp > 8)) ↔
+    ((min (repI i) 6 + gi > 6) ∨ (min (repF f) 8 + fp > 8)) := by
+  rw [integer_capacity i gi hg, floating_capacity f fp hf]
+
+#print axioms aggregate_spill
+
+```
