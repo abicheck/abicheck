@@ -232,8 +232,11 @@ jobs:
         # (shard 2/2's main cancellations left none, BlobNotFound). `-v` names
         # each finished test per worker, and faulthandler_timeout dumps every
         # thread's stack for a test still running after 7 min, so the log
-        # shows where a stall sits.
-        timeout-minutes: 28
+        # shows where a stall sits. A healthy shard's test step takes up to
+        # ~30 min (shard 1/3 reached 93% at 26 min with -v and coverage); 35
+        # leaves that headroom and still ends ~3 min before the job's 40, past
+        # its ~1.5 min of setup.
+        timeout-minutes: 35
         env:
           # Linux's ELF integration count is known (~900), so it gets a real
           # floor; the step's own default is the host-agnostic '1'. Each shard
