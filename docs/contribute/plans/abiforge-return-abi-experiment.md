@@ -471,3 +471,120 @@ if __name__ == "__main__":
   }
 }
 ```
+
+## Hidden return pointer and explicit inputs
+
+A follow-up uses 1–8 integer arguments with distinct values 100, 101, ...,
+and two double arguments 1.25 and 2.5. The provider records received inputs in
+private globals, exposed through unchanged scalar accessor functions. This
+observes input transfer independently of the incompatible result transfer.
+Three profiles (destructor removed, nontrivial identity, trivial identity) at
+O0/O2, with old/old, new/new and old/new combinations, yield 144 executions.
+All 96 matched-version baselines and 32 cross-version identity controls passed.
+All 16 mutation runs had incorrect integer arguments; the two floating arguments
+were unchanged. For two integer arguments, the new provider saw a buffer address
+and 100 rather than 100 and 101. At seven arguments the shift extended across
+the register/stack boundary. This bounded experiment does not prove arbitrary
+argument sequences or other platforms. Cross-version calls deliberately violate
+the ABI; reverse mutation with an invalid write destination was not executed.
+This follow-up has not been independently audited through the checker.
+
+Save as `research/sret-input-pilot/run.py` and run with Python and GCC 14.
+
+```python
+from pathlib import Path
+import subprocess as sp, os,json
+P=Path(__file__).resolve().parent
+rows=[]
+def run(args,env=None):
+ return sp.check_output(list(map(str,args)),env=env,text=True,timeout=60)
+for opt in ['-O0','-O2']:
+ for profile,traits in [('removed',[True,False]),('sret_control',[True,True]),('register_control',[False,False])]:
+  base=P/opt[1:]/profile
+  for side,nontrivial in zip(['old','new'],traits):
+   d=base/side;d.mkdir(parents=True,exist_ok=True)
+   header='#include <cstdint>\nusing U=uint64_t;\nstruct T { U a,b; '+('~T() {}' if nontrivial else '')+' };\n'
+   provider=['#include "api.hpp"','static U seen[8]; static double fs[2];','extern "C" U read_i(int i) { return seen[i]; }','extern "C" double read_f(int i) { return fs[i]; }']
+   client=['#include "api.hpp"','#include <cstdio>','#include <cstdlib>','extern "C" U read_i(int); extern "C" double read_f(int);','int main(int argc,char** argv) {switch(std::atoi(argv[1])) {']
+   for n in range(1,9):
+    args=', '.join([f'U a{i}' for i in range(n)]+['double f0','double f1'])
+    header+=f'extern "C" T probe{n}({args});\n'
+    provider.append(f'T probe{n}({args}) {{ '+''.join(f'seen[{i}]=a{i};' for i in range(n))+'fs[0]=f0;fs[1]=f1;return T{11,22}; }')
+    client.append(f'case {n}: {{ T t=probe{n}('+','.join([str(100+i) for i in range(n)]+['1.25','2.5'])+');'+f'for(int i=0;i<{n};i++) std::printf("%llu ",(unsigned long long)read_i(i)); std::printf("%.2f %.2f\\n",read_f(0),read_f(1));return 0; }}')
+   client.append('}return 2;}')
+   (d/'api.hpp').write_text(header)
+   (d/'provider.cpp').write_text('\n'.join(provider))
+   (d/'client.cpp').write_text('\n'.join(client))
+   flags=['g++','-std=c++20',opt,'-g']
+   run(flags+['-shared','-fPIC',d/'provider.cpp','-o',d/'libprobe.so'])
+   run(flags+[d/'client.cpp','-L'+str(d),'-lprobe','-o',d/'client'])
+  for n in range(1,9):
+   expected=' '.join([str(100+i) for i in range(n)]+['1.25','2.50'])
+   for caller,provider in [('old','old'),('new','new'),('old','new')]:
+    env=os.environ|{'LD_LIBRARY_PATH':str(base/provider)}
+    out=run([base/caller/'client',str(n)],env).strip()
+    if caller==provider: assert out==expected,(out,expected)
+    rows.append(dict(opt=opt,profile=profile,n=n,caller=caller,provider=provider,output=out,expected=expected,match=out==expected))
+(P/'results.json').write_text(json.dumps(rows,indent=2))
+for opt in ['-O0','-O2']:
+ for p in ['removed','sret_control','register_control']:
+  subset=[r for r in rows if r['opt']==opt and r['profile']==p and r['caller']!=r['provider']]
+  print(opt,p,'mismatches',sum(not r['match'] for r in subset),'/',len(subset))
+
+```
+
+## Crossed client/provider optimization experiment
+
+Reused the retained binaries and crossed client O0/O2 with provider O0/O2.
+Nine profiles x 99 signatures x three version combinations x four optimization
+pairs = 10,692 executions. This reruns the same-optimization cells; it is not
+10,692 new semantic scenarios. All 7,128 matched-version executions and all
+1,980 cross-version identity controls passed. Loader resolution was checked for
+each of the 108 executable/provider groups. No new checker audit was performed.
+
+Accidental matches for each of II-to-DD and II-to-ID, out of 99:
+
+| Client | Provider O0 | Provider O2 |
+|---|---:|---:|
+| O0 | 33 | 0 |
+| O2 | 33 | 0 |
+
+ID-to-DI and sret removal mismatched in all 99 cells for every optimization pair.
+Thus in these fixtures optimization alone did not produce an observed interface
+failure. Provider optimization changed the visibility of the intentionally
+introduced type/protocol mismatch. This is not a claim that all compiler flags
+preserve ABI, nor a proof for arbitrary optimization combinations or programs.
+
+Run this after generating both original optimization directories. It retains
+per-execution results and a compact summary beside the original experiment.
+
+```python
+from pathlib import Path
+import json,subprocess,os,itertools
+P=Path(__file__).resolve().parent
+roots={'O0':P,'O2':P.parent/'return-abi-o2'}
+expected=json.loads((P/'results.json').read_text())['expected']
+profiles=list(json.loads((P/'results.json').read_text())['profiles'])
+rows=[];summary=[]
+for co,lo in itertools.product(roots,repeat=2):
+ for name in profiles:
+  for caller,provider in [('old','old'),('new','new'),('old','new')]:
+   exe=roots[co]/'fixtures'/name/caller/'client'
+   lib=roots[lo]/'fixtures'/name/provider
+   env=os.environ|{'LD_LIBRARY_PATH':str(lib)}
+   receipt=subprocess.check_output(['ldd',str(exe)],env=env,text=True)
+   assert f'libprobe.so => {lib}/libprobe.so ' in receipt
+   matches=0
+   for i in range(99):
+    r=subprocess.run([str(exe),str(i)],env=env,text=True,capture_output=True,timeout=2)
+    match=r.returncode==0 and r.stdout.strip()==expected
+    rows.append(dict(client_opt=co,library_opt=lo,profile=name,caller=caller,provider=provider,index=i,rc=r.returncode,output=r.stdout.strip(),match=match))
+    matches+=match
+   if caller==provider or 'identity' in name: assert matches==99
+   summary.append(dict(client_opt=co,library_opt=lo,profile=name,caller=caller,provider=provider,matches=matches,total=99))
+(P/'cross-opt-results.json').write_text(json.dumps(rows,indent=2))
+(P/'cross-opt-summary.json').write_text(json.dumps(summary,indent=2))
+for s in summary:
+ if s['caller']!=s['provider'] and 'identity' not in s['profile']: print(s)
+
+```
