@@ -4,7 +4,8 @@
 another was cancelled, so the floor job once ran on a superseded run whose
 corpus shard had been cancelled and failed with "no Linux shard uploaded
 edit corpus coverage records". Each Linux shard now leaves a
-``shard-N.done`` marker when its integration step finished; the floor is
+``shard-N.done`` marker once its test command returned (never when the
+step's timeout killed it); the floor is
 judged only with every shard's marker. These tests execute the steps themselves.
 """
 
@@ -29,6 +30,9 @@ pytestmark = pytest.mark.skipif(not have_bash(), reason="needs a real bash")
 _WF = "integration.yml"
 _FLOOR = find_run_step(_WF, "edit-corpus-coverage", "Check the PR-tier floor")
 _SHARD_REPORT = find_run_step(_WF, "integration", "Edit corpus coverage (Linux)")
+_TEST_STEP = find_run_step(
+    _WF, "integration", "Integration tests (Linux, with coverage)"
+)
 
 
 def _stub_python(tmp_path: Path, rc: int) -> Path:
@@ -52,32 +56,72 @@ def _stub_bsd_wc(bindir: Path) -> None:
 
 
 @pytest.mark.parametrize("shard", ["1", "2", "3"])
+@pytest.mark.parametrize("test_rc", [0, 1, 3], ids=["pass", "fail", "error"])
+def test_a_returned_test_command_leaves_its_marker(
+    tmp_path: Path, shard: str, test_rc: int
+) -> None:
+    # The marker says "the test command returned": the test step writes it
+    # whatever the command's exit, and keeps that exit as its own. A step
+    # its timeout kills never reaches the write (it also reads `failure`, so
+    # no later step could tell it from a finished one).
+    require_bash()
+    ws = make_workspace(tmp_path)
+    bindir = _stub_python(tmp_path, test_rc)
+    result = run_step(
+        _TEST_STEP,
+        workspace=ws,
+        env={"SHARD": shard, "PATH": f"{bindir}:/usr/bin:/bin"},
+    )
+    assert result.returncode == test_rc, result.stderr
+    assert f"edit-corpus-coverage/shard-{shard}.done" in result.tree()
+    assert outside_is_intact(tmp_path)
+
+
+def test_a_killed_test_command_leaves_no_marker(tmp_path: Path) -> None:
+    # Negative control: a command that never returns (the timeout's SIGTERM
+    # stands in as the kill) leaves no marker.
+    require_bash()
+    ws = make_workspace(tmp_path)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "python").write_text(
+        "#!/bin/sh\nkill -TERM $PPID\nsleep 5\n", encoding="utf-8"
+    )
+    (bindir / "python").chmod(0o755)
+    result = run_step(
+        _TEST_STEP,
+        workspace=ws,
+        env={"SHARD": "2", "PATH": f"{bindir}:/usr/bin:/bin"},
+    )
+    assert result.returncode != 0
+    assert "edit-corpus-coverage/shard-2.done" not in result.tree()
+
+
 @pytest.mark.parametrize(
     ("has_records", "report_rc", "step_rc"),
     [(False, 1, 0), (True, 0, 0), (True, 1, 1)],
     ids=["no-records", "report-ok", "report-fails"],
 )
-def test_a_finished_shard_leaves_its_marker(
-    tmp_path: Path, shard: str, has_records: bool, report_rc: int, step_rc: int
+def test_the_shard_report_runs_only_on_records(
+    tmp_path: Path, has_records: bool, report_rc: int, step_rc: int
 ) -> None:
-    # The marker says "the integration step finished"; it is written before
-    # the report, so a failing report fails the step (and the leg) without
-    # making the floor job read the shard as cancelled.
+    # The report step writes no marker; it reports a shard's records when a
+    # corpus cell left any, and a failing report fails the step.
     require_bash()
-    files = {"edit-corpus-coverage/.keep": ""} if has_records else {}
+    files = {"edit-corpus-coverage/rec.json": "{}"} if has_records else {}
+    files["edit-corpus-coverage/shard-1.done"] = ""
     ws = make_workspace(tmp_path, files=files)
     bindir = _stub_python(tmp_path, report_rc)
     result = run_step(
         _SHARD_REPORT,
         workspace=ws,
         env={
-            "SHARD": shard,
+            "SHARD": "1",
             "GITHUB_STEP_SUMMARY": str(ws / "_summary"),
             "PATH": f"{bindir}:/usr/bin:/bin",
         },
     )
     assert result.returncode == step_rc, result.stderr
-    assert f"edit-corpus-coverage/shard-{shard}.done" in result.tree()
     assert outside_is_intact(tmp_path)
 
 

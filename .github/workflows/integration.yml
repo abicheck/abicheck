@@ -227,6 +227,16 @@ jobs:
       # consumer, so coverage stays -- only its serial cost goes.
       - name: Integration tests (Linux, with coverage)
         if: (success() || failure()) && runner.os == 'Linux'
+        # A step timeout below the job's: a stalled shard then fails this step
+        # with its log kept, where the job-level cancel discards the log
+        # (shard 2/2's main cancellations left none, BlobNotFound). `-v` names
+        # each finished test per worker, and faulthandler_timeout dumps every
+        # thread's stack for a test still running after 7 min, so the log
+        # shows where a stall sits. A healthy shard's test step takes up to
+        # ~30 min (shard 1/3 reached 93% at 26 min with -v and coverage); 35
+        # leaves that headroom and still ends ~3 min before the job's 40, past
+        # its ~1.5 min of setup.
+        timeout-minutes: 35
         env:
           # Linux's ELF integration count is known (~900), so it gets a real
           # floor; the step's own default is the host-agnostic '1'. Each shard
@@ -238,8 +248,19 @@ jobs:
           # The edit corpus's PR tier writes one coverage record per cell
           # (abiforge/coverage.py); the next step reports them.
           ABICHECK_EDIT_CORPUS_COVERAGE_DIR: edit-corpus-coverage
-          PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/3 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
-        run: python scripts/verify.py --profile full --only integration --require-complete
+          PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/3 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml -v -o faulthandler_timeout=420
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # The shard marker is written here, once the test command has
+          # returned (passed or failed), and never by a later step: a step the
+          # timeout kills also reports `failure`, so a follow-up step could not
+          # tell an interrupted shard from a finished one. The floor job judges
+          # a run only when all three markers exist.
+          rc=0
+          python scripts/verify.py --profile full --only integration --require-complete || rc=$?
+          mkdir -p edit-corpus-coverage
+          : > "edit-corpus-coverage/shard-${SHARD}.done"
+          exit "$rc"
       - name: Edit corpus coverage (Linux)
         # ChangeKinds this shard's corpus cells verified and the language space
         # they ran, in the step summary. Reported only: the `pr` verified floor
@@ -249,15 +270,9 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          # This shard's integration step finished (passed or failed): the
-          # floor job judges a run only when every shard left this marker, so a
-          # cancelled shard is never read as missing records. Written first, so
-          # a failing report below fails this step without hiding the shard.
-          had_records=0
-          [ -d edit-corpus-coverage ] && had_records=1
-          mkdir -p edit-corpus-coverage
-          : > "edit-corpus-coverage/shard-${SHARD}.done"
-          if [ "$had_records" = 1 ]; then
+          # The shard marker is written by the test step itself; records exist
+          # only when a corpus cell ran.
+          if find edit-corpus-coverage -type f ! -name 'shard-*.done' 2>/dev/null | grep -q .; then
             python -m abiforge.coverage report edit-corpus-coverage \
               --title "Edit corpus PR-tier coverage (shard ${SHARD}/3)" \
               --summary "$GITHUB_STEP_SUMMARY"
