@@ -110,7 +110,15 @@ def _record_change(old_rec: RecordType, new_rec: RecordType) -> str | None:
     if old_rec.size_bits is None or old_rec.size_bits != new_rec.size_bits:
         return None
     old_names = {f.name for f in old_rec.fields}
-    added = [f.name for f in new_rec.fields if f.name and f.name not in old_names]
+    # A field at an offset an old field already starts at reuses that storage
+    # (a rename, or a reserved slot put to use): it is not new data absorbed
+    # by padding, so packing cannot shift it.
+    old_offsets = {f.offset_bits for f in old_rec.fields if f.offset_bits is not None}
+    added = [
+        f.name
+        for f in new_rec.fields
+        if f.name and f.name not in old_names and f.offset_bits not in old_offsets
+    ]
     if not added:
         return None
     return (

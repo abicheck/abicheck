@@ -98,6 +98,29 @@ def test_record_signal_matches_packed_layout_oracle() -> None:
     assert checked > 50
 
 
+def test_renaming_fields_in_place_is_not_flagged() -> None:
+    """A rename or a reserved slot put to use keeps every offset (case54/case35).
+
+    Oracle: the new field starts where an old field started, so it occupies
+    storage the old layout already had; packing cannot shift it.
+    """
+    checked = 0
+    for n in (1, 2, 3):
+        for old in itertools.product(_SCALARS, repeat=n):
+            old_f = [(f"f{k}", t, s, a) for k, (_, t, s, a) in enumerate(old)]
+            for renamed in range(1, 2**n):
+                new_f = [
+                    (f"used{k}" if renamed >> k & 1 else name, t, s, a)
+                    for k, (name, t, s, a) in enumerate(old_f)
+                ]
+                changes = build_config_sensitive_changes(
+                    _snap([_rec(old_f)]), _snap([_rec(new_f)])
+                )
+                assert changes == [], (old_f, new_f)
+                checked += 1
+    assert checked > 50
+
+
 def test_record_growth_visible_in_header_layout_is_not_flagged() -> None:
     old = _rec([("a", "int", 4, 4)])
     new = _rec([("a", "int", 4, 4), ("b", "int", 4, 4)])
