@@ -18,6 +18,7 @@ from abiforge.operators.dialect import DIALECT_OPERATORS
 _OPS = {op.name: op for op in DIALECT_OPERATORS}
 _NOEXCEPT = _OPS["dialect_cxx17_noexcept_in_function_type"]
 _CHAR8 = _OPS["dialect_cxx20_char8_t_parameter"]
+_CONTROL = _OPS["dialect_rebuild_cxx23_control"]
 
 
 def _problems(op_name: str, findings: tuple[Finding, ...]) -> list[str]:
@@ -101,7 +102,11 @@ def test_a_wrong_attribution_fails(
 def test_each_operator_only_changes_the_standard() -> None:
     """Identical source: the edit is the -std= flag, nothing else."""
     seed = SEED_BY_NAME["cxx_dialect"]
-    for op, flag in ((_NOEXCEPT, "-std=c++17"), (_CHAR8, "-std=c++20")):
+    for op, flag in (
+        (_NOEXCEPT, "-std=c++17"),
+        (_CHAR8, "-std=c++20"),
+        (_CONTROL, "-std=c++23"),
+    ):
         changed = op.edit(dict(seed.roles))
         assert changed == {"build.cflags": (flag, "")}
 
@@ -122,3 +127,23 @@ def test_baseline_standard_precedes_the_revision(
     lo, hi = STANDARD_BY_NAME[rng.first].year, STANDARD_BY_NAME[rng.last].year
     assert all(lo <= years[s] <= hi for s in allowed)
     assert not any(lo <= years[s] <= hi for s in refused)
+
+
+def test_every_cxx_standard_has_a_dialect_edit() -> None:
+    """Some edit applies at every C++ baseline, so no standard leaves the
+    gated seed unexercised; C++20 onward gets the no-rename control."""
+    from abiforge.model.config import STANDARDS
+
+    for std in (s for s in STANDARDS if s.lang == "c++"):
+        covering = [
+            op.name
+            for op in DIALECT_OPERATORS
+            for rng in op.standards
+            if STANDARD_BY_NAME[rng.first].year
+            <= std.year
+            <= STANDARD_BY_NAME[rng.last or "c++26"].year
+        ]
+        assert covering, std.name
+    (rng,) = _CONTROL.standards
+    assert rng.first == "c++20" and rng.last is None
+    assert _CONTROL.verdict_max == "COMPATIBLE"

@@ -700,4 +700,60 @@ def _diff_type_vtable(
     ):
         change.qualified_name = t_new.qualified_name or t_new.name
         change.vtable_covers_unverifiable_layout_gap = True
-    return [change]
+    return [change, *_moved_entries(old_vtable, new_vtable, old_funcs, new_funcs)]
+
+
+def _moved_entries(
+    old_vtable: list[str],
+    new_vtable: list[str],
+    old_funcs: Mapping[str, Function],
+    new_funcs: Mapping[str, Function],
+) -> list[Change]:
+    """One finding per virtual whose place in a *reordered* sequence moved.
+
+    ``compare.function_signature`` names each moved method from its own
+    ``vtable_index`` (DWARF records one per virtual). A header snapshot
+    records the class's declared sequence but no per-function index
+    (castxml emits none), so without this the report names the class and
+    not the methods whose slots an old client now calls through. Only a
+    pure reorder (same entries) is split: an added or removed entry has its
+    own finding, and every later entry's place shifting is not a reorder of
+    it. A method whose index either side records is left to the indexed
+    path, so no method is reported twice; an entry naming no function on
+    either side stays with the class finding.
+    """
+    if Counter(old_vtable) != Counter(new_vtable) or len(set(old_vtable)) != len(
+        old_vtable
+    ):
+        return []
+    out: list[Change] = []
+    for entry in old_vtable:
+        before, after = old_vtable.index(entry), new_vtable.index(entry)
+        if before == after:
+            continue
+        f_old, f_new = old_funcs.get(entry), new_funcs.get(entry)
+        if f_old is None and f_new is None:
+            # Names no function either side declares: the class finding
+            # already covers it, and a row naming nothing cannot be placed.
+            continue
+        if (f_old is not None and f_old.vtable_index is not None) or (
+            f_new is not None and f_new.vtable_index is not None
+        ):
+            continue
+        known = f_old or f_new
+        label = known.name if known is not None else entry
+        out.append(
+            make_change(
+                ChangeKind.TYPE_VTABLE_CHANGED,
+                symbol=entry,
+                description=(
+                    f"position in the declared vtable sequence changed for "
+                    f"{label}: {before} → {after}"
+                ),
+                old_value=f"position {before}",
+                new_value=f"position {after}",
+                entity_id=(f_old.entity_id if f_old else None)
+                or (f_new.entity_id if f_new else None),
+            )
+        )
+    return out

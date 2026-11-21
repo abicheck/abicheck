@@ -284,6 +284,9 @@ class TestCheckerEdgeCases:
         vtable_changes = [
             c for c in r.changes if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
         ]
+        # The entries name no declared function, so only the class finding
+        # carries the reorder (tests/test_vtable_moved_entries.py covers the
+        # per-method split for declared virtuals).
         assert len(vtable_changes) == 1
         assert "reordered" in vtable_changes[0].description
 

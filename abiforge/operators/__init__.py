@@ -730,6 +730,34 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "swapping virtual declarations changes vtable slot order",
         expected=frozenset({"TYPE_VTABLE_CHANGED"}),
         touches=("shape.area", "shape.kind"),
+        # Owner and members are judged apart (research/standard-space
+        # follow-up): a report naming only Shape is right about the class
+        # but not about which slots an old client now calls through.
+        claims=(
+            EntityClaim(
+                EntityRef("Shape"),
+                required=True,
+                kinds=frozenset({"TYPE_VTABLE_CHANGED"}),
+                why="Shape's vtable order changes",
+            ),
+            *(
+                EntityClaim(
+                    EntityRef(f"Shape::{m}", sym),
+                    required=True,
+                    kinds=frozenset({"TYPE_VTABLE_CHANGED"}),
+                    why=f"Shape::{m} moves to the other slot",
+                )
+                for m, sym in (
+                    ("area", "_ZNK5Shape4areaEv"),
+                    ("kind", "_ZNK5Shape4kindEv"),
+                )
+            ),
+            EntityClaim(
+                EntityRef("shape_area"),
+                required=False,
+                why="shape_area's signature and body are unchanged",
+            ),
+        ),
     ),
     EditOp(
         "virtual_remove",
