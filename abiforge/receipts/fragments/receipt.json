@@ -1,6 +1,6 @@
 {
-  "command": "python -m abiforge.run.fragment_campaign /tmp/claude-0/campaign",
-  "revision": "1319f52118a16a86655370886dc9112195c95217",
+  "command": "python -m abiforge.run.fragment_campaign /tmp/claude-0/camp2",
+  "revision": "c0f4f360ca38331cab8d5fe5196b642a63f91416",
   "python": "3.13.18",
   "host": "Linux x86_64",
   "toolchains": {
@@ -27,21 +27,21 @@
       "headers"
     ]
   },
-  "operators": 29,
-  "generated": 696,
+  "operators": 36,
+  "generated": 864,
   "unsupported": {},
-  "built_and_compared": 696,
+  "built_and_compared": 864,
   "obligations": {
-    "judged_rows": 1380,
-    "cells_with_unknown_rows": 98
+    "judged_rows": 1592,
+    "cells_with_unknown_rows": 118
   },
   "classes": {
-    "non-observable": 162,
-    "agree": 424,
-    "evidence-limited": 82,
-    "unobservable": 16,
+    "non-observable": 186,
+    "agree": 544,
+    "evidence-limited": 94,
+    "unobservable": 24,
     "wrong-kind": 2,
-    "wrong-detail": 10
+    "wrong-detail": 14
   },
   "failures": [
     {
@@ -130,6 +130,34 @@
       "known_gap": "castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule"
     },
     {
+      "op": "bitfield_barrier_removed_after_6",
+      "config": "c17-gcc13-O0+p1-headers",
+      "cls": "wrong-detail",
+      "problems": [
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::c 24bit->22bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::c 32bit->22bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::tail 40bit->32bit (x1)",
+        "exact unexpected TYPE_SIZE_CHANGED Bits_brem6_after 48bit->40bit (x1)"
+      ],
+      "known_gap": "castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule"
+    },
+    {
+      "op": "bitfield_barrier_removed_before_1",
+      "config": "c17-gcc13-O0+p1-headers",
+      "cls": "wrong-detail",
+      "problems": [
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::b 8bit->1bit (x1)",
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::c 24bit->17bit (x1)",
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::tail 32bit->24bit (x1)",
+        "exact missing TYPE_SIZE_CHANGED Bits_brem1_before 40bit->32bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::b 32bit->1bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::c 48bit->17bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::tail 56bit->24bit (x1)",
+        "exact unexpected TYPE_SIZE_CHANGED Bits_brem1_before 64bit->32bit (x1)"
+      ],
+      "known_gap": "castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule"
+    },
+    {
       "op": "bitfield_width_16_to_17_behind_barrier",
       "config": "c17-gcc13-O2+p1-headers",
       "cls": "wrong-kind",
@@ -211,6 +239,34 @@
         "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem7_before::c 48bit->23bit (x1)",
         "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem7_before::tail 56bit->32bit (x1)",
         "exact unexpected TYPE_SIZE_CHANGED Bits_brem7_before 64bit->40bit (x1)"
+      ],
+      "known_gap": "castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule"
+    },
+    {
+      "op": "bitfield_barrier_removed_after_6",
+      "config": "c17-gcc13-O2+p1-headers",
+      "cls": "wrong-detail",
+      "problems": [
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::c 24bit->22bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::c 32bit->22bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::tail 40bit->32bit (x1)",
+        "exact unexpected TYPE_SIZE_CHANGED Bits_brem6_after 48bit->40bit (x1)"
+      ],
+      "known_gap": "castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule"
+    },
+    {
+      "op": "bitfield_barrier_removed_before_1",
+      "config": "c17-gcc13-O2+p1-headers",
+      "cls": "wrong-detail",
+      "problems": [
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::b 8bit->1bit (x1)",
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::c 24bit->17bit (x1)",
+        "exact missing TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::tail 32bit->24bit (x1)",
+        "exact missing TYPE_SIZE_CHANGED Bits_brem1_before 40bit->32bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::b 32bit->1bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::c 48bit->17bit (x1)",
+        "exact unexpected TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::tail 56bit->24bit (x1)",
+        "exact unexpected TYPE_SIZE_CHANGED Bits_brem1_before 64bit->32bit (x1)"
       ],
       "known_gap": "castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule"
     }

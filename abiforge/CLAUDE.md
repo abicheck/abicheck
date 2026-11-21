@@ -53,7 +53,10 @@ Purpose and claims: `README.md`.
   `source_tree` (what only a multi-file, multi-TU tree shows; `cxx_tree`),
   `fragments` (union and bit-field edits on the gated `c_layout` seed, with
   exact rows from `model/layout_model.py`; campaign:
-  `python -m abiforge.run.fragment_campaign OUT`). The
+  `python -m abiforge.run.fragment_campaign OUT`; which width and barrier
+  edits stand for the rest, under a named projection, is certified by
+  `model/reduction.py`), `dialect` (identical C++ source rebuilt under a
+  newer `-std=`; the gated `cxx_dialect` seed). The
   `EditOp` type is `model/opkit.py`. The ChangeKind scope table (which kinds
   are in scope, and why not the rest) is `coverage_scope.py`.
 - **Seeds** (`model/seeds.py`): a seed's `build.*` roles carry compile and link
