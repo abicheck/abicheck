@@ -25,10 +25,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 from abicheck.elf_metadata import parse_elf_metadata
 from abicheck.model.elf_facts import VttEntryTarget
+from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 pytestmark = [
     pytest.mark.integration,
