@@ -406,19 +406,24 @@ def _run_release(
 
     old, new = _release_operands(tmp_path, breaking=breaking, operand=operand)
     md = tmp_path / "report.md"
-    result = CliRunner().invoke(
-        main,
-        [
-            "compare",
-            str(old),
-            str(new),
-            "-o",
-            "json=-",
-            "-o",
-            f"markdown={md}",
-        ],
-    )
+    args = ["compare", str(old), str(new), "-o", "json=-", "-o", f"markdown={md}"]
+    if operand == "directory":
+        # The live route's other two artifacts: JUnit and the summary sidecar.
+        args += ["-o", f"junit={tmp_path / 'report.xml'}"]
+        args += ["-o", f"json={tmp_path / 'out'}/"]
+    result = CliRunner().invoke(main, args)
     return result.exit_code, json.loads(result.stdout), md.read_text("utf-8")
+
+
+def _junit_errors(tmp_path: Path) -> int:
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(tmp_path / "report.xml").getroot()
+    return int(root.get("errors", "0"))
+
+
+def _summary(tmp_path: Path) -> dict:
+    return json.loads((tmp_path / "out" / "summary.json").read_text("utf-8"))
 
 
 _OPERANDS = ("directory", "bundle_facts")
@@ -429,9 +434,15 @@ _OPERANDS = ("directory", "bundle_facts")
 def test_release_without_bundle_failure_is_unfloored(
     tmp_path, breaking, operand
 ) -> None:
+    from abicheck.workflows.aggregate.report_gate import analysis_assurance_exit
+
     code, payload, _ = _run_release(tmp_path, breaking=breaking, operand=operand)
     assert "bundle_analysis_errors" not in payload
     assert code == (4 if breaking else 0)
+    assert analysis_assurance_exit(payload) == 0
+    if operand == "directory":
+        assert _junit_errors(tmp_path) == 0
+        assert analysis_assurance_exit(_summary(tmp_path)) == 0
 
 
 # A stored BundleFacts pair builds its bundle snapshots from the stored facts,
@@ -449,14 +460,49 @@ _CASES = [
 def test_failed_bundle_axis_floors_the_release_exit_code(
     monkeypatch, tmp_path, operand, producer, breaking
 ) -> None:
+    from abicheck.workflows.aggregate.report_gate import analysis_assurance_exit
+
     message = _PRODUCERS[producer](monkeypatch)
     code, payload, markdown = _run_release(tmp_path, breaking=breaking, operand=operand)
     assert message in payload["bundle_analysis_errors"]
     expected = max(4 if breaking else 0, 1)
     assert code == expected
     assert payload["exit"]["code"] == expected  # report and process agree
+    # The aggregate / deferred-gate reader sees the same floor.
+    assert analysis_assurance_exit(payload) == 1
     assert "Bundle Analysis Warnings" in markdown
     assert "release exit code is at least 1" in markdown
+    if operand == "directory":
+        assert _junit_errors(tmp_path) >= 1
+        summary = _summary(tmp_path)
+        assert summary["exit"]["code"] == expected
+        assert analysis_assurance_exit(summary) == 1
+        assert message in summary["bundle_analysis_errors"]
+
+
+@pytest.mark.parametrize(
+    "with_failure", [False, True], ids=["note_only", "note+failure"]
+)
+def test_a_scope_notice_alone_does_not_floor(
+    monkeypatch, tmp_path, with_failure
+) -> None:
+    """A withheld-manifest scope notice is listed in ``bundle_analysis_errors``
+    but is the completeness axis's business (ADR-065 D6): it never floors a
+    clean release by itself, and never hides a genuine failure beside it."""
+    import abicheck.workflows.release_bundle as rb
+
+    note = "bundle manifest entries withheld: libgone.so (out of scope)"
+    real = rb.scope_manifest_to_members
+    monkeypatch.setattr(
+        rb, "scope_manifest_to_members", lambda m, r: (real(m, r)[0], note)
+    )
+    if with_failure:
+        _force_compare_bundle_failure(monkeypatch)
+    code, payload, markdown = _run_release(tmp_path, breaking=False)
+    assert note in payload["bundle_analysis_errors"]
+    assert code == payload["exit"]["code"] == (1 if with_failure else 0)
+    assert ("release exit code is at least 1" in markdown) is with_failure
+    assert _junit_errors(tmp_path) == (1 if with_failure else 0)
 
 
 @pytest.mark.parametrize("require_complete", [False, True])
@@ -483,6 +529,6 @@ def test_bundle_failure_floor_is_max_folded(verdict, errors, require_complete) -
         0,
         rows,
         require_complete_analysis=require_complete,
-        bundle_analysis_errors=errors,
+        bundle_analysis_failures=errors,
     ).code
     assert floored == (max(base, 1) if errors else base)

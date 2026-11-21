@@ -392,6 +392,7 @@ def _release_md_bundle_findings(
     if bundle_result is not None and bundle_result.analysis_errors:
         lines += ["", "## ⚠️ Bundle Analysis Warnings", ""]
         lines += [f"- {msg}" for msg in bundle_result.analysis_errors]
+    if bundle_result is not None and bundle_result.analysis_failures:
         lines += [
             "",
             "Cross-library analysis did not complete, so analysis assurance is "

@@ -445,7 +445,7 @@ def _exit_compare_release(
     no_comparison_completed_exit_contribution: int = 0,
     failed_member_exit_contribution: int = 0,
     assurance_decision: ReleaseAssuranceDecision | None = None,
-    bundle_analysis_errors: Sequence[str] = (),
+    bundle_analysis_failures: Sequence[str] = (),
 ) -> None:
     """Exit a directory/package ``compare`` with the release's own status code.
 
@@ -477,12 +477,12 @@ def _exit_compare_release(
         no_comparison_completed_exit_contribution=no_comparison_completed_exit_contribution,
         failed_member_exit_contribution=failed_member_exit_contribution,
         assurance_decision=assurance_decision,
-        bundle_analysis_errors=bundle_analysis_errors,
+        bundle_analysis_failures=bundle_analysis_failures,
     )
-    if bundle_analysis_errors:
+    if bundle_analysis_failures:
         click.echo(
             "Cross-library (bundle) analysis did not complete: "
-            + "; ".join(bundle_analysis_errors)
+            + "; ".join(bundle_analysis_failures)
             + ". Analysis assurance is lowered, so the release exit code is "
             "at least 1 (ADR-071, 2026-11-21 amendment).",
             err=True,

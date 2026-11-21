@@ -696,11 +696,13 @@ class BundleDiffResult:
     #: distinguish "bundle_findings is empty because nothing broke" from
     #: "bundle_findings is empty because analysis degraded partway
     #: through" by checking this field instead of grepping the run's own
-    #: stderr. Deliberately plain strings, not a richer per-error type --
-    #: see this phase's own plan-doc entry for what a fuller structured
-    #: coverage ledger (mirroring `policy/coverage_ledger.py`) would add
-    #: beyond this.
+    #: stderr. Plain strings; scope notices (withheld manifest entries,
+    #: skipped members) are listed here too, for display only.
     analysis_errors: list[str] = field(default_factory=list)
+    #: The subset of *analysis_errors* that records a failed analysis step
+    #: (snapshot build, ``compare_bundle`` or the signature check raised).
+    #: Only these floor the release exit (ADR-071, 2026-11-21 amendment).
+    analysis_failures: list[str] = field(default_factory=list)
     #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
     #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
     #: findings were always scored under the bare *policy* name alone, even
