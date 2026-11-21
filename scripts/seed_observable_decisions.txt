@@ -102,6 +102,7 @@ struct_field_offset_changed      DH
 struct_field_removed             DH
 struct_field_type_changed        DH
 struct_packing_changed           DH   # plan A2.2: {B,D},{B,H}
+layout_build_config_unverified   BH   # ADR-095: header-derived layout judged without DWARF or build data
 struct_size_changed              DH
 trivially_copyable_lost          DH   # plan A2.4: VALUE_ABI_TRAIT duplicate
 type_alignment_changed           BH_ALIGN

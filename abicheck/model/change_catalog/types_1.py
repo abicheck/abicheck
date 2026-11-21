@@ -211,8 +211,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         observable_at=(
             observable(
                 ("B", "H"),
-                rationale="An assurance finding about a header-derived layout; "
-                "it exists only where the layout came from headers without DWARF or build data",
+                rationale="declared in the public header and present in the export table",
             ),
         ),
         impact="A change reads as layout-compatible only because the header-derived "
