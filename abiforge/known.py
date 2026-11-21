@@ -352,6 +352,30 @@ KNOWN: tuple[Known, ...] = (
             "exact-unexpected:TYPE_SIZE_CHANGED Bits_brem7_before 64bit->40bit",
         },
     ),
+    _castxml_gcc_barrier(
+        "bitfield_barrier_removed_after_6",
+        "wrong-detail",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::c 24bit->22bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::c 32bit->22bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem6_after::tail 40bit->32bit",
+            "exact-unexpected:TYPE_SIZE_CHANGED Bits_brem6_after 48bit->40bit",
+        },
+    ),
+    _castxml_gcc_barrier(
+        "bitfield_barrier_removed_before_1",
+        "wrong-detail",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::b 8bit->1bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::c 24bit->17bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::tail 32bit->24bit",
+            "exact-missing:TYPE_SIZE_CHANGED Bits_brem1_before 40bit->32bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::b 32bit->1bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::c 48bit->17bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem1_before::tail 56bit->24bit",
+            "exact-unexpected:TYPE_SIZE_CHANGED Bits_brem1_before 64bit->32bit",
+        },
+    ),
     # Stripped {B,H}: a config-level layout flag the public header cannot carry
     # (plan §11.2 WS-6 A3; the reduced-assurance signal is an ADR question).
     Known(

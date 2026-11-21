@@ -48,6 +48,7 @@ from abiforge.operators.attribution import ATTRIBUTION_OPERATORS
 from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.operators.cxx import CXX_OPERATORS
 from abiforge.operators.dependencies import DEPENDENCY_OPERATORS
+from abiforge.operators.dialect import DIALECT_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
 from abiforge.operators.enums import ENUM_OPERATORS
 from abiforge.operators.fragments import FRAGMENT_OPERATORS
@@ -1059,6 +1060,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *CXX_OPERATORS,
     *LAYOUT_OPERATORS,
     *FRAGMENT_OPERATORS,
+    *DIALECT_OPERATORS,
     *SYMBOL_OPERATORS,
     *KIND_OPERATORS,
     *VTABLE_OPERATORS,

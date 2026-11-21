@@ -177,6 +177,9 @@ BINARY_VISIBLE_FLAG_EDITS = frozenset(
     {
         "rebuild_m32",  # ELF machine and class
         "rebuild_x32",  # ELF class with EM_X86_64
+        # -std= renames a function whose type the standard changes
+        "dialect_cxx17_noexcept_in_function_type",
+        "dialect_cxx20_char8_t_parameter",
         "rebuild_cxx11_abi_off",  # mangled names
         "rebuild_against_libcxx",  # mangled names and imports
         "rebuild_optimized",  # imports and the canary call

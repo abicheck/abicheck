@@ -1020,3 +1020,86 @@ for standard in ['c11','c17','c23']:
 raise SystemExit(0 if all(r["status"] == "matched" for r in rows) else 1)
 
 ```
+
+---
+
+# Follow-up: bit-field reduction certificate and language-revision edits
+
+## Bit-field reduction certificate (priority 5)
+
+`abiforge/model/reduction.py` checks whether the generator's bit-field edits
+stand for every edit of the same shape, under a named projection, by exhaustive
+enumeration over the independent layout model.
+
+- **Domain.** The `bitfield_record` shape (`a : w`, `b : 16`, `c : 3`, an
+  ordinary `tail`, an optional `unsigned : 0` barrier before or after `b`),
+  `w` in 1..32. Every width change at a fixed barrier and every barrier
+  insertion or removal at a fixed width: 3,104 transitions, each under gcc and
+  clang with default packing and `-fpack-struct=1` (12,416 transition cells).
+- **Projection.** The *shape* of the exact rows an assertion judges: the edit
+  kind and the set of (row kind, member) pairs (offset of `b`, `c`, `tail`;
+  width of `a`; size; alignment). Values are excluded. A class under this
+  projection says nothing about values, calling convention, consumers or any
+  other record shape.
+
+| Configuration | Classes | Reached by the original 15 edits | Reached after adding 7 |
+| --- | ---: | ---: | ---: |
+| gcc, default packing | 10 | 8 | 10 |
+| clang, default packing | 10 | 8 | 10 |
+| gcc, `-fpack-struct=1` | 9 | 5 | 9 |
+| clang, `-fpack-struct=1` | 9 | 5 | 9 |
+
+The original edits missed barrier removals that change the size, width changes
+on either side of a barrier, and the packed-only absorbed cases. For example,
+gcc's byte-rounded barrier after `b` absorbs an edit when `a + b` already ends
+on a byte. Seven operators close every class: barrier removals at widths 1, 6,
+14, 16 and 30, plus `a : 1 → 2` with a barrier before and after `b`. Removing
+any one of the seven reopens a class (`tests/test_abiforge_reduction.py`).
+Under this projection, 13 of the original 15 edits are redundant. They are kept
+anyway: the exact assertions judge values, and the standard-space fault study
+(`research/standard-space/followup/reduction`) shows that selected
+representatives can miss a fault that the dense run catches. The seven
+additions were chosen after the classes were computed, a greedy cover of a
+known finite domain. They are not a sample whose detection rate generalizes.
+
+**Fault retention.** Four rule mutants of the model each count the
+(transition, configuration) cells whose exact rows differ from the true model:
+barrier ignored, gcc/clang barrier rule swapped (the `#pragma pack` versus
+`-fpack-struct` transfer error), packing ignored and packing forced.
+
+| Mutant | Dense detecting cells | Selected (22 edits × 4 configs) |
+| --- | ---: | ---: |
+| barrier ignored | 7,356 | 42 |
+| barrier rule swapped | 3,264 | 16 |
+| packing ignored | 4,448 | 32 |
+| packing forced | 4,448 | 32 |
+
+Every mutant is detected by both suites. A suite of unpacked width-only edits
+without barriers detects neither barrier mutant, and the test pins that
+negative control. Four mutants say nothing about faults outside them. The
+certificate is the model's own arithmetic. The compiler side is
+`tests/test_abiforge_layout_model.py` and the checker side is
+`python -m abiforge.run.fragment_campaign`.
+
+## Language-revision edits (standard-space follow-up)
+
+`research/standard-space/cpp.csv` found two breaks from identical source when
+only the language revision of the provider changes. The gated `cxx_dialect`
+seed (`abiforge/operators/dialect.py`) makes them generator inputs, each with
+the untouched functions as forbidden-attribution controls:
+
+| Operator | Baseline | Rebuild | Old name lost |
+| --- | --- | --- | --- |
+| `dialect_cxx17_noexcept_in_function_type` | C++11/14 | `-std=c++17` (P0012R1) | `_Z11dl_registerPFvvE` |
+| `dialect_cxx20_char8_t_parameter` | C++17 | `-std=c++20` (P0482R6) | `_Z7dl_takeRKc` |
+
+On gcc 13 and clang 18, all eight lanes (binary, DWARF, headers, stripped
+headers) return BREAKING with the claim on the old name, and the execution
+oracle observes the consumer break. Binary and DWARF lanes pair the two names
+(`FUNC_PARAMS_CHANGED`, plus `CHAR8T_MIGRATION` for the second edit). Header
+lanes parse the unchanged header at the baseline standard, so they still see
+the old declaration and report its export lost (`FUNC_VISIBILITY_CHANGED`).
+That is a true reading of the evidence they were given, but it does not name
+the rename. Naming it needs the new build's `-std=`, which is L3 build data.
+Reverse directions, mixed compilers and other triggers listed in the research
+remain open.

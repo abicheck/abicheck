@@ -200,6 +200,20 @@ FRAGMENTS_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("bitfield_rebuild_optimized", "c_layout", "gcc", {"evidence": "dwarf"}),
 )
 
+#: The PR tier's language-revision guards (``abiforge.operators.dialect``):
+#: identical source rebuilt under a newer ``-std=`` renames one function
+#: (C++14 -> 17 on clang, C++17 -> 20 on gcc), with the untouched functions
+#: as forbidden-attribution controls.
+DIALECT_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
+    (
+        "dialect_cxx17_noexcept_in_function_type",
+        "cxx_dialect",
+        "clang",
+        {"std": "c++14"},
+    ),
+    ("dialect_cxx20_char8_t_parameter", "cxx_dialect", "gcc", {}),
+)
+
 #: The evidence axis value of the stripped primary configuration (plan §4 B0):
 #: ``headers`` evidence on a stripped library. A row or factor names it as one
 #: value, so it is one more axis value in every pair draw, not a side flag.
@@ -252,6 +266,7 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     *KIND_REACH_PR,
     *ATTRIBUTION_PR,
     *FRAGMENTS_PR,
+    *DIALECT_PR,
 )
 
 
