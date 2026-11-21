@@ -1,0 +1,9 @@
+operator,seed,provider,observed
+struct_swap_fields,c_core,old,55
+struct_swap_fields,c_core,new,77
+struct_swap_fields,cxx_classes,old,55
+struct_swap_fields,cxx_classes,new,77
+virtual_reorder,cxx_classes,old,70/7
+virtual_reorder,cxx_classes,new,70/1
+primary_base_grew,cxx_more,old,1
+primary_base_grew,cxx_more,new,0

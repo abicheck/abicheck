@@ -1,0 +1,347 @@
+[
+  {
+    "case": "aggregate-control/c99",
+    "evidence": "dwarf",
+    "exit": 0,
+    "verdict": "NO_CHANGE",
+    "assurance": "complete",
+    "findings": []
+  },
+  {
+    "case": "aggregate-control/c99",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "reorder-2-longs/c99",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "type_field_offset_changed",
+        "T"
+      ]
+    ]
+  },
+  {
+    "case": "reorder-2-longs/c99",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "reorder-3-longs/c99",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "type_field_offset_changed",
+        "T"
+      ]
+    ]
+  },
+  {
+    "case": "reorder-3-longs/c99",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "move-base/c++98",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "base_class_offset_changed",
+        "D"
+      ],
+      [
+        "type_field_type_changed",
+        "P"
+      ],
+      [
+        "type_size_changed",
+        "D"
+      ],
+      [
+        "type_size_changed",
+        "P"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1aEv"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1bEv"
+      ]
+    ]
+  },
+  {
+    "case": "move-base/c++98",
+    "evidence": "stripped",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "partial",
+    "findings": [
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1aEv"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1bEv"
+      ]
+    ]
+  },
+  {
+    "case": "swap-slots/c++98",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "type_vtable_changed",
+        "B"
+      ],
+      [
+        "type_vtable_changed",
+        "_ZN1B1aEv"
+      ],
+      [
+        "type_vtable_changed",
+        "_ZN1B1bEv"
+      ]
+    ]
+  },
+  {
+    "case": "swap-slots/c++98",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "move-base/c++03",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "base_class_offset_changed",
+        "D"
+      ],
+      [
+        "type_field_type_changed",
+        "P"
+      ],
+      [
+        "type_size_changed",
+        "D"
+      ],
+      [
+        "type_size_changed",
+        "P"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1aEv"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1bEv"
+      ]
+    ]
+  },
+  {
+    "case": "move-base/c++03",
+    "evidence": "stripped",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "partial",
+    "findings": [
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1aEv"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN1D1bEv"
+      ]
+    ]
+  },
+  {
+    "case": "swap-slots/c++03",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "type_vtable_changed",
+        "B"
+      ],
+      [
+        "type_vtable_changed",
+        "_ZN1B1aEv"
+      ],
+      [
+        "type_vtable_changed",
+        "_ZN1B1bEv"
+      ]
+    ]
+  },
+  {
+    "case": "swap-slots/c++03",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "abiforge/c_core/struct_swap_fields",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "type_field_offset_changed",
+        "point"
+      ]
+    ]
+  },
+  {
+    "case": "abiforge/c_core/struct_swap_fields",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "abiforge/cxx_classes/struct_swap_fields",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "type_field_offset_changed",
+        "point"
+      ]
+    ]
+  },
+  {
+    "case": "abiforge/cxx_classes/struct_swap_fields",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "abiforge/cxx_classes/virtual_reorder",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "type_vtable_changed",
+        "Shape"
+      ],
+      [
+        "type_vtable_changed",
+        "_ZNK5Shape4areaEv"
+      ],
+      [
+        "type_vtable_changed",
+        "_ZNK5Shape4kindEv"
+      ]
+    ]
+  },
+  {
+    "case": "abiforge/cxx_classes/virtual_reorder",
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "abiforge/cxx_more/primary_base_grew",
+    "evidence": "dwarf",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "complete",
+    "findings": [
+      [
+        "base_class_offset_changed",
+        "MI"
+      ],
+      [
+        "type_field_added",
+        "B1"
+      ],
+      [
+        "type_size_changed",
+        "B1"
+      ],
+      [
+        "type_size_changed",
+        "MI"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN2MI2f2Ev"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN2MID0Ev"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN2MID1Ev"
+      ]
+    ]
+  },
+  {
+    "case": "abiforge/cxx_more/primary_base_grew",
+    "evidence": "stripped",
+    "exit": 4,
+    "verdict": "BREAKING",
+    "assurance": "partial",
+    "findings": [
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN2MI2f2Ev"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN2MID0Ev"
+      ],
+      [
+        "vtable_thunk_offset_changed",
+        "_ZN2MID1Ev"
+      ]
+    ]
+  }
+]
