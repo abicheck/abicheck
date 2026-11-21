@@ -25,9 +25,9 @@ from __future__ import annotations
 
 import itertools
 import json
-import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock
 
+import defusedxml.ElementTree as ET
 import pytest
 from click.testing import CliRunner
 

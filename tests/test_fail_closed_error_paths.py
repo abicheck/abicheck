@@ -416,7 +416,7 @@ def _run_release(
 
 
 def _junit_errors(tmp_path: Path) -> int:
-    import xml.etree.ElementTree as ET
+    import defusedxml.ElementTree as ET
 
     root = ET.parse(tmp_path / "report.xml").getroot()
     return int(root.get("errors", "0"))
