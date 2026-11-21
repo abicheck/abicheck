@@ -46,7 +46,10 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from .castxml_array_migration import migrate_castxml_array_counts
+from .castxml_array_migration import (
+    migrate_castxml_array_counts,
+    migrate_castxml_array_order,
+)
 from .castxml_base_offset_migration import migrate_castxml_base_offsets
 from .castxml_noexcept_migration import migrate_castxml_noexcept
 from .clang_vtable_base_migration import migrate_clang_vtable_bases
@@ -304,6 +307,7 @@ def migrate_and_describe(
         # already rewritten, but the document still holds them, so say so
         # exactly as the first load did (a dry run that keeps only notices).
         notices.extend(migrate_castxml_array_counts(document, extractor)[1])
+        notices.extend(migrate_castxml_array_order(document, extractor)[1])
         notices.extend(migrate_castxml_base_offsets(document, extractor)[1])
         notices.extend(migrate_clang_vtable_bases(document, extractor)[1])
         notices.extend(migrate_castxml_noexcept(document, extractor)[1])
@@ -314,6 +318,8 @@ def migrate_and_describe(
     notices.extend(spelling_notices)
     migrated, array_notices = migrate_castxml_array_counts(migrated, spellings)
     notices.extend(array_notices)
+    migrated, order_notices = migrate_castxml_array_order(migrated, spellings)
+    notices.extend(order_notices)
     migrated, offset_notices = migrate_castxml_base_offsets(migrated, spellings)
     notices.extend(offset_notices)
     migrated, vtable_notices = migrate_clang_vtable_bases(migrated, spellings)

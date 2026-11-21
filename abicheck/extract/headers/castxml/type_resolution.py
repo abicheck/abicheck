@@ -144,17 +144,7 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
     if tag == "Typedef":
         return el.get("name", "?")
     if tag == "ArrayType":
-        # castxml's ``max`` is the last valid index, so the element count is
-        # ``max + 1``: ``float a[8]`` has ``max="7"`` and spells ``float[8]``.
-        max_ = el.get("max", "")
-        base = type_name(ctx, el.get("type", ""), depth + 1)
-        if not max_:
-            return f"{base}[]"
-        try:
-            count = int(max_) + 1
-        except ValueError:
-            return f"{base}[{max_}]"
-        return f"{base}[{max(count, 0)}]"
+        return _array_spelling(ctx, el, depth)
     if tag == "Unimplemented" and el.get("type_class") in UNEXPRESSIBLE_TYPE_CLASSES:
         # castxml drops a vector's element and lane count, and a complex or
         # bit-precise integer's spelling; the clang join (``vector_spellings``)
@@ -175,6 +165,77 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
         # name, and the tag fallback below would spell it "AutoType".
         return "auto"
     return el.get("name", tag)
+
+
+#: The compiler builtin every target's ``<stdarg.h>`` ``va_list`` aliases.
+_BUILTIN_VA_LIST = "__builtin_va_list"
+
+
+def param_is_va_list(ctx: CastxmlParserContext, arg: Any) -> bool:
+    """Whether castxml ``Argument`` *arg* was written as a ``va_list``.
+
+    On a target whose ``va_list`` is an array (x86-64 System V) the
+    parameter's ``type`` is the decayed ``__va_list_tag *``, and castxml
+    keeps the written type in ``original_type``; elsewhere ``type`` itself is
+    the alias. Either way the written type is a typedef chain (``va_list`` ->
+    ``__gnuc_va_list`` -> ``__builtin_va_list``) that ends in the builtin,
+    so following it is target-independent -- unlike the clang backend's
+    ``__va_list_tag *`` spelling check. A qualifier on the alias (``const
+    va_list``) is not followed, as in the clang backend.
+    """
+    node = ctx.resolve(arg.get("original_type") or arg.get("type", ""))
+    for _ in range(11):
+        if node is None:
+            return False
+        if node.tag == "Typedef":
+            if node.get("name") == _BUILTIN_VA_LIST:
+                return True
+        elif node.tag != "ElaboratedType":
+            return False
+        node = ctx.resolve(node.get("type", ""))
+    return False
+
+
+def _array_bound(el: Any) -> str:
+    """One ``[N]`` suffix for castxml ArrayType *el*.
+
+    castxml's ``max`` is the last valid index, so the element count is
+    ``max + 1``: ``float a[8]`` has ``max="7"`` and spells ``float[8]``.
+    """
+    max_ = el.get("max", "")
+    if not max_:
+        return "[]"
+    try:
+        count = int(max_) + 1
+    except ValueError:
+        return f"[{max_}]"
+    return f"[{max(count, 0)}]"
+
+
+def _array_spelling(ctx: CastxmlParserContext, el: Any, depth: int) -> str:
+    """Spell a (possibly multi-dimensional) castxml ArrayType in C order.
+
+    castxml nests ``int m[2][3]`` as ArrayType(2 elements) of ArrayType(3
+    ints) -- an array of 2 arrays of 3 ``int``, which C writes outermost
+    bound first. Collect the bounds of the directly nested ArrayType chain
+    outermost-first, then spell the element type once, so the result is
+    ``int[2][3]`` as the clang backend and DWARF spell it. Appending each
+    outer bound after the already-spelled inner array (the earlier
+    recursion) produced the reversed ``int[3][2]``. Only a direct ArrayType
+    element extends the chain: an array of a typedef'd array
+    (``typedef int row[3]; row m[2];``) keeps the alias name, ``row[2]``.
+    """
+    bounds: list[str] = []
+    cur: Any = el
+    while cur is not None and cur.tag == "ArrayType" and depth <= 10:
+        bounds.append(_array_bound(cur))
+        elem_id = cur.get("type", "")
+        nxt = ctx.resolve(elem_id)
+        if nxt is None or nxt.tag != "ArrayType":
+            return type_name(ctx, elem_id, depth + 1) + "".join(bounds)
+        cur = nxt
+        depth += 1
+    return "?" + "".join(bounds)
 
 
 def _nameless_record_spelling(ctx: CastxmlParserContext, el: Any, tag: str) -> str:

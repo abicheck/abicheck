@@ -72,6 +72,7 @@ from .return_by_value import castxml_return_by_value_fact
 from .scope import scope_path
 from .type_resolution import (
     is_global_scope,
+    param_is_va_list,
     pointer_depth,
     resolve_cv_restrict,
     top_level_param_kind,
@@ -296,8 +297,7 @@ def parse_function_params(
                     # detector rather than folded into `type` (see
                     # type_name's CvQualifiedType handling above).
                     is_restrict=p_restrict,
-                    # CastXML never determines va_list-ness at all -- UNSUPPORTED says so plainly, stronger than the omission bridge's NOT_COLLECTED ("not this time" vs. "never from this producer").
-                    is_va_list_fact=Fact.unsupported(),
+                    is_va_list_fact=Fact.present(param_is_va_list(ctx, arg)),
                     type_identities_fact=Fact.present(type_identities(ctx, p_type_id)),
                     type_abi_fact=castxml_type_abi_fact(ctx, p_type_id),
                 )

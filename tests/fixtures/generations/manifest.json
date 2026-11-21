@@ -467,6 +467,12 @@
       "commit": "a614517e8979",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen9/corpus.json.gz"
+    },
+    "90": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "0cc877655044",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen90/corpus.json.gz"
     }
   },
   "skipped": {

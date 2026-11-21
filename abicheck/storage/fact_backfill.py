@@ -620,8 +620,8 @@ def apply_legacy_fact_backfill(
     correcting it at all.
 
     ``is_va_list`` needs an extra gate ``vtable``/``vptr_offset_bits`` don't
-    (Codex review, fresh evidence): CastXML never determines va_list-ness at
-    all — its own ``is_va_list`` is always a blanket ``False`` placeholder,
+    (Codex review, fresh evidence): CastXML before extractor generation 91
+    never determined va_list-ness — its own ``is_va_list`` is always a blanket ``False`` placeholder,
     not a computed fact the way CastXML's vtable *is* one (see
     ``clang_vtable_facts_reliable_value``'s own computation in
     ``serialization.py``: "a castxml... snapshot's own vtable extraction

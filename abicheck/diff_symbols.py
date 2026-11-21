@@ -1301,18 +1301,18 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
+_VA_LIST_AST = ("clang", "castxml")
+
+
 @registry.detector("param_va_list")
 def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect va_list parameter changes (ABICC: Parameter_Became_VaList/Non_VaList).
 
-    Header-tier, "clang"-producer-ONLY (deliberately NOT "hybrid" -- unlike
-    ``param_restrict``'s gate just above), and reliability-gated -- see
-    ``compare/parameter_facts.va_list_changes`` (G31 Phase C continued,
-    Codex review); registration stays HERE for registry ordering.
-    """
+    Header-tier, one producer on both sides, "clang" or "castxml" (not "hybrid",
+    nor a mix: clang answers False off x86-64 System V); see parameter_facts."""
     if not both_header_aware(old, new):
         return []
-    if old.ast_producer != "clang" or new.ast_producer != "clang":
+    if old.ast_producer != new.ast_producer or new.ast_producer not in _VA_LIST_AST:
         return []
     changes: list[Change] = []
     for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(

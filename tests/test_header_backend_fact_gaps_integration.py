@@ -117,15 +117,13 @@ def _va_list_fact(backend: str, tmp: Path) -> object:
 
 
 @pytest.mark.known_gap_canary
-@pytest.mark.parametrize("backend", ["castxml", "gcc"])
-def test_only_the_clang_backend_marks_a_va_list_parameter(
-    tmp_path: Path, backend: str
-) -> None:
-    """castxml and the native gcc plugin never establish ``Param.is_va_list``;
-    clang reads the x86-64 ``__va_list_tag *`` spelling."""
+def test_only_the_clang_backend_marks_a_va_list_parameter(tmp_path: Path) -> None:
+    """The native gcc plugin never establishes ``Param.is_va_list``; clang
+    reads the x86-64 ``__va_list_tag *`` spelling. (castxml reads it since
+    generation 91: tests/test_castxml_written_type_integration.py.)"""
     if sys.maxsize <= 2**32:
         pytest.skip("the clang reading is x86-64 SysV only")
-    gapped = _va_list_fact(backend, tmp_path / backend)
+    gapped = _va_list_fact("gcc", tmp_path / "gcc")
     clang = _va_list_fact("clang", tmp_path / "clang")
     assert getattr(gapped, "value", None) is not True
     assert getattr(clang, "value", None) is True

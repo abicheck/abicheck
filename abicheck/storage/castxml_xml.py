@@ -26,7 +26,8 @@ about a third; the pool lives only for the parse.
 ``Argument`` elements are the bulk of what is left: on the same dump they
 are 256k of 285k elements, and every one is a distinct object carrying its
 own ``file``/``line``/``location``. No reader consults those -- a parameter
-is read for its ``name``, ``type`` and ``default`` only
+is read for its ``name``, ``type``, ``default`` and ``original_type`` (the
+written type of a decayed parameter, read for ``va_list``) only
 (:data:`ARGUMENT_ATTRIBUTES_READ`) -- and with only those kept, the same
 parameter spelling recurs across thousands of signatures. So each
 ``Argument`` is reduced to those attributes and, as its parent closes,
@@ -52,9 +53,12 @@ from defusedxml.ElementTree import DefusedXMLParser, parse as _defused_parse
 __all__ = ["ARGUMENT_ATTRIBUTES_READ", "parse_castxml_text", "parse_castxml_xml"]
 
 #: The only ``Argument`` attributes any castxml reader consults
-#: (``extract.headers.castxml.functions.parse_function_params``). Adding a
-#: reader of another one means adding it here, or it reads ``None``.
-ARGUMENT_ATTRIBUTES_READ: frozenset[str] = frozenset({"name", "type", "default"})
+#: (``extract.headers.castxml.functions.parse_function_params`` and
+#: ``type_resolution.param_is_va_list``). Adding a reader of another one
+#: means adding it here, or it reads ``None``.
+ARGUMENT_ATTRIBUTES_READ: frozenset[str] = frozenset(
+    {"name", "type", "default", "original_type"}
+)
 
 
 class _SharingTreeBuilder(TreeBuilder):

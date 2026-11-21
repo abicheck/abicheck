@@ -785,4 +785,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "snapshot carries no such fact, which reads as not read, and the VTT entry "
         "comparison declines it; no rewrite applies."
     ),
+    91: GenerationSpellingChange(
+        "castxml multi-dimensional arrays: a castxml snapshot spelled the bounds of a nested "
+        "ArrayType chain innermost first (int m[2][3] as int[3][2]); it now spells them in C "
+        "order, as the clang backend and DWARF do. castxml_array_migration."
+        "migrate_castxml_array_order reverses each adjacent run of bounds outside a template "
+        "argument list in a castxml snapshot's return, parameter, field, variable and typedef "
+        "spellings. A castxml parameter whose written type is va_list now records "
+        "Param.is_va_list as present; an older snapshot's unsupported fact is not compared."
+    ),
 }
