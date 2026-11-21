@@ -11,7 +11,10 @@ every installed producer, and must equal the model exactly.
 
 from __future__ import annotations
 
+import platform
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,9 +23,28 @@ from abiforge.model.layout_model import Layout, layout
 from abiforge.operators.fragments import MODELLED_STATES
 from abiforge.run.layout_probe import dwarf, probe
 
-pytestmark = pytest.mark.integration
+#: The model covers SysV x86-64 Linux only (``layout_model``): on another
+#: host the compiled probes would measure another ABI, which is a scope gap,
+#: not a model failure.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform != "linux"
+        or platform.machine().lower() not in ("x86_64", "amd64"),
+        reason="the layout model covers SysV x86-64 Linux only",
+    ),
+]
 
-_PRODUCERS = [p for p in ("gcc", "clang") if shutil.which(p)]
+
+def _family(cc: str) -> str | None:
+    """The driver's real family: on some hosts ``gcc`` is clang."""
+    if shutil.which(cc) is None:
+        return None
+    out = subprocess.run([cc, "--version"], capture_output=True, text=True).stdout
+    return "clang" if "clang" in out else "gcc"
+
+
+_PRODUCERS = [p for p in ("gcc", "clang") if _family(p) == p]
 _STATES = sorted(dict(MODELLED_STATES).items())
 
 
@@ -91,8 +113,6 @@ def test_gcc_pack_flag_and_pragma_differ_on_a_barrier(tmp_path: Path) -> None:
         "int i; memset(&v,0,sizeof v); v.b=~0u; memcpy(m,&v,sizeof v);"
         'for(i=0;i<(int)(8*sizeof v);i++) if((m[i/8]>>(i%8))&1){printf("%d\\n",i);break;}return 0;}\n'
     )
-    import subprocess
-
     subprocess.run(["gcc", "-w", str(src), "-o", str(tmp_path / "pragma")], check=True)
     out = subprocess.run(
         [str(tmp_path / "pragma")], capture_output=True, text=True, check=True
