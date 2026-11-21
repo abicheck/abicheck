@@ -778,4 +778,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "parse sees it. A snapshot dumped with options before this generation recorded a "
         "graph without them; no rewrite applies."
     ),
+    90: GenerationSpellingChange(
+        "ELF VTT entry targets: no stored type or name spelling changes. An x86-64 ELF "
+        "dump now records each exported Itanium VTT entry's logical target (table and "
+        "address-point offset) as the abicheck.elf_vtt_entries extension fact. An older "
+        "snapshot carries no such fact, which reads as not read, and the VTT entry "
+        "comparison declines it; no rewrite applies."
+    ),
 }

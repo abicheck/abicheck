@@ -22,13 +22,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 64 |
+| L0 | 130 | 64 |
 | L1 | 66 | 7 |
 | L2 | 79 | 38 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 95 |
+| unmapped | 120 | 95 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -183,6 +183,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `vtable_slot_count_changed` | BREAKING | 1 | 0 | 3 |
 | `vtable_thunk_offset_changed` | BREAKING | 1 | 0 | 1 |
 | `vtable_thunk_set_changed` | BREAKING | 0 | 0 | 0 |
+| `vtt_entry_target_changed` | BREAKING | 0 | 0 | 1 |
 | `vtt_slot_count_changed` | BREAKING | 1 | 0 | 0 |
 | `wheel_closure_dependency_violation` | BREAKING | 0 | 0 | 1 |
 | `wheel_rpath_not_portable` | RISK | 0 | 0 | 1 |
@@ -522,5 +523,4 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `virtual_method_added` | BREAKING | 0 | 0 | 0 |
 | `visibility_leak` | COMPATIBLE | 0 | 0 | 2 |
 | `vtable_symbol_identity_changed` | RISK | 0 | 0 | 0 |
-| `vtt_entry_target_changed` | BREAKING | 0 | 0 | 1 |
 | `writable_executable_segment` | RISK | 0 | 0 | 0 |
