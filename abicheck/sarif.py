@@ -527,56 +527,52 @@ def _missing_contract_result(
     }
 
 
-def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
+def _scoped_gate_properties(
+    result: DiffResult, envelope: ReportEnvelope | None
+) -> dict[str, Any] | None:
     """Build a ``scopedGate`` block when ``--used-by``/``consumers.required_symbols``
-    scoping was requested (ADR-043).
+    scoping was requested (ADR-043), from the envelope's ``ScopedGateFacts``.
 
     **Purely informational (workstream D-S1).** ``invocations[0].exitCode``
     and every result's ``level`` always follow ``result.verdict``/the
     resolved severity config -- never this block's ``gateVerdict``/
     ``gateExitCode``. A supplied consumer's own impact is reported *beside*
     that full-library result (also carried, unswapped, as
-    ``fullLibraryVerdict``), never in place of it. Also carries the
-    relevant/unrelated finding counts for the supplied consumer(s).
+    ``fullLibraryVerdict``), never in place of it.
     """
-    scoped_verdict = getattr(result, "scoped_verdict", None)
-    if scoped_verdict is None:
+    from abicheck.report.envelope import resolved_scoped_gate
+
+    facts = resolved_scoped_gate(envelope, result)
+    if facts is None:
         return None
-    used_by = getattr(result, "used_by", None)
-    required_symbols = getattr(result, "required_symbols", None)
-    scoped_exit_code = getattr(result, "scoped_exit_code", None)
-    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-    gate_scope = getattr(result, "gate_scope", None)
-    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_in_changes = sum(
-        1 for c in result.changes if finding_id(c) in relevant_ids
-    )
-    # scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and missing-contract
-    # members are relevant by construction -- they exist only because
-    # scope_diff_to_app/scope_diff_to_required_symbols found them relevant --
-    # and are never in result.changes, so they don't affect unrelatedFindingCount
-    # (which counts only irrelevant entries *within* result.changes) but do
-    # count toward relevantFindingCount (CodeRabbit review).
-    scoped_only_count = len(getattr(result, "scoped_only_changes", ()) or ())
-    missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
-    relevant_count = relevant_in_changes + scoped_only_count + missing_count
     block: dict[str, Any] = {
-        "gateScope": gate_scope,
-        "gateVerdict": scoped_verdict.value,
-        "fullLibraryVerdict": result.verdict.value,
-        "relevantFindingCount": relevant_count,
-        "unrelatedFindingCount": len(result.changes) - relevant_in_changes,
+        "gateScope": facts.gate_scope,
+        "gateVerdict": facts.gate_verdict,
+        "fullLibraryVerdict": facts.full_library_verdict,
+        "relevantFindingCount": facts.relevant_finding_count,
+        "unrelatedFindingCount": facts.unrelated_finding_count,
         # Back-compat alias for the block's original field name.
-        "scopedVerdict": scoped_verdict.value,
+        "scopedVerdict": facts.gate_verdict,
     }
-    if scoped_exit_code is not None:
-        block["gateExitCode"] = scoped_exit_code
-        block["gateExitCodeScheme"] = scoped_exit_code_scheme
+    if facts.gate_exit_code is not None:
+        block["gateExitCode"] = facts.gate_exit_code
+        block["gateExitCodeScheme"] = facts.gate_exit_code_scheme
         # Back-compat aliases.
-        block["scopedExitCode"] = scoped_exit_code
-        block["scopedExitCodeScheme"] = scoped_exit_code_scheme
+        block["scopedExitCode"] = facts.gate_exit_code
+        block["scopedExitCodeScheme"] = facts.gate_exit_code_scheme
+    used_by = getattr(result, "used_by", None)
     if used_by is not None:
         block["usedBy"] = used_by
+    summary = facts.consumer_impact_summary
+    if summary is not None:
+        block["consumerImpactSummary"] = {
+            "total": summary.get("total"),
+            "evaluated": summary.get("evaluated"),
+            "affected": summary.get("affected"),
+            "unreadableAdvisory": summary.get("unreadable_advisory"),
+            "unreadablePaths": list(summary.get("unreadable_paths") or ()),
+        }
+    required_symbols = getattr(result, "required_symbols", None)
     if required_symbols is not None:
         block["requiredSymbolContract"] = required_symbols
     return block
@@ -897,7 +893,7 @@ def to_sarif(
         if gate_decision is not None and severity_config is not None
         else None
     )
-    scoped_gate = _scoped_gate_properties(result)
+    scoped_gate = _scoped_gate_properties(result, envelope)
     # ADR-061 gap C: SARIF's published exit contract is a decision, not a
     # rendering choice -- it moved to report/sarif_invocation.py and reads the
     # gate this render already resolved (see that module's docstring).

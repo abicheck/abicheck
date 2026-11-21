@@ -460,27 +460,16 @@ own migration, not an incremental widening of the predicate here. Tracked as a
 `KnownGap` on the `report.unestablished_result_reads_as_success` bug class
 (`tests/regressions/manifest.py`).
 
-**Known, accepted limitation (Codex review, P1, fresh evidence):** a step
-whose own `extra-args` carries a non-JSON export set (`-o text=...`)
-reaches exactly this "genuinely unreadable" case for the unconditional
-coverage/assurance/severity-category floors too — a caller-stated export
-set replaces this script's own, so the internal JSON sidecar is not
-injected alongside it. (Before plan slice 7m the same combination failed
-for a different mechanical reason: `--write` was a separate flag and
-`extra-args` was appended last, so an injected JSON write lost to the
-user's own under Click's last-wins rule. Same outcome, and the same
-resolution.) There is no way to recover a structured report in this
-specific combination without either silently discarding the user's
-explicit exports (wrong — the whole point of `_extra_args_has_export`
-is not to do that) or unconditionally re-running the analysis a second
-time purely to obtain one (`_maybe_post_pr_comment` already accepts that
-cost, but only for the sticky-comment feature specifically, and only under
-its own narrower guards — doing it unconditionally for the floors would
-impose a second, potentially expensive analysis on every such run, a
-different and larger trade-off than this bug fix's scope). So this one
-combination is accepted, not fixed: the floors go blind exactly there, and
-the fix is on the caller's side (add a `-o json=PATH` export of your own, or set
-`format: json`) rather than in this script.
+**A caller's non-JSON export keeps the floors (formerly an accepted
+limitation, closed 2026-11-21).** `-o` is repeatable, so a step whose own
+`extra-args` carries a non-JSON export set (`-o text=...`) still gets this
+script's internal `-o json=$PR_JSON` sidecar beside it, and the
+unconditional coverage/assurance/severity-category floors read that
+sidecar. Only a caller export that already targets JSON suppresses the
+sidecar (`_extra_args_write_would_conflict`), and `_json_report_src` then
+reads the caller's file. Regression test:
+`tests/test_action_non_json_extra_args_export_floors.py`. Do not reintroduce
+a rule that drops the sidecar because the caller named *some* export.
 
 **This is why the internal `-o json=$PR_JSON` sidecar
 injection is unconditional** (not gated on `pr-comment`, since Track T8):

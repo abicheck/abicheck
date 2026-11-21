@@ -1576,13 +1576,9 @@ concepts:
       floors without a report to read in exactly the `pr-comment: false`
       case this track's own removal made newly load-bearing), plus a
       follow-up guard against injecting it alongside an effective
-      `extra-args --dry-run`. One narrow gap remains, documented rather
-      than closed (`action/AGENTS.md`'s "Known, accepted limitation"
-      paragraph): a `scan --against` step whose own `extra-args` requests a
-      non-JSON `--write` (e.g. `--write text=...`) still leaves those
-      floors blind, since the CLI's single `--write` slot means this
-      script's own JSON-targeted append always loses to the user's later,
-      non-JSON one. Both track T8 and track T6 are now complete.
+      `extra-args --dry-run`. The former non-JSON `extra-args` export gap is
+      closed (2026-11-21): `-o` is repeatable, so the JSON sidecar is
+      injected beside a caller's non-JSON export. Both track T8 and track T6 are now complete.
       2026-09-29 T8 follow-up: _is_cli_error()'s stderr check no longer
       decides anything for mode compare or dump. Usage errors are the CLI's
       own exit 64 (Click's 2 is remapped at the root group, so exit 2 is

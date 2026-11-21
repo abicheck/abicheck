@@ -34,6 +34,12 @@ gap on the main page instead.
 **Status (2026-11-12): OPEN.** clang emits a public-header inline function's static local (`_ZZ8edit_ctrvE1n`) as a weak export (gcc as `STB_GNU_UNIQUE`). With public headers the new export reads as `exported_not_public` and the addition becomes `COMPATIBLE_WITH_RISK`, though no source can name a function-local static: it exists only to keep the inline function's ODR. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, clang). Owner: `buildsource/cross_source_checks.py` (`exported_not_public`).
 `false-positive` — adding a header inline function with a static local reads as a risk under clang.
 
+### The composite Action's single write slot could leave its coverage/assurance/severity floors without a structured report (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED.** `-o FORMAT=DESTINATION` is repeatable (plan slice 7m), so `action/run.sh` injects its internal `-o json=$PR_JSON` sidecar beside every caller `extra-args` export set that names no JSON destination (`_extra_args_write_would_conflict` only suppresses it when the caller already exports JSON, which `_json_report_src` then reads). A step with `extra-args: -o text=...` keeps the caller's export and its unconditional coverage/assurance/severity-category floors. Regression test: `tests/test_action_non_json_extra_args_export_floors.py` (every non-JSON caller format, both primaries, coverage-only/severity/both).
+
+**Former status (2026-10-09): POLICY_NOTE.** When `--write` was single-valued, a caller's non-JSON `--write` displaced the sidecar and the floors went blind for that run; accepted in `action/AGENTS.md` at the time.
+
 ### Affected-symbol attribution ignores identifier boundaries (closed 2026-11-19)
 
 **Status (2026-11-19): CLOSED.** `_build_type_to_funcs` and `_build_type_embed_index` keep the Aho-Corasick prefilter but count a hit only when it occurs as a whole identifier (`compare/type_name_boundary.py`; `::` stays a boundary, scoped same-name types are `type_symbol_disambiguation`'s job). The record-edit fragment (`formal/RECORD_EDIT_FRAGMENT.md`) had re-measured it on 925 of 9252 records in every evidence lane; regression: `tests/test_affected_symbols_identifier_boundary.py`.
