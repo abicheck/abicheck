@@ -359,29 +359,59 @@ def _snap(lib: str, version: str, *, with_bar: bool):
     return AbiSnapshot(library=lib, version=version, functions=funcs, from_headers=True)
 
 
-def _run_release(tmp_path: Path, *, breaking: bool) -> tuple[int, dict, str]:
+def _release_operands(tmp_path: Path, *, breaking: bool, operand: str):
+    """OLD/NEW release operands: directories of snapshots, or stored
+    BundleFacts documents holding the same members (``compare --bundle-facts``'s
+    stored-pair route)."""
+    from abicheck.model.bundle_facts import BundleFacts
+    from abicheck.serialization import save_bundle_facts, snapshot_to_json
+
+    sides = {
+        side: {
+            lib: _snap(
+                lib,
+                "1" if side == "old" else "2",
+                with_bar=side == "old" or not (breaking and lib == "liba.so"),
+            )
+            for lib in ("liba.so", "libb.so")
+        }
+        for side in ("old", "new")
+    }
+    paths = []
+    for side, members in sides.items():
+        if operand == "bundle_facts":
+            path = tmp_path / f"{side}.bundlefacts.json"
+            save_bundle_facts(
+                BundleFacts(variant_fingerprint="fp", per_library_snapshots=members),
+                path,
+                format="json",
+            )
+        else:
+            path = tmp_path / side
+            path.mkdir()
+            for lib, snap in members.items():
+                (path / f"{lib}.json").write_text(
+                    snapshot_to_json(snap), encoding="utf-8"
+                )
+        paths.append(path)
+    return paths
+
+
+def _run_release(
+    tmp_path: Path, *, breaking: bool, operand: str = "directory"
+) -> tuple[int, dict, str]:
     from click.testing import CliRunner
 
     from abicheck.cli import main
-    from abicheck.serialization import snapshot_to_json
 
-    for side in ("old", "new"):
-        (tmp_path / side).mkdir()
-    for lib in ("liba.so", "libb.so"):
-        removed = breaking and lib == "liba.so"
-        (tmp_path / "old" / f"{lib}.json").write_text(
-            snapshot_to_json(_snap(lib, "1", with_bar=True)), encoding="utf-8"
-        )
-        (tmp_path / "new" / f"{lib}.json").write_text(
-            snapshot_to_json(_snap(lib, "2", with_bar=not removed)), encoding="utf-8"
-        )
+    old, new = _release_operands(tmp_path, breaking=breaking, operand=operand)
     md = tmp_path / "report.md"
     result = CliRunner().invoke(
         main,
         [
             "compare",
-            str(tmp_path / "old"),
-            str(tmp_path / "new"),
+            str(old),
+            str(new),
             "-o",
             "json=-",
             "-o",
@@ -391,20 +421,36 @@ def _run_release(tmp_path: Path, *, breaking: bool) -> tuple[int, dict, str]:
     return result.exit_code, json.loads(result.stdout), md.read_text("utf-8")
 
 
+_OPERANDS = ("directory", "bundle_facts")
+
+
+@pytest.mark.parametrize("operand", _OPERANDS)
 @pytest.mark.parametrize("breaking", [False, True], ids=["clean", "breaking"])
-def test_release_without_bundle_failure_is_unfloored(tmp_path, breaking) -> None:
-    code, payload, _ = _run_release(tmp_path, breaking=breaking)
+def test_release_without_bundle_failure_is_unfloored(
+    tmp_path, breaking, operand
+) -> None:
+    code, payload, _ = _run_release(tmp_path, breaking=breaking, operand=operand)
     assert "bundle_analysis_errors" not in payload
     assert code == (4 if breaking else 0)
 
 
+# A stored BundleFacts pair builds its bundle snapshots from the stored facts,
+# not through `build_bundle_snapshot_mixed`, so that producer is live-only.
+_CASES = [
+    (operand, producer)
+    for operand in _OPERANDS
+    for producer in sorted(_PRODUCERS)
+    if not (operand == "bundle_facts" and producer == "snapshot_build")
+]
+
+
 @pytest.mark.parametrize("breaking", [False, True], ids=["clean", "breaking"])
-@pytest.mark.parametrize("producer", sorted(_PRODUCERS))
+@pytest.mark.parametrize(("operand", "producer"), _CASES)
 def test_failed_bundle_axis_floors_the_release_exit_code(
-    monkeypatch, tmp_path, producer, breaking
+    monkeypatch, tmp_path, operand, producer, breaking
 ) -> None:
     message = _PRODUCERS[producer](monkeypatch)
-    code, payload, markdown = _run_release(tmp_path, breaking=breaking)
+    code, payload, markdown = _run_release(tmp_path, breaking=breaking, operand=operand)
     assert message in payload["bundle_analysis_errors"]
     expected = max(4 if breaking else 0, 1)
     assert code == expected

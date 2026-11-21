@@ -445,6 +445,9 @@ def dispatch(
         no_comparison_completed_exit_contribution=outcome.scope_decision.no_comparison_completed_exit_contribution,
         failed_member_exit_contribution=outcome.scope_decision.failed_member_exit_contribution,
         assurance_decision=outcome.assurance_decision,
+        # ADR-071's 2026-11-21 amendment: a failed bundle analysis floors the
+        # process exit too, as the rendered `exit` block already does.
+        bundle_analysis_errors=list(getattr(result, "analysis_errors", []) or []),
     )
 
 

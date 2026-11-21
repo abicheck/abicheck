@@ -339,7 +339,9 @@ pass.
 4. One resolver owns it:
    `policy/release_exit_decision.resolve_release_exit_decision_for_report`
    takes `bundle_analysis_errors`, so the process exit, the persisted
-   `exit` block and the `--output-dir` summary agree by construction.
+   `exit` block and the `--output-dir` summary agree by construction, on
+   both the live directory/package route and the stored `compare
+   --bundle-facts` route.
 5. The report states it: the Markdown "Bundle Analysis Warnings" section
    says the exit is at least `1`, and the CLI prints a stderr notice.
 
