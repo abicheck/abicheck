@@ -67,6 +67,7 @@ __all__ = [
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
     "MACHO_OBJECT_SIZES",
+    "ELF_VTT_ENTRIES",
     "FINAL_MEMBER_FUNCTIONS",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
@@ -317,6 +318,56 @@ MACHO_OBJECT_SIZES: ExtensionFact[dict[str, Any]] = ExtensionFact(
     owner="ADR-062",
     encode=_macho_sizes_codec,
     decode=_macho_sizes_codec,
+)
+
+
+def _vtt_entries_codec(value: Any) -> Any:
+    """``{"_ZTT...": [[table, offset] | null, ...]}`` -- one row per entry.
+
+    *table* names the vtable or construction vtable an entry points into and
+    *offset* the byte distance to its address point
+    (``model/elf_facts.VttEntryTarget``); null is an unresolved entry.
+    """
+    if not isinstance(value, dict):
+        raise TypeError("elf_vtt_entries must be a {VTT symbol: entries} map")
+    out: dict[str, list[Any]] = {}
+    for name in sorted(value):
+        entries = value[name]
+        if not isinstance(name, str) or not isinstance(entries, (list, tuple)):
+            raise TypeError("elf_vtt_entries maps a symbol name to a list")
+        rows: list[Any] = []
+        for entry in entries:
+            if entry is None:
+                rows.append(None)
+                continue
+            if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+                raise ValueError("elf_vtt_entries rows are [table, offset] or null")
+            table, offset = entry
+            if not isinstance(table, str) or not table:
+                raise ValueError("elf_vtt_entries table must be a symbol name")
+            if not isinstance(offset, int) or isinstance(offset, bool):
+                raise ValueError("elf_vtt_entries offset must be an int")
+            rows.append([table, offset])
+        out[name] = rows
+    return out
+
+
+#: ADR-062 D19 extension fact: the logical target of each entry of every
+#: exported Itanium VTT (``ElfMetadata.vtt_entries``, read by
+#: ``extract/elf_vtt_entries.py``). Absent, the map stays None -- not read --
+#: and the VTT entry comparison declines the pair instead of reading it as
+#: unchanged.
+ELF_VTT_ENTRIES: ExtensionFact[dict[str, Any]] = ExtensionFact(
+    name="abicheck.elf_vtt_entries",
+    section="binary",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as=(
+        "not read: the VTT entry targets are unknown, so the VTT entry "
+        "comparison declines the pair rather than reading it as unchanged"
+    ),
+    owner="ADR-062",
+    encode=_vtt_entries_codec,
+    decode=_vtt_entries_codec,
 )
 
 
@@ -685,6 +736,7 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         CXX_CONCEPT_HEADER_SCAN,
         CXX_CONCEPT_CONSTRAINTS,
         CXX_TEMPLATE_DEFAULTS,
+        ELF_VTT_ENTRIES,
         EXPORT_READ,
         FINAL_MEMBER_FUNCTIONS,
         MACHO_OBJECT_SIZES,

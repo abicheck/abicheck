@@ -63,6 +63,7 @@ from .extract.elf_symbol_versions import (
     correlate_symbol_versions,
     symbols_of,
 )
+from .extract.elf_vtt_entries import read_vtt_entries
 from .extract.parse_failures import (
     note_export_read_failure,
     recording_export_read_failures,
@@ -188,12 +189,11 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     )
 
     _postprocess_metadata(meta)
-    # DF_STATIC_TLS is a linker summary that AArch64 GNU ld omits; the
-    # relocation is the requirement itself (extract/elf_static_tls.py).
+    # DF_STATIC_TLS: AArch64 ld omits it; the relocation is the requirement.
     meta.has_static_tls = meta.has_static_tls or has_static_tls_relocation(elf)
+    meta.vtt_entries = read_vtt_entries(elf, meta)
 
-    # Finalize derived hardening properties now that segments, dynamic flags,
-    # and the symbol table have all been parsed.
+    # Finalize hardening now that segments, dynamic flags and symbols are read.
     _finalize_hardening(meta, has_relro_segment=has_relro_segment, is_et_dyn=is_et_dyn)
 
     return meta
