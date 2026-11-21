@@ -412,7 +412,15 @@ had complete evidence. A release can be scope-`complete` with a `partial`
 analysis, or scope-`incomplete` with a complete analysis over what ran; on a
 tie both are named in `reasons`.
 
-**Without `assurance.require_complete: true` every pre-existing invocation's
+**A failed bundle (cross-library) analysis** on a directory/package
+`compare` -- a non-empty `bundle_analysis_errors` in the report (the bundle
+snapshot could not be built, `compare_bundle` raised, or the
+signature-evidence check raised) -- also contributes `1` to this axis,
+**without** `assurance.require_complete`: an analysis that did not run is
+never a clean pass. It folds with `max`, so it never lowers a higher code
+([ADR-071, 2026-11-21 amendment](../contribute/adr/071-release-analysis-assurance-fold.md#amendment-2026-11-21-a-failed-bundle-analysis-lowers-release-assurance)).
+
+Apart from that, **without `assurance.require_complete: true` every pre-existing invocation's
 exit code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
 

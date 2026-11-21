@@ -305,38 +305,138 @@ def test_pdb_lookup_failure_marks_debug_section_failed(
     }
 
 
-@pytest.mark.known_gap_canary
-def test_failed_bundle_axis_does_not_floor_the_release_exit_code(monkeypatch) -> None:
-    """Canary for known-gaps.md "A failed bundle snapshot build is reported
-    but does not floor the exit code": the release exit ladder has no input
-    for a failed bundle axis, so an otherwise clean release exits 0 even
-    though its report records the failure. Raising it needs an ADR (ADR-071
-    rules out folding it into the per-pair assurance axis)."""
+# ── R4: a failed bundle axis floors the release exit (ADR-071, 2026-11-21) ──
+#
+# Every producer of ``BundleDiffResult.analysis_errors`` on the live
+# directory-compare path, driven through the public CLI. The oracle is the
+# amendment's rule stated independently of the resolver:
+# exit == max(exit the same release reaches with no bundle failure, 1).
+
+
+def _raise(exc: Exception):
+    def boom(*_args, **_kwargs):
+        raise exc
+
+    return boom
+
+
+def _force_bundle_build_failure(monkeypatch) -> str:
+    monkeypatch.setattr(
+        bundle_mod, "build_bundle_snapshot_mixed", _raise(OSError("eio"))
+    )
+    return "bundle snapshot could not be built: eio"
+
+
+def _force_compare_bundle_failure(monkeypatch) -> str:
+    monkeypatch.setattr(bundle_mod, "compare_bundle", _raise(RuntimeError("bug")))
+    return "bundle analysis raised: bug"
+
+
+def _force_signature_check_failure(monkeypatch) -> str:
+    import abicheck.bundle_signature_evidence as sig_mod
+
+    monkeypatch.setattr(
+        sig_mod, "find_unverified_signature_findings", _raise(KeyError("sig"))
+    )
+    return "bundle signature-evidence check raised: 'sig'"
+
+
+_PRODUCERS = {
+    "snapshot_build": _force_bundle_build_failure,
+    "compare_bundle": _force_compare_bundle_failure,
+    "signature_check": _force_signature_check_failure,
+}
+
+
+def _snap(lib: str, version: str, *, with_bar: bool):
+    from abicheck.model import AbiSnapshot, Function, Visibility
+
+    names = ["foo", "bar"] if with_bar else ["foo"]
+    funcs = [
+        Function(name=n, mangled=n, return_type="int", visibility=Visibility.PUBLIC)
+        for n in names
+    ]
+    return AbiSnapshot(library=lib, version=version, functions=funcs, from_headers=True)
+
+
+def _run_release(tmp_path: Path, *, breaking: bool) -> tuple[int, dict, str]:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+    from abicheck.serialization import snapshot_to_json
+
+    for side in ("old", "new"):
+        (tmp_path / side).mkdir()
+    for lib in ("liba.so", "libb.so"):
+        removed = breaking and lib == "liba.so"
+        (tmp_path / "old" / f"{lib}.json").write_text(
+            snapshot_to_json(_snap(lib, "1", with_bar=True)), encoding="utf-8"
+        )
+        (tmp_path / "new" / f"{lib}.json").write_text(
+            snapshot_to_json(_snap(lib, "2", with_bar=not removed)), encoding="utf-8"
+        )
+    md = tmp_path / "report.md"
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(tmp_path / "old"),
+            str(tmp_path / "new"),
+            "-o",
+            "json=-",
+            "-o",
+            f"markdown={md}",
+        ],
+    )
+    return result.exit_code, json.loads(result.stdout), md.read_text("utf-8")
+
+
+@pytest.mark.parametrize("breaking", [False, True], ids=["clean", "breaking"])
+def test_release_without_bundle_failure_is_unfloored(tmp_path, breaking) -> None:
+    code, payload, _ = _run_release(tmp_path, breaking=breaking)
+    assert "bundle_analysis_errors" not in payload
+    assert code == (4 if breaking else 0)
+
+
+@pytest.mark.parametrize("breaking", [False, True], ids=["clean", "breaking"])
+@pytest.mark.parametrize("producer", sorted(_PRODUCERS))
+def test_failed_bundle_axis_floors_the_release_exit_code(
+    monkeypatch, tmp_path, producer, breaking
+) -> None:
+    message = _PRODUCERS[producer](monkeypatch)
+    code, payload, markdown = _run_release(tmp_path, breaking=breaking)
+    assert message in payload["bundle_analysis_errors"]
+    expected = max(4 if breaking else 0, 1)
+    assert code == expected
+    assert payload["exit"]["code"] == expected  # report and process agree
+    assert "Bundle Analysis Warnings" in markdown
+    assert "release exit code is at least 1" in markdown
+
+
+@pytest.mark.parametrize("require_complete", [False, True])
+@pytest.mark.parametrize("errors", [(), ("x",), ("x", "y")], ids=["none", "one", "two"])
+@pytest.mark.parametrize(
+    "verdict", ["NO_CHANGE", "COMPATIBLE", "API_BREAK", "BREAKING", "ERROR"]
+)
+def test_bundle_failure_floor_is_max_folded(verdict, errors, require_complete) -> None:
     from abicheck.policy.release_exit_decision import (
         resolve_release_exit_decision_for_report,
     )
 
-    monkeypatch.setattr(
-        bundle_mod, "build_bundle_snapshot", _failing_build("both", OSError("eio"))
-    )
-    members = {"libcore.so": Path("libcore.so")}
-    library_results: list[dict[str, object]] = [
-        {
-            "library": "libcore.so",
-            "verdict": "NO_CHANGE",
-            "_diff_result": _diff("libcore.so", Verdict.NO_CHANGE),
-        }
+    rows: list[dict[str, object]] = [
+        {"library": "a", "verdict": verdict, "analysis_assurance_status": "complete"}
     ]
-    result, worst = collect_bundle_result(
-        library_results,
-        members,
-        dict(members),
-        manifest_path=None,
-        bundle_system_providers=(),
-        worst_verdict="NO_CHANGE",
-    )
-    assert result is not None and result.analysis_errors
-    decision = resolve_release_exit_decision_for_report(
-        worst, False, [], None, 0, library_results, require_complete_analysis=True
-    )
-    assert decision.code == 0
+    base = resolve_release_exit_decision_for_report(
+        verdict, False, [], None, 0, rows, require_complete_analysis=require_complete
+    ).code
+    floored = resolve_release_exit_decision_for_report(
+        verdict,
+        False,
+        [],
+        None,
+        0,
+        rows,
+        require_complete_analysis=require_complete,
+        bundle_analysis_errors=errors,
+    ).code
+    assert floored == (max(base, 1) if errors else base)

@@ -293,12 +293,6 @@ current emitter, which is unchanged.
 `false-clean` — a reroute inside one class-template specialization is unreported when another specialization of the same template moves the opposite way.
 <!-- canary: tests/test_template_stem_real_mangling.py::test_two_specializations_swapping_overloads_read_as_no_reroute -->
 
-#### A failed bundle snapshot build is reported but does not floor the exit code (2026-11-13)
-
-**Status (2026-11-13): OPEN.** When a release's bundle snapshot cannot be built, `run_bundle_analysis` records `bundle snapshot could not be built: ...` in `BundleDiffResult.analysis_errors`. JSON (`bundle_analysis_errors`) and Markdown show it. No exit axis reads it, so a release that is otherwise clean still exits 0. ADR-071 §3 keeps assurance per-pair, and a new `0 -> 1` axis needs an ADR. Owner: `policy/release_exit_decision.py`.
-`false-clean` — a release whose cross-library analysis failed exits 0 when its per-library results are clean. [Full write-up](known-gaps/a-failed-bundle-snapshot-build-does-not-floor-the-exit-code.md)
-<!-- canary: tests/test_fail_closed_error_paths.py::test_failed_bundle_axis_does_not_floor_the_release_exit_code -->
-
 #### A declaration-only DWARF record on one side reads as an added type (2026-11-13)
 
 **Status (2026-11-13): OPEN.** GCC and Clang emit only a declaration DIE (`DW_AT_declaration`, no size, no children) for a class with a virtual base and no key function in a TU that never constructs it. `dwarf_snapshot._process_record_type_named` drops such DIEs, so when the old library carries only the declaration and the new one the definition, the type and its bases read `type_added` and the run is COMPATIBLE: a 16 -> 8 byte size change and a lost virtual base vanish at DWARF-only depth. Header evidence is unaffected. Found by the edit corpus (`base_became_nonvirtual`; the seed now constructs the type, so the corpus no longer exercises this shape). Closing it: keep a declaration-only record as an incomplete fact and report the one-sided layout as unconfirmed (assurance axis), never as an addition. Owner: `extract/` (DWARF snapshot builder), `compare/`.

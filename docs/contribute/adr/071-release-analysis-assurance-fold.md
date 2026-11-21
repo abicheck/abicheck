@@ -309,3 +309,42 @@ and it does not give the release report a per-member `analysis_assurance`
 *block* — only the status, contribution, and notes. A full per-member
 assurance block is a report-schema question of its own size; the members
 that need one are reachable today by comparing that library individually.
+
+## Amendment (2026-11-21): a failed bundle analysis lowers release assurance
+
+**Problem.** §3 defined release assurance as a fold of per-pair member
+assurance and said a release has no evidence of its own to assess. That is
+not true of a directory/package `compare` that runs bundle (cross-library,
+ADR-023) analysis: the bundle check is the release's own analysis. When it
+fails -- the bundle snapshot cannot be built, `compare_bundle` raises, or
+the signature-evidence check raises -- `BundleDiffResult.analysis_errors`
+records it and the report shows it, but no exit axis read it, so a release
+with clean members exited `0` although no cross-library check ran. AGENTS.md
+"Weaker evidence narrows conclusions": a failed analysis is never a clean
+pass.
+
+**Decision.**
+
+1. Non-empty bundle `analysis_errors` lowers the release's analysis
+   assurance. It contributes `1` to the existing `ANALYSIS_ASSURANCE` axis
+   (ADR-064), folded with `max` into the per-member fold of §3. No new axis
+   and no new exit number.
+2. Unlike the per-member contribution, it is **not** gated on
+   `assurance.require_complete`. `require_complete` decides whether
+   *weaker-but-present* evidence is acceptable; a cross-library analysis
+   that did not run is a failed extractor (ADR-063/064), which must never
+   read clean. The opt-in is therefore not an escape hatch for it.
+3. It only raises `0 -> 1`. Every other axis (2/4/5/6/7/8/16 and the
+   operational `4`) still dominates through `max`; it never lowers a code.
+4. One resolver owns it:
+   `policy/release_exit_decision.resolve_release_exit_decision_for_report`
+   takes `bundle_analysis_errors`, so the process exit, the persisted
+   `exit` block and the `--output-dir` summary agree by construction.
+5. The report states it: the Markdown "Bundle Analysis Warnings" section
+   says the exit is at least `1`, and the CLI prints a stderr notice.
+
+**Migration.** A release whose bundle analysis already failed and whose
+members were clean now exits `1` instead of `0`. This is the intended fix
+of a false-clean result, not a compatibility promise to keep; it is
+recorded in the changelog. Closes the known gap "A failed bundle snapshot
+build is reported but does not floor the exit code".

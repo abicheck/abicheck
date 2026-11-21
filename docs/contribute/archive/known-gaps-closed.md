@@ -16,6 +16,10 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A failed bundle snapshot build is reported but does not floor the exit code (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED** by the [ADR-071 2026-11-21 amendment](../adr/071-release-analysis-assurance-fold.md#amendment-2026-11-21-a-failed-bundle-analysis-lowers-release-assurance). A directory/package `compare` whose bundle (cross-library) analysis failed -- non-empty `BundleDiffResult.analysis_errors` from a raising bundle snapshot build, a raising `compare_bundle`, or a raising signature-evidence check -- now has lowered analysis assurance: the release exit resolver (`policy/release_exit_decision.resolve_release_exit_decision_for_report`) folds `1` into the `ANALYSIS_ASSURANCE` axis with `max`, unconditionally, so a clean release exits `1` and a higher code is never lowered. The JSON `exit` block, the `--output-dir` summary, the Markdown "Bundle Analysis Warnings" section and a stderr notice all state it. Regression tests: `tests/test_fail_closed_error_paths.py::test_failed_bundle_axis_floors_the_release_exit_code` (public CLI, all three producers x clean/breaking release) and `::test_bundle_failure_floor_is_max_folded`. [Full write-up](../known-gaps/a-failed-bundle-snapshot-build-does-not-floor-the-exit-code.md)
+
 ### Affected-symbol attribution ignores identifier boundaries (closed 2026-11-19)
 
 **Status (2026-11-19): CLOSED.** `_build_type_to_funcs` and `_build_type_embed_index` keep the Aho-Corasick prefilter but count a hit only when it occurs as a whole identifier (`compare/type_name_boundary.py`; `::` stays a boundary, scoped same-name types are `type_symbol_disambiguation`'s job). The record-edit fragment (`formal/RECORD_EDIT_FRAGMENT.md`) had re-measured it on 925 of 9252 records in every evidence lane; regression: `tests/test_affected_symbols_identifier_boundary.py`.

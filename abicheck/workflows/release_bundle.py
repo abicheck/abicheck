@@ -180,8 +180,8 @@ def run_bundle_analysis(
         # but the bundle axis is recorded as failed in `analysis_errors` --
         # the same structured record a raising `compare_bundle` leaves -- so
         # the report says "nothing was checked", not "nothing was found".
-        # The exit code is not raised: see known-gaps.md "A failed bundle
-        # snapshot build is reported but does not floor the exit code".
+        # The release exit resolver floors such a run to at least 1
+        # (ADR-071's 2026-11-21 amendment), so it never reads clean.
         failed = BundleDiffResult(
             old_root=old_root if old_root is not None else Path(),
             new_root=new_root if new_root is not None else Path(),

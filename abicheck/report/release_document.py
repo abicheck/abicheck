@@ -385,6 +385,9 @@ def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> Release
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
         failed_member_contribution=terms.decision.failed_member_exit_contribution,
         require_complete_analysis=ev.require_complete_analysis,
+        bundle_analysis_errors=(
+            ev.bundle_result.analysis_errors if ev.bundle_result is not None else ()
+        ),
     ).to_dict()
     return ReleaseReport(
         evaluation=ev,

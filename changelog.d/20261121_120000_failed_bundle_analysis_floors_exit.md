@@ -1,0 +1,3 @@
+### Fixed
+
+- **A directory/package `compare` whose cross-library (bundle) analysis failed no longer exits 0.** When the bundle snapshot could not be built, `compare_bundle` raised, or the signature-evidence check raised, the report listed the failure under `bundle_analysis_errors` but a release with clean members still passed. Such a release now has lowered analysis assurance and exits at least `1` (folded with `max`, never lowering a higher code), whether or not `assurance.require_complete` is set; the `exit` block, the `--output-dir` summary, the Markdown "Bundle Analysis Warnings" section and a stderr notice say so (ADR-071, 2026-11-21 amendment).
