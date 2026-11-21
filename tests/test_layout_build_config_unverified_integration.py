@@ -12,10 +12,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
+from tests._abicheck_subprocess import abicheck_command
 
 pytestmark = pytest.mark.integration
 
@@ -65,10 +66,7 @@ def _compare(
     new_so, new_hdr = _build(tmp, "new", flag, new_h, strip=strip)
     out = tmp / "report.json"
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "compare",
             str(old_so),
             str(new_so),
@@ -79,7 +77,7 @@ def _compare(
             "-o",
             f"json={out}",
             *extra,
-        ],
+        ),
         capture_output=True,
         text=True,
     )

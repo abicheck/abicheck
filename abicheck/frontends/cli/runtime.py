@@ -484,7 +484,7 @@ def _exit_compare_release(
             "Cross-library (bundle) analysis did not complete: "
             + "; ".join(bundle_analysis_failures)
             + ". Analysis assurance is lowered, so the release exit code is "
-            "at least 1 (ADR-071, 2026-11-21 amendment).",
+            "at least 1.",
             err=True,
         )
     # ADR-071's assurance notice is worded against every *other* axis ("floored

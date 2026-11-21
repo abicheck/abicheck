@@ -211,7 +211,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         observable_at=(
             observable(
                 ("B", "H"),
-                rationale="ADR-095: an assurance finding about a header-derived layout; "
+                rationale="An assurance finding about a header-derived layout; "
                 "it exists only where the layout came from headers without DWARF or build data",
             ),
         ),

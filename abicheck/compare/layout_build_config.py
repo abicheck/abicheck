@@ -45,23 +45,32 @@ from ..model.entities import EnumType, RecordType
 from ..model.snapshot import AbiSnapshot
 
 __all__ = [
-    "LAYOUT_FLAG_PREFIXES",
+    "LAYOUT_SWITCHES",
     "build_config_sensitive_changes",
     "layout_config_unverified",
     "short_enum_width",
 ]
 
 #: Compile switches that change record or enum layout without the header
-#: saying so. A header parse that received one is not assuming the default.
-LAYOUT_FLAG_PREFIXES: tuple[str, ...] = (
-    "-fpack-struct",
-    "-fshort-enums",
-    "-fno-short-enums",
-    "-mms-bitfields",
-    "-mno-ms-bitfields",
-    "-malign-double",
-    "-mno-align-double",
+#: saying so, by option name (``-fpack-struct=N`` is ``-fpack-struct``). A
+#: header parse that received one is not assuming the default.
+LAYOUT_SWITCHES: frozenset[str] = frozenset(
+    {
+        "-fpack-struct",
+        "-fshort-enums",
+        "-fno-short-enums",
+        "-mms-bitfields",
+        "-mno-ms-bitfields",
+        "-malign-double",
+        "-mno-align-double",
+    }
 )
+
+
+def _option_name(arg: str) -> str:
+    """The option name of a compile argument: everything before its ``=`` value."""
+    return arg.partition("=")[0]
+
 
 _INT_UNDERLYING = frozenset({"int", "unsigned int", "signed int", "unsigned"})
 
@@ -72,7 +81,7 @@ def _side_unverified(snap: AbiSnapshot) -> bool:
     if snap.parsed_with_build_context:
         return False
     return not any(
-        arg.startswith(LAYOUT_FLAG_PREFIXES) for arg in snap.ast_compile_args
+        _option_name(arg) in LAYOUT_SWITCHES for arg in snap.ast_compile_args
     )
 
 
