@@ -75,7 +75,7 @@
       "abicheck/extract/elf_symbol_origin.py": "3408f0fdb9d3ce98eff14007012ac4bf844256f6628d127c4853ef8b6c20dac4",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
-      "abicheck/extract/elf_vtt_entries.py": "0fa2d0210214731a7d554cbbdd65da80afd0b9219ad964cab0109bbe94d01c1b",
+      "abicheck/extract/elf_vtt_entries.py": "f1be739610ddbcfa397130529f04cf4b955e39dc6c3b04bcda196f449347f379",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "fc6262e7eeaf5834cfd354cef88cff7610dcfd30961f42118623635b9c57736d",
       "abicheck/extract/export_table_read.py": "60fbf398e40df9cd48a9146ae1b79910cb7da865015a171405a727284848f7bd",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "ff894f81e422db62c2af05ccebbfcc76ae4188bd65daaf60770ac0d87039ed60",
+    "fingerprint": "196f3656c051790e7da3bd4eb5682dd2074a58a74051189358fa723ea8eb8337",
     "generation": 90,
-    "reason": "review follow-up: VTT map unknown exactly when the export read failed (generation 90, unshipped)"
+    "reason": "review follow-up: VTT span bounded by the file length (generation 90, unshipped)"
   },
   "resolver": {
     "files": {

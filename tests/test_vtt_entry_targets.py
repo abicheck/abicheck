@@ -284,3 +284,31 @@ def test_export_read_outcome_decides_unknown_vs_no_vtt(symbols, failed, expected
             note_export_read_failure("dynsym unreadable")
         got = read_vtt_entries(_FakeElf(), ElfMetadata(symbols=symbols))
     assert got == expected
+
+
+@pytest.mark.parametrize(
+    ("sh_size", "st_size", "file_len", "expected"),
+    [
+        (0x100, 56, 0x2000, True),  # an honest VTT inside its section's bytes
+        (0x100, 0x200, 0x2000, False),  # the VTT runs past its section
+        (1 << 40, 1 << 39, 0x2000, False),  # forged section and VTT sizes
+        (0x100, 56, 0x1010, False),  # the section is cut short by the file end
+    ],
+)
+def test_vtt_span_must_exist_in_the_file(sh_size, st_size, file_len, expected):
+    import io
+
+    from abicheck.extract.elf_vtt_entries import _backed
+
+    class _Elf:
+        stream = io.BytesIO(b"\0" * file_len)
+
+        def get_section(self, _index):
+            return {
+                "sh_type": "SHT_PROGBITS",
+                "sh_addr": 0x4000,
+                "sh_size": sh_size,
+                "sh_offset": 0x1000,
+            }
+
+    assert _backed(_Elf(), 22, (0x4000, st_size)) is expected

@@ -230,7 +230,15 @@ def _backed(elf: Any, shndx: int, span: tuple[int, int]) -> bool:
         return False
     start, size = span
     base = int(section["sh_addr"])
-    return base <= start and start + size <= base + int(section["sh_size"])
+    if not (base <= start and start + size <= base + int(section["sh_size"])):
+        return False
+    # The section header is as untrusted as st_size: the bytes must also
+    # exist in the file, or a forged size would drive the slot allocation.
+    stream = elf.stream
+    here = stream.tell()
+    length = int(stream.seek(0, 2))
+    stream.seek(here)
+    return int(section["sh_offset"]) + (start - base) + size <= length
 
 
 def _read_word(elf: Any, address: int) -> int | None:
