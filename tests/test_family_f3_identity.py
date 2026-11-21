@@ -1004,3 +1004,29 @@ def test_castxml_duplicate_collapse_is_order_invariant_and_keeps_distinct() -> N
             f.mangled for f in collapse_benign_duplicates(parsed, lambda _: True)
         )
         assert keys == {"strchr": 1, "lookup": 2}
+
+
+@pytest.mark.parametrize("delta", [8, 0x40, 0x1000, 0x123458])
+def test_vtt_entry_identity_survives_a_relink_and_separates_targets(
+    delta: int,
+) -> None:
+    """Bug class ``extraction.vtt_entry_target_reduced_to_size``: a VTT
+    entry's identity is the table it points into and the address-point
+    offset, never the address. Moving every table by *delta* keeps each
+    identity; two different address points stay two identities. Oracle:
+    the hand-placed table layout."""
+    from abicheck.extract.elf_vtt_entries import _CoverIndex, _target
+    from abicheck.model.elf_facts import VttEntryTarget
+
+    layout = {
+        "_ZTV1D": (0x4B58, 96),
+        "_ZTC1D0_1L": (0x4BF0, 64),
+        "_ZTV1V": (0x4CC0, 24),
+    }
+    points = [("_ZTV1D", 24), ("_ZTC1D0_1L", 24), ("_ZTC1D0_1L", 56), ("_ZTV1V", 16)]
+    for shift in (0, delta):
+        moved = {n: (s + shift, z) for n, (s, z) in layout.items()}
+        index = _CoverIndex(moved)
+        got = [_target(("addr", moved[t][0] + off), moved, index) for t, off in points]
+        assert got == [VttEntryTarget(t, off) for t, off in points]
+        assert len(set(got)) == len(points)

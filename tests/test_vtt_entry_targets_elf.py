@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 from abicheck.elf_metadata import parse_elf_metadata
 from abicheck.model.elf_facts import VttEntryTarget
@@ -158,16 +159,8 @@ def _reloc_at(lib: Path, address: int) -> str:
 
 def _compare(old: Path, new: Path, out: Path) -> tuple[int, dict]:
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
-            "compare",
-            str(old),
-            str(new),
-            "-o",
-            f"json={out}",
-        ],
+        abicheck_command("compare", old, new, "-o", f"json={out}"),
+        env=abicheck_env(),
         capture_output=True,
         text=True,
         check=False,
@@ -275,7 +268,7 @@ def _nm_dynamic(lib: Path) -> str:
 
 
 def _dump(lib: Path, out: Path) -> Path:
-    _run([sys.executable, "-m", "abicheck.cli", "dump", lib, "-o", out])
+    _run(abicheck_command("dump", lib, "-o", out), env=abicheck_env())
     return out
 
 

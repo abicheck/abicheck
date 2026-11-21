@@ -27,10 +27,9 @@ from typing import TYPE_CHECKING
 from ..demangle import demangle
 from ..detector_registry import registry
 from ..diff_helpers import make_change
-from ..model import stdlib_namespaces_excluded
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.cxx_artifact_symbols import cxx_class_artifact_kind
 from ..model.evidence_status import Confidence
-from ..name_classification import STDLIB_RTTI_PREFIXES
 from .declined_comparisons import record_declined
 
 if TYPE_CHECKING:
@@ -39,8 +38,6 @@ if TYPE_CHECKING:
     from ..model.elf_facts import ElfMetadata, VttEntryTarget
 
 __all__ = ["describe_target"]
-
-_VTT_PREFIX = "_ZTT"
 
 
 def _both_elf(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None]:
@@ -51,13 +48,14 @@ def _both_elf(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None]:
     return True, None
 
 
-def _vtts(elf: ElfMetadata, *, skip_runtime: bool) -> dict[str, int]:
+def _vtts(elf: ElfMetadata) -> dict[str, int]:
+    """Exported VTTs and their sizes. A runtime (``std::``) VTT a library
+    emits is kept: its entries are compared by the same logical target, so
+    it can only differ when that library's copy really changed."""
     return {
         s.name: s.size
         for s in elf.symbols
-        if s.name.startswith(_VTT_PREFIX)
-        and s.size > 0
-        and not (skip_runtime and s.name.startswith(STDLIB_RTTI_PREFIXES))
+        if s.size > 0 and cxx_class_artifact_kind(s.name) == "VTT"
     }
 
 
@@ -81,9 +79,8 @@ def _owner(vtt: str) -> str:
 def _diff_vtt_entries(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """One finding per VTT entry whose logical target changed."""
     assert old.elf is not None and new.elf is not None  # support gate
-    skip_runtime = stdlib_namespaces_excluded(old, new)
-    old_vtts = _vtts(old.elf, skip_runtime=skip_runtime)
-    new_vtts = _vtts(new.elf, skip_runtime=skip_runtime)
+    old_vtts = _vtts(old.elf)
+    new_vtts = _vtts(new.elf)
     word = new.elf.pointer_size or 8
     old_map, new_map = old.elf.vtt_entries, new.elf.vtt_entries
     changes: list[Change] = []

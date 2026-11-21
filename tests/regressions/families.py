@@ -586,6 +586,7 @@ _F3 = (
     "templates.parameter_template_args_read_as_family_membership",
     "identity.header_declaration_retype_read_as_removal",
     "identity.benign_duplicate_declaration_key",
+    "extraction.vtt_entry_target_reduced_to_size",
 )
 _F4 = (
     "scanner.dead_preprocessor_branch_read_as_live",
