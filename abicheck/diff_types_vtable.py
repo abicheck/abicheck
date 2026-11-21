@@ -735,14 +735,15 @@ def _moved_entries(
             f_new is not None and f_new.vtable_index is not None
         ):
             continue
+        known = f_old or f_new
+        label = known.name if known is not None else entry
         out.append(
             make_change(
                 ChangeKind.TYPE_VTABLE_CHANGED,
                 symbol=entry,
                 description=(
                     f"position in the declared vtable sequence changed for "
-                    f"{(f_old or f_new).name if (f_old or f_new) else entry}: "
-                    f"{before} → {after}"
+                    f"{label}: {before} → {after}"
                 ),
                 old_value=f"position {before}",
                 new_value=f"position {after}",
