@@ -4131,5 +4131,83 @@
   "observable": true,
   "verdict_max": "COMPATIBLE",
   "verdict_min": "NO_CHANGE"
+ },
+ "bitfield_barrier_removed_before_30|c_layout": {
+  "expected": [],
+  "any_of": [],
+  "verdict_min": "NO_CHANGE",
+  "verdict_max": "COMPATIBLE",
+  "observable": true
+ },
+ "bitfield_barrier_removed_before_1|c_layout": {
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED"
+  ],
+  "any_of": [],
+  "verdict_min": "BREAKING",
+  "verdict_max": null,
+  "observable": true
+ },
+ "bitfield_barrier_removed_after_14|c_layout": {
+  "expected": [],
+  "any_of": [],
+  "verdict_min": "NO_CHANGE",
+  "verdict_max": "COMPATIBLE",
+  "observable": true
+ },
+ "bitfield_barrier_removed_after_16|c_layout": {
+  "expected": [],
+  "any_of": [],
+  "verdict_min": "NO_CHANGE",
+  "verdict_max": "COMPATIBLE",
+  "observable": true
+ },
+ "bitfield_width_1_to_2_before_barrier|c_layout": {
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "any_of": [],
+  "verdict_min": "BREAKING",
+  "verdict_max": null,
+  "observable": true
+ },
+ "bitfield_barrier_removed_after_6|c_layout": {
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "any_of": [],
+  "verdict_min": "BREAKING",
+  "verdict_max": null,
+  "observable": true
+ },
+ "bitfield_width_1_to_2_after_barrier|c_layout": {
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "any_of": [],
+  "verdict_min": "BREAKING",
+  "verdict_max": null,
+  "observable": true
+ },
+ "dialect_cxx20_char8_t_parameter|cxx_dialect": {
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "any_of": [
+   [
+    "FUNC_PARAMS_CHANGED",
+    "FUNC_REMOVED",
+    "FUNC_VISIBILITY_CHANGED"
+   ]
+  ],
+  "verdict_min": "BREAKING",
+  "verdict_max": null,
+  "observable": true
  }
 }

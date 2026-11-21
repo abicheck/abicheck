@@ -268,6 +268,8 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "bv": "function",
     # c_layout (union and bit-field fragments; lf.gate admits an operator)
     "lf": "struct",
+    # cxx_dialect (a rebuild under a newer standard; dl.gate admits an operator)
+    "dl": "function",
     # cxx_alt
     "xa.uniq": "inline_function",
     "xa.str": "std_string",
@@ -360,7 +362,16 @@ ROLE_CONSTRUCT: dict[str, str] = {
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
 GATE_ROLES = frozenset(
-    {"alt.gate", "xa.gate", "src.gate", "tree.gate", "opq.gate", "bv.gate", "lf.gate"}
+    {
+        "alt.gate",
+        "xa.gate",
+        "src.gate",
+        "tree.gate",
+        "opq.gate",
+        "bv.gate",
+        "lf.gate",
+        "dl.gate",
+    }
 )
 
 # Language feature an operator needs -> the construct it exercises.
@@ -382,6 +393,9 @@ def role_construct(role: str) -> str:
 # seed role holding several declarations) rather than what the edit changes:
 # the role-derived construct is not the one the edit touches. A key must be a real operator (``test_edit_corpus_edit_axis``).
 OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
+    # cxx_dialect: -std= (a build flag) retypes a function's parameter.
+    "dialect_cxx17_noexcept_in_function_type": ("function",),
+    "dialect_cxx20_char8_t_parameter": ("function",),
     # declarations of another construct added next to the seed's functions
     "object_added": ("variable",),
     "source_only_var_export_added": ("variable",),
@@ -509,6 +523,13 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "bitfield_barrier_inserted_after_17": "bitfield_barrier_shifts",
         "bitfield_barrier_removed_after_17": "bitfield_barrier_shifts",
         "bitfield_barrier_removed_before_7": "bitfield_barrier_shifts",
+        "bitfield_barrier_removed_after_6": "bitfield_barrier_shifts",
+        "bitfield_barrier_removed_before_1": "bitfield_barrier_shifts",
+        "bitfield_barrier_removed_after_14": "bitfield_barrier_absorbed",
+        "bitfield_barrier_removed_after_16": "bitfield_barrier_absorbed",
+        "bitfield_barrier_removed_before_30": "bitfield_barrier_absorbed",
+        "bitfield_width_1_to_2_after_barrier": "bitfield_width_shifts",
+        "bitfield_width_1_to_2_before_barrier": "bitfield_width_absorbed",
         "bitfield_rebuild_packed_alignment_only": "packing_change",
         "record_alignment_raised": "record_align_change",
         "cxx_record_added": "record_added",
@@ -534,6 +555,9 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "secondary_base_became_polymorphic": "base_layout_changed",
     },
     "function": {
+        # cxx_dialect: the standard, not the source, retypes the parameter.
+        "dialect_cxx17_noexcept_in_function_type": "exception_spec_change",
+        "dialect_cxx20_char8_t_parameter": "param_retyped",
         "func_param_append": "param_added",
         "func_param_remove": "param_removed",
         "func_param_type_change": "param_retyped",

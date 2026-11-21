@@ -208,6 +208,16 @@ LAYOUT_FIXTURES: tuple[Fixture, ...] = (
     _bits_fx("bins17_after", 17),
     _bits_fx("brem17_after", 17, "after"),
     _bits_fx("brem7_before", 7, "before"),
+    # The edits that close the row-shape classes the ones above miss
+    # (``model/reduction.certify``): barrier removals whose size or absorption
+    # differs, and width changes on either side of a barrier.
+    _bits_fx("brem6_after", 6, "after"),
+    _bits_fx("brem1_before", 1, "before"),
+    _bits_fx("brem14_after", 14, "after"),
+    _bits_fx("brem16_after", 16, "after"),
+    _bits_fx("brem30_before", 30, "before"),
+    _bits_fx("bw1_after", 1, "after"),
+    _bits_fx("bw1_before", 1, "before"),
     Fixture(
         "balign",
         (

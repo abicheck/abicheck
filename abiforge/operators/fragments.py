@@ -494,6 +494,35 @@ _BITFIELD_OPS = (
         "the :0 barrier before b is removed: b, c and tail move back",
         construct="struct",
     ),
+    *(
+        _op(
+            f"bitfield_barrier_removed_{where}_{w}",
+            f"brem{w}_{where}",
+            (bitfield_record(f"brem{w}_{where}", w, "none"),),
+            f"the :0 barrier {where} b is removed after a {w}-bit a: {why}",
+            construct="struct",
+        )
+        for w, where, why in (
+            (6, "after", "c moves back; unpacked tail too, clang packed size too"),
+            (1, "before", "b, c, tail move back and sizeof shrinks"),
+            (14, "after", "unpacked nothing moves; packed c moves back"),
+            (16, "after", "b already ends on the unit: nothing moves"),
+            (30, "before", "unpacked nothing moves; packed b and c move back"),
+        )
+    ),
+    *(
+        _op(
+            f"bitfield_width_1_to_2_{where}_barrier",
+            f"bw1_{where}",
+            (bitfield_record(f"bw1_{where}", 2, where),),
+            f"a: 1 -> 2 bits with a :0 barrier {where} b: {why}",
+            construct="struct",
+        )
+        for where, why in (
+            ("after", "b moves inside its unit, the barrier holds c and tail"),
+            ("before", "the barrier holds b, c and tail: only a's width changes"),
+        )
+    ),
     _op(
         "bitfield_rebuild_packed_alignment_only",
         "balign",

@@ -354,6 +354,35 @@ int main(void) {
 }
 """
 
+# cxx_dialect: one shape per function, so a renamed symbol breaks only the
+# shape that references it and ``keep`` stays a control.
+_DL_CB = r"""#include <cstdio>
+#include "edit_seed.h"
+static int hits;
+static void cb() noexcept { ++hits; }
+int main() {
+  dl_register(cb);
+  std::printf("hits=%d\n", hits);
+  return 0;
+}
+"""
+
+_DL_U8 = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  std::printf("take=%d\n", dl_take(u8"x"[0]));
+  return 0;
+}
+"""
+
+_DL_KEEP = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  std::printf("keep=%d\n", dl_keep(4));
+  return 0;
+}
+"""
+
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
@@ -373,4 +402,5 @@ CONSUMERS: dict[str, dict[str, str]] = {
     "c_layout": {"layout": consumer_text(LAYOUT_FIXTURES)},
     "cxx_src": {"call": _SRC_CALL},
     "cxx_tree": {"call": _TREE_CALL},
+    "cxx_dialect": {"callback": _DL_CB, "char": _DL_U8, "keep": _DL_KEEP},
 }

@@ -1577,6 +1577,45 @@ def _layout_seed() -> Seed:
 
 LAYOUT_SEED = _layout_seed()
 
+# cxx_dialect: one library rebuilt under a newer C++ standard with identical
+# source text (research/standard-space, cpp.csv). Two declarations whose type
+# the standard itself changes -- a noexcept function-pointer parameter (part
+# of the function type from C++17, P0012R1) and the element type of a u8
+# literal (char8_t from C++20, P0482R6) -- and one whose type no revision
+# changes. ``build.cflags`` carries the new side's ``-std=``; ``dl.gate``
+# admits only ``operators/dialect``.
+_DIALECT_ROLES: dict[str, RoleText] = {
+    "dl.gate": ("", ""),
+    "dl.cb": (
+        "void dl_register(void (*cb)() noexcept);",
+        "void dl_register(void (*cb)() noexcept) { if (cb) cb(); }",
+    ),
+    "dl.u8": (
+        'int dl_take(decltype(u8"x"[0]) c);',
+        'int dl_take(decltype(u8"x"[0]) c) { return (int)c; }',
+    ),
+    "dl.keep": ("int dl_keep(int v);", "int dl_keep(int v) { return v + 1; }"),
+    "build.cflags": ("", ""),
+}
+
+DIALECT_SEED = Seed(
+    name="cxx_dialect",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_DL_HPP",
+        "#define EDIT_SEED_DL_HPP",
+        _VIS_OPEN,
+        "@@dl.cb@@",
+        "@@dl.u8@@",
+        "@@dl.keep@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=('#include "edit_seed.h"', "@@dl.cb@@", "@@dl.u8@@", "@@dl.keep@@"),
+    roles=_DIALECT_ROLES,
+    gate_role="dl.gate",
+)
+
 SEEDS: tuple[Seed, ...] = (
     C_SEED,
     CXX_SEED,
@@ -1590,5 +1629,6 @@ SEEDS: tuple[Seed, ...] = (
     OPAQUE_SEED,
     BYVAL_SEED,
     LAYOUT_SEED,
+    DIALECT_SEED,
 )
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}
