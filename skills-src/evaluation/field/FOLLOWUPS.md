@@ -74,11 +74,13 @@ work is the live C++ validation campaign tracked under §C/§E.
 - **Context.** Public headers routinely `#include` *generated* headers
   (`snappy-stubs-public.h`); without the build's `-I`, the header parse fails
   `file not found`.
-- **What actually shipped.** `cli._resolve_build_context_flags` runs
-  `build_context_for_header(db, header).to_castxml_flags()` whenever a compile DB
-  is supplied via `-p`/`--compile-db`, deriving `-I`/`-isystem`/`-D`/`-U`/`-std`/
-  `--target`/`--sysroot` from the matched TU; `_merge_gcc_options` folds them into
-  the castxml invocation. So the build dir holding generated headers is on the
+- **What actually shipped.** (Owner moved since: the old
+  `cli._resolve_build_context_flags` is gone; the compile-DB match now lives in
+  `abicheck/workflows/artifact/compile_db_match.py::match_compile_db`, fed by
+  `--build-info` on `dump`/`compare`.) It runs
+  `BuildContext.to_castxml_flags()` for the header's matched TU, deriving `-I`/`-isystem`/`-D`/`-U`/`-std`/
+  `--target`/`--sysroot` from the matched TU, and folds them into
+  the header-parse invocation. So the build dir holding generated headers is on the
   include path automatically — no manual `-I`.
 - **Acceptance (pinned).** `tests/test_build_context.py::TestPerHeaderMatching::test_matched_tu_include_paths_flow_into_castxml_flags`
   asserts the matched TU's include dirs (where generated headers land), defines,
@@ -96,7 +98,10 @@ work is the live C++ validation campaign tracked under §C/§E.
   language mode; never hard-fail a correct `extern "C"` header.
 - **Acceptance.** `dump zlib.h --lang c` succeeds (or warns + falls back), no abort.
 - **Effort·Risk.** S · low. Fold into the G16 work.
-- **Shipped.** `dumper._castxml_dump` now factors the single invocation into
+- **Shipped.** (Current owner: `abicheck/extract/headers/castxml/backend.py`
+  — `castxml_dump` / `_run_castxml_attempt`, gated by
+  `extract/headers/castxml/probe.py::_castxml_cpp_retry_allowed`; the old
+  `dumper._castxml_dump` path no longer exists.) The castxml driver factors the single invocation into
   `_run_castxml_attempt` and, when an explicit `--lang c` parse fails *and* the
   header carries C++ constructs (`extern "C"`/class/namespace) *and* the failure
   is not a frontend-too-old signature, retries once in C++ mode with a warning
@@ -356,6 +361,11 @@ The entire eval was **Linux/ELF**. These are untested paths, not known bugs.
 
 ## H. Conda-forge scan 2026-06-24 follow-ups
 
+> **CLI note (2026-11).** The `scan` command this run used was removed
+> (ADR-068): a two-version check is `abicheck compare OLD NEW [-H …]`, a
+> single-version audit is `abicheck compare --no-baseline NEW`, and the cost
+> preview `scan --estimate` became `compare --dry-run`.
+
 A broad conda-forge validation run (22 runtime libraries) surfaced one stale
 harness bug and a cluster of header-mode UX gaps. The product-side gaps were
 addressed directly; the harness/packaging items below are network-bound (they
@@ -381,21 +391,27 @@ network-enabled run.
   (`absl/strings/string_view.h` not found), glib (`gio/gio.h` root missing),
   libjpeg-turbo/hdf5 (`size_t`/`hid_t`/`H5std_string` undeclared without an
   umbrella).
-- **Shipped.** `dumper_clang_errors.diagnose_header_compile_failure` maps these
+- **Shipped.** `abicheck/dumper_clang_errors.py::diagnose_header_compile_failure` maps these
   three signatures (required macro → `--gcc-options -D…`; missing include →
   add `-I` / install `-dev`/`-devel`; undeclared type → point `-H` at the
   umbrella header) and both the castxml and clang failure paths append the
-  hint. Unit-tested in `tests/test_header_failure_hints.py`.
+  hint. Unit-tested in `tests/test_header_failure_hints.py`. (The L4
+  source-replay sibling — a configure-only tree's missing *generated* header —
+  is `abicheck/buildsource/source_extractors/clang_dump_errors.py::_missing_generated_header_hint`.)
 
-### H3. `scan --estimate` L2 cost is size-aware (P1) — **shipped (product)**
+### H3. Dry-run L2 cost estimate is size-aware (P1) — **shipped (product)**
 - **Context.** The dry-run estimate priced every header at a flat anchor, so a
   trivial shim and a heavy templated umbrella ranked identically; ICU/hdf5
   header scans took 80–180 s while the estimate read flat.
-- **Shipped.** `service_scan._estimate_header_seconds` adds a per-KB term over
-  each header's on-disk size on top of the per-header base. Tested in
-  `tests/test_scan_estimate.py`.
+- **Shipped.** `abicheck/dry_run_estimate.py::_estimate_header_seconds` adds a
+  per-KB term over each header's on-disk size on top of the per-header base
+  (plus a complexity-risk multiplier). `scan --estimate` was removed with
+  `scan` (ADR-068); the estimate now surfaces through `compare --dry-run`
+  (`frontends/cli/compare_dry_run.py`). `tests/test_scan_estimate.py` went
+  with it; `tests/test_dry_run_contract.py` covers the dry-run contract but
+  no test pins the size term itself today (open).
 
-### H4. Fetch devel/include + dependency header packages — **NEW, network-bound**
+### H4. Fetch devel/include + dependency header packages — **shipped (harness); acceptance partial**
 - **Context.** `condafetch.py` fetches only the single runtime package, which
   for several libs (zlib, xz-liblzma, openblas) ships no `include/` tree; and
   header scans of split libraries need dependency include roots (protobuf→absl,
@@ -408,11 +424,35 @@ network-enabled run.
 - **Acceptance.** Header tier green for the rc=1 libraries using documented,
   per-entry umbrella + macro config.
 - **Effort·Risk.** M · medium (network + per-package config discovery).
+- **Shipped (2026-11-21).** `condafetch.py` gained `devel_candidates()` (runtime
+  pkg, then `-devel`/`-dev`/`-headers`/`-include`/`-static`, with and without a
+  `lib` prefix), `resolve_headers_pkg()` (first candidate at that version with an
+  `include/`), and a CDN `repodata.json.zst` fallback for hosts whose proxy
+  blocks `api.anaconda.org`. `manifest.yaml` entries take a `headers:` block
+  (`umbrella`, `packages`, `defines`, `include`, `deps: [{pkg, old, new}]`,
+  optional `expect`). `header_tier.py` + `runner.py --tier header` run
+  `abicheck compare OLD.so NEW.so --header old=/new=… -I old=/new=… -D …` and
+  report verdict, exit code, `analysis_assurance.status`, evidence tier and
+  counts in REPORT.md's "Header tier" table; a header-only run merges into the
+  committed `results/latest.json` instead of replacing the binary rows. Pure
+  logic tested in `tests/test_eval_header_tier.py`.
+- **Live (2026-11-21).** zlib, pcre2 (`-DPCRE2_CODE_UNIT_WIDTH=8`), lz4, onetbb,
+  onednn, onedal all compared at L2 (see REPORT.md).
+- **Still open.** Not yet wired into `eval-suite.yml` (no header-tier job), and
+  the split-dependency cases the acceptance names — protobuf→abseil,
+  glib→gio, hdf5/libjpeg-turbo umbrellas — have no `headers:` block yet; their
+  `deps:` versions must be discovered per release.
 
-### H5. Add oneDAL / oneTBB / oneDNN entries — **NEW, network-bound**
+### H5. Add oneDAL / oneTBB / oneDNN entries — **shipped (binary + header tiers); no source block**
 - **Context.** Split oneAPI packages exercise the devel-package + umbrella-
   header path (`oneapi/tbb.h`) end-to-end.
 - **Pointers.** `skills-src/evaluation/field/manifest.yaml` with `source:` blocks (repo + tags +
   `cmake_args`) and, once H4 lands, a `headers:` block; verify each builds and
   scans before committing `expect` verdicts (do not commit guessed verdicts).
 - **Effort·Risk.** M per lib · medium.
+- **Shipped (2026-11-21).** `onetbb` (tbb + tbb-devel 2022.2.0→2022.3.0,
+  `oneapi/tbb.h`), `onednn` (onednn 3.8.1→3.9.1, `oneapi/dnnl/dnnl.h`), `onedal`
+  (dal + dal-include 2026.1.0→2026.2.0, `oneapi/dal.hpp`; note `dal-devel` ships
+  only CMake/pkg-config files — headers are in `dal-include`). Binary `expect`
+  values are the observed live verdicts (onetbb/onedal `UNCONFIRMED`, onednn
+  `BREAKING`), not guesses. No `source:` blocks yet (builds not attempted).

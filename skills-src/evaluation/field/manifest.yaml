@@ -29,23 +29,36 @@
 #               public_headers  the library's public headers, relative to the
 #                           checkout root — the L4 public-surface roots (with
 #                           none, source replay records no declarations)
+#   headers   optional — header tier (L2: binary + headers), scanned by
+#             `runner.py --tier header` (non-gating). Fields (header_tier.py):
+#               umbrella  public header(s), relative to the header package's include/
+#               packages  header package(s) to try; default: conda_pkg, then its
+#                         -devel/-dev/-headers/-include/-static splits (and the
+#                         same without a `lib` prefix)
+#               defines   -D macros the headers require (e.g. PCRE2_CODE_UNIT_WIDTH=8)
+#               include   extra include dirs, relative to that include/
+#               deps      dependency header packages: [{pkg, old, new}] (extra -I roots)
+#               expect    optional expected L2 verdict (reported, never gated)
 schema_version: 1
 
 libraries:
   # ── small / common C libraries ──────────────────────────────────────────
   - {lib: zlib,          conda_pkg: libzlib,       old: "1.2.13",  new: "1.3.1",   expect: COMPATIBLE_WITH_RISK, so_stem: libz,
      source: {repo: "https://github.com/madler/zlib.git", tag_old: "v1.2.13", tag_new: "v1.3.1",
-              target: zlib, public_headers: ["zlib.h"]}}
+              target: zlib, public_headers: ["zlib.h"]},
+     headers: {packages: [zlib], umbrella: ["zlib.h"]}}
   - {lib: zstd,          conda_pkg: zstd,          old: "1.5.5",   new: "1.5.7",   expect: BREAKING,             so_stem: libzstd,
      source: {repo: "https://github.com/facebook/zstd.git", tag_old: "v1.5.5", tag_new: "v1.5.7", cmake_subdir: "build/cmake",
               cmake_args: ["-DZSTD_BUILD_PROGRAMS=OFF", "-DZSTD_BUILD_STATIC=OFF", "-DZSTD_BUILD_TESTS=OFF"],
               target: libzstd_shared, public_headers: ["lib/zstd.h", "lib/zdict.h", "lib/zstd_errors.h"]}}
   - {lib: xz-liblzma,    conda_pkg: liblzma,       old: "5.6.4",   new: "5.8.3",   expect: COMPATIBLE,           so_stem: liblzma}
   - {lib: bzip2,         conda_pkg: bzip2,         old: "1.0.6",   new: "1.0.8",   expect: COMPATIBLE_WITH_RISK, so_stem: libbz2}
-  - {lib: lz4,           conda_pkg: lz4-c,         old: "1.9.3",   new: "1.10.0",  expect: COMPATIBLE_WITH_RISK, so_stem: liblz4}
+  - {lib: lz4,           conda_pkg: lz4-c,         old: "1.9.3",   new: "1.10.0",  expect: COMPATIBLE_WITH_RISK, so_stem: liblz4,
+     headers: {umbrella: ["lz4.h", "lz4frame.h"]}}
   - {lib: libpng,        conda_pkg: libpng,        old: "1.6.55",  new: "1.6.58",  expect: COMPATIBLE_WITH_RISK, so_stem: libpng16}
   - {lib: libjpeg-turbo, conda_pkg: libjpeg-turbo, old: "3.0.0",   new: "3.1.4.1", expect: COMPATIBLE_WITH_RISK, so_stem: libturbojpeg}
-  - {lib: pcre2,         conda_pkg: pcre2,         old: "10.44",   new: "10.47",   expect: COMPATIBLE,           so_stem: libpcre2-8}
+  - {lib: pcre2,         conda_pkg: pcre2,         old: "10.44",   new: "10.47",   expect: COMPATIBLE,           so_stem: libpcre2-8,
+     headers: {umbrella: ["pcre2.h"], defines: ["PCRE2_CODE_UNIT_WIDTH=8"]}}
   - {lib: libsodium,     conda_pkg: libsodium,     old: "1.0.18",  new: "1.0.22",  expect: COMPATIBLE_WITH_RISK, so_stem: libsodium}
   - {lib: c-ares,        conda_pkg: c-ares,        old: "1.34.3",  new: "1.34.6",  expect: COMPATIBLE_WITH_RISK, so_stem: libcares}
   - {lib: libssh2,       conda_pkg: libssh2,       old: "1.10.0",  new: "1.11.1",  expect: BREAKING,             so_stem: libssh2}
@@ -64,3 +77,10 @@ libraries:
   - {lib: gmp,           conda_pkg: gmp,           old: "6.2.1",   new: "6.3.0",   expect: BREAKING,             so_stem: libgmp}
   - {lib: flac,          conda_pkg: libflac,       old: "1.4.3",   new: "1.5.0",   expect: BREAKING,             so_stem: libFLAC++}
   - {lib: openblas,      conda_pkg: libopenblas,   old: "0.3.8",   new: "0.3.9",   expect: NO_CHANGE,            so_stem: libopenblas}
+  # ── split oneAPI packages (H5): runtime + -devel/-include header packages ──
+  - {lib: onetbb,        conda_pkg: tbb,           old: "2022.2.0", new: "2022.3.0", expect: UNCONFIRMED, so_stem: libtbb.so,
+     headers: {packages: [tbb-devel], umbrella: ["oneapi/tbb.h"]}}
+  - {lib: onednn,        conda_pkg: onednn,        old: "3.8.1",    new: "3.9.1",    expect: BREAKING,    so_stem: libdnnl,
+     headers: {umbrella: ["oneapi/dnnl/dnnl.h"]}}
+  - {lib: onedal,        conda_pkg: dal,           old: "2026.1.0", new: "2026.2.0", expect: UNCONFIRMED, so_stem: libonedal.so,
+     headers: {packages: [dal-include], umbrella: ["oneapi/dal.hpp"]}}
