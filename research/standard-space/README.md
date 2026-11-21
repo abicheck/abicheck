@@ -53,7 +53,7 @@ The existing [derive consumer](../../abiforge/run/consumers.py) exercises both d
 2. Extend C2/C4 with physical-location checks and V4 with a construction-only mutation and a compatible control. Record unsupported observations explicitly.
 3. Extend the P0 rows with C11 alignment and atomics, supported C23 types, nontrivial C++ parameters, RTTI/EH, and Clang/mixed builds. Record time, exclusions and independently witnessed transitions per profile.
 
-Sources: [WG14 N1256](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1256.pdf), [AMD64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI), [Itanium C++ ABI](https://itanium-cxx-abi.github.io/cxx-abi/abi.html), [WG21 P0012R1](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0012r1.html), [WG21 P0482R6](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0482r6.html).
+Sources: [WG14 N1256](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1256.pdf), [AMD64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI), [Itanium C++ ABI](https://itanium-cxx-abi.github.io/cxx-abi/abi.html), [WG21 P0012R1](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0012r1.html), [WG21 P0482R6](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0482r6.html).
 
 ## Old-client results for three aggregate operations and C++ subobjects
 

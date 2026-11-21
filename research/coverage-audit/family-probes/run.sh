@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eu
+set -e
 src=$(cd "$(dirname "$0")" && pwd)
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT

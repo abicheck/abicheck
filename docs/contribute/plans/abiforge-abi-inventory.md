@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # ABI coverage inventory: profile P0, draft 1
 
 This is a specification-derived research backlog, not a claim that 40 rows exhaust

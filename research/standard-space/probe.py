@@ -1,4 +1,6 @@
 """Run on Linux x86-64 LP64 with GCC 14 and binutils. No Python dependencies."""
+from __future__ import annotations
+
 import csv
 import itertools
 import os
@@ -7,6 +9,7 @@ import struct
 import subprocess
 import tempfile
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent
@@ -15,18 +18,18 @@ TYPES = ("_Bool,char,signed char,unsigned char,short,unsigned short,int,unsigned
          "float _Complex,double _Complex,long double _Complex").split(",")
 
 
-def run(*args):
+def run(*args: str | Path) -> str:
     return subprocess.check_output(args, text=True).strip()
 
 
-def save(name, header, rows):
+def save(name: str, header: Sequence[str], rows: Iterable[Sequence[object]]) -> None:
     with (OUT / name).open("w") as stream:
         writer = csv.writer(stream, lineterminator="\n")
         writer.writerow(header)
         writer.writerows(rows)
 
 
-def layouts():
+def layouts() -> None:
     code = ['#include <stddef.h>', '#include <stdio.h>', 'int main(void){']
     keys = []
     for kind, arity in itertools.product(("struct", "union"), (1, 2)):
@@ -55,7 +58,7 @@ def layouts():
               "changed since C99", sum(a != b for a,b in zip(rows, baseline, strict=True)))
 
 
-def calls():
+def calls() -> None:
     code = ['#include <stdio.h>', 'unsigned long slots[16];']
     asm = ['.text','probe:']
     regs = ['rdi','rsi','rdx','rcx','r8','r9'] + [f'xmm{i}' for i in range(8)]
@@ -103,8 +106,11 @@ STABLE = ("struct Pair { long x; double y; }; long take(Pair);",
           "Pair p={17,24};return take(p)!=41;")
 
 
-def pair(case, old, new, before, after):
-    def provider(mode, fixture):
+Fixture = tuple[str, str, str]
+
+
+def pair(case: str, old: str, new: str, before: Fixture, after: Fixture) -> tuple[str, ...]:
+    def provider(mode: str, fixture: Fixture) -> list[str]:
         Path("api.h").write_text(fixture[0])
         Path("lib.cc").write_text('#include "api.h"\n'+fixture[1])
         run("g++","-m64","-std="+mode,"-pedantic-errors","-fPIC","-shared","lib.cc","-o","libp.so")
@@ -126,7 +132,7 @@ def pair(case, old, new, before, after):
     return case,old,new,verdict," ".join(previous)," ".join(current)
 
 
-def cpp():
+def cpp() -> None:
     rows = [pair("pair-control",a,b,STABLE,STABLE) for a,b in itertools.product(DIALECTS,repeat=2)]
     callback = ('long take(void (*)() noexcept);',
                 'long take(void (*)() noexcept){return 41;}', 'return take(0)!=41;')
