@@ -206,6 +206,16 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
             "from_headers": _FROM_HEADERS,
         },
     ),
+    "layout_build_config": DetectorInputs(
+        tolerates={
+            "from_headers": "the detector is silent without header-derived layout "
+            "on both sides, so a cleared flag yields no finding",
+            "declarations.types": "cleared only with from_headers, which already "
+            "silences the detector",
+            "declarations.enums": "cleared only with from_headers, which already "
+            "silences the detector",
+        },
+    ),
     "func_final_specifier": DetectorInputs(
         tolerates={
             "declarations.types": _LOOKUP,

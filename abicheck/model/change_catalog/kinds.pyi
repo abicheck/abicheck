@@ -187,6 +187,7 @@ class ChangeKind(StrEnum):
     FUNC_RETURN_COVARIANT_NARROWED = 'func_return_covariant_narrowed'
     SANITIZER_RUNTIME_REQUIRED = 'sanitizer_runtime_required'
     IMPORTED_SYMBOL_UNPROVIDED = 'imported_symbol_unprovided'
+    LAYOUT_BUILD_CONFIG_UNVERIFIED = 'layout_build_config_unverified'
     FUNC_BECAME_INLINE = 'func_became_inline'
     FUNC_LOST_INLINE = 'func_lost_inline'
     FUNC_DELETED_ELF_FALLBACK = 'func_deleted_elf_fallback'

@@ -775,3 +775,10 @@ adrs:
     use_cases: []
     surfaces: []
     missing: Proposed roadmap ADR, partially implemented; only D8's call evaluator (compare/call_interface.py) exists, with no verdict effect. No ChangeAssessment or compare_report.assessments field exists yet.
+
+  - id: ADR-095
+    file: 095-header-layout-without-build-flag-evidence.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - cli: compare

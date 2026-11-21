@@ -92,6 +92,7 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
             "types",
         ]
     ),
+    "layout_build_config": frozenset(["debug", "declarations", "types"]),
     "func_final_specifier": frozenset(
         ["binary", "declarations", "layout", "provenance", "types"]
     ),

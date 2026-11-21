@@ -382,52 +382,6 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(
-        "field_added_in_tail_padding",
-        frozenset({"cxx_more"}),
-        "false-clean",
-        lambda c: c.stripped and c.flags.pack == 1,
-        "-fpack-struct=1 leaves no tail padding: the header dump keeps the padding, so "
-        "the grown record reads COMPATIBLE while the binary breaks (sizeof 5 -> 6)",
-        GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset(
-            {
-                "missing:SONAME_BUMP_RECOMMENDED",
-                "none-of:TYPE_SIZE_CHANGED",
-                "weaker-than:BREAKING",
-            }
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "field_inserted_in_padding",
-        frozenset({"cxx_more"}),
-        "false-clean",
-        lambda c: c.stripped and c.flags.pack == 1,
-        "-fpack-struct=1 leaves no hole: an inserted field moves the offset of the field "
-        "after it, which the header dump (no flag) does not show, so the change reads COMPATIBLE",
-        GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset(
-            {
-                "missing:SONAME_BUMP_RECOMMENDED",
-                "none-of:TYPE_FIELD_OFFSET_CHANGED",
-                "none-of:TYPE_SIZE_CHANGED",
-                "weaker-than:BREAKING",
-            }
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "enum_append_wide_value",
-        frozenset({"c_core"}),
-        "false-clean",
-        lambda c: c.stripped and c.header_backend == "clang" and c.flags.short_enums,
-        "-fshort-enums: appending a wide value grows the enum from 1 to 2 bytes; the header "
-        "dump without the flag sees an enum of int size, so the change reads COMPATIBLE",
-        GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
         "enum_underlying_narrow",
         frozenset({"cxx_classes"}),
         "false-positive",
