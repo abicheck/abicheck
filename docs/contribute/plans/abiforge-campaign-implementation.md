@@ -2,6 +2,27 @@
 
 Reviewed local `b0b879398` and the existing `origin/main` ref at `691862f` using read-only Git inspection. This roadmap implements the inventory and fragment-validation parts of the research plan at `f2f143e232` first. Use a report-only campaign alongside existing corpus tiers. Its unit is a directed old/new case × target/toolchain × evidence lane × consumer context × observation. Each result needs that denominator and the scope predicate that generated it. Generator points, finding kinds, observations and executions have different denominators. The campaign describes specific fragments of a declared ABI contract. It supplies no percentage of all C++.
 
+## Status: union and bit-field fragments (2026-11-21)
+
+Implemented on the normal operator path, not a standalone runner:
+`abiforge/model/exact.py` (exact multiset rows with explicit units, a
+declared scope, and unknown for unestablished evidence; judged by
+`Expectation.problems`, reconciled as `wrong-detail`),
+`abiforge/model/layout_model.py` (the independent union/bit-field model,
+checked against compiler probes and raw DWARF by
+`tests/test_abiforge_layout_model.py`), `abiforge/operators/fragments.py` on
+the gated `c_layout` seed, and `python -m abiforge.run.fragment_campaign`
+for the bounded sweep and its receipt. abicheck now writes `field_name` on
+`union_field_added`/`union_field_removed`/`field_bitfield_changed`.
+Measured differences from the research fixtures: under the generator's real
+`-fpack-struct=1`, gcc rounds an unnamed `:0` barrier to the next byte, while
+the research's scoped `#pragma pack(1)` (and clang under either) rounds to
+the 32-bit unit; alignment is absent from gcc/clang DWARF for these records,
+so alignment rows are unknown below header evidence; castxml's layout
+replaces the gcc binary's DWARF layout in the gcc + pack 1 + barrier case
+(`docs/contribute/known-gaps.md`). No reduction by size/alignment
+signature is implemented: every case is retained.
+
 ## Existing integration points
 
 | Owner | Existing behavior | Campaign integration |

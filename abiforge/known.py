@@ -38,6 +38,7 @@ GAP_FLAG_INVISIBLE_LAYOUT = (
     "A config-level layout flag a public header cannot carry: stripped {B,H} reads the "
     "layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)"
 )
+GAP_CASTXML_GCC_BARRIER = "castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule"
 
 
 def _always(_: Config) -> bool:
@@ -249,7 +250,108 @@ _PLATFORM: tuple[Known, ...] = (
 )
 
 
+def _gcc_packed_headers(c: Config) -> bool:
+    """gcc build, -fpack-struct=1, header dump with the flag (DWARF in the cell)."""
+    return (
+        c.producer.family == "gcc"
+        and c.flags.pack == 1
+        and c.evidence == "headers"
+        and not c.stripped
+        and c.header_backend == "castxml"
+    )
+
+
+def _castxml_gcc_barrier(op: str, cls: str, issues: set[str]) -> Known:
+    return Known(
+        op,
+        frozenset({"c_layout"}),
+        cls,
+        _gcc_packed_headers,
+        "castxml computes the record with clang's rule (a :0 barrier rounds to "
+        "the 32-bit unit) and that layout replaces the gcc binary's DWARF, "
+        "where gcc -fpack-struct=1 rounds the barrier to the next byte: the "
+        "verdict is right, the reported offsets and sizes are not",
+        GAP_CASTXML_GCC_BARRIER,
+        issues=frozenset(issues),
+        verdicts=frozenset({"BREAKING"}),
+    )
+
+
 KNOWN: tuple[Known, ...] = (
+    _castxml_gcc_barrier(
+        "bitfield_width_16_to_17_behind_barrier",
+        "wrong-kind",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bw16_before::b 16bit->24bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bw16_before::c 32bit->40bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bw16_before::tail 40bit->48bit",
+            "exact-missing:TYPE_SIZE_CHANGED Bits_bw16_before 48bit->56bit",
+            "missing:TYPE_FIELD_OFFSET_CHANGED",
+            "missing:TYPE_SIZE_CHANGED",
+        },
+    ),
+    _castxml_gcc_barrier(
+        "bitfield_barrier_inserted_before_7",
+        "wrong-detail",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bins7_before::b 7bit->8bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bins7_before::c 23bit->24bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins7_before::b 7bit->32bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins7_before::c 23bit->48bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins7_before::tail 32bit->56bit",
+            "exact-unexpected:TYPE_SIZE_CHANGED Bits_bins7_before 40bit->64bit",
+        },
+    ),
+    _castxml_gcc_barrier(
+        "bitfield_barrier_inserted_before_17",
+        "wrong-detail",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_before::b 17bit->24bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_before::c 33bit->40bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_before::tail 40bit->48bit",
+            "exact-missing:TYPE_SIZE_CHANGED Bits_bins17_before 48bit->56bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_before::b 17bit->32bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_before::c 33bit->48bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_before::tail 40bit->56bit",
+            "exact-unexpected:TYPE_SIZE_CHANGED Bits_bins17_before 48bit->64bit",
+        },
+    ),
+    _castxml_gcc_barrier(
+        "bitfield_barrier_inserted_after_17",
+        "wrong-detail",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_after::c 33bit->40bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_after::tail 40bit->48bit",
+            "exact-missing:TYPE_SIZE_CHANGED Bits_bins17_after 48bit->56bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_after::c 33bit->64bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_bins17_after::tail 40bit->72bit",
+            "exact-unexpected:TYPE_SIZE_CHANGED Bits_bins17_after 48bit->80bit",
+        },
+    ),
+    _castxml_gcc_barrier(
+        "bitfield_barrier_removed_after_17",
+        "wrong-detail",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem17_after::c 40bit->33bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem17_after::tail 48bit->40bit",
+            "exact-missing:TYPE_SIZE_CHANGED Bits_brem17_after 56bit->48bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem17_after::c 64bit->33bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem17_after::tail 72bit->40bit",
+            "exact-unexpected:TYPE_SIZE_CHANGED Bits_brem17_after 80bit->48bit",
+        },
+    ),
+    _castxml_gcc_barrier(
+        "bitfield_barrier_removed_before_7",
+        "wrong-detail",
+        {
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem7_before::b 8bit->7bit",
+            "exact-missing:TYPE_FIELD_OFFSET_CHANGED Bits_brem7_before::c 24bit->23bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem7_before::b 32bit->7bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem7_before::c 48bit->23bit",
+            "exact-unexpected:TYPE_FIELD_OFFSET_CHANGED Bits_brem7_before::tail 56bit->32bit",
+            "exact-unexpected:TYPE_SIZE_CHANGED Bits_brem7_before 64bit->40bit",
+        },
+    ),
     # Stripped {B,H}: a config-level layout flag the public header cannot carry
     # (plan §11.2 WS-6 A3; the reduced-assurance signal is an ADR question).
     Known(

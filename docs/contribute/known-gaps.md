@@ -128,6 +128,12 @@ dependency walk and debug roots to every member. No open gap remains.
 
 <!-- no-canary: pinned by the stripped nightly's strict-xfail entries in abiforge/known.py, which fail once the answer changes -->
 
+#### castxml lays out a gcc `-fpack-struct=1` record with a zero-width bit-field by clang's rule (2026-11-21)
+
+**Status (2026-11-21): OPEN.** Under `-fpack-struct=1`, gcc rounds an unnamed `unsigned : 0` barrier to the next *byte* (its alignment is capped at the pack value) while clang, and therefore castxml, round it to the next 32-bit unit; under `#pragma pack(1)` both round to the unit. For a gcc-built library audited with headers *and* DWARF, the header backend's record (castxml computes its own layout, given the build's `-fpack-struct=1`) replaces the binary's DWARF layout in the snapshot without a coherence check, so the report's offsets and sizes are clang's: `struct { unsigned a:7; unsigned :0; unsigned b:16; unsigned c:3; unsigned char tail; }` reads `b` at bit 32 and size 64 bits, where the binary's own DWARF says bit 8 and 40 bits. The verdict stays `BREAKING`, so only an exact assertion sees it. The clang header backend does not have this problem for layout it backfills from DWARF (`extract/dwarf_layout_backfill.py`, `dwarf_layout_coherence`); closing it needs the same DWARF-vs-header corroboration on the castxml path, with DWARF authoritative for a layout it establishes. `wrong-detail` (and `wrong-kind` where the castxml layout shows no movement) on gcc + pack 1 + DWARF + castxml headers. Found by the `c_layout` fragment campaign (`abiforge/operators/fragments.py`). Owner: `extract/headers/castxml/` / `dumper.py` (layout merge).
+
+<!-- no-canary: pinned by strict-xfail entries in abiforge/known.py (`_castxml_gcc_barrier`), which fail once the answer changes; minimal fixture in tests/test_abiforge_layout_model.py::test_gcc_pack_flag_and_pragma_differ_on_a_barrier -->
+
 ### Report and detector coverage
 
 #### A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth (2026-11-12)

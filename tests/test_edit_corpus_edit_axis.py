@@ -63,6 +63,8 @@ EXPECTED_STRUCT = _MEMBER | {
     "bitfield_to_field",
     "bitfield_width_absorbed",
     "bitfield_width_shifts",
+    "bitfield_barrier_absorbed",
+    "bitfield_barrier_shifts",
     "packing_change",
     "record_align_change",
     "record_kind_change",

@@ -184,6 +184,22 @@ ATTRIBUTION_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("func_removed_and_private_record_grew", "c_opaque", "gcc", {"evidence": "dwarf"}),
 )
 
+#: The PR tier's union/bit-field exact-assertion guards
+#: (``abiforge.operators.fragments``): a unit spill that moves later fields at
+#: a fixed sizeof, a packed union boundary under DWARF, and an -O2 control
+#: (a required absence). The full family runs in the nightly/weekly draws
+#: and in ``python -m abiforge.run.fragment_campaign``.
+FRAGMENTS_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
+    ("bitfield_width_16_to_17", "c_layout", "gcc", {}),
+    (
+        "union_char_extent_8_to_9",
+        "c_layout",
+        "clang",
+        {"flags": Flags(pack=1), "evidence": "dwarf"},
+    ),
+    ("bitfield_rebuild_optimized", "c_layout", "gcc", {"evidence": "dwarf"}),
+)
+
 #: The evidence axis value of the stripped primary configuration (plan §4 B0):
 #: ``headers`` evidence on a stripped library. A row or factor names it as one
 #: value, so it is one more axis value in every pair draw, not a side flag.
@@ -235,6 +251,7 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     *DEPENDENCY_PR,
     *KIND_REACH_PR,
     *ATTRIBUTION_PR,
+    *FRAGMENTS_PR,
 )
 
 

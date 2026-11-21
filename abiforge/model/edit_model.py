@@ -152,6 +152,16 @@ _STRUCT_OTHER: tuple[tuple[str, str], ...] = (
     ("bitfield_to_field", "a bit-field becomes a plain member"),
     ("bitfield_width_absorbed", "a bit-field's width changes within its storage unit"),
     ("bitfield_width_shifts", "a bit-field's width change crosses a storage unit"),
+    (
+        "bitfield_barrier_absorbed",
+        "an unnamed zero-width bit-field is inserted or removed where the next "
+        "member already starts a storage unit: nothing moves",
+    ),
+    (
+        "bitfield_barrier_shifts",
+        "an unnamed zero-width bit-field is inserted or removed and later "
+        "members move to (or back from) the next storage unit",
+    ),
     ("packing_change", "the record's packing changes (pragma, attribute or flag)"),
     ("record_align_change", "the record's own alignment changes (alignas/aligned)"),
     ("record_kind_change", "struct becomes union or the reverse"),

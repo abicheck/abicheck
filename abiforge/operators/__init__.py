@@ -50,6 +50,7 @@ from abiforge.operators.cxx import CXX_OPERATORS
 from abiforge.operators.dependencies import DEPENDENCY_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
 from abiforge.operators.enums import ENUM_OPERATORS
+from abiforge.operators.fragments import FRAGMENT_OPERATORS
 from abiforge.operators.kinds import KIND_OPERATORS
 from abiforge.operators.layout import LAYOUT_OPERATORS
 from abiforge.operators.platform import PLATFORM_OPERATORS
@@ -1057,6 +1058,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *PLATFORM_OPERATORS,
     *CXX_OPERATORS,
     *LAYOUT_OPERATORS,
+    *FRAGMENT_OPERATORS,
     *SYMBOL_OPERATORS,
     *KIND_OPERATORS,
     *VTABLE_OPERATORS,

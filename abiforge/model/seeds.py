@@ -1547,6 +1547,36 @@ BYVAL_SEED = Seed(
     gate_role="bv.gate",
 )
 
+
+# c_layout: the union and bit-field fixtures of ``model/fragments`` (one role
+# per operator old state), with ``lf.gate`` admitting only their operators.
+def _layout_seed() -> Seed:
+    from abiforge.model.fragments import LAYOUT_FIXTURES, role_text
+
+    roles: dict[str, RoleText] = {"lf.gate": ("", "")}
+    for fx in LAYOUT_FIXTURES:
+        roles[fx.role] = role_text(fx.id, fx.records)
+    slots = tuple(f"@@{fx.role}@@" for fx in LAYOUT_FIXTURES)
+    return Seed(
+        name="c_layout",
+        lang="c",
+        header_template=(
+            "#ifndef EDIT_SEED_LF_H",
+            "#define EDIT_SEED_LF_H",
+            "#include <stdint.h>",
+            _VIS_OPEN,
+            *slots,
+            _VIS_CLOSE,
+            "#endif",
+        ),
+        source_template=('#include "edit_seed.h"', "#include <string.h>", *slots),
+        roles=roles,
+        gate_role="lf.gate",
+    )
+
+
+LAYOUT_SEED = _layout_seed()
+
 SEEDS: tuple[Seed, ...] = (
     C_SEED,
     CXX_SEED,
@@ -1559,5 +1589,6 @@ SEEDS: tuple[Seed, ...] = (
     TREE_SEED,
     OPAQUE_SEED,
     BYVAL_SEED,
+    LAYOUT_SEED,
 )
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}
