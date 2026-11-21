@@ -106,7 +106,7 @@ listed. An independent review examines missing mechanisms and compositions.
 
 ### R2 — Exact reduction for scalar-layout suffixes
 
-Start with one inserted scalar field in ordinary sequential layout. Common
+Start with one inserted scalar field in ordinary sequential layout. The inserted field and all common
 suffix fields have size = alignment in {1,2,4,8}. Observe only whether each
 suffix field moves, not total size, argument classification or API type identity.
 
@@ -266,7 +266,7 @@ change repeated by an array may invalidate the scalar displacement bound.
 ## Nested-array counterexample and reproducible probe
 
 
-Run `python3 research/layout-cutoff-pilot/nested/run.py` from the repository root.
+From the repository root, create `research/layout-cutoff-pilot/nested/`, save the Python block below as `run.py` there, and run `python3 research/layout-cutoff-pilot/nested/run.py`.
 The script generates C11 in a temporary directory, compiles it with GCC, executes
 the probe, and writes `results.json`. The JSON records the compiler, target,
 counts by array length, and concrete witnesses. The ground truth comes from
@@ -306,7 +306,7 @@ such as moved versus unchanged. The experiment checks ordinary sequential
 records with one level of nesting, one insertion, and a single compiler/target.
 It supplies no checker coverage measurement or mechanized aggregate proof.
 
-Save the following as `nested_probe.py` and run `python nested_probe.py`; only GCC and Python are required.
+The following is the source for `nested/run.py`. It requires GCC and Python.
 
 ```python
 """Compare ordinary aggregate layout against executed C11 compiler probes."""
@@ -576,7 +576,7 @@ selector to actual abiforge pairs and audit predictions against public checker
 findings, retaining long controls for implementation bugs.
 
 Self-contained reproduction: save as `array_vector.py`, run with Python and GCC.
-It writes `results.json` beside the script.
+It writes `vector-results.json` beside the script.
 
 ```python
 """Symbolic residue representatives for a vector of aggregate-layout equalities."""
@@ -628,10 +628,12 @@ with tempfile.TemporaryDirectory() as tmp:
  subprocess.run(['gcc','-std=c11',str(c),'-o',str(exe)],check=True)
  rows=[list(map(int,line.split())) for line in subprocess.check_output([str(exe)],text=True).splitlines()]
 for n,old,new,os,ns in rows:
- assert [new-old,ns-os]==[diff(witness,n)[6],diff(witness,n)[4]]
+ before,after,p,t=witness
+ expected_old=obs(*before,p,t,n);expected_new=obs(*after,p,t,n)
+ assert (old,new,os,ns)==(expected_old[6],expected_new[6],expected_old[4],expected_new[4])
 assert bits(witness,15)[6] and not bits(witness,101)[6]
 result={'profiles':len(pairs),'vector_checks':checks,'affine_vector_checks':affine_checks,'observations_per_vector':7,'max_selected_lengths':maximum,'counterexample_compiler_rows':rows,'counterexample_columns':['N','old_last_x','new_last_x','old_size','new_size'],'compiler':subprocess.check_output(['gcc','--version'],text=True).splitlines()[0],'observation_order':['stride','element_alignment','array_start','tail_offset','outer_size','first_field_offset','last_field_offset'],'scope':'ordinary one-dimensional arrays, fixed old/new element summaries, same P/T/N, alignments divide 8, integer arithmetic, one common byte field'}
-(HERE/'results.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
+(HERE/'vector-results.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 
 ```
 

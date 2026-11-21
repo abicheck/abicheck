@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # Return ABI experiment: protocol evidence versus output agreement
 
 GCC 14.2.0 (Debian 14.2.0-19), C++20, Linux x86-64 ELF, `-O0 -g`, abicheck checkout `b0b8793989c150a5b05f48e4e999a7df4219365a`. The client is linked once per version. For the replacement run the old executable loads the new shared library using `LD_LIBRARY_PATH`. The retained `ldd` receipts verify all 27 client/provider path selections. Both libraries expose the same 99 C-linkage probe names and the test type has size 16 and alignment 8 on both sides.
@@ -20,7 +27,7 @@ For the destructor case the old client pre-fills aligned storage with 0xa5, then
 
 The public abicheck CLI dumped each unstripped ELF without headers and compared the resulting snapshots. The three register-class mutations report `type_field_type_changed`. The destructor mutation reports `struct_return_convention_changed` for all 99 symbols. All four breaking comparisons also recommend a SONAME bump. The field-type findings establish that the checker flags those changes, while the disassembly identifies the return locations.
 
-Run `python research/return-abi-pilot/run.py` from the checkout with GCC 14, binutils, ldd, and the abicheck Python dependencies installed. The script retains generated source, libraries, clients and raw checker dumps/reports under `fixtures/`. `commands.json` records commands, per-command environment overrides, exit codes and output, including loader checks and sampled disassembly. See `results.json` for each runtime cell and `checker_results.json` for checker summaries.
+Create `research/return-abi-pilot/` and save the [reproduction script](#reproduction-script) there as `run.py`. Run `python research/return-abi-pilot/run.py` from the checkout with GCC 14, binutils, ldd, and the abicheck Python dependencies installed. The script retains generated source, libraries, clients and raw checker dumps/reports under `fixtures/`. `commands.json` records commands, per-command environment overrides, exit codes and output, including loader checks and sampled disassembly. See `results.json` for each runtime cell and `checker_results.json` for checker summaries.
 
 ## Optimization replication
 
@@ -192,8 +199,7 @@ def main():
             for side in ("old", "new"):
                 for symbol in ("probe0", "probe33", "probe98"):
                     run(["objdump", "-d", f"--disassemble={symbol}", folder / side / "libprobe.so"])
-            if name.startswith("sret"):
-                run(["objdump", "-d", "--disassemble=main", folder / "old" / "client"])
+            run(["objdump", "-d", "--disassemble=main", folder / "old" / "client"])
             cases = []
             for index, (integers, floats) in enumerate(CELLS):
                 case = {"integer_prefix": integers, "floating_prefix": floats, "symbol": f"probe{index}"}

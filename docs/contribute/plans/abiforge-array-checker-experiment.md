@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # Array selector versus public checker
 
 Research artifact for the pinned revision documented in the [plan](abiforge-space-reduction-research.md).

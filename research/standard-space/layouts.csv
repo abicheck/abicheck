@@ -1,0 +1,685 @@
+kind,field0,field1,size,embed,off0,off1
+struct,_Bool,,1,1,0,
+struct,char,,1,1,0,
+struct,signed char,,1,1,0,
+struct,unsigned char,,1,1,0,
+struct,short,,2,2,0,
+struct,unsigned short,,2,2,0,
+struct,int,,4,4,0,
+struct,unsigned int,,4,4,0,
+struct,long,,8,8,0,
+struct,unsigned long,,8,8,0,
+struct,long long,,8,8,0,
+struct,unsigned long long,,8,8,0,
+struct,float,,4,4,0,
+struct,double,,8,8,0,
+struct,long double,,16,16,0,
+struct,float _Complex,,8,4,0,
+struct,double _Complex,,16,8,0,
+struct,long double _Complex,,32,16,0,
+struct,_Bool,_Bool,2,1,0,1
+struct,_Bool,char,2,1,0,1
+struct,_Bool,signed char,2,1,0,1
+struct,_Bool,unsigned char,2,1,0,1
+struct,_Bool,short,4,2,0,2
+struct,_Bool,unsigned short,4,2,0,2
+struct,_Bool,int,8,4,0,4
+struct,_Bool,unsigned int,8,4,0,4
+struct,_Bool,long,16,8,0,8
+struct,_Bool,unsigned long,16,8,0,8
+struct,_Bool,long long,16,8,0,8
+struct,_Bool,unsigned long long,16,8,0,8
+struct,_Bool,float,8,4,0,4
+struct,_Bool,double,16,8,0,8
+struct,_Bool,long double,32,16,0,16
+struct,_Bool,float _Complex,12,4,0,4
+struct,_Bool,double _Complex,24,8,0,8
+struct,_Bool,long double _Complex,48,16,0,16
+struct,char,_Bool,2,1,0,1
+struct,char,char,2,1,0,1
+struct,char,signed char,2,1,0,1
+struct,char,unsigned char,2,1,0,1
+struct,char,short,4,2,0,2
+struct,char,unsigned short,4,2,0,2
+struct,char,int,8,4,0,4
+struct,char,unsigned int,8,4,0,4
+struct,char,long,16,8,0,8
+struct,char,unsigned long,16,8,0,8
+struct,char,long long,16,8,0,8
+struct,char,unsigned long long,16,8,0,8
+struct,char,float,8,4,0,4
+struct,char,double,16,8,0,8
+struct,char,long double,32,16,0,16
+struct,char,float _Complex,12,4,0,4
+struct,char,double _Complex,24,8,0,8
+struct,char,long double _Complex,48,16,0,16
+struct,signed char,_Bool,2,1,0,1
+struct,signed char,char,2,1,0,1
+struct,signed char,signed char,2,1,0,1
+struct,signed char,unsigned char,2,1,0,1
+struct,signed char,short,4,2,0,2
+struct,signed char,unsigned short,4,2,0,2
+struct,signed char,int,8,4,0,4
+struct,signed char,unsigned int,8,4,0,4
+struct,signed char,long,16,8,0,8
+struct,signed char,unsigned long,16,8,0,8
+struct,signed char,long long,16,8,0,8
+struct,signed char,unsigned long long,16,8,0,8
+struct,signed char,float,8,4,0,4
+struct,signed char,double,16,8,0,8
+struct,signed char,long double,32,16,0,16
+struct,signed char,float _Complex,12,4,0,4
+struct,signed char,double _Complex,24,8,0,8
+struct,signed char,long double _Complex,48,16,0,16
+struct,unsigned char,_Bool,2,1,0,1
+struct,unsigned char,char,2,1,0,1
+struct,unsigned char,signed char,2,1,0,1
+struct,unsigned char,unsigned char,2,1,0,1
+struct,unsigned char,short,4,2,0,2
+struct,unsigned char,unsigned short,4,2,0,2
+struct,unsigned char,int,8,4,0,4
+struct,unsigned char,unsigned int,8,4,0,4
+struct,unsigned char,long,16,8,0,8
+struct,unsigned char,unsigned long,16,8,0,8
+struct,unsigned char,long long,16,8,0,8
+struct,unsigned char,unsigned long long,16,8,0,8
+struct,unsigned char,float,8,4,0,4
+struct,unsigned char,double,16,8,0,8
+struct,unsigned char,long double,32,16,0,16
+struct,unsigned char,float _Complex,12,4,0,4
+struct,unsigned char,double _Complex,24,8,0,8
+struct,unsigned char,long double _Complex,48,16,0,16
+struct,short,_Bool,4,2,0,2
+struct,short,char,4,2,0,2
+struct,short,signed char,4,2,0,2
+struct,short,unsigned char,4,2,0,2
+struct,short,short,4,2,0,2
+struct,short,unsigned short,4,2,0,2
+struct,short,int,8,4,0,4
+struct,short,unsigned int,8,4,0,4
+struct,short,long,16,8,0,8
+struct,short,unsigned long,16,8,0,8
+struct,short,long long,16,8,0,8
+struct,short,unsigned long long,16,8,0,8
+struct,short,float,8,4,0,4
+struct,short,double,16,8,0,8
+struct,short,long double,32,16,0,16
+struct,short,float _Complex,12,4,0,4
+struct,short,double _Complex,24,8,0,8
+struct,short,long double _Complex,48,16,0,16
+struct,unsigned short,_Bool,4,2,0,2
+struct,unsigned short,char,4,2,0,2
+struct,unsigned short,signed char,4,2,0,2
+struct,unsigned short,unsigned char,4,2,0,2
+struct,unsigned short,short,4,2,0,2
+struct,unsigned short,unsigned short,4,2,0,2
+struct,unsigned short,int,8,4,0,4
+struct,unsigned short,unsigned int,8,4,0,4
+struct,unsigned short,long,16,8,0,8
+struct,unsigned short,unsigned long,16,8,0,8
+struct,unsigned short,long long,16,8,0,8
+struct,unsigned short,unsigned long long,16,8,0,8
+struct,unsigned short,float,8,4,0,4
+struct,unsigned short,double,16,8,0,8
+struct,unsigned short,long double,32,16,0,16
+struct,unsigned short,float _Complex,12,4,0,4
+struct,unsigned short,double _Complex,24,8,0,8
+struct,unsigned short,long double _Complex,48,16,0,16
+struct,int,_Bool,8,4,0,4
+struct,int,char,8,4,0,4
+struct,int,signed char,8,4,0,4
+struct,int,unsigned char,8,4,0,4
+struct,int,short,8,4,0,4
+struct,int,unsigned short,8,4,0,4
+struct,int,int,8,4,0,4
+struct,int,unsigned int,8,4,0,4
+struct,int,long,16,8,0,8
+struct,int,unsigned long,16,8,0,8
+struct,int,long long,16,8,0,8
+struct,int,unsigned long long,16,8,0,8
+struct,int,float,8,4,0,4
+struct,int,double,16,8,0,8
+struct,int,long double,32,16,0,16
+struct,int,float _Complex,12,4,0,4
+struct,int,double _Complex,24,8,0,8
+struct,int,long double _Complex,48,16,0,16
+struct,unsigned int,_Bool,8,4,0,4
+struct,unsigned int,char,8,4,0,4
+struct,unsigned int,signed char,8,4,0,4
+struct,unsigned int,unsigned char,8,4,0,4
+struct,unsigned int,short,8,4,0,4
+struct,unsigned int,unsigned short,8,4,0,4
+struct,unsigned int,int,8,4,0,4
+struct,unsigned int,unsigned int,8,4,0,4
+struct,unsigned int,long,16,8,0,8
+struct,unsigned int,unsigned long,16,8,0,8
+struct,unsigned int,long long,16,8,0,8
+struct,unsigned int,unsigned long long,16,8,0,8
+struct,unsigned int,float,8,4,0,4
+struct,unsigned int,double,16,8,0,8
+struct,unsigned int,long double,32,16,0,16
+struct,unsigned int,float _Complex,12,4,0,4
+struct,unsigned int,double _Complex,24,8,0,8
+struct,unsigned int,long double _Complex,48,16,0,16
+struct,long,_Bool,16,8,0,8
+struct,long,char,16,8,0,8
+struct,long,signed char,16,8,0,8
+struct,long,unsigned char,16,8,0,8
+struct,long,short,16,8,0,8
+struct,long,unsigned short,16,8,0,8
+struct,long,int,16,8,0,8
+struct,long,unsigned int,16,8,0,8
+struct,long,long,16,8,0,8
+struct,long,unsigned long,16,8,0,8
+struct,long,long long,16,8,0,8
+struct,long,unsigned long long,16,8,0,8
+struct,long,float,16,8,0,8
+struct,long,double,16,8,0,8
+struct,long,long double,32,16,0,16
+struct,long,float _Complex,16,8,0,8
+struct,long,double _Complex,24,8,0,8
+struct,long,long double _Complex,48,16,0,16
+struct,unsigned long,_Bool,16,8,0,8
+struct,unsigned long,char,16,8,0,8
+struct,unsigned long,signed char,16,8,0,8
+struct,unsigned long,unsigned char,16,8,0,8
+struct,unsigned long,short,16,8,0,8
+struct,unsigned long,unsigned short,16,8,0,8
+struct,unsigned long,int,16,8,0,8
+struct,unsigned long,unsigned int,16,8,0,8
+struct,unsigned long,long,16,8,0,8
+struct,unsigned long,unsigned long,16,8,0,8
+struct,unsigned long,long long,16,8,0,8
+struct,unsigned long,unsigned long long,16,8,0,8
+struct,unsigned long,float,16,8,0,8
+struct,unsigned long,double,16,8,0,8
+struct,unsigned long,long double,32,16,0,16
+struct,unsigned long,float _Complex,16,8,0,8
+struct,unsigned long,double _Complex,24,8,0,8
+struct,unsigned long,long double _Complex,48,16,0,16
+struct,long long,_Bool,16,8,0,8
+struct,long long,char,16,8,0,8
+struct,long long,signed char,16,8,0,8
+struct,long long,unsigned char,16,8,0,8
+struct,long long,short,16,8,0,8
+struct,long long,unsigned short,16,8,0,8
+struct,long long,int,16,8,0,8
+struct,long long,unsigned int,16,8,0,8
+struct,long long,long,16,8,0,8
+struct,long long,unsigned long,16,8,0,8
+struct,long long,long long,16,8,0,8
+struct,long long,unsigned long long,16,8,0,8
+struct,long long,float,16,8,0,8
+struct,long long,double,16,8,0,8
+struct,long long,long double,32,16,0,16
+struct,long long,float _Complex,16,8,0,8
+struct,long long,double _Complex,24,8,0,8
+struct,long long,long double _Complex,48,16,0,16
+struct,unsigned long long,_Bool,16,8,0,8
+struct,unsigned long long,char,16,8,0,8
+struct,unsigned long long,signed char,16,8,0,8
+struct,unsigned long long,unsigned char,16,8,0,8
+struct,unsigned long long,short,16,8,0,8
+struct,unsigned long long,unsigned short,16,8,0,8
+struct,unsigned long long,int,16,8,0,8
+struct,unsigned long long,unsigned int,16,8,0,8
+struct,unsigned long long,long,16,8,0,8
+struct,unsigned long long,unsigned long,16,8,0,8
+struct,unsigned long long,long long,16,8,0,8
+struct,unsigned long long,unsigned long long,16,8,0,8
+struct,unsigned long long,float,16,8,0,8
+struct,unsigned long long,double,16,8,0,8
+struct,unsigned long long,long double,32,16,0,16
+struct,unsigned long long,float _Complex,16,8,0,8
+struct,unsigned long long,double _Complex,24,8,0,8
+struct,unsigned long long,long double _Complex,48,16,0,16
+struct,float,_Bool,8,4,0,4
+struct,float,char,8,4,0,4
+struct,float,signed char,8,4,0,4
+struct,float,unsigned char,8,4,0,4
+struct,float,short,8,4,0,4
+struct,float,unsigned short,8,4,0,4
+struct,float,int,8,4,0,4
+struct,float,unsigned int,8,4,0,4
+struct,float,long,16,8,0,8
+struct,float,unsigned long,16,8,0,8
+struct,float,long long,16,8,0,8
+struct,float,unsigned long long,16,8,0,8
+struct,float,float,8,4,0,4
+struct,float,double,16,8,0,8
+struct,float,long double,32,16,0,16
+struct,float,float _Complex,12,4,0,4
+struct,float,double _Complex,24,8,0,8
+struct,float,long double _Complex,48,16,0,16
+struct,double,_Bool,16,8,0,8
+struct,double,char,16,8,0,8
+struct,double,signed char,16,8,0,8
+struct,double,unsigned char,16,8,0,8
+struct,double,short,16,8,0,8
+struct,double,unsigned short,16,8,0,8
+struct,double,int,16,8,0,8
+struct,double,unsigned int,16,8,0,8
+struct,double,long,16,8,0,8
+struct,double,unsigned long,16,8,0,8
+struct,double,long long,16,8,0,8
+struct,double,unsigned long long,16,8,0,8
+struct,double,float,16,8,0,8
+struct,double,double,16,8,0,8
+struct,double,long double,32,16,0,16
+struct,double,float _Complex,16,8,0,8
+struct,double,double _Complex,24,8,0,8
+struct,double,long double _Complex,48,16,0,16
+struct,long double,_Bool,32,16,0,16
+struct,long double,char,32,16,0,16
+struct,long double,signed char,32,16,0,16
+struct,long double,unsigned char,32,16,0,16
+struct,long double,short,32,16,0,16
+struct,long double,unsigned short,32,16,0,16
+struct,long double,int,32,16,0,16
+struct,long double,unsigned int,32,16,0,16
+struct,long double,long,32,16,0,16
+struct,long double,unsigned long,32,16,0,16
+struct,long double,long long,32,16,0,16
+struct,long double,unsigned long long,32,16,0,16
+struct,long double,float,32,16,0,16
+struct,long double,double,32,16,0,16
+struct,long double,long double,32,16,0,16
+struct,long double,float _Complex,32,16,0,16
+struct,long double,double _Complex,32,16,0,16
+struct,long double,long double _Complex,48,16,0,16
+struct,float _Complex,_Bool,12,4,0,8
+struct,float _Complex,char,12,4,0,8
+struct,float _Complex,signed char,12,4,0,8
+struct,float _Complex,unsigned char,12,4,0,8
+struct,float _Complex,short,12,4,0,8
+struct,float _Complex,unsigned short,12,4,0,8
+struct,float _Complex,int,12,4,0,8
+struct,float _Complex,unsigned int,12,4,0,8
+struct,float _Complex,long,16,8,0,8
+struct,float _Complex,unsigned long,16,8,0,8
+struct,float _Complex,long long,16,8,0,8
+struct,float _Complex,unsigned long long,16,8,0,8
+struct,float _Complex,float,12,4,0,8
+struct,float _Complex,double,16,8,0,8
+struct,float _Complex,long double,32,16,0,16
+struct,float _Complex,float _Complex,16,4,0,8
+struct,float _Complex,double _Complex,24,8,0,8
+struct,float _Complex,long double _Complex,48,16,0,16
+struct,double _Complex,_Bool,24,8,0,16
+struct,double _Complex,char,24,8,0,16
+struct,double _Complex,signed char,24,8,0,16
+struct,double _Complex,unsigned char,24,8,0,16
+struct,double _Complex,short,24,8,0,16
+struct,double _Complex,unsigned short,24,8,0,16
+struct,double _Complex,int,24,8,0,16
+struct,double _Complex,unsigned int,24,8,0,16
+struct,double _Complex,long,24,8,0,16
+struct,double _Complex,unsigned long,24,8,0,16
+struct,double _Complex,long long,24,8,0,16
+struct,double _Complex,unsigned long long,24,8,0,16
+struct,double _Complex,float,24,8,0,16
+struct,double _Complex,double,24,8,0,16
+struct,double _Complex,long double,32,16,0,16
+struct,double _Complex,float _Complex,24,8,0,16
+struct,double _Complex,double _Complex,32,8,0,16
+struct,double _Complex,long double _Complex,48,16,0,16
+struct,long double _Complex,_Bool,48,16,0,32
+struct,long double _Complex,char,48,16,0,32
+struct,long double _Complex,signed char,48,16,0,32
+struct,long double _Complex,unsigned char,48,16,0,32
+struct,long double _Complex,short,48,16,0,32
+struct,long double _Complex,unsigned short,48,16,0,32
+struct,long double _Complex,int,48,16,0,32
+struct,long double _Complex,unsigned int,48,16,0,32
+struct,long double _Complex,long,48,16,0,32
+struct,long double _Complex,unsigned long,48,16,0,32
+struct,long double _Complex,long long,48,16,0,32
+struct,long double _Complex,unsigned long long,48,16,0,32
+struct,long double _Complex,float,48,16,0,32
+struct,long double _Complex,double,48,16,0,32
+struct,long double _Complex,long double,48,16,0,32
+struct,long double _Complex,float _Complex,48,16,0,32
+struct,long double _Complex,double _Complex,48,16,0,32
+struct,long double _Complex,long double _Complex,64,16,0,32
+union,_Bool,,1,1,0,
+union,char,,1,1,0,
+union,signed char,,1,1,0,
+union,unsigned char,,1,1,0,
+union,short,,2,2,0,
+union,unsigned short,,2,2,0,
+union,int,,4,4,0,
+union,unsigned int,,4,4,0,
+union,long,,8,8,0,
+union,unsigned long,,8,8,0,
+union,long long,,8,8,0,
+union,unsigned long long,,8,8,0,
+union,float,,4,4,0,
+union,double,,8,8,0,
+union,long double,,16,16,0,
+union,float _Complex,,8,4,0,
+union,double _Complex,,16,8,0,
+union,long double _Complex,,32,16,0,
+union,_Bool,_Bool,1,1,0,0
+union,_Bool,char,1,1,0,0
+union,_Bool,signed char,1,1,0,0
+union,_Bool,unsigned char,1,1,0,0
+union,_Bool,short,2,2,0,0
+union,_Bool,unsigned short,2,2,0,0
+union,_Bool,int,4,4,0,0
+union,_Bool,unsigned int,4,4,0,0
+union,_Bool,long,8,8,0,0
+union,_Bool,unsigned long,8,8,0,0
+union,_Bool,long long,8,8,0,0
+union,_Bool,unsigned long long,8,8,0,0
+union,_Bool,float,4,4,0,0
+union,_Bool,double,8,8,0,0
+union,_Bool,long double,16,16,0,0
+union,_Bool,float _Complex,8,4,0,0
+union,_Bool,double _Complex,16,8,0,0
+union,_Bool,long double _Complex,32,16,0,0
+union,char,_Bool,1,1,0,0
+union,char,char,1,1,0,0
+union,char,signed char,1,1,0,0
+union,char,unsigned char,1,1,0,0
+union,char,short,2,2,0,0
+union,char,unsigned short,2,2,0,0
+union,char,int,4,4,0,0
+union,char,unsigned int,4,4,0,0
+union,char,long,8,8,0,0
+union,char,unsigned long,8,8,0,0
+union,char,long long,8,8,0,0
+union,char,unsigned long long,8,8,0,0
+union,char,float,4,4,0,0
+union,char,double,8,8,0,0
+union,char,long double,16,16,0,0
+union,char,float _Complex,8,4,0,0
+union,char,double _Complex,16,8,0,0
+union,char,long double _Complex,32,16,0,0
+union,signed char,_Bool,1,1,0,0
+union,signed char,char,1,1,0,0
+union,signed char,signed char,1,1,0,0
+union,signed char,unsigned char,1,1,0,0
+union,signed char,short,2,2,0,0
+union,signed char,unsigned short,2,2,0,0
+union,signed char,int,4,4,0,0
+union,signed char,unsigned int,4,4,0,0
+union,signed char,long,8,8,0,0
+union,signed char,unsigned long,8,8,0,0
+union,signed char,long long,8,8,0,0
+union,signed char,unsigned long long,8,8,0,0
+union,signed char,float,4,4,0,0
+union,signed char,double,8,8,0,0
+union,signed char,long double,16,16,0,0
+union,signed char,float _Complex,8,4,0,0
+union,signed char,double _Complex,16,8,0,0
+union,signed char,long double _Complex,32,16,0,0
+union,unsigned char,_Bool,1,1,0,0
+union,unsigned char,char,1,1,0,0
+union,unsigned char,signed char,1,1,0,0
+union,unsigned char,unsigned char,1,1,0,0
+union,unsigned char,short,2,2,0,0
+union,unsigned char,unsigned short,2,2,0,0
+union,unsigned char,int,4,4,0,0
+union,unsigned char,unsigned int,4,4,0,0
+union,unsigned char,long,8,8,0,0
+union,unsigned char,unsigned long,8,8,0,0
+union,unsigned char,long long,8,8,0,0
+union,unsigned char,unsigned long long,8,8,0,0
+union,unsigned char,float,4,4,0,0
+union,unsigned char,double,8,8,0,0
+union,unsigned char,long double,16,16,0,0
+union,unsigned char,float _Complex,8,4,0,0
+union,unsigned char,double _Complex,16,8,0,0
+union,unsigned char,long double _Complex,32,16,0,0
+union,short,_Bool,2,2,0,0
+union,short,char,2,2,0,0
+union,short,signed char,2,2,0,0
+union,short,unsigned char,2,2,0,0
+union,short,short,2,2,0,0
+union,short,unsigned short,2,2,0,0
+union,short,int,4,4,0,0
+union,short,unsigned int,4,4,0,0
+union,short,long,8,8,0,0
+union,short,unsigned long,8,8,0,0
+union,short,long long,8,8,0,0
+union,short,unsigned long long,8,8,0,0
+union,short,float,4,4,0,0
+union,short,double,8,8,0,0
+union,short,long double,16,16,0,0
+union,short,float _Complex,8,4,0,0
+union,short,double _Complex,16,8,0,0
+union,short,long double _Complex,32,16,0,0
+union,unsigned short,_Bool,2,2,0,0
+union,unsigned short,char,2,2,0,0
+union,unsigned short,signed char,2,2,0,0
+union,unsigned short,unsigned char,2,2,0,0
+union,unsigned short,short,2,2,0,0
+union,unsigned short,unsigned short,2,2,0,0
+union,unsigned short,int,4,4,0,0
+union,unsigned short,unsigned int,4,4,0,0
+union,unsigned short,long,8,8,0,0
+union,unsigned short,unsigned long,8,8,0,0
+union,unsigned short,long long,8,8,0,0
+union,unsigned short,unsigned long long,8,8,0,0
+union,unsigned short,float,4,4,0,0
+union,unsigned short,double,8,8,0,0
+union,unsigned short,long double,16,16,0,0
+union,unsigned short,float _Complex,8,4,0,0
+union,unsigned short,double _Complex,16,8,0,0
+union,unsigned short,long double _Complex,32,16,0,0
+union,int,_Bool,4,4,0,0
+union,int,char,4,4,0,0
+union,int,signed char,4,4,0,0
+union,int,unsigned char,4,4,0,0
+union,int,short,4,4,0,0
+union,int,unsigned short,4,4,0,0
+union,int,int,4,4,0,0
+union,int,unsigned int,4,4,0,0
+union,int,long,8,8,0,0
+union,int,unsigned long,8,8,0,0
+union,int,long long,8,8,0,0
+union,int,unsigned long long,8,8,0,0
+union,int,float,4,4,0,0
+union,int,double,8,8,0,0
+union,int,long double,16,16,0,0
+union,int,float _Complex,8,4,0,0
+union,int,double _Complex,16,8,0,0
+union,int,long double _Complex,32,16,0,0
+union,unsigned int,_Bool,4,4,0,0
+union,unsigned int,char,4,4,0,0
+union,unsigned int,signed char,4,4,0,0
+union,unsigned int,unsigned char,4,4,0,0
+union,unsigned int,short,4,4,0,0
+union,unsigned int,unsigned short,4,4,0,0
+union,unsigned int,int,4,4,0,0
+union,unsigned int,unsigned int,4,4,0,0
+union,unsigned int,long,8,8,0,0
+union,unsigned int,unsigned long,8,8,0,0
+union,unsigned int,long long,8,8,0,0
+union,unsigned int,unsigned long long,8,8,0,0
+union,unsigned int,float,4,4,0,0
+union,unsigned int,double,8,8,0,0
+union,unsigned int,long double,16,16,0,0
+union,unsigned int,float _Complex,8,4,0,0
+union,unsigned int,double _Complex,16,8,0,0
+union,unsigned int,long double _Complex,32,16,0,0
+union,long,_Bool,8,8,0,0
+union,long,char,8,8,0,0
+union,long,signed char,8,8,0,0
+union,long,unsigned char,8,8,0,0
+union,long,short,8,8,0,0
+union,long,unsigned short,8,8,0,0
+union,long,int,8,8,0,0
+union,long,unsigned int,8,8,0,0
+union,long,long,8,8,0,0
+union,long,unsigned long,8,8,0,0
+union,long,long long,8,8,0,0
+union,long,unsigned long long,8,8,0,0
+union,long,float,8,8,0,0
+union,long,double,8,8,0,0
+union,long,long double,16,16,0,0
+union,long,float _Complex,8,8,0,0
+union,long,double _Complex,16,8,0,0
+union,long,long double _Complex,32,16,0,0
+union,unsigned long,_Bool,8,8,0,0
+union,unsigned long,char,8,8,0,0
+union,unsigned long,signed char,8,8,0,0
+union,unsigned long,unsigned char,8,8,0,0
+union,unsigned long,short,8,8,0,0
+union,unsigned long,unsigned short,8,8,0,0
+union,unsigned long,int,8,8,0,0
+union,unsigned long,unsigned int,8,8,0,0
+union,unsigned long,long,8,8,0,0
+union,unsigned long,unsigned long,8,8,0,0
+union,unsigned long,long long,8,8,0,0
+union,unsigned long,unsigned long long,8,8,0,0
+union,unsigned long,float,8,8,0,0
+union,unsigned long,double,8,8,0,0
+union,unsigned long,long double,16,16,0,0
+union,unsigned long,float _Complex,8,8,0,0
+union,unsigned long,double _Complex,16,8,0,0
+union,unsigned long,long double _Complex,32,16,0,0
+union,long long,_Bool,8,8,0,0
+union,long long,char,8,8,0,0
+union,long long,signed char,8,8,0,0
+union,long long,unsigned char,8,8,0,0
+union,long long,short,8,8,0,0
+union,long long,unsigned short,8,8,0,0
+union,long long,int,8,8,0,0
+union,long long,unsigned int,8,8,0,0
+union,long long,long,8,8,0,0
+union,long long,unsigned long,8,8,0,0
+union,long long,long long,8,8,0,0
+union,long long,unsigned long long,8,8,0,0
+union,long long,float,8,8,0,0
+union,long long,double,8,8,0,0
+union,long long,long double,16,16,0,0
+union,long long,float _Complex,8,8,0,0
+union,long long,double _Complex,16,8,0,0
+union,long long,long double _Complex,32,16,0,0
+union,unsigned long long,_Bool,8,8,0,0
+union,unsigned long long,char,8,8,0,0
+union,unsigned long long,signed char,8,8,0,0
+union,unsigned long long,unsigned char,8,8,0,0
+union,unsigned long long,short,8,8,0,0
+union,unsigned long long,unsigned short,8,8,0,0
+union,unsigned long long,int,8,8,0,0
+union,unsigned long long,unsigned int,8,8,0,0
+union,unsigned long long,long,8,8,0,0
+union,unsigned long long,unsigned long,8,8,0,0
+union,unsigned long long,long long,8,8,0,0
+union,unsigned long long,unsigned long long,8,8,0,0
+union,unsigned long long,float,8,8,0,0
+union,unsigned long long,double,8,8,0,0
+union,unsigned long long,long double,16,16,0,0
+union,unsigned long long,float _Complex,8,8,0,0
+union,unsigned long long,double _Complex,16,8,0,0
+union,unsigned long long,long double _Complex,32,16,0,0
+union,float,_Bool,4,4,0,0
+union,float,char,4,4,0,0
+union,float,signed char,4,4,0,0
+union,float,unsigned char,4,4,0,0
+union,float,short,4,4,0,0
+union,float,unsigned short,4,4,0,0
+union,float,int,4,4,0,0
+union,float,unsigned int,4,4,0,0
+union,float,long,8,8,0,0
+union,float,unsigned long,8,8,0,0
+union,float,long long,8,8,0,0
+union,float,unsigned long long,8,8,0,0
+union,float,float,4,4,0,0
+union,float,double,8,8,0,0
+union,float,long double,16,16,0,0
+union,float,float _Complex,8,4,0,0
+union,float,double _Complex,16,8,0,0
+union,float,long double _Complex,32,16,0,0
+union,double,_Bool,8,8,0,0
+union,double,char,8,8,0,0
+union,double,signed char,8,8,0,0
+union,double,unsigned char,8,8,0,0
+union,double,short,8,8,0,0
+union,double,unsigned short,8,8,0,0
+union,double,int,8,8,0,0
+union,double,unsigned int,8,8,0,0
+union,double,long,8,8,0,0
+union,double,unsigned long,8,8,0,0
+union,double,long long,8,8,0,0
+union,double,unsigned long long,8,8,0,0
+union,double,float,8,8,0,0
+union,double,double,8,8,0,0
+union,double,long double,16,16,0,0
+union,double,float _Complex,8,8,0,0
+union,double,double _Complex,16,8,0,0
+union,double,long double _Complex,32,16,0,0
+union,long double,_Bool,16,16,0,0
+union,long double,char,16,16,0,0
+union,long double,signed char,16,16,0,0
+union,long double,unsigned char,16,16,0,0
+union,long double,short,16,16,0,0
+union,long double,unsigned short,16,16,0,0
+union,long double,int,16,16,0,0
+union,long double,unsigned int,16,16,0,0
+union,long double,long,16,16,0,0
+union,long double,unsigned long,16,16,0,0
+union,long double,long long,16,16,0,0
+union,long double,unsigned long long,16,16,0,0
+union,long double,float,16,16,0,0
+union,long double,double,16,16,0,0
+union,long double,long double,16,16,0,0
+union,long double,float _Complex,16,16,0,0
+union,long double,double _Complex,16,16,0,0
+union,long double,long double _Complex,32,16,0,0
+union,float _Complex,_Bool,8,4,0,0
+union,float _Complex,char,8,4,0,0
+union,float _Complex,signed char,8,4,0,0
+union,float _Complex,unsigned char,8,4,0,0
+union,float _Complex,short,8,4,0,0
+union,float _Complex,unsigned short,8,4,0,0
+union,float _Complex,int,8,4,0,0
+union,float _Complex,unsigned int,8,4,0,0
+union,float _Complex,long,8,8,0,0
+union,float _Complex,unsigned long,8,8,0,0
+union,float _Complex,long long,8,8,0,0
+union,float _Complex,unsigned long long,8,8,0,0
+union,float _Complex,float,8,4,0,0
+union,float _Complex,double,8,8,0,0
+union,float _Complex,long double,16,16,0,0
+union,float _Complex,float _Complex,8,4,0,0
+union,float _Complex,double _Complex,16,8,0,0
+union,float _Complex,long double _Complex,32,16,0,0
+union,double _Complex,_Bool,16,8,0,0
+union,double _Complex,char,16,8,0,0
+union,double _Complex,signed char,16,8,0,0
+union,double _Complex,unsigned char,16,8,0,0
+union,double _Complex,short,16,8,0,0
+union,double _Complex,unsigned short,16,8,0,0
+union,double _Complex,int,16,8,0,0
+union,double _Complex,unsigned int,16,8,0,0
+union,double _Complex,long,16,8,0,0
+union,double _Complex,unsigned long,16,8,0,0
+union,double _Complex,long long,16,8,0,0
+union,double _Complex,unsigned long long,16,8,0,0
+union,double _Complex,float,16,8,0,0
+union,double _Complex,double,16,8,0,0
+union,double _Complex,long double,16,16,0,0
+union,double _Complex,float _Complex,16,8,0,0
+union,double _Complex,double _Complex,16,8,0,0
+union,double _Complex,long double _Complex,32,16,0,0
+union,long double _Complex,_Bool,32,16,0,0
+union,long double _Complex,char,32,16,0,0
+union,long double _Complex,signed char,32,16,0,0
+union,long double _Complex,unsigned char,32,16,0,0
+union,long double _Complex,short,32,16,0,0
+union,long double _Complex,unsigned short,32,16,0,0
+union,long double _Complex,int,32,16,0,0
+union,long double _Complex,unsigned int,32,16,0,0
+union,long double _Complex,long,32,16,0,0
+union,long double _Complex,unsigned long,32,16,0,0
+union,long double _Complex,long long,32,16,0,0
+union,long double _Complex,unsigned long long,32,16,0,0
+union,long double _Complex,float,32,16,0,0
+union,long double _Complex,double,32,16,0,0
+union,long double _Complex,long double,32,16,0,0
+union,long double _Complex,float _Complex,32,16,0,0
+union,long double _Complex,double _Complex,32,16,0,0
+union,long double _Complex,long double _Complex,32,16,0,0

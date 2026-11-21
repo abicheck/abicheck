@@ -1,6 +1,13 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # C++ by-value call ABI pilot
 
-Run `python run.py` in this directory on Linux x86-64 with
+Save the scripts as described in [Reproduce and inspect](#reproduce-and-inspect), then run `python run.py` from `research/call-abi-pilot/` on Linux x86-64 with
 `/usr/bin/g++-14` version 14.2.0 and GNU binutils. The script generates two
 independent C++20 shared libraries and two clients for each profile under
 `fixtures/<profile>/{old,new}/`. Each side has `fixture.hpp`, `library.cpp`,

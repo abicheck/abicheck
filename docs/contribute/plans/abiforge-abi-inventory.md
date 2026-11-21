@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # ABI coverage inventory: profile P0, draft 1
 
 This is a specification-derived research backlog, not a claim that 40 rows exhaust
@@ -173,3 +180,5 @@ this proves a capacity predicate, not complete calling-convention correctness.
 The [configuration campaign](abiforge-configuration-campaign.md) records the bounded packing universe, per-fact checker audit, alignment evidence gap and implementation acceptance criteria. These extend partial evidence without closing the whole layout family.
 
 The [implementation roadmap](abiforge-campaign-implementation.md) maps existing generator and checker seams to work packages and acceptance criteria.
+
+See the [bounded C/C++ measurements and P0 mapping](https://github.com/abicheck/abicheck/blob/8cd2b750d8b2b1d916d65e50964b06b229974c26/research/standard-space/README.md#coverage-against-the-p0-inventory) for executable argument-placement, object-layout and virtual-dispatch observations.

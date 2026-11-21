@@ -1,0 +1,329 @@
+{
+  "checker_sha": "70f9029aebdf2f7f84403ab3689184d288135ba7",
+  "gcc": "14.2.0",
+  "calls": [
+    {
+      "fault": "unused_bank_negative_capacity",
+      "suite": "dense",
+      "checked": 693,
+      "mismatches": 34,
+      "first": [
+        [
+          "II",
+          "DD",
+          0,
+          9
+        ]
+      ],
+      "seconds": 0.000923
+    },
+    {
+      "fault": "unused_bank_negative_capacity",
+      "suite": "selected",
+      "checked": 63,
+      "mismatches": 0,
+      "first": [],
+      "seconds": 0.000565
+    },
+    {
+      "fault": "unused_bank_negative_capacity",
+      "suite": "augmented",
+      "checked": 70,
+      "mismatches": 2,
+      "first": [
+        [
+          "II",
+          "DD",
+          0,
+          9
+        ]
+      ],
+      "seconds": 0.000121
+    },
+    {
+      "fault": "early_gpr_exhaustion",
+      "suite": "dense",
+      "checked": 693,
+      "mismatches": 23,
+      "first": [
+        [
+          "II",
+          "DD",
+          4,
+          7
+        ]
+      ],
+      "seconds": 0.00134
+    },
+    {
+      "fault": "early_gpr_exhaustion",
+      "suite": "selected",
+      "checked": 63,
+      "mismatches": 4,
+      "first": [
+        [
+          "II",
+          "ID",
+          5,
+          0
+        ]
+      ],
+      "seconds": 9.1e-05
+    },
+    {
+      "fault": "early_gpr_exhaustion",
+      "suite": "augmented",
+      "checked": 70,
+      "mismatches": 4,
+      "first": [
+        [
+          "II",
+          "ID",
+          5,
+          0
+        ]
+      ],
+      "seconds": 0.0001
+    },
+    {
+      "fault": "early_sse_exhaustion",
+      "suite": "dense",
+      "checked": 693,
+      "mismatches": 11,
+      "first": [
+        [
+          "II",
+          "DD",
+          5,
+          6
+        ]
+      ],
+      "seconds": 0.001772
+    },
+    {
+      "fault": "early_sse_exhaustion",
+      "suite": "selected",
+      "checked": 63,
+      "mismatches": 3,
+      "first": [
+        [
+          "II",
+          "ID",
+          5,
+          7
+        ]
+      ],
+      "seconds": 9.4e-05
+    },
+    {
+      "fault": "early_sse_exhaustion",
+      "suite": "augmented",
+      "checked": 70,
+      "mismatches": 3,
+      "first": [
+        [
+          "II",
+          "ID",
+          5,
+          7
+        ]
+      ],
+      "seconds": 0.000102
+    },
+    {
+      "fault": "ignore_sse_pressure",
+      "suite": "dense",
+      "checked": 693,
+      "mismatches": 37,
+      "first": [
+        [
+          "II",
+          "DD",
+          5,
+          7
+        ]
+      ],
+      "seconds": 0.001392
+    },
+    {
+      "fault": "ignore_sse_pressure",
+      "suite": "selected",
+      "checked": 63,
+      "mismatches": 7,
+      "first": [
+        [
+          "II",
+          "DD",
+          5,
+          7
+        ]
+      ],
+      "seconds": 0.000108
+    },
+    {
+      "fault": "ignore_sse_pressure",
+      "suite": "augmented",
+      "checked": 70,
+      "mismatches": 8,
+      "first": [
+        [
+          "II",
+          "DD",
+          5,
+          7
+        ]
+      ],
+      "seconds": 0.000218
+    }
+  ],
+  "arrays_baseline": {
+    "dense": {
+      "cases": 512,
+      "direct_offset_checks": 1536,
+      "moved": 512,
+      "unchanged": 1024,
+      "missing": [],
+      "unexpected": [],
+      "wrong_values": [],
+      "extraction_mismatches": [],
+      "duplicates": [],
+      "seconds": 7.775101170998823
+    },
+    "selected": {
+      "cases": 35,
+      "direct_offset_checks": 105,
+      "moved": 36,
+      "unchanged": 69,
+      "missing": [],
+      "unexpected": [],
+      "wrong_values": [],
+      "extraction_mismatches": [],
+      "duplicates": [],
+      "seconds": 3.323005006999665
+    },
+    "augmented": {
+      "cases": 37,
+      "direct_offset_checks": 111,
+      "moved": 39,
+      "unchanged": 72,
+      "missing": [],
+      "unexpected": [],
+      "wrong_values": [],
+      "extraction_mismatches": [],
+      "duplicates": [],
+      "seconds": 3.414123352999013
+    }
+  },
+  "arrays_historical": [
+    {
+      "suite": "dense",
+      "sha": "b5da820a42792c9f58b621dcde9018d7305c5d93",
+      "cases": 512,
+      "wrong_bounds": 512,
+      "first_mismatch": [
+        [
+          0,
+          1,
+          "I0[]"
+        ]
+      ],
+      "seconds": 3.072
+    },
+    {
+      "suite": "selected",
+      "sha": "b5da820a42792c9f58b621dcde9018d7305c5d93",
+      "cases": 35,
+      "wrong_bounds": 35,
+      "first_mismatch": [
+        [
+          0,
+          1,
+          "I0[]"
+        ]
+      ],
+      "seconds": 0.959
+    },
+    {
+      "suite": "augmented",
+      "sha": "b5da820a42792c9f58b621dcde9018d7305c5d93",
+      "cases": 37,
+      "wrong_bounds": 37,
+      "first_mismatch": [
+        [
+          0,
+          1,
+          "I0[]"
+        ]
+      ],
+      "seconds": 0.943
+    },
+    {
+      "suite": "dense",
+      "sha": "dac367b706a71d6dc7091c5be1a6bb7e4ec9d387",
+      "cases": 512,
+      "wrong_bounds": 0,
+      "first_mismatch": [],
+      "seconds": 3.196
+    },
+    {
+      "suite": "selected",
+      "sha": "dac367b706a71d6dc7091c5be1a6bb7e4ec9d387",
+      "cases": 35,
+      "wrong_bounds": 0,
+      "first_mismatch": [],
+      "seconds": 1.101
+    },
+    {
+      "suite": "augmented",
+      "sha": "dac367b706a71d6dc7091c5be1a6bb7e4ec9d387",
+      "cases": 37,
+      "wrong_bounds": 0,
+      "first_mismatch": [],
+      "seconds": 0.955
+    }
+  ],
+  "arrays_injected": [
+    {
+      "suite": "dense",
+      "fault": "skip_zero_origin",
+      "missing": 0,
+      "extra": 0,
+      "seconds": 4.349
+    },
+    {
+      "suite": "selected",
+      "fault": "skip_zero_origin",
+      "missing": 0,
+      "extra": 0,
+      "seconds": 1.511
+    },
+    {
+      "suite": "augmented",
+      "fault": "skip_zero_origin",
+      "missing": 1,
+      "extra": 0,
+      "seconds": 1.35
+    },
+    {
+      "suite": "dense",
+      "fault": "byte_offset_narrowed_to_uint8",
+      "missing": 4,
+      "extra": 0,
+      "seconds": 3.063
+    },
+    {
+      "suite": "selected",
+      "fault": "byte_offset_narrowed_to_uint8",
+      "missing": 0,
+      "extra": 0,
+      "seconds": 1.347
+    },
+    {
+      "suite": "augmented",
+      "fault": "byte_offset_narrowed_to_uint8",
+      "missing": 1,
+      "extra": 0,
+      "seconds": 1.412
+    }
+  ]
+}
