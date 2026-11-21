@@ -253,3 +253,34 @@ def test_stored_rows_shorter_than_the_vtt_decline(short_side):
     assert _vtt_findings(result) == []
     ((entity, _reason),) = _declined(result)
     assert entity == "_ZTT1D"
+
+
+class _FakeElf:
+    elfclass = 64
+
+    def __getitem__(self, key: str) -> str:
+        assert key == "e_machine"
+        return "EM_X86_64"
+
+
+@pytest.mark.parametrize(
+    ("symbols", "failed", "expected"),
+    [
+        ([], False, {}),  # a complete read with zero exports: no VTT
+        ([], True, None),  # the read failed before any export
+        ([ElfSymbol(name="f", size=4)], True, None),  # failed after some exports
+        ([ElfSymbol(name="f", size=4)], False, {}),  # complete, no VTT
+    ],
+)
+def test_export_read_outcome_decides_unknown_vs_no_vtt(symbols, failed, expected):
+    from abicheck.extract.elf_vtt_entries import read_vtt_entries
+    from abicheck.extract.parse_failures import (
+        note_export_read_failure,
+        recording_export_read_failures,
+    )
+
+    with recording_export_read_failures():
+        if failed:
+            note_export_read_failure("dynsym unreadable")
+        got = read_vtt_entries(_FakeElf(), ElfMetadata(symbols=symbols))
+    assert got == expected

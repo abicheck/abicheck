@@ -37,6 +37,7 @@ import logging
 from typing import Any
 
 from ..model.elf_facts import ElfMetadata, VttEntryTarget
+from .parse_failures import export_read_failed
 
 log = logging.getLogger(__name__)
 
@@ -64,9 +65,10 @@ def read_vtt_entries(
     """
     if elf["e_machine"] != "EM_X86_64" or elf.elfclass != 64:
         return None
-    if not meta.symbols:
-        # No export was read (or the export read failed): "no VTT" would be
-        # a claim the parse cannot support, so the map stays unknown.
+    if export_read_failed():
+        # The export table was not read in full: "no VTT" (or a VTT list
+        # missing the ones the failed read never reached) would be a claim
+        # the parse cannot support, so the map stays unknown.
         return None
     vtts = {
         s.name: s.size

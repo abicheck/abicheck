@@ -51,6 +51,14 @@ def note_export_read_failure(reason: str) -> None:
         sink.append(reason)
 
 
+def export_read_failed() -> bool:
+    """Whether an export-table read failure was noted in the active recording.
+
+    False outside a recording: nothing was noted.
+    """
+    return bool(_SINK.get())
+
+
 @contextmanager
 def recording_export_read_failures() -> Iterator[list[str]]:
     """Collect every :func:`note_export_read_failure` made inside the block."""
