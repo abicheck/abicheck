@@ -115,4 +115,30 @@ DIALECT_OPERATORS: tuple[EditOp, ...] = (
             _KEEP,
         ),
     ),
+    EditOp(
+        "dialect_rebuild_cxx23_control",
+        ("dl.gate", "build.cflags"),
+        _std("-std=c++23"),
+        "the library is rebuilt as C++23 from identical source on a C++20 or "
+        "newer baseline: no declaration's type differs between these "
+        "revisions (dl_take is already char8_t, dl_register's noexcept is "
+        "already in its type), so every exported name and every consumer "
+        "result stays the same",
+        verdict_min="NO_CHANGE",
+        verdict_max="COMPATIBLE",
+        touches=("build.cflags",),
+        standards=(
+            StdRange(
+                "c++",
+                "c++20",
+                "P0482R6 (char8_t from C++20; nothing these declarations use "
+                "changes type after it)",
+            ),
+        ),
+        claims=(
+            _untouched("dl_register", "its type is the same in C++20 and later"),
+            _untouched("dl_take", "its type is the same in C++20 and later"),
+            _KEEP,
+        ),
+    ),
 )

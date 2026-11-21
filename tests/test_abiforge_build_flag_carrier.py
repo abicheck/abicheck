@@ -199,6 +199,8 @@ BINARY_VISIBLE_FLAG_EDITS = frozenset(
         # there is nothing to carry; their exact assertion is an absence.
         "union_rebuild_optimized",
         "bitfield_rebuild_optimized",
+        # -std=c++23 on a C++20+ baseline: retypes nothing (a control)
+        "dialect_rebuild_cxx23_control",
     }
 )
 

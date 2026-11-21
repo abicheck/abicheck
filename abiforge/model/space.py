@@ -396,6 +396,8 @@ OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
     # cxx_dialect: -std= (a build flag) retypes a function's parameter.
     "dialect_cxx17_noexcept_in_function_type": ("function",),
     "dialect_cxx20_char8_t_parameter": ("function",),
+    # A -std= rebuild that retypes nothing: a compile-option control.
+    "dialect_rebuild_cxx23_control": ("compile_option",),
     # declarations of another construct added next to the seed's functions
     "object_added": ("variable",),
     "source_only_var_export_added": ("variable",),
