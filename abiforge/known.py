@@ -169,7 +169,8 @@ _BACKEND_GAPS: tuple[Known, ...] = (
             ("param_became_va_list", "PARAM_BECAME_VA_LIST"),
             ("param_lost_va_list", "PARAM_LOST_VA_LIST"),
         )
-        for backend in ("castxml", "gcc")
+        # castxml reads the written typedef chain since generation 91.
+        for backend in ("gcc",)
     ),
     _backend_gap(
         "func_exception_spec_widened",

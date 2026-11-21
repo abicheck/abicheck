@@ -247,7 +247,9 @@ def test_enum_qualified_name_fact_present_with_real_value() -> None:
     assert en.qualified_name_fact.value == "ns::Color"
 
 
-def test_param_is_va_list_fact_is_unsupported_not_not_collected() -> None:
+def test_param_is_va_list_fact_is_present_false_for_a_plain_param() -> None:
+    """Generation 91: castxml establishes va_list-ness from the written type,
+    so a plain ``int`` parameter reads a present False (not unsupported)."""
     root = _base_root()
     SubElement(
         root,
@@ -272,4 +274,4 @@ def test_param_is_va_list_fact_is_unsupported_not_not_collected() -> None:
     assert len(funcs) == 1
     param = funcs[0].params[0]
     assert param.is_va_list is False
-    assert param.is_va_list_fact.status is FactStatus.UNSUPPORTED
+    assert param.is_va_list_fact.status is FactStatus.PRESENT

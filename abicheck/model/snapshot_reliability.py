@@ -203,10 +203,11 @@ __all__ = [
 # consulting this flag for it; see that detector's and
 # ``diff_param_qualifiers.param_va_list_changes``'s docstrings for the
 # full reasoning. Not needed for "castxml" either, for the ordinary
-# reason: it has never populated this fact at all (still true after
-# this change — see ``dumper_castxml.py``), so a castxml snapshot's
-# blanket False is unconditionally correct-as-"not collected" the same
-# way it always was, on any schema version. False only for a snapshot
+# reason: before extractor generation 91 castxml recorded the fact as
+# ``unsupported`` (never compared), and since then it records a real
+# ``present`` value read from the parameter's written typedef chain
+# (``extract/headers/castxml/type_resolution.param_is_va_list``), so no
+# castxml value is a legacy placeholder this flag would have to describe. False only for a snapshot
 # rehydrated from a persisted pre-v23, clang-producer schema (a fresh
 # in-memory snapshot always defaults True -- see
 # serialization.SCHEMA_VERSION).

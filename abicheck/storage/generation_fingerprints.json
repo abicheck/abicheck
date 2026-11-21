@@ -110,7 +110,7 @@
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/explicit_instantiation.py": "02efd130ec0654aa7e4fb684b83c2be6c2273c85d58a6b6ca8fd1c90221e1616",
       "abicheck/extract/headers/castxml/function_type_cc.py": "629328f9a0e9c3842ef43c05e11ef3f781b9f5c351e3f14638ce54b91e36405a",
-      "abicheck/extract/headers/castxml/functions.py": "241e84de19312a91dd8b8d1b4f076ac419685605c8399202bea8d3fa48d363e9",
+      "abicheck/extract/headers/castxml/functions.py": "7a4d9e27c5fb23ce54f7bd61576d3c085efd1153819886ed42b8c9b0d3b99d9b",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -125,7 +125,7 @@
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
-      "abicheck/extract/headers/castxml/type_resolution.py": "36aa982df5872038bad515dbe068522f6235c37f299ee41abb4dfedd64441c84",
+      "abicheck/extract/headers/castxml/type_resolution.py": "3fa98ad82ade7cc9be724810631e99c19cf996bf0b6a99d1bd6f106d5d6e3ebb",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/variable_alignment.py": "f6ac94a93f1c9c1fac888e69753a7e40a9a9848c66e2d38cb5a894b1baeca1f5",
       "abicheck/extract/headers/castxml/variable_template_join.py": "120d86ede886ecf370fc31763332f2889f557764ef3c54c23f72c5985e4289fb",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "bd319084ca532e04bb9e6bf3e55f559b7f042f926b22614fca5439a197c6954f",
-    "generation": 90,
-    "reason": "review follow-up: duplicate VTT aliases cannot size the read (generation 90, unshipped)"
+    "fingerprint": "39f4f4ca8d98188fc250297fa49bf624550cba1db5fbc110c754c5b56599d283",
+    "generation": 91,
+    "reason": "castxml multi-dimensional arrays spelled in C order; castxml va_list parameters read from original_type (generation 91)"
   },
   "resolver": {
     "files": {

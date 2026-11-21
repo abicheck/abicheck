@@ -3606,8 +3606,6 @@ ABIFORGE_KNOWN_BASELINE: tuple[str, ...] = (
     "gnu_unique_static_added|cxx_more|false-positive||stronger-than:COMPATIBLE|COMPATIBLE_WITH_RISK|An inline function's static local, exported by clang, reads as an undeclared export",
     "gnu_unique_static_added|cxx_more|wrong-kind||missing:SYMBOL_BINDING_BECAME_UNIQUE|COMPATIBLE|A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth",
     "param_became_va_list|c_elf|wrong-kind||missing:PARAM_BECAME_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
-    "param_became_va_list|c_elf|wrong-kind||missing:PARAM_BECAME_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
-    "param_lost_va_list|c_elf|wrong-kind||missing:PARAM_LOST_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
     "param_lost_va_list|c_elf|wrong-kind||missing:PARAM_LOST_VA_LIST|BREAKING|Only the clang header backend marks a `va_list` parameter",
     "rebuild_optimized|c_core|false-positive||stronger-than:COMPATIBLE|COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW",
     "rebuild_optimized|cxx_stdlib|false-positive||stronger-than:COMPATIBLE|BREAKING,COMPATIBLE_WITH_RISK|An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW",

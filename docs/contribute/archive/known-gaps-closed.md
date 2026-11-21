@@ -16,6 +16,10 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### castxml spells a multi-dimensional array with its bounds reversed (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED.** Not a castxml bug: castxml 0.7.0 nests `int m[2][3]` correctly (an `ArrayType` of 2 of an `ArrayType` of 3), and abicheck's `extract/headers/castxml/type_resolution.py` appended each outer bound after the inner ones. Extractor generation 91 spells the nested chain outermost first (`int[2][3]`, as the clang backend and DWARF do), and `storage/castxml_array_migration.migrate_castxml_array_order` reverses each run of adjacent bounds in a stored pre-91 castxml snapshot, so an old baseline compares clean. Regressions: `tests/test_castxml_written_type_integration.py` (real castxml against the C declarator and the clang backend), `tests/test_castxml_array_order_migration.py`.
+
 ### Affected-symbol attribution ignores identifier boundaries (closed 2026-11-19)
 
 **Status (2026-11-19): CLOSED.** `_build_type_to_funcs` and `_build_type_embed_index` keep the Aho-Corasick prefilter but count a hit only when it occurs as a whole identifier (`compare/type_name_boundary.py`; `::` stays a boundary, scoped same-name types are `type_symbol_disambiguation`'s job). The record-edit fragment (`formal/RECORD_EDIT_FRAGMENT.md`) had re-measured it on 925 of 9252 records in every evidence lane; regression: `tests/test_affected_symbols_identifier_boundary.py`.

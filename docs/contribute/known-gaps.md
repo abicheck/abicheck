@@ -148,11 +148,6 @@ dependency walk and debug roots to every member. No open gap remains.
 `wrong-kind` — the new glibc floor is named as a compatible requirement.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `glibc_version_required_added` entry in abiforge/known.py, which fails once the answer changes -->
 
-#### castxml spells a multi-dimensional array with its bounds reversed (2026-11-08)
-
-**Status (2026-11-08): OPEN.** castxml writes `int m[2][3]` as an `ArrayType` of `ArrayType`, and `extract/headers/castxml/type_resolution.py` appends the outer bound after the inner one, so the member reads `int[3][2]`. The clang header backend and DWARF (generation 45) spell it `int[2][3]`, as C does. Comparing two castxml dumps is self-consistent, but a castxml snapshot against a clang or DWARF one reports a `type_field_type_changed` that is not there, and a reshape `[2][3]` -> `[3][2]` reads as its mirror image. Closing it needs the spelling fixed and a stored-spelling migration for castxml snapshots (every multi-dimensional castxml spelling reverses soundly). `false-positive` across frontends. Owner: `extract/headers/castxml/`.
-<!-- no-canary: needs castxml and a multi-dimensional member; tests/test_dwarf_array_extents.py uses the clang frontend as its oracle for that reason -->
-
 #### castxml records no `volatile` qualifier on a member function (2026-11-08)
 
 **Status (2026-11-08): OPEN.** `int touch() volatile;` mangles as `_ZNV...` and DWARF (generation 45) records `is_volatile=True`, but the castxml header lane records `is_volatile=False`, so a dropped or added `volatile` on a method is seen only through the mangled-name change (`func_removed` + `func_added`), not `func_cv_changed`. Owner: `extract/headers/castxml/functions.py`.
@@ -313,8 +308,8 @@ current emitter, which is unchanged.
 
 #### Only the clang header backend marks a `va_list` parameter (2026-11-12)
 
-**Status (2026-11-12): OPEN.** `Param.is_va_list` is read by the clang backend alone (`extract/headers/clang/qualifiers.py`, the x86-64 `__va_list_tag *` spelling); castxml and the native gcc plugin never establish it, and DWARF marks it unsupported. A parameter that becomes or stops being a `va_list` therefore reads only `func_params_changed` at castxml and gcc headers depth, without `param_became_va_list`/`param_lost_va_list`. The verdict is unaffected (the parameter type change gates on its own). Found by the edit corpus (`param_became_va_list`/`param_lost_va_list` on `c_elf`). Owner: `extract/headers/castxml/`, `extract/headers/gcc/`.
-`false-clean` — the va_list-specific finding is missing on two of three header backends.
+**Status (2026-11-21): OPEN, narrowed.** `Param.is_va_list` is read by the clang backend (`extract/headers/clang/qualifiers.py`, the x86-64 `__va_list_tag *` spelling) and, since extractor generation 91, by castxml (`extract/headers/castxml/type_resolution.param_is_va_list`, which follows the `Argument`'s `original_type` typedef chain to `__builtin_va_list`; the earlier gap was abicheck's reader dropping `original_type`, not castxml). The native gcc plugin still never establishes it and DWARF marks it unsupported, so a parameter that becomes or stops being a `va_list` reads only `func_params_changed` at gcc headers depth, without `param_became_va_list`/`param_lost_va_list`. The verdict is unaffected. Found by the edit corpus (`param_became_va_list`/`param_lost_va_list` on `c_elf`). Owner: `extract/headers/gcc/`.
+`false-clean` — the va_list-specific finding is missing on the gcc header backend.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_only_the_clang_backend_marks_a_va_list_parameter -->
 
 #### The native gcc header backend records no dynamic exception specification (2026-11-12)
