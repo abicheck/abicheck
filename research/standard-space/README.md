@@ -26,18 +26,32 @@ Build a client and DSO in the old mode, verify baseline success, rebuild only th
 
 The latter two experiments use identical source text for both providers. Both break through the same external-symbol lookup mechanism. They need distinct generator inputs. The 49 control runs are one interface under 49 configurations. They establish neither general interoperability for those revisions nor coverage of the C++ object model. Standard-library ABI settings, compiler versions and ABI-version flags were held fixed.
 
-## Work register
+## Coverage against the P0 inventory
 
-| Priority | Profile | Next experiment and exit criterion |
+The [P0 inventory](../../docs/contribute/plans/abiforge-abi-inventory.md) owns the 40 local families and 12 interactions. Its 208 fixture-role slots are a planning budget. The older [38-row campaign](../coverage-audit/campaign.tsv) is historical. Use the [reduction research plan](../../docs/contribute/plans/abiforge-space-reduction-research.md) for acceptance criteria.
+
+| P0 obligation | Evidence here | Remaining boundary |
 | --- | --- | --- |
-| 1 | C99 shared subset | Enumerate argument → return, hidden result, va_arg and pointer access separately. Confirm each location or offset with an independent client; include a compatible and a divergent old/new pair. |
-| 2 | C11 / C17 / C23 | Add C11 _Alignas and _Atomic, C17 controls and C23 fixed-underlying enum and _BitInt where supported. Record unsupported frontend features. Measure width, alignment and call class on supported compilers. |
-| 3 | C++98 / 03 | Freeze class layout, virtual base, secondary dispatch, VTT during construction, RTTI and EH fixtures. Isolate each observation even when one mutation changes multiple facts. |
-| 4 | C++11 / 14 | Contrast trivial and nontrivial copy/destruction for by-value calls, alignment and padding. Record old caller and new callee locations; capture a compatible control for each. |
-| 5 | C++17 / 20 / 23 | Add reverse directions to both name changes, noexcept on top-level functions as a control, no_unique_address layout and C++23 feature-specific fixtures. Determine whether each needs a new observable or only a new trigger. |
-| 6 | abiforge / abicheck | For each row map spec clause → bounded domain → operator → generated artifact → independent observation → diagnostic per evidence mode. Track missing, unsupported, ambiguous, false positive and false negative separately. Repeat on Clang and mixed compiler pairs. |
+| L2, field order | [Frozen clients](operations.csv) observe reordered fields through pointers, returns and varargs. [Generated clients](generated_clients.csv) reproduce field swaps. | The swaps preserve transport classes; no credit for the L2 × C1 interaction that changes classification. |
+| C1 × C3, aggregate argument under register pressure | [252 placements](calls.csv) checked at assembly entry for four shapes. | Five transport outcomes merge register indices and exhaustion causes. Validate any proposed CI reduction against checker regressions. |
+| C2 and C4, return and variadic access | [Five shapes](operations.csv), including a three-long result; 54 variadic contexts per shape. | Values verified; hidden-result location and va_list cursor transitions still need independent checks. |
+| H1, H4 and H1 × V2, secondary-base adjustment | Old client and provider disagree on the base address; [checker findings](checker.json) include a changed adjustment thunk. | Extend the single hierarchy and compiler before extrapolating. |
+| V1 and V4, normal and construction dispatch | Old-client slot change is observable in both phases. | No isolated construction-table mutation; keep V4 open. |
+| M1, mangled names | [C++ dialect pairs](cpp.csv) isolate two unresolved old symbols. | Reverse directions, mixed compilers and additional triggers remain open. |
 
-The earlier budget of 38 review rows and 164 planned tests was a manual allocation. It has no mathematical relationship to the measured layout count of 38. Report coverage separately for each bounded domain and operation. Establish a reduction rule before extrapolating to more fields, nested types or other ABIs.
+### Shared runner and entity attribution
+
+Join the four generated pairs by seed and operator with the [existing sweep](../../abiforge/receipts/competitors/sweep/pairs.csv). Its dwarf+headers and stripped+headers lanes complement the two header-free modes in checker.json. These are separate builds. Keep evidence and compiler metadata when comparing verdicts.
+
+For cxx_classes.virtual_reorder, both header-aware [raw receipts](../../abiforge/receipts/competitors/sweep/pairs.jsonl.gz) expect entities area and kind from the header-text diff. The checker emits type_vtable_changed on Shape. This explains decision_outcome=correct together with detail_entity=miss: the record is identified, while the individual affected methods are absent from that finding. Retain the historical score. Evaluate owner and affected members separately in a future runner change; include a wrong-owner control.
+
+The existing [derive consumer](../../abiforge/run/consumers.py) exercises both dispatch directions on client-created objects. The research fixture adds a provider-owned object and separately observes the library call (70 → 70) and the frozen client's direct call (7 → 1). Reuse derive and the existing judge when promoting assertions. Keep these observations distinct.
+
+### Next measurements
+
+1. Check method attribution and provider ownership using the shared runner; require separate expectations for owner, members and both dispatch observations.
+2. Extend C2/C4 with physical-location checks and V4 with a construction-only mutation and a compatible control. Record unsupported observations explicitly.
+3. Extend the P0 rows with C11 alignment and atomics, supported C23 types, nontrivial C++ parameters, RTTI/EH, and Clang/mixed builds. Record time, exclusions and independently witnessed transitions per profile.
 
 Sources: [WG14 N1256](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1256.pdf), [AMD64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI), [Itanium C++ ABI](https://itanium-cxx-abi.github.io/cxx-abi/abi.html), [WG21 P0012R1](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0012r1.html), [WG21 P0482R6](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0482r6.html).
 
