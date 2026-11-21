@@ -256,7 +256,7 @@ suppression:
 | `fail-on-api-break` | `false` | Fail step on source-level API break |
 | `severity-preset` | — | Severity preset: `default`, `strict`, or `info-only` (compare mode only) |
 | `severity-addition` | — | Severity for additions: `error`, `warning`, or `info` (compare mode only) |
-| `extra-args` | `''` | Additional CLI arguments passed to abicheck |
+| `extra-args` | `''` | Additional CLI arguments passed to abicheck. Your own `-o FORMAT=PATH` exports are added beside the Action's; when none of them is JSON, the Action still adds its internal JSON export, so the coverage, assurance and severity checks keep working |
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
 | `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons and the audit-only shape). No-op outside `pull_request` / `pull_request_target` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |

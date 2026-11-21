@@ -19,7 +19,7 @@ change the published JSON shape. Only the envelope carries them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
@@ -51,6 +51,11 @@ class ScopedGateFacts:
     used_by_app_count: int | None
     #: The ``consumers.required_symbols`` contract verdict text, or ``None`` if unset.
     required_symbol_contract_verdict: str | None
+    #: "N of M consumers affected" (``total``/``evaluated``/``affected``/
+    #: ``unreadable_advisory``/``unreadable_paths``) for a ``--used-by`` run,
+    #: exactly as JSON's ``consumer_impact_summary`` carries it; ``None``
+    #: for a ``consumers.required_symbols``-only run.
+    consumer_impact_summary: dict[str, Any] | None = None
 
 
 def build_scoped_gate_facts(result: DiffResult) -> ScopedGateFacts | None:
@@ -85,5 +90,10 @@ def build_scoped_gate_facts(result: DiffResult) -> ScopedGateFacts | None:
             None
             if required_symbols is None
             else str(required_symbols.get("verdict", ""))
+        ),
+        consumer_impact_summary=(
+            None
+            if used_by is None
+            else getattr(result, "consumer_impact_summary", None)
         ),
     )

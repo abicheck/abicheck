@@ -131,6 +131,13 @@ def add_scoped_properties(
             "abicheck.required_symbol_contract_verdict",
             facts.required_symbol_contract_verdict,
         )
+    summary = facts.consumer_impact_summary
+    if summary is not None:
+        # "N of M consumers affected", JSON's `consumer_impact_summary`.
+        for key in ("total", "evaluated", "affected", "unreadable_advisory"):
+            _prop(f"abicheck.consumer_impact.{key}", str(summary.get(key, 0)))
+        for path in summary.get("unreadable_paths") or ():
+            _prop("abicheck.consumer_impact.unreadable_path", str(path))
 
 
 def add_contract_properties(
