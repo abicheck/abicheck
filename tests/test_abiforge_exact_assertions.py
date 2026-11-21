@@ -344,3 +344,20 @@ def test_exact_problems_reconcile_as_wrong_detail_with_stable_keys() -> None:
         reconcile(ExecTruth(available=False, reason="off"), exp, "BREAKING", kinds).cls
         == "agree"
     )
+
+
+def test_unexpected_rows_mixing_none_and_text_still_fail() -> None:
+    # Two unexpected rows that differ only in a None versus a text member
+    # (and value) must be reported, not crash the report's ordering.
+    control = _assertion(())
+    rows = (
+        Finding("TYPE_SIZE_CHANGED", "Bits", old_value="32", new_value="64"),
+        Finding(
+            "TYPE_SIZE_CHANGED", "Bits", field_name="a", old_value="32", new_value="64"
+        ),
+        Finding("UNION_FIELD_ADDED", "Payload", field_name="x", new_value="int"),
+        Finding("UNION_FIELD_ADDED", "Payload", field_name="x", old_value="int"),
+    )
+    out = control.judge(rows)
+    assert out.status == "fail"
+    assert sum(p.startswith("exact unexpected") for p in out.problems) == 4

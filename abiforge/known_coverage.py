@@ -41,9 +41,15 @@ PROBE_FLAGS: tuple[Flags, ...] = tuple(
         bits=bits,
         short_enums=short,
         cxx11_abi=abi,
+        pack=pack,
     )
-    for opt, vis, bits, short, abi in itertools.product(
-        ("O0", "O2"), ("default", "hidden"), (64, 32), (False, True), (None, 0)
+    for opt, vis, bits, short, abi, pack in itertools.product(
+        ("O0", "O2"),
+        ("default", "hidden"),
+        (64, 32),
+        (False, True),
+        (None, 0),
+        (None, 1),
     )
 )
 PROBE_EVIDENCE: tuple[str, ...] = ("binary", "dwarf", "headers")

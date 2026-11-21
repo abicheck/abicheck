@@ -102,6 +102,8 @@ def _model_gap(config: Config, flags: Flags) -> str | None:
         return f"the layout model covers SysV ELF Linux, not {config.platform}"
     if flags.bits != 64:
         return "the layout model covers LP64 (-m64) only"
+    if config.producer.arch != "x86_64":
+        return f"the layout model covers x86-64 only, not {config.producer.arch}"
     if flags.pack not in (None, 1):
         return f"the layout model covers default packing and -fpack-struct=1, not {flags.pack}"
     return None

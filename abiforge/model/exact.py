@@ -129,10 +129,18 @@ class ExactRow:
         return (self.kind, self.entity, self.member, _canon(self.old), _canon(self.new))
 
 
-def _describe(key: tuple[str, str, str | None, str | None, str | None]) -> str:
+_Key = tuple[str, str, str | None, str | None, str | None]
+
+
+def _describe(key: _Key) -> str:
     kind, entity, member, old, new = key
     who = f"{entity}::{member}" if member else entity
     return f"{kind} {who} {old}->{new}"
+
+
+def _order(item: tuple[_Key, int]) -> tuple[tuple[bool, str], ...]:
+    """A total order over keys whose optional fields mix ``None`` and text."""
+    return tuple((v is not None, v or "") for v in item[0])
 
 
 @dataclass(frozen=True)
@@ -229,9 +237,9 @@ class FindingAssertion:
                 problems.append(f"exact unreadable {f.describe()}: {exc}")
                 continue
             got[key] += 1
-        for key, n in sorted((expected - got).items()):
+        for key, n in sorted((expected - got).items(), key=_order):
             problems.append(f"exact missing {_describe(key)} (x{n})")
-        for key, n in sorted((got - expected).items()):
+        for key, n in sorted((got - expected).items(), key=_order):
             problems.append(f"exact unexpected {_describe(key)} (x{n})")
         if problems:
             return Outcome("fail", tuple(problems))

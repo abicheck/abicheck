@@ -39,24 +39,37 @@ def test_some_producer_is_installed() -> None:
 
 @pytest.mark.parametrize("producer", _PRODUCERS)
 @pytest.mark.parametrize("pack", [None, 1], ids=["default", "pack1"])
-def test_model_matches_compiler_probe_and_raw_dwarf(
-    producer: str, pack, tmp_path: Path
-) -> None:
+def test_model_matches_the_compiler_probe(producer: str, pack, tmp_path: Path) -> None:
     checked = 0
     for name, records in _STATES:
         want = _model(records, pack, producer)
-        work = tmp_path / name.replace(":", "_")
         for opt in ("O0", "O2"):
-            got = probe(producer, records, pack=pack, work=work / f"p{opt}", opt=opt)
+            work = tmp_path / name.replace(":", "_") / opt
+            got = probe(producer, records, pack=pack, work=work, opt=opt)
             assert (got.size, got.align) == (want.size, want.align), (name, opt)
             for member, off in got.offsets.items():
                 assert want.offsets[member] == off, (name, member, opt)
             assert got.widths == want.widths, (name, opt)
-        dw = dwarf(producer, records, pack=pack, work=work / "dwarf")
-        assert dw.size == want.size, name
-        assert dw.align is None  # DWARF records no alignment for these records
-        assert dw.offsets == want.offsets, name
-        assert dw.widths == want.widths, name
+        checked += 1
+    assert checked == len(_STATES) > 30
+
+
+@pytest.mark.parametrize("producer", _PRODUCERS)
+@pytest.mark.parametrize("pack", [None, 1], ids=["default", "pack1"])
+def test_model_matches_raw_dwarf(producer: str, pack, tmp_path: Path) -> None:
+    # A missing binutils is a tool gap (skip); a build that fails still fails.
+    if shutil.which("readelf") is None:
+        pytest.skip("GNU readelf is not installed")
+    checked = 0
+    for name, records in _STATES:
+        want = _model(records, pack, producer)
+        for opt in ("O0", "O2"):
+            work = tmp_path / name.replace(":", "_") / opt
+            dw = dwarf(producer, records, pack=pack, work=work, opt=opt)
+            assert dw.size == want.size, (name, opt)
+            assert dw.align is None  # DWARF records no alignment for these records
+            assert dw.offsets == want.offsets, (name, opt)
+            assert dw.widths == want.widths, (name, opt)
         checked += 1
     assert checked == len(_STATES) > 30
 

@@ -227,3 +227,15 @@ def test_computing_the_record_runs_no_toolchain_probe(gate, monkeypatch):
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(shutil, "which", forbidden)
     assert known_record(KNOWN, gate.known_entry_key)
+
+
+def test_dropping_the_producer_from_a_pack1_entry_is_widening_on_the_real_grid(gate):
+    """The probe grid covers -fpack-struct=1: a pack-1 entry records real cells,
+    and lifting its gcc restriction (keeping pack 1) is caught as widening."""
+    gcc_pack1 = lambda c: c.producer.family == "gcc" and c.flags.pack == 1  # noqa: E731
+    any_pack1 = lambda c: c.flags.pack == 1  # noqa: E731
+    recorded = known_record([Synthetic("e", gcc_pack1)], _key)
+    assert recorded["e#0"], "the probe grid never builds -fpack-struct=1"
+    current = known_record([Synthetic("e", any_pack1)], _key)
+    (problem,) = gate.known_when_widening(current, recorded)
+    assert problem.startswith("widening, needs review")

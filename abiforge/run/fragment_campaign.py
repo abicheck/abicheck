@@ -36,7 +36,7 @@ from pathlib import Path
 
 from abiforge.known import known_mismatch
 from abiforge.model.config import Flags, default_config
-from abiforge.model.expect import MISMATCH_CLASSES
+from abiforge.model.expect import MISMATCH_CLASSES, issue_keys
 from abiforge.model.seeds import SEED_BY_NAME
 from abiforge.operators.fragments import FRAGMENT_OPERATORS
 from abiforge.run.cells import CellContext, run_cell
@@ -99,7 +99,13 @@ def run(
                         gap = ""
                         if rec is not None and rec.cls in MISMATCH_CLASSES:
                             k = known_mismatch(op.name, seed.name, cfg)
-                            gap = k.gap if k is not None else ""
+                            # A recorded gap covers only its exact signature:
+                            # class, issues and verdict. A changed failure in
+                            # the same cell stays unrecorded.
+                            if k is not None and k.matches(
+                                rec.cls, issue_keys(rec.problems), r.verdict
+                            ):
+                                gap = k.gap
                         rows.append(
                             {
                                 "op": op.name,
@@ -183,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     print(json.dumps(summary, indent=2))
     unrecorded = [f for f in receipt["failures"] if not f["known_gap"]]  # type: ignore[union-attr,index]
+    if not receipt["built_and_compared"]:
+        print("no cell was built and compared: nothing was checked", file=sys.stderr)
+        return 1
     return 1 if unrecorded else 0
 
 
