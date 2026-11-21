@@ -327,6 +327,7 @@ class ChangeKind(StrEnum):
     BASE_CLASS_ACCESS_NARROWED = 'base_class_access_narrowed'
     FUNC_BECAME_FINAL = 'func_became_final'
     FUNC_LOST_FINAL = 'func_lost_final'
+    VTT_ENTRY_TARGET_CHANGED = 'vtt_entry_target_changed'
     DECLARATION_MOVED = 'declaration_moved'
     DECLARATION_IDENTITY_RECONCILED = 'declaration_identity_reconciled'
     EXPORTED_NOT_PUBLIC = 'exported_not_public'

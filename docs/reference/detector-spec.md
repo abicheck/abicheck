@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (434 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (435 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -432,6 +432,7 @@ One row per `ChangeKind` (434 total). Columns fuse the verdict partition (`check
 | `vtable_symbol_identity_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `vtable_symbol_identity_changed` | — |
 | `vtable_thunk_offset_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_thunk_offset_changed` | [case172](examples/case172_vtable_thunk_offset_changed.md) |
 | `vtable_thunk_set_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_thunk_set_changed` | — |
+| `vtt_entry_target_changed` | breaking | `BREAKING` | `error` | L0 | `vtt_entry_target_changed` | — |
 | `vtt_slot_count_changed` | breaking | `BREAKING` | `error` | L0 | `vtt_slot_count_changed` | [case173](examples/case173_vtt_slot_count_changed.md) |
 | `wchar_model_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `wchar_model_changed` | — |
 | `wheel_closure_dependency_violation` | breaking | `BREAKING` | `error` | L0 | `wheel_closure_dependency_violation` | — |

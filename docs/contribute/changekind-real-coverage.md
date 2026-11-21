@@ -15,14 +15,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **434**
-- Kinds with at least one real source: **218**
+- Total kinds: **435**
+- Kinds with at least one real source: **219**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 113
+- Kinds per source: catalog 159, field_shapes 9, integration 114
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 64 |
+| L0 | 130 | 64 |
 | L1 | 66 | 7 |
 | L2 | 79 | 38 |
 | L3 | 15 | 5 |
@@ -183,6 +183,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `vtable_slot_count_changed` | BREAKING | 1 | 0 | 3 |
 | `vtable_thunk_offset_changed` | BREAKING | 1 | 0 | 1 |
 | `vtable_thunk_set_changed` | BREAKING | 0 | 0 | 0 |
+| `vtt_entry_target_changed` | BREAKING | 0 | 0 | 1 |
 | `vtt_slot_count_changed` | BREAKING | 1 | 0 | 0 |
 | `wheel_closure_dependency_violation` | BREAKING | 0 | 0 | 1 |
 | `wheel_rpath_not_portable` | RISK | 0 | 0 | 1 |

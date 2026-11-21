@@ -14,7 +14,7 @@
     "abicheck/compare/call_interface.py(_unknown)": 93,
     "abicheck/compare/debug_layout_view.py(_layout_channel)": 140,
     "abicheck/compare/debug_layout_view.py(debug_layout_view)": 140,
-    "abicheck/compare/declined_comparisons.py(declined_scope)": 789,
+    "abicheck/compare/declined_comparisons.py(declined_scope)": 803,
     "abicheck/compare/dedup_key.py(hashable_value)": 1661,
     "abicheck/compare/detection_memo.py(detection_memo_scope)": 14,
     "abicheck/compare/detection_memo.py(memoized)": 777,
@@ -320,5 +320,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 234512
+  "total": 234526
 }

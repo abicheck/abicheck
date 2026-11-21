@@ -600,4 +600,9 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "func_lost_final",
         "a virtual member function lost the final virt-specifier: overriding it is allowed again, but calls compiled while it was final may have been devirtualized and never reach a new override -> COMPATIBLE_WITH_RISK",
     ),
+    (
+        "VTT_ENTRY_TARGET_CHANGED",
+        "vtt_entry_target_changed",
+        "an entry of a same-size Itanium VTT (_ZTT) points at a different address point (another vtable or construction vtable, or another offset in it): construction-time virtual dispatch of old clients changes -> BREAKING",
+    ),
 )

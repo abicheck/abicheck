@@ -540,6 +540,7 @@ UNVERIFIED = frozenset(
         "vtable_thunk_offset_changed",
         "vtable_thunk_set_changed",
         "vtt_slot_count_changed",
+        "vtt_entry_target_changed",
         "wchar_model_changed",
         "wheel_closure_dependency_violation",
         "wheel_rpath_not_portable",

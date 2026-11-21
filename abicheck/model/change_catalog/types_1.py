@@ -34,7 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .observability import observable
+from .observability import ELF_X86_64, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -44,6 +44,7 @@ from .registry import (
 )
 
 _OBS_B = observable(("B",))
+_OBS_B_ELF_X86_64 = observable(("B",), condition=ELF_X86_64)
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
@@ -68,6 +69,27 @@ _OP = ChangeOperation
 _CS = ContractSubject
 
 TYPES_ENTRIES_1: list[ChangeKindMeta] = [
+    _E(
+        "vtt_entry_target_changed",
+        _B,
+        observable_at=(_OBS_B_ELF_X86_64,),
+        impact="An entry of a class's VTT (virtual-table-table, `_ZTT`) now "
+        "points at a different address point, while the VTT kept its size. "
+        "Constructors and destructors of a class with virtual bases install "
+        "the vtable pointers of its base subobjects from the VTT, so an old "
+        "client that constructs the class through the library dispatches a "
+        "virtual call made during construction or destruction to a different "
+        "override (for example the virtual base's own instead of the "
+        "intermediate base's). A completely built object is unaffected, which "
+        "is why the size-only check (`vtt_slot_count_changed`) cannot see it. "
+        "The target is compared as the table it points into plus the offset "
+        "of the address point inside that table, read from the dynamic "
+        "relocations; a relink that only moves the table is not a change.",
+        description_template="VTT entry changed for '{name}': {detail}",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
     _E(
         "abi_equivalent_type_changed",
         _R,

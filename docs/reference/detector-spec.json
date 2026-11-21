@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 434,
+  "count": 435,
   "detectors": [
     {
       "kind": "abi_equivalent_type_changed",
@@ -3834,6 +3834,15 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "vtable_thunk_set_changed",
+      "examples": ""
+    },
+    {
+      "kind": "vtt_entry_target_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtt_entry_target_changed",
       "examples": ""
     },
     {

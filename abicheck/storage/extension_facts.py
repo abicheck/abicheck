@@ -47,6 +47,7 @@ from .extension_fact_catalog import (
     CXX_CONCEPT_CONSTRAINTS,
     CXX_CONCEPT_HEADER_SCAN,
     CXX_TEMPLATE_DEFAULTS,
+    ELF_VTT_ENTRIES,
     EXPORT_READ,
     EXTENSION_FACTS,
     FINAL_MEMBER_FUNCTIONS,
@@ -267,6 +268,54 @@ def apply_macho_sizes_fact(snap: Any) -> None:
     macho.sizes_derived = fact.value["derived"]
 
 
+def sync_vtt_entries_fact(snap: Any) -> None:
+    """Record ``ElfMetadata.vtt_entries`` as ELF_VTT_ENTRIES. A map that was
+    never read (None) claims nothing: a fact loaded earlier is dropped so it
+    cannot restore entries the caller cleared."""
+    elf = _platform_blocks(snap).get("elf")
+    entries = getattr(elf, "vtt_entries", None) if elf is not None else None
+    blocked = _blocked_reason(snap, ELF_VTT_ENTRIES.section) is not None
+    if entries is None:
+        if not blocked:
+            _drop_extension_fact(snap, ELF_VTT_ENTRIES)
+        return
+    if blocked:
+        return
+    value = {
+        name: [None if t is None else [t.table, t.offset] for t in targets]
+        for name, targets in entries.items()
+    }
+    write_extension_fact(snap, ELF_VTT_ENTRIES, value)
+
+
+def apply_vtt_entries_fact(snap: Any) -> None:
+    """The inverse on load. Absent (an older writer, a non-x86-64 image) the
+    map stays None -- unknown. A value that does not decode is refused rather
+    than read as "no VTT entries"."""
+    from ..model.elf_facts import VttEntryTarget
+
+    elf = _platform_blocks(snap).get("elf")
+    if elf is None:
+        return
+    fact = read_extension_fact(snap, ELF_VTT_ENTRIES)
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if fact.status is not FactStatus.PRESENT or fact.value is None:
+        if _blocked_reason(snap, ELF_VTT_ENTRIES.section) is not None:
+            return
+        raise SnapshotError(
+            "snapshot's elf_vtt_entries extension fact is unreadable: "
+            + "; ".join(str(d) for d in fact.diagnostics)
+        )
+    elf.vtt_entries = {
+        name: tuple(
+            None if row is None else VttEntryTarget(table=row[0], offset=row[1])
+            for row in rows
+        )
+        for name, rows in fact.value.items()
+    }
+
+
 def apply_export_read_fact(snap: Any) -> None:
     """Set each loaded platform block's ``export_read`` from the stored fact:
     a listed platform reads its state, an unlisted one ``complete``. With no
@@ -293,6 +342,7 @@ def sync_model_extension_facts(snap: Any) -> None:
     path and the evidence digest call this first; it is idempotent."""
     sync_export_read_fact(snap)
     sync_macho_sizes_fact(snap)
+    sync_vtt_entries_fact(snap)
     _sync_binary_sha256(snap)
     # Before the early return below: its section is not this fact's, and a
     # blocked one must not leave a stale or missing typedef_origins fact.
@@ -569,6 +619,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
     apply_macho_sizes_fact(snap)
+    apply_vtt_entries_fact(snap)
     _apply_binary_sha256(snap)
     _apply_concept_constraints(snap)
     _apply_stack_protector_census(snap)

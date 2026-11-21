@@ -1,9 +1,9 @@
 {
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
-    "total_kinds": 434,
+    "total_kinds": 435,
     "backed": 313,
-    "unbacked": 121
+    "unbacked": 122
   },
   "backed": {
     "abi_equivalent_type_changed": [
@@ -1530,6 +1530,7 @@
     "symbol_elf_visibility_changed",
     "toolchain_version_changed",
     "virtual_method_added",
+    "vtt_entry_target_changed",
     "wheel_closure_dependency_violation",
     "wheel_rpath_not_portable",
     "wheel_tag_architecture_mismatch"

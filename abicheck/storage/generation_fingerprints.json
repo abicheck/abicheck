@@ -12,7 +12,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "4cef17c9d4ed06c753e792e3b9d448b2412dd76d505bf3607902f0f5ee869fc8",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
-      "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
+      "abicheck/elf_metadata.py": "7ccb5cf7e6d457bd4d7aaecfef5f51f4f924c8a52e1fd55bc447283bf02392b9",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
@@ -75,6 +75,7 @@
       "abicheck/extract/elf_symbol_origin.py": "3408f0fdb9d3ce98eff14007012ac4bf844256f6628d127c4853ef8b6c20dac4",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
+      "abicheck/extract/elf_vtt_entries.py": "9983a5e2e7937fa3b6d9953463133e686b19957a6ac73beb3b239942be8eadb2",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "fc6262e7eeaf5834cfd354cef88cff7610dcfd30961f42118623635b9c57736d",
       "abicheck/extract/export_table_read.py": "60fbf398e40df9cd48a9146ae1b79910cb7da865015a171405a727284848f7bd",
@@ -206,7 +207,7 @@
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
       "abicheck/extract/ownership_stamp.py": "07e5714eac1e1770aa53f09479b7ae240f2f123ee2b7bf223241f6880233d8d7",
       "abicheck/extract/packages.py": "247d879a111bddde7a7c8fdabcae9964622913469faca1ad854e42ef24aa5eca",
-      "abicheck/extract/parse_failures.py": "e79460be46386fa1c42360ae8b5cefee56d7e923e7d3cd89b392d82b691d4a48",
+      "abicheck/extract/parse_failures.py": "9e526f3cd1a732fa83d1b5e83af06a00c5572034c8416119c8743c5522f4e8c4",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
       "abicheck/extract/pdb_codeview_types.py": "1bad7440b2b2aa734ee4c292781905eaec8c8c6b34f27bc743a6e5a0705e57d1",
@@ -248,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "3b3133e62fade69aa25e49b71fb80da518e69977b15fdfae2f41b6d2aea24177",
-    "generation": 89,
-    "reason": "bumped to 89: the typed header graph is parsed with the dump's compile options"
+    "fingerprint": "bd319084ca532e04bb9e6bf3e55f559b7f042f926b22614fca5439a197c6954f",
+    "generation": 90,
+    "reason": "review follow-up: duplicate VTT aliases cannot size the read (generation 90, unshipped)"
   },
   "resolver": {
     "files": {

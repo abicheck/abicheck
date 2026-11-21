@@ -1127,4 +1127,29 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "form": ("specialization", "implicit_instance"),
         },
     ),
+    BugClass(
+        id="extraction.vtt_entry_target_reduced_to_size",
+        invariant=(
+            "An exported Itanium VTT is compared entry by entry by each entry's "
+            "logical target (the table it points into and the offset of the "
+            "address point inside it): a same-size VTT whose entry points at "
+            "another table or another address point is reported, a relink that "
+            "moves every table or changes only the relocation form "
+            "(R_X86_64_64, RELATIVE, DT_RELR) is not, and an entry whose target "
+            "cannot be resolved is declined rather than read as changed or "
+            "unchanged."
+        ),
+        fixed_by=(2154,),
+        seed_tests=(
+            "tests/test_vtt_entry_targets.py",
+            "tests/test_vtt_entry_targets_elf.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "evidence": ("dwarf", "stripped", "stored_snapshot", "pre_fact_snapshot"),
+            "relink": ("moved_tables", "bsymbolic", "dt_relr"),
+            "target": ("other_table", "same_table_other_offset", "imported_table"),
+        },
+    ),
 )

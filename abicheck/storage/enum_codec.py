@@ -45,6 +45,10 @@ def encode_platform_enums(d: dict[str, Any]) -> None:
     # Mach-O object sizes persist as the binary section's
     # ``abicheck.macho_object_sizes`` extension fact (ADR-062 D19), so an older
     # reader that lacks the fact reads them as not derived.
+    # ``ElfMetadata.vtt_entries`` likewise persists only as the
+    # ``abicheck.elf_vtt_entries`` extension fact.
+    if isinstance(d.get("elf"), dict):
+        d["elf"].pop("vtt_entries", None)
     macho_block = d.get("macho")
     if isinstance(macho_block, dict):
         macho_block.pop("sizes_derived", None)

@@ -98,6 +98,24 @@ class ElfSymbol:
     version_binding: ElfVersionBinding = ElfVersionBinding.UNKNOWN
 
 
+@dataclass(frozen=True)
+class VttEntryTarget:
+    """The logical target of one Itanium VTT entry (``_ZTT``).
+
+    A VTT entry is a pointer to an *address point*: a position inside a
+    vtable or construction vtable. ``table`` is the symbol naming that table
+    (``_ZTV1V``, a local ``_ZTC1D0_1L``, or an undefined imported vtable)
+    and ``offset`` the byte distance from the table's start to the address
+    point. Neither depends on where the linker placed the table, so a relink
+    that moves it keeps the value; the relocation form (``R_X86_64_64``
+    against a symbol, ``R_X86_64_RELATIVE``, ``DT_RELR``) is resolved away
+    (``extract/elf_vtt_entries.py``).
+    """
+
+    table: str
+    offset: int
+
+
 @dataclass
 class ElfImport:
     """An undefined (imported) dynamic symbol — what this DSO requires."""
@@ -236,6 +254,20 @@ class ElfMetadata:
     # (.hash → "sysv", .gnu.hash → "gnu"; ld --hash-style). Dropping a style
     # drops loaders/tools that only support that style.
     hash_styles: frozenset[str] = field(default_factory=frozenset)
+
+    # ── Itanium VTT entry targets ────────────────────────────────────────
+    # ``{exported _ZTT symbol: one target per pointer-sized entry}``, read
+    # from the dynamic relocations (extract/elf_vtt_entries.py). An entry is
+    # None when its target could not be resolved (no covering symbol, e.g.
+    # a stripped .symtab, or an unsupported relocation). The whole map is
+    # None when it is unavailable: the extension fact is absent (an older
+    # writer), the image is not x86-64 ELF, or the read failed -- unknown,
+    # never "no VTT entries".
+    # Persisted as the binary section's ``abicheck.elf_vtt_entries`` extension
+    # fact (ADR-062 D19), never as a block key.
+    vtt_entries: dict[str, tuple[VttEntryTarget | None, ...]] | None = field(
+        default=None, kw_only=True, metadata={"wire": False}
+    )
 
     # ADR-063 Phase 5 (seventh batch): Fact[...] siblings for this
     # dataclass's own schema-version-driven case-(b) fields -- the identical
