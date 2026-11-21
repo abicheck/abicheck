@@ -91,7 +91,9 @@ def _read(
     from elftools.elf.sections import SymbolTableSection
 
     objects: dict[str, tuple[int, int]] = {}  # name -> (start, size)
-    vtt_starts: dict[str, int] = {}
+    # name -> the (start, size) of the one backed .dynsym VTT, or None when
+    # its aliases disagree or its bytes are not in the file: not read.
+    vtt_spans: dict[str, tuple[int, int] | None] = {}
     versions = _symbol_versions(elf)
     for section in elf.iter_sections():
         if not isinstance(section, SymbolTableSection):
@@ -104,22 +106,23 @@ def _read(
             if entry["st_info"]["type"] != "STT_OBJECT":
                 continue
             span = (int(entry["st_value"]), int(entry["st_size"]))
+            if section["sh_type"] == "SHT_DYNSYM" and sym.name in vtts:
+                if sym.name not in vtt_spans:
+                    backed = _backed(elf, shndx, span)
+                    vtt_spans[sym.name] = span if backed else None
+                elif vtt_spans[sym.name] != span:
+                    vtt_spans[sym.name] = None  # aliases disagree: not read
             if sym.name in objects and objects[sym.name] != span:
                 # One name, two places (a local in two TUs): no single table.
                 objects[sym.name] = (-1, 0)
                 continue
             objects[sym.name] = span
-            if (
-                section["sh_type"] == "SHT_DYNSYM"
-                and sym.name in vtts
-                and _backed(elf, shndx, span)
-            ):
-                vtt_starts[sym.name] = span[0]
-    # Only the VTT words are read: other relocations are never resolved.
+    # Only the VTT words are read, sized by the span that passed _backed.
+    spans = {name: span for name, span in vtt_spans.items() if span is not None}
     slots = {
         start + i * _WORD
-        for name, start in vtt_starts.items()
-        for i in range(vtts[name] // _WORD)
+        for start, size in spans.values()
+        for i in range(size // _WORD)
     }
 
     relocs: dict[int, _Resolved | None] = {}
@@ -141,10 +144,7 @@ def _read(
 
     index = _CoverIndex(objects)
     out: dict[str, tuple[VttEntryTarget | None, ...]] = {}
-    for name, size in sorted(vtts.items()):
-        start = vtt_starts.get(name)
-        if start is None:
-            continue
+    for name, (start, size) in sorted(spans.items()):
         out[name] = tuple(
             _target(relocs.get(start + i * _WORD), objects, index)
             for i in range(size // _WORD)

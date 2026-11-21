@@ -312,3 +312,64 @@ def test_vtt_span_must_exist_in_the_file(sh_size, st_size, file_len, expected):
             }
 
     assert _backed(_Elf(), 22, (0x4000, st_size)) is expected
+
+
+def _sym_entry(value: int, size: int) -> dict:
+    return {
+        "st_shndx": 22,
+        "st_size": size,
+        "st_value": value,
+        "st_info": {"type": "STT_OBJECT"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("second_size", "expected_rows"),
+    [
+        (56, 7),  # a versioned alias repeating the same span: read once
+        (1 << 39, None),  # a forged, larger alias: the VTT is not read
+        (24, None),  # a smaller disagreeing alias: not read either
+    ],
+)
+def test_duplicate_vtt_names_never_size_the_read(second_size, expected_rows):
+    import io
+
+    from elftools.elf.sections import SymbolTableSection
+
+    from abicheck.extract.elf_vtt_entries import _read
+
+    class _Sym:
+        def __init__(self, size: int) -> None:
+            self.name = "_ZTT1D"
+            self.entry = _sym_entry(0x4000, size)
+
+    class _Dynsym(SymbolTableSection):
+        def __init__(self) -> None:  # no pyelftools parsing
+            pass
+
+        def __getitem__(self, key):
+            return "SHT_DYNSYM"
+
+        def iter_symbols(self):
+            return iter([_Sym(56), _Sym(second_size)])
+
+    class _Elf:
+        stream = io.BytesIO(b"\0" * 0x2000)
+
+        def iter_sections(self):
+            return iter([_Dynsym()])
+
+        def iter_segments(self):
+            return iter([])
+
+        def get_section(self, _index):
+            return {
+                "sh_type": "SHT_PROGBITS",
+                "sh_addr": 0x4000,
+                "sh_size": 0x100,
+                "sh_offset": 0x1000,
+            }
+
+    got = _read(_Elf(), {"_ZTT1D": second_size})
+    rows = got.get("_ZTT1D") if got is not None else None
+    assert (None if rows is None else len(rows)) == expected_rows
