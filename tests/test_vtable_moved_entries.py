@@ -102,3 +102,11 @@ def test_an_unchanged_sequence_reports_nothing() -> None:
         NAME, _cls(SLOTS), _cls(SLOTS), _funcs(SLOTS), _funcs(SLOTS), {}, {}
     )
     assert changes == []
+
+
+def test_an_entry_naming_no_declared_function_stays_with_the_class() -> None:
+    """No function to name: the class finding alone carries the reorder."""
+    changes = _diff_type_vtable(
+        NAME, _cls(SLOTS[:2]), _cls(SLOTS[1::-1]), {}, {}, {}, {}
+    )
+    assert [c.symbol for c in changes] == [NAME]

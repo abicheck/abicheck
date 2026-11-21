@@ -719,7 +719,8 @@ def _moved_entries(
     pure reorder (same entries) is split: an added or removed entry has its
     own finding, and every later entry's place shifting is not a reorder of
     it. A method whose index either side records is left to the indexed
-    path, so no method is reported twice.
+    path, so no method is reported twice; an entry naming no function on
+    either side stays with the class finding.
     """
     if Counter(old_vtable) != Counter(new_vtable) or len(set(old_vtable)) != len(
         old_vtable
@@ -731,6 +732,10 @@ def _moved_entries(
         if before == after:
             continue
         f_old, f_new = old_funcs.get(entry), new_funcs.get(entry)
+        if f_old is None and f_new is None:
+            # Names no function either side declares: the class finding
+            # already covers it, and a row naming nothing cannot be placed.
+            continue
         if (f_old is not None and f_old.vtable_index is not None) or (
             f_new is not None and f_new.vtable_index is not None
         ):
