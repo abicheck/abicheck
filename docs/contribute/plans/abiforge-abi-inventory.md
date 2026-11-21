@@ -174,4 +174,4 @@ The [configuration campaign](abiforge-configuration-campaign.md) records the bou
 
 The [implementation roadmap](abiforge-campaign-implementation.md) maps existing generator and checker seams to work packages and acceptance criteria.
 
-See the [bounded C/C++ measurements and P0 mapping](../../../research/standard-space/README.md#coverage-against-the-p0-inventory) for executable argument-placement, object-layout and virtual-dispatch observations.
+See the [bounded C/C++ measurements and P0 mapping](https://github.com/abicheck/abicheck/blob/8cd2b750d8b2b1d916d65e50964b06b229974c26/research/standard-space/README.md#coverage-against-the-p0-inventory) for executable argument-placement, object-layout and virtual-dispatch observations.
