@@ -1,0 +1,90 @@
+[
+  {
+    "case": "identity",
+    "old_vtt_bytes": 56,
+    "new_vtt_bytes": 56,
+    "old_entry": "R_X86_64_RELATIVE 4c28",
+    "new_entry": "R_X86_64_RELATIVE 4c28",
+    "client_values": [
+      20,
+      1,
+      30,
+      1,
+      1,
+      40,
+      1,
+      1
+    ],
+    "evidence": "dwarf",
+    "exit": 0,
+    "verdict": "NO_CHANGE",
+    "assurance": "complete",
+    "findings": []
+  },
+  {
+    "case": "vtt-entry",
+    "old_vtt_bytes": 56,
+    "new_vtt_bytes": 56,
+    "old_entry": "R_X86_64_RELATIVE 4c28",
+    "new_entry": "R_X86_64_64 0000000000004cc0 _ZTV1V + 10",
+    "client_values": [
+      10,
+      1,
+      30,
+      1,
+      1,
+      40,
+      1,
+      1
+    ],
+    "evidence": "dwarf",
+    "exit": 0,
+    "verdict": "NO_CHANGE",
+    "assurance": "complete",
+    "findings": []
+  },
+  {
+    "case": "identity",
+    "old_vtt_bytes": 56,
+    "new_vtt_bytes": 56,
+    "old_entry": "R_X86_64_RELATIVE 4c28",
+    "new_entry": "R_X86_64_RELATIVE 4c28",
+    "client_values": [
+      20,
+      1,
+      30,
+      1,
+      1,
+      40,
+      1,
+      1
+    ],
+    "evidence": "stripped",
+    "exit": 0,
+    "verdict": "NO_CHANGE",
+    "assurance": "partial",
+    "findings": []
+  },
+  {
+    "case": "vtt-entry",
+    "old_vtt_bytes": 56,
+    "new_vtt_bytes": 56,
+    "old_entry": "R_X86_64_RELATIVE 4c28",
+    "new_entry": "R_X86_64_64 0000000000004cc0 _ZTV1V + 10",
+    "client_values": [
+      10,
+      1,
+      30,
+      1,
+      1,
+      40,
+      1,
+      1
+    ],
+    "evidence": "stripped",
+    "exit": 1,
+    "verdict": "UNCONFIRMED",
+    "assurance": "partial",
+    "findings": []
+  }
+]

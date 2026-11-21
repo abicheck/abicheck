@@ -68,3 +68,14 @@ For both C++98 and C++03, growing the primary base made the old client's seconda
 Run checker.py and generated_clients.py with PYTHONPATH pointing to the checkout and abicheck dependencies installed. Measurements used checker 691862f and GCC/G++ 14.2, with no headers supplied to the checker. checker.json contains verdict, assurance, exit code and diagnostic kind/symbol for each comparison. Four generated operator/seed pairs complement six changed research fixtures and one identical-source control. Among the ten changed pairs, DWARF yielded ten BREAKING verdicts; stripped ELF yielded three BREAKING (adjustment thunk changed) and seven UNCONFIRMED. The control yielded NO_CHANGE with DWARF and UNCONFIRMED stripped. Several pairs repeat the same mechanism.
 
 generated_clients.csv records four old-client checks against abiforge provider replacements. For virtual_reorder, each cell records provider-side dispatch and direct client-side dispatch on the same provider-owned object. Only the direct call changes. Small observer exports for this case and primary_base_grew enable cross-DSO observation; checker.json uses the original generator render without these adapters. This establishes mutation and detection coverage for three mechanisms, without certifying all contexts or a construction-only VTT change.
+
+## Follow-up results and implementation priorities
+
+| Experiment | Decision supported by the measurement |
+| --- | --- |
+| [Checker calibration](followup/matrix/README.md) | Assert owner and individual method attribution independently. For the same unstripped virtual_reorder pair, supplying headers loses both method names. Three edited controls produce zero false BREAKING verdicts across four evidence modes. |
+| [Fault retention](followup/reduction/README.md) | Keep a dense reference run. Nine prefix representatives miss a reconstructed negative-capacity fault; the full grid detects it. Both array suites detect the historical loss of DWARF bounds in #1962. |
+| [Construction dispatch and cross-DSO runtime](followup/cpp/README.md) | Add a focused regression for changes to a VTT entry's relocation target while VTT size stays fixed. The GCC-built DWARF pair gets NO_CHANGE despite the frozen client's changed construction-only result. Establish stable relocation comparison under layout-preserving relinks before introducing a breaking diagnostic. |
+| [oneDAL 2025.10.0](followup/onedal/README.md) | Sample polymorphic interfaces and by-value returns, and improve binding for templates and special members before using signature counts to rank the whole product. The 369 exact linker-name joins cover 11.2% of the defined function exports in this DSO. |
+
+The VTT and method-attribution cases are separate checker regressions to guard: one affects the verdict, the other the specificity of a correct verdict. CI selection should track which known faults survive a reduction alongside ABI-obligation coverage.

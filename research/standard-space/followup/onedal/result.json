@@ -1,0 +1,21 @@
+{
+  "exports": 3287,
+  "matched": 369,
+  "unmatched": 2918,
+  "counts": {
+    "record_arg_by_value": 3,
+    "record_return_by_value": 32,
+    "direct_function_callback": 11,
+    "visible_polymorphic_type": 40
+  },
+  "public_candidates": 47,
+  "public_candidate_counts": {
+    "record_arg_by_value": 0,
+    "record_return_by_value": 2,
+    "direct_function_callback": 0,
+    "visible_polymorphic_type": 17
+  },
+  "compiler": "14.2.0",
+  "diagnostics": [],
+  "binary_sha256": "dc0ffafbc86221eab9278c9a9352df3d09986b7e92f2819ee231af88d143c0f3"
+}

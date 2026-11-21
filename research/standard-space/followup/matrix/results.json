@@ -1,0 +1,775 @@
+[
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "break",
+    "stripped": false,
+    "headers": false,
+    "old_sha256": "14108fd5b4790320a7b5c981bbfa8ebafb617e06fdefbf65adbb4b701953a820",
+    "new_sha256": "ac3b0738566ea11de377216cb9ab8fd56a15a2fd96956b8449b4135816aa34c9",
+    "old_client": "55",
+    "replacement_client": "77",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "point",
+      "owner_reported": true,
+      "expected_members": [
+        "x",
+        "y"
+      ],
+      "reported_members": [
+        "x",
+        "y"
+      ]
+    },
+    "exit_code": 4,
+    "assurance": "complete",
+    "evidence_lines": [],
+    "findings": [
+      {
+        "kind": "type_field_offset_changed",
+        "symbol": "point",
+        "description": "Field offset changed: point::x (0 \u2192 32 bits)"
+      },
+      {
+        "kind": "type_field_offset_changed",
+        "symbol": "point",
+        "description": "Field offset changed: point::y (32 \u2192 0 bits)"
+      }
+    ]
+  },
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "break",
+    "stripped": false,
+    "headers": true,
+    "old_sha256": "14108fd5b4790320a7b5c981bbfa8ebafb617e06fdefbf65adbb4b701953a820",
+    "new_sha256": "ac3b0738566ea11de377216cb9ab8fd56a15a2fd96956b8449b4135816aa34c9",
+    "old_client": "55",
+    "replacement_client": "77",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "point",
+      "owner_reported": true,
+      "expected_members": [
+        "x",
+        "y"
+      ],
+      "reported_members": [
+        "x",
+        "y"
+      ]
+    },
+    "exit_code": 4,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "type_field_offset_changed",
+        "symbol": "point",
+        "description": "Field offset changed: point::x (0 \u2192 32 bits)"
+      },
+      {
+        "kind": "type_field_offset_changed",
+        "symbol": "point",
+        "description": "Field offset changed: point::y (32 \u2192 0 bits)"
+      }
+    ]
+  },
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "break",
+    "stripped": true,
+    "headers": false,
+    "old_sha256": "ee327e0385cf0d3bb823e834b18dc807d4956b3aea7a8aae2f30270b5a1496eb",
+    "new_sha256": "734d67b955729661bcc95c1fe0032386a3ac7e88c2ed06650569efdec584d7d0",
+    "old_client": "55",
+    "replacement_client": "77",
+    "verdict": "UNCONFIRMED",
+    "attribution": {
+      "owner": "point",
+      "owner_reported": false,
+      "expected_members": [
+        "x",
+        "y"
+      ],
+      "reported_members": []
+    },
+    "exit_code": 1,
+    "assurance": "partial",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "break",
+    "stripped": true,
+    "headers": true,
+    "old_sha256": "ee327e0385cf0d3bb823e834b18dc807d4956b3aea7a8aae2f30270b5a1496eb",
+    "new_sha256": "734d67b955729661bcc95c1fe0032386a3ac7e88c2ed06650569efdec584d7d0",
+    "old_client": "55",
+    "replacement_client": "77",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "point",
+      "owner_reported": true,
+      "expected_members": [
+        "x",
+        "y"
+      ],
+      "reported_members": [
+        "x",
+        "y"
+      ]
+    },
+    "exit_code": 4,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "type_field_offset_changed",
+        "symbol": "point",
+        "description": "Field offset changed: point::x (0 \u2192 32 bits)"
+      },
+      {
+        "kind": "type_field_offset_changed",
+        "symbol": "point",
+        "description": "Field offset changed: point::y (32 \u2192 0 bits)"
+      }
+    ]
+  },
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "control",
+    "stripped": false,
+    "headers": false,
+    "old_sha256": "14108fd5b4790320a7b5c981bbfa8ebafb617e06fdefbf65adbb4b701953a820",
+    "new_sha256": "43a303beb9058ef4519d3d4f05ce8998d9ede55c25066645c20f343176bcc4a4",
+    "old_client": "55",
+    "replacement_client": "55",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "complete",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "control",
+    "stripped": false,
+    "headers": true,
+    "old_sha256": "14108fd5b4790320a7b5c981bbfa8ebafb617e06fdefbf65adbb4b701953a820",
+    "new_sha256": "43a303beb9058ef4519d3d4f05ce8998d9ede55c25066645c20f343176bcc4a4",
+    "old_client": "55",
+    "replacement_client": "55",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": []
+  },
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "control",
+    "stripped": true,
+    "headers": false,
+    "old_sha256": "ee327e0385cf0d3bb823e834b18dc807d4956b3aea7a8aae2f30270b5a1496eb",
+    "new_sha256": "77256a06e2fa8f2377d3edd077ff261ce3484e9e8fdf8c3a43187745cc72d293",
+    "old_client": "55",
+    "replacement_client": "55",
+    "verdict": "UNCONFIRMED",
+    "attribution": null,
+    "exit_code": 1,
+    "assurance": "partial",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "struct_swap_fields",
+    "seed": "c_core",
+    "stage": "control",
+    "stripped": true,
+    "headers": true,
+    "old_sha256": "ee327e0385cf0d3bb823e834b18dc807d4956b3aea7a8aae2f30270b5a1496eb",
+    "new_sha256": "77256a06e2fa8f2377d3edd077ff261ce3484e9e8fdf8c3a43187745cc72d293",
+    "old_client": "55",
+    "replacement_client": "55",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": []
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "break",
+    "stripped": false,
+    "headers": false,
+    "old_sha256": "06dbf93061f5eb0a166830e3134ee6fd945461dc8370e5c94094a5008e9ef280",
+    "new_sha256": "67da57af95fe3f133c840d4dec7663c921aaf9c6dec42a8f7a78324e4990775a",
+    "old_client": "70/7",
+    "replacement_client": "70/1",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "Shape",
+      "owner_reported": true,
+      "expected_members": [
+        "area",
+        "kind"
+      ],
+      "reported_members": [
+        "area",
+        "kind"
+      ]
+    },
+    "exit_code": 4,
+    "assurance": "complete",
+    "evidence_lines": [],
+    "findings": [
+      {
+        "kind": "type_vtable_changed",
+        "symbol": "_ZNK5Shape4kindEv",
+        "description": "vtable slot index changed for Shape::kind: 1 \u2192 0"
+      },
+      {
+        "kind": "type_vtable_changed",
+        "symbol": "_ZNK5Shape4areaEv",
+        "description": "vtable slot index changed for Shape::area: 0 \u2192 1"
+      },
+      {
+        "kind": "type_vtable_changed",
+        "symbol": "Shape",
+        "description": "vtable reordered: Shape"
+      }
+    ]
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "break",
+    "stripped": false,
+    "headers": true,
+    "old_sha256": "06dbf93061f5eb0a166830e3134ee6fd945461dc8370e5c94094a5008e9ef280",
+    "new_sha256": "67da57af95fe3f133c840d4dec7663c921aaf9c6dec42a8f7a78324e4990775a",
+    "old_client": "70/7",
+    "replacement_client": "70/1",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "Shape",
+      "owner_reported": true,
+      "expected_members": [
+        "area",
+        "kind"
+      ],
+      "reported_members": []
+    },
+    "exit_code": 4,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "type_vtable_changed",
+        "symbol": "Shape",
+        "description": "vtable reordered: Shape"
+      }
+    ]
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "break",
+    "stripped": true,
+    "headers": false,
+    "old_sha256": "1ff3c4ed2da284b365dbf6b084d3c08e821efbf374fc84215e15301b6decd664",
+    "new_sha256": "86a9a51646096bfef97f49916b970967b7639160ca01c5d7b30bfe99a6425b2c",
+    "old_client": "70/7",
+    "replacement_client": "70/1",
+    "verdict": "UNCONFIRMED",
+    "attribution": {
+      "owner": "Shape",
+      "owner_reported": false,
+      "expected_members": [
+        "area",
+        "kind"
+      ],
+      "reported_members": []
+    },
+    "exit_code": 1,
+    "assurance": "partial",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "break",
+    "stripped": true,
+    "headers": true,
+    "old_sha256": "1ff3c4ed2da284b365dbf6b084d3c08e821efbf374fc84215e15301b6decd664",
+    "new_sha256": "86a9a51646096bfef97f49916b970967b7639160ca01c5d7b30bfe99a6425b2c",
+    "old_client": "70/7",
+    "replacement_client": "70/1",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "Shape",
+      "owner_reported": true,
+      "expected_members": [
+        "area",
+        "kind"
+      ],
+      "reported_members": []
+    },
+    "exit_code": 4,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "type_vtable_changed",
+        "symbol": "Shape",
+        "description": "vtable reordered: Shape"
+      }
+    ]
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "control",
+    "stripped": false,
+    "headers": false,
+    "old_sha256": "06dbf93061f5eb0a166830e3134ee6fd945461dc8370e5c94094a5008e9ef280",
+    "new_sha256": "514e2519cdb29433b12469ada4240bf79b53d41fe3526ef488f559590f1ea0c5",
+    "old_client": "70/7",
+    "replacement_client": "70/7",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "complete",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "control",
+    "stripped": false,
+    "headers": true,
+    "old_sha256": "06dbf93061f5eb0a166830e3134ee6fd945461dc8370e5c94094a5008e9ef280",
+    "new_sha256": "514e2519cdb29433b12469ada4240bf79b53d41fe3526ef488f559590f1ea0c5",
+    "old_client": "70/7",
+    "replacement_client": "70/7",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": []
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "control",
+    "stripped": true,
+    "headers": false,
+    "old_sha256": "1ff3c4ed2da284b365dbf6b084d3c08e821efbf374fc84215e15301b6decd664",
+    "new_sha256": "ef8ec357a8c50eab32e8419ff8fd20e18002b579b136d96723db1e75b1d1ede7",
+    "old_client": "70/7",
+    "replacement_client": "70/7",
+    "verdict": "UNCONFIRMED",
+    "attribution": null,
+    "exit_code": 1,
+    "assurance": "partial",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "virtual_reorder",
+    "seed": "cxx_classes",
+    "stage": "control",
+    "stripped": true,
+    "headers": true,
+    "old_sha256": "1ff3c4ed2da284b365dbf6b084d3c08e821efbf374fc84215e15301b6decd664",
+    "new_sha256": "ef8ec357a8c50eab32e8419ff8fd20e18002b579b136d96723db1e75b1d1ede7",
+    "old_client": "70/7",
+    "replacement_client": "70/7",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": []
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "break",
+    "stripped": false,
+    "headers": false,
+    "old_sha256": "de1a7c402edc13b618e2221dca059d9b744e7ff06e3bef6325e1e631df2837bc",
+    "new_sha256": "3352c7b11dd1bd2884d1c39496a6f1acbdb3b7e26fcf8f445eb0c34e5b52bab1",
+    "old_client": "1",
+    "replacement_client": "0",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "B1",
+      "owner_reported": true,
+      "expected_members": [
+        "pad"
+      ],
+      "reported_members": [
+        "pad"
+      ]
+    },
+    "exit_code": 4,
+    "assurance": "complete",
+    "evidence_lines": [],
+    "findings": [
+      {
+        "kind": "type_size_changed",
+        "symbol": "MI",
+        "description": "Size changed: MI (256 \u2192 320 bits)"
+      },
+      {
+        "kind": "type_size_changed",
+        "symbol": "B1",
+        "description": "Size changed: B1 (128 \u2192 192 bits)"
+      },
+      {
+        "kind": "type_field_added",
+        "symbol": "B1",
+        "description": "Field added: B1::pad"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MI2f2Ev",
+        "description": "Vtable thunk offset changed for MI::f2(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID0Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID1Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "base_class_offset_changed",
+        "symbol": "MI",
+        "description": "Base class 'B2' moved within 'MI' (128 \u2192 192 bits). The `this`-pointer adjustment for that base and the offset of every field after it shift; existing binaries read the wrong addresses."
+      }
+    ]
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "break",
+    "stripped": false,
+    "headers": true,
+    "old_sha256": "de1a7c402edc13b618e2221dca059d9b744e7ff06e3bef6325e1e631df2837bc",
+    "new_sha256": "3352c7b11dd1bd2884d1c39496a6f1acbdb3b7e26fcf8f445eb0c34e5b52bab1",
+    "old_client": "1",
+    "replacement_client": "0",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "B1",
+      "owner_reported": true,
+      "expected_members": [
+        "pad"
+      ],
+      "reported_members": [
+        "pad"
+      ]
+    },
+    "exit_code": 4,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "type_size_changed",
+        "symbol": "B1",
+        "description": "Size changed: B1 (128 \u2192 192 bits)"
+      },
+      {
+        "kind": "type_field_added",
+        "symbol": "B1",
+        "description": "Field added: B1::pad"
+      },
+      {
+        "kind": "type_size_changed",
+        "symbol": "MI",
+        "description": "Size changed: MI (256 \u2192 320 bits)"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MI2f2Ev",
+        "description": "Vtable thunk offset changed for MI::f2(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID0Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID1Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "base_class_offset_changed",
+        "symbol": "MI",
+        "description": "Base class 'B2' moved within 'MI' (128 \u2192 192 bits). The `this`-pointer adjustment for that base and the offset of every field after it shift; existing binaries read the wrong addresses."
+      },
+      {
+        "kind": "exported_not_public",
+        "symbol": "_Z4kfamI6ktag_aEiv",
+        "description": "Symbol '_Z4kfamI6ktag_aEiv' is this library's own instantiation of an external (standard/third-party) template over the library's own types -- a vague-linkage copy, not a statically linked dependency. No public header needs it exported; hide it unless consumers rely on it."
+      }
+    ]
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "break",
+    "stripped": true,
+    "headers": false,
+    "old_sha256": "0bcd5d5ef0b76cc067f8b08c23ec9de5b5813eada045ae32ef740678c262d9c6",
+    "new_sha256": "4f83cd185619800550cbe0a9075e63a1442cb7de0d13db9ebf7008128ec29f81",
+    "old_client": "1",
+    "replacement_client": "0",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "B1",
+      "owner_reported": false,
+      "expected_members": [
+        "pad"
+      ],
+      "reported_members": []
+    },
+    "exit_code": 4,
+    "assurance": "partial",
+    "evidence_lines": [],
+    "findings": [
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MI2f2Ev",
+        "description": "Vtable thunk offset changed for MI::f2(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID0Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID1Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      }
+    ]
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "break",
+    "stripped": true,
+    "headers": true,
+    "old_sha256": "0bcd5d5ef0b76cc067f8b08c23ec9de5b5813eada045ae32ef740678c262d9c6",
+    "new_sha256": "4f83cd185619800550cbe0a9075e63a1442cb7de0d13db9ebf7008128ec29f81",
+    "old_client": "1",
+    "replacement_client": "0",
+    "verdict": "BREAKING",
+    "attribution": {
+      "owner": "B1",
+      "owner_reported": true,
+      "expected_members": [
+        "pad"
+      ],
+      "reported_members": [
+        "pad"
+      ]
+    },
+    "exit_code": 4,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "type_size_changed",
+        "symbol": "B1",
+        "description": "Size changed: B1 (128 \u2192 192 bits)"
+      },
+      {
+        "kind": "type_field_added",
+        "symbol": "B1",
+        "description": "Field added: B1::pad"
+      },
+      {
+        "kind": "type_size_changed",
+        "symbol": "MI",
+        "description": "Size changed: MI (256 \u2192 320 bits)"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MI2f2Ev",
+        "description": "Vtable thunk offset changed for MI::f2(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID0Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "vtable_thunk_offset_changed",
+        "symbol": "_ZN2MID1Ev",
+        "description": "Vtable thunk offset changed for MI::~MI(): h:n16 \u2192 h:n24 \u2014 a base subobject moved; old binaries mis-adjust `this` on virtual dispatch"
+      },
+      {
+        "kind": "base_class_offset_changed",
+        "symbol": "MI",
+        "description": "Base class 'B2' moved within 'MI' (128 \u2192 192 bits). The `this`-pointer adjustment for that base and the offset of every field after it shift; existing binaries read the wrong addresses."
+      },
+      {
+        "kind": "exported_not_public",
+        "symbol": "_Z4kfamI6ktag_aEiv",
+        "description": "Symbol '_Z4kfamI6ktag_aEiv' is this library's own instantiation of an external (standard/third-party) template over the library's own types -- a vague-linkage copy, not a statically linked dependency. No public header needs it exported; hide it unless consumers rely on it."
+      }
+    ]
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "control",
+    "stripped": false,
+    "headers": false,
+    "old_sha256": "de1a7c402edc13b618e2221dca059d9b744e7ff06e3bef6325e1e631df2837bc",
+    "new_sha256": "f23bc4cbf091d47947a08dd116e32238b0958e669d14c6159d68cb301566b873",
+    "old_client": "1",
+    "replacement_client": "1",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "complete",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "control",
+    "stripped": false,
+    "headers": true,
+    "old_sha256": "de1a7c402edc13b618e2221dca059d9b744e7ff06e3bef6325e1e631df2837bc",
+    "new_sha256": "f23bc4cbf091d47947a08dd116e32238b0958e669d14c6159d68cb301566b873",
+    "old_client": "1",
+    "replacement_client": "1",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "exported_not_public",
+        "symbol": "_Z4kfamI6ktag_aEiv",
+        "description": "Symbol '_Z4kfamI6ktag_aEiv' is this library's own instantiation of an external (standard/third-party) template over the library's own types -- a vague-linkage copy, not a statically linked dependency. No public header needs it exported; hide it unless consumers rely on it."
+      }
+    ]
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "control",
+    "stripped": true,
+    "headers": false,
+    "old_sha256": "0bcd5d5ef0b76cc067f8b08c23ec9de5b5813eada045ae32ef740678c262d9c6",
+    "new_sha256": "ed9b74b60627613027f86acb480fa56516700bda25b0ccca566c2754ad5b7a09",
+    "old_client": "1",
+    "replacement_client": "1",
+    "verdict": "UNCONFIRMED",
+    "attribution": null,
+    "exit_code": 1,
+    "assurance": "partial",
+    "evidence_lines": [],
+    "findings": []
+  },
+  {
+    "operator": "primary_base_grew",
+    "seed": "cxx_more",
+    "stage": "control",
+    "stripped": true,
+    "headers": true,
+    "old_sha256": "0bcd5d5ef0b76cc067f8b08c23ec9de5b5813eada045ae32ef740678c262d9c6",
+    "new_sha256": "ed9b74b60627613027f86acb480fa56516700bda25b0ccca566c2754ad5b7a09",
+    "old_client": "1",
+    "replacement_client": "1",
+    "verdict": "NO_CHANGE",
+    "attribution": null,
+    "exit_code": 0,
+    "assurance": "partial",
+    "evidence_lines": [
+      "L2 public header AST       present, high confidence: header-scoped",
+      "L2 public header AST       old=present       new=present",
+      "[on]  Public declarations, signatures, and declared virtual sequence \u2014 from the public header AST"
+    ],
+    "findings": [
+      {
+        "kind": "exported_not_public",
+        "symbol": "_Z4kfamI6ktag_aEiv",
+        "description": "Symbol '_Z4kfamI6ktag_aEiv' is this library's own instantiation of an external (standard/third-party) template over the library's own types -- a vague-linkage copy, not a statically linked dependency. No public header needs it exported; hide it unless consumers rely on it."
+      }
+    ]
+  }
+]
