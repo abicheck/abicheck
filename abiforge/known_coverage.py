@@ -52,7 +52,33 @@ PROBE_FLAGS: tuple[Flags, ...] = tuple(
         (None, 1),
     )
 )
-PROBE_EVIDENCE: tuple[str, ...] = ("binary", "dwarf", "headers")
+#: Evidence lanes, spelled ``<level>[.stripped][.<header backend>]``: the
+#: stripped ``{B,H}`` primary cell and the non-reference header backends are
+#: their own lanes, so an entry gated on either records real cells.
+PROBE_EVIDENCE: tuple[str, ...] = (
+    "binary",
+    "dwarf",
+    "headers",
+    "headers.stripped",
+    "headers.clang",
+    "headers.gcc",
+    "headers.stripped.clang",
+    "headers.stripped.gcc",
+)
+
+
+def _evidence_fields(lane: str) -> dict[str, Any]:
+    """The ``Config`` fields one ``PROBE_EVIDENCE`` lane stands for."""
+    level, *rest = lane.split(".")
+    out: dict[str, Any] = {"evidence": level}
+    for part in rest:
+        if part == "stripped":
+            out["stripped"] = True
+        else:
+            out["header_backend"] = part
+    return out
+
+
 #: (platform, object format) pinned for every probe configuration. A ``when``
 #: may read ``objfmt``, so the grid enumerates the axis instead of taking the
 #: runner's host (``Config``'s default), which made the record host-dependent.
@@ -95,8 +121,8 @@ def covered_masks(
                                 std=std,
                                 producer=tc,
                                 flags=fl,
-                                evidence=ev,
                                 platform=plat,
+                                **_evidence_fields(ev),
                             )
                         except ValueError:
                             continue
