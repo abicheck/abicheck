@@ -40,14 +40,6 @@ if TYPE_CHECKING:
 __all__ = ["describe_target"]
 
 
-def _both_elf(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None]:
-    if old.elf is None or new.elf is None:
-        # Not an ELF pair: VTT entries are read from ELF relocations only,
-        # and nothing here could be reported.
-        return False, "VTT entry targets are read from ELF relocations only"
-    return True, None
-
-
 def _vtts(elf: ElfMetadata) -> dict[str, int]:
     """Exported VTTs and their sizes. A runtime (``std::``) VTT a library
     emits is kept: its entries are compared by the same logical target, so
@@ -73,12 +65,13 @@ def _owner(vtt: str) -> str:
     return readable.split(" for ", 1)[1] if " for " in readable else vtt
 
 
-@registry.detector(
-    "elf_vtt_entries", requires_support=_both_elf, support_is_trigger=True
-)
+@registry.detector("elf_vtt_entries")
 def _diff_vtt_entries(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """One finding per VTT entry whose logical target changed."""
-    assert old.elf is not None and new.elf is not None  # support gate
+    if old.elf is None or new.elf is None:
+        # VTT entries are read from ELF relocations only; a PE or Mach-O pair
+        # has no fact here to compare (its VTT size is elf_layout's).
+        return []
     old_vtts = _vtts(old.elf)
     new_vtts = _vtts(new.elf)
     word = new.elf.pointer_size or 8

@@ -110,6 +110,7 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
     ),
     "integer_model": _NONE,
     "elf_layout": _NONE,
+    "elf_vtt_entries": _NONE,
     "fingerprint_renames": _NONE,
     "functions": DetectorInputs(
         tolerates={

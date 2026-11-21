@@ -262,7 +262,11 @@ class ElfMetadata:
     # a stripped .symtab, or an unsupported relocation). The whole map is
     # None when it was never read: a pre-v71 snapshot, or a target other than
     # x86-64 ELF -- unknown, never "no VTT entries".
-    vtt_entries: dict[str, tuple[VttEntryTarget | None, ...]] | None = None
+    # Persisted as the binary section's ``abicheck.elf_vtt_entries`` extension
+    # fact (ADR-062 D19), never as a block key.
+    vtt_entries: dict[str, tuple[VttEntryTarget | None, ...]] | None = field(
+        default=None, kw_only=True, metadata={"wire": False}
+    )
 
     # ADR-063 Phase 5 (seventh batch): Fact[...] siblings for this
     # dataclass's own schema-version-driven case-(b) fields -- the identical

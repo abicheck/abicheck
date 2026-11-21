@@ -147,6 +147,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "vtt_slot_count_changed",
             }
         ),
+        "elf_vtt_entries": frozenset({"vtt_entry_target_changed"}),
         "enum_deprecated": frozenset(
             {"enum_deprecated_added", "enum_deprecated_removed"}
         ),

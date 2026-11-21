@@ -432,7 +432,7 @@ One row per `ChangeKind` (435 total). Columns fuse the verdict partition (`check
 | `vtable_symbol_identity_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `vtable_symbol_identity_changed` | — |
 | `vtable_thunk_offset_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_thunk_offset_changed` | [case172](examples/case172_vtable_thunk_offset_changed.md) |
 | `vtable_thunk_set_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_thunk_set_changed` | — |
-| `vtt_entry_target_changed` | breaking | `BREAKING` | `error` | unspecified | `vtt_entry_target_changed` | — |
+| `vtt_entry_target_changed` | breaking | `BREAKING` | `error` | L0 | `vtt_entry_target_changed` | — |
 | `vtt_slot_count_changed` | breaking | `BREAKING` | `error` | L0 | `vtt_slot_count_changed` | [case173](examples/case173_vtt_slot_count_changed.md) |
 | `wchar_model_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `wchar_model_changed` | — |
 | `wheel_closure_dependency_violation` | breaking | `BREAKING` | `error` | L0 | `wheel_closure_dependency_violation` | — |
