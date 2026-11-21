@@ -102,10 +102,6 @@ from .export_account_decision import (
 )
 from .export_accounting import (
     _UNDOCUMENTED_ACCOUNTS,
-    ACCOUNT_ALLOCATOR_INTERPOSER,
-    ACCOUNT_CXX_ARTIFACT,
-    ACCOUNT_PUBLIC,
-    ACCOUNT_PUBLIC_TEMPLATE,
 )
 from .export_obligation_linkage import (
     inline_declared_symbols as inline_declared_symbols,
@@ -361,11 +357,8 @@ def _check_exported_not_public(  # noqa: ARG001 -- runner-table signature (snaps
             )
         )
 
-    documented = (
-        account[ACCOUNT_PUBLIC]
-        + account[ACCOUNT_CXX_ARTIFACT]
-        + account[ACCOUNT_ALLOCATOR_INTERPOSER]
-        + account[ACCOUNT_PUBLIC_TEMPLATE]
+    documented = sum(
+        n for cat, n in account.items() if cat not in _UNDOCUMENTED_ACCOUNTS
     )
     breakdown = ", ".join(
         f"{cat}={account[cat]}" for cat in _UNDOCUMENTED_ACCOUNTS if account[cat]

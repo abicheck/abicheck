@@ -142,12 +142,6 @@ dependency walk and debug roots to every member. No open gap remains.
 `false-clean` — a GNU-unique binding change is missed when the static's owner left the binary.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_disabled` entry in abiforge/known.py, which fails once the answer changes -->
 
-#### A version requirement on a newly needed library reads as compatible, whatever its version (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `diff_platform_elf_symbols` reports a new `.gnu.version_r` tag as `symbol_version_required_added_compat` whenever its library was neither required nor `DT_NEEDED` before. A library whose old build imported nothing from libc (an `-O2` build linked `--as-needed`) and now calls `getrandom` gains `libc.so.6` with `GLIBC_2.25`: a runtime floor that did not exist before reads as compatible, and no `runtime_floor_raised` is reported. `needed_added` keeps the verdict at `COMPATIBLE_WITH_RISK`, so no verdict reads cleaner. Found by the edit corpus (`glibc_version_required_added` on `c_elf`, gcc `-O2`). Owner: `diff_platform_elf_symbols.py`.
-`wrong-kind` — the new glibc floor is named as a compatible requirement.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `glibc_version_required_added` entry in abiforge/known.py, which fails once the answer changes -->
-
 #### castxml spells a multi-dimensional array with its bounds reversed (2026-11-08)
 
 **Status (2026-11-08): OPEN.** castxml writes `int m[2][3]` as an `ArrayType` of `ArrayType`, and `extract/headers/castxml/type_resolution.py` appends the outer bound after the inner one, so the member reads `int[3][2]`. The clang header backend and DWARF (generation 45) spell it `int[2][3]`, as C does. Comparing two castxml dumps is self-consistent, but a castxml snapshot against a clang or DWARF one reports a `type_field_type_changed` that is not there, and a reshape `[2][3]` -> `[3][2]` reads as its mirror image. Closing it needs the spelling fixed and a stored-spelling migration for castxml snapshots (every multi-dimensional castxml spelling reverses soundly). `false-positive` across frontends. Owner: `extract/headers/castxml/`.
@@ -636,12 +630,6 @@ per-item status in the
 
 **Status (2026-11-17): OPEN.** `func_params_changed` is `BREAKING` whatever the platform calling convention says, so a C parameter edit after which every old binary still calls the function correctly gates as an ABI break (exit 4) rather than a source break (exit 2). The closed function-signature fragment (`formal/FUNC_FRAGMENT.md`, E13) proves when an x86-64 System V edit keeps the call interface (`set_compatible_iff`, `rem_compatible_iff`) and confirms it by execution on gcc and clang: in its 2160-case space, 240 such edits are reported `breaking`. They are removing the last parameter (84), removing a parameter with no later one of its register class, e.g. the `int` in `f(int, double)` (42), and `long` ↔ `void *` (114). All of them still break callers' source, so the accurate verdict is `API_BREAK`. Changing it makes a parameter edit's verdict depend on the target ABI's register assignment (per-platform: SysV, AAPCS64 and Windows x64 differ), so it is a default/exit-code change and needs an ADR. `false-positive` (over-severity: ABI break for a source-only break). The closed return-type fragment (`formal/RET_FRAGMENT.md`, E14) finds the same for `func_return_changed`: in its 1176-case space, 168 return-type changes keep the call interface (`call_compatible_iff`, confirmed by execution) and are reported `breaking`. They are a `void` function starting to return a value in registers (126), whose callers' source breaks only where the function's type is used (`void (*fp)(int) = f;`), and `long` ↔ `void *` (42). Owner: `compare/` function-signature detectors and `policy/` classification.
 <!-- no-canary: pinned by tests/test_formal_func_fragment.py and tests/test_formal_ret_fragment.py, whose integration run requires abicheck's verdict to equal the report contract's `breaking` on every case, so it fails once the answer changes -->
-
-#### An inline function's static local, exported by clang, reads as an undeclared export (2026-11-12)
-
-**Status (2026-11-12): OPEN.** clang emits a public-header inline function's static local (`_ZZ8edit_ctrvE1n`) as a weak export (gcc as `STB_GNU_UNIQUE`). With public headers the new export reads as `exported_not_public` and the addition becomes `COMPATIBLE_WITH_RISK`, though no source can name a function-local static: it exists only to keep the inline function's ODR. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, clang). Owner: `buildsource/cross_source_checks.py` (`exported_not_public`).
-`false-positive` — adding a header inline function with a static local reads as a risk under clang.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_static_added` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### `func_virtual_noexcept_added` does not rule out a `final` method or class (2026-11-08)
 

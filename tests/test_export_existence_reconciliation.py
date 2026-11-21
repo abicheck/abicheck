@@ -272,6 +272,7 @@ _CATEGORY_ORACLE = {
     acct.ACCOUNT_CXX_ARTIFACT: (False, "C++ ABI artifact"),
     acct.ACCOUNT_ALLOCATOR_INTERPOSER: (False, "allocator replacement"),
     acct.ACCOUNT_PUBLIC_TEMPLATE: (False, "public template ns::Box"),
+    acct.ACCOUNT_PUBLIC_LOCAL_ENTITY: (False, "local entity of public function _Z1gv"),
     acct.ACCOUNT_EXTERNAL_DEP: (False, "external dependency libstdc++.so.6"),
     acct.ACCOUNT_INTERNAL_NS: (True, "internal namespace"),
     acct.ACCOUNT_TEMPLATE_INST: (True, "template instantiation"),
@@ -302,6 +303,7 @@ def test_existence_wording_per_category(kind, category: str, hinted: bool) -> No
         origin_lib="libstdc++.so.6",
         public_template="ns::Box",
         hint=hint,
+        local_owner="_Z1gv",
     )
     text = existence_description(Change(kind, "_Z1fv", "old wording"), decision) or ""
     claims_absent, phrase = _CATEGORY_ORACLE[category]

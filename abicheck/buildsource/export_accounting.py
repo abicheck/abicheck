@@ -82,6 +82,10 @@ ACCOUNT_PUBLIC = "documented_public_api"
 #: A compiler-generated C++ ABI artifact owned by a class (ctor/dtor/vtable/RTTI/
 #: thunk). Accounted as legitimate — its owning type is the real surface.
 ACCOUNT_CXX_ARTIFACT = "cxx_abi_artifact"
+#: A function-local entity (static local, its guard, a string literal) of a
+#: publicly declared function, exported only to keep the owner's ODR. No source
+#: can name it; its owner's declaration documents it.
+ACCOUNT_PUBLIC_LOCAL_ENTITY = "public_function_local_entity"
 #: A symbol that leaked in from an external dependency (C++ runtime or a vendored
 #: third-party library statically linked and re-exported). Clearly marked.
 ACCOUNT_EXTERNAL_DEP = "external_dependency"
