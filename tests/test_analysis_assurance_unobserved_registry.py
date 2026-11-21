@@ -89,6 +89,9 @@ TRIGGERS: dict[str, Callable[[AbiSnapshot], AbiSnapshot]] = {
     ),
     "_concepts": lambda s: dataclasses.replace(s, cxx_concept_header_scan=True),
     "_scope_fallback": lambda s: dataclasses.replace(s, scope_fallback="no-match"),
+    "_unparsed_headers": lambda s: dataclasses.replace(
+        s, ast_toolchain={"unparseable_headers_excluded": '["bad.h"]'}
+    ),
     "_depth_projection": lambda s: dataclasses.replace(
         s, projection_evidence_gaps=("debug-info subprograms",)
     ),
