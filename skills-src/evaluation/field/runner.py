@@ -43,6 +43,7 @@ import time
 from pathlib import Path
 
 import condafetch as cf  # local helper (skills-src/evaluation/field/condafetch.py)
+import header_tier as ht  # L2 header tier (H4)
 
 try:
     import yaml
@@ -442,6 +443,13 @@ def run(manifest: dict, only: set[str] | None, tiers: set[str]) -> dict:
                 print(f"  {rec['lib']:14} src {status}  (L3 cu={cu}, L4 decls={decls})", file=sys.stderr)
                 source_rows.append(rec)
 
+    header_rows: list[dict] = []
+    if "header" in tiers:
+        for entry in ht.header_entries(manifest, only):
+            rec = ht.scan_header_one(entry, _pick_so, _run)
+            print(f"  {rec['lib']:14} hdr {rec.get('verdict') or rec.get('error', '?')}", file=sys.stderr)
+            header_rows.append(rec)
+
     payload = {
         "result_schema": RESULT_SCHEMA,
         "generated_utc": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
@@ -452,6 +460,8 @@ def run(manifest: dict, only: set[str] | None, tiers: set[str]) -> dict:
     }
     if "source" in tiers:
         payload["source_results"] = source_rows
+    if "header" in tiers:
+        payload["header_results"] = header_rows
     return payload
 
 
@@ -706,14 +716,17 @@ def render_report(payload: dict) -> str:
         L.extend(_render_binary_section(rows))
     if source_rows:
         L.extend(_render_source_section(source_rows))
+    if payload.get("header_results"):
+        L.extend(ht.render_header_section(payload["header_results"]))
     return "\n".join(L)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", help="comma-separated lib names")
-    ap.add_argument("--tier", choices=["binary", "source", "both"], default="binary",
-                    help="which tier(s) to scan: binary L0/L1 (default), source L3/L4/L5, or both")
+    ap.add_argument("--tier", choices=["binary", "source", "header", "both"], default="binary",
+                    help="which tier(s) to scan: binary L0/L1 (default), source L3/L4/L5, "
+                         "both (binary+source), or header (L2 binary+headers, non-gating)")
     ap.add_argument("--report-only", action="store_true", help="regenerate REPORT.md from latest results")
     ap.add_argument("--fail-on-drift", action="store_true",
                     help="exit non-zero if any binary-tier verdict drifts from its "
@@ -734,6 +747,11 @@ def main() -> None:
         only = set(args.only.split(",")) if args.only else None
         tiers = {"binary", "source"} if args.tier == "both" else {args.tier}
         payload = run(manifest, only, tiers)
+        if tiers == {"header"} and (RESULTS_DIR / "latest.json").exists():
+            # The non-gating L2 lane adds its table to the committed run rather
+            # than replacing the binary/source rows it does not re-scan.
+            payload = ht.merge_into(
+                json.loads((RESULTS_DIR / "latest.json").read_text(encoding="utf-8")), payload)
         out = write_results(payload)
         print(f"results → {out}", file=sys.stderr)
     (EVAL_DIR / "REPORT.md").write_text(render_report(payload), encoding="utf-8")

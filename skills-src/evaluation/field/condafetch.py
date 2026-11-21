@@ -75,15 +75,106 @@ def _get(url, dest):
     _retrieve(url, dest)
     return time.time() - t0, os.path.getsize(dest)
 
+REPODATA = "https://conda.anaconda.org/conda-forge/{}/repodata.json.zst"
+_REPODATA_INDEX: dict = {}
+
+
+def repodata_files(repodata, subdir):
+    """Index a channel ``repodata.json`` dict into the anaconda.org API file shape.
+
+    Pure: returns ``{name: [{"basename", "version", "attrs": {...}}]}`` so
+    :func:`pick` works unchanged whichever source listed the files.
+    """
+    out: dict = {}
+    for key in ("packages", "packages.conda"):
+        for fn, rec in (repodata.get(key) or {}).items():
+            out.setdefault(rec["name"], []).append({
+                "basename": f"{subdir}/{fn}",
+                "version": rec["version"],
+                "attrs": {"subdir": rec.get("subdir", subdir),
+                          "build_number": rec.get("build_number", 0)},
+            })
+    return out
+
+
+def _repodata_index(subdir):
+    """Channel repodata for *subdir* (CDN), cached on disk + in memory.
+
+    Fallback for hosts whose proxy blocks ``api.anaconda.org`` but allows the
+    ``conda.anaconda.org`` CDN the archives come from anyway.
+    """
+    if subdir not in _REPODATA_INDEX:
+        _require_zstd()
+        zst = f"{CACHE}/repodata-{subdir}.json.zst"
+        if not os.path.exists(zst):
+            _retrieve(REPODATA.format(subdir), zst)
+        raw = subprocess.run(["zstd", "-dc", zst], check=True, capture_output=True).stdout
+        _REPODATA_INDEX[subdir] = repodata_files(json.loads(raw), subdir)
+    return _REPODATA_INDEX[subdir]
+
+
 def list_files(pkg, subdir="linux-64"):
     p = f"{CACHE}/{pkg}.api.json"
     if not os.path.exists(p):
-        _retrieve(API.format(pkg), p)
+        try:
+            _retrieve(API.format(pkg), p)
+        except OSError:  # API host unreachable/blocked: use the CDN's repodata
+            return list(_repodata_index(subdir).get(pkg, []))
     with open(p, encoding="utf-8") as fh:
         d = json.load(fh)
     fs = [f for f in d["files"] if f["attrs"].get("subdir") == subdir]
     # newest build per (version): sort by version then build_number
     return fs
+
+
+#: Suffixes conda-forge uses for the split package that carries a library's
+#: ``include/`` tree when the runtime package does not (``tbb`` → ``tbb-devel``).
+DEVEL_SUFFIXES = ("", "-devel", "-dev", "-headers", "-include", "-static")
+
+
+def devel_candidates(pkg):
+    """Package names that may ship *pkg*'s headers, most likely first (pure).
+
+    The runtime package itself comes first (zstd/lz4-c ship headers inline),
+    then the ``-devel``/``-dev``/``-headers``/``-include``/``-static`` splits, then the same
+    for the name with a ``lib`` prefix stripped (``libzlib`` → ``zlib``).
+    """
+    stems = [pkg]
+    if pkg.startswith("lib") and len(pkg) > 3:
+        stems.append(pkg[3:])
+    out = []
+    for stem in stems:
+        for suf in DEVEL_SUFFIXES:
+            if stem + suf not in out:
+                out.append(stem + suf)
+    return out
+
+
+def fetch_extract(pkg, version, subdir="linux-64"):
+    """Download + extract one package version; return its extract dir."""
+    arch, _, _ = download(pkg, version, subdir)
+    out = os.path.join(CACHE, f"ex_{pkg}_{version}")
+    if not os.path.isdir(out) or not os.listdir(out):
+        extract(arch, out)
+    return out
+
+
+def resolve_headers_pkg(pkg, version, candidates=None, subdir="linux-64"):
+    """First candidate package at *version* whose extract has an ``include/`` dir.
+
+    Returns ``(package, include_root)``; raises ``LookupError`` naming every
+    candidate tried when none ships headers for that version.
+    """
+    tried = []
+    for cand in candidates or devel_candidates(pkg):
+        if not any(f["version"] == version for f in list_files(cand, subdir)):
+            tried.append(f"{cand} (no {version})")
+            continue
+        inc = os.path.join(fetch_extract(cand, version, subdir), "include")
+        if os.path.isdir(inc):
+            return cand, inc
+        tried.append(f"{cand} (no include/)")
+    raise LookupError(f"no header package for {pkg} {version}: tried " + ", ".join(tried))
 
 def pick(pkg, version, subdir="linux-64"):
     """Pick the highest build_number .conda (fallback .tar.bz2) for a version."""
