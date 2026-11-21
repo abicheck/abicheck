@@ -119,7 +119,10 @@ def _write_release_summary_file(
     """
     from ...cli_compare_receipt import _release_summary_effective_config_block
     from ...report.not_comparable import run_outcome_dict_for_release
-    from ...report.release_document import release_findings_for_render
+    from ...report.release_document import (
+        release_assurance_exit_key,
+        release_findings_for_render,
+    )
     from ...workflows.gate import (
         fold_release_outcome,
         release_global_verdicts,
@@ -173,8 +176,8 @@ def _write_release_summary_file(
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
         require_complete_analysis=require_complete_analysis,
         failed_member_contribution=terms.decision.failed_member_exit_contribution,
-        bundle_analysis_errors=(
-            bundle_result.analysis_errors if bundle_result is not None else ()
+        bundle_analysis_failures=(
+            bundle_result.analysis_failures if bundle_result is not None else ()
         ),
     ).to_dict()
     record = terms.record
@@ -234,9 +237,13 @@ def _write_release_summary_file(
     # gap the top-level key exists to close for the primary document.
     if assurance_terms is not None and assurance_terms.section is not None:
         summary_data["analysis_assurance"] = assurance_terms.section
-        summary_data["analysis_assurance_exit_contribution"] = (
-            assurance_terms.decision.exit_contribution
-        )
+    # ADR-071's 2026-11-21 amendment: the same gate key carries a failed
+    # bundle analysis, so aggregate / the deferred gate read the floor too.
+    assurance_key = release_assurance_exit_key(assurance_terms, bundle_result)
+    if assurance_key is not None:
+        summary_data["analysis_assurance_exit_contribution"] = assurance_key
+    if bundle_result is not None and bundle_result.analysis_errors:
+        summary_data["bundle_analysis_errors"] = list(bundle_result.analysis_errors)
     # ADR-067 C-S2: the same folded release-level `disposition_audit` the
     # primary report carries (`report.release_document.
     # release_json_document`), via the identical shared helper, so this sidecar cannot drift
@@ -480,8 +487,8 @@ def _finalize_release_output(
         failed_member_exit_contribution=(
             scope_terms.decision.failed_member_exit_contribution if scope_terms else 0
         ),
-        bundle_analysis_errors=(
-            bundle_result.analysis_errors if bundle_result is not None else ()
+        bundle_analysis_failures=(
+            bundle_result.analysis_failures if bundle_result is not None else ()
         ),
         # ADR-071: the whole resolved decision, not just its contribution --
         # `_exit_compare_release` both folds it and formats its notice, and

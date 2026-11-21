@@ -180,6 +180,7 @@ def analyze_bundle(
             policy=policy,
             policy_file=policy_file,
             analysis_errors=[f"bundle analysis raised: {exc}"],
+            analysis_failures=[f"bundle analysis raised: {exc}"],
         )
 
     # ADR-062 A1.8: carry each side's non-ELF members forward as a named fact.
@@ -203,8 +204,8 @@ def analyze_bundle(
                 )
             )
         except Exception as exc:
-            result.analysis_errors.append(
-                f"bundle signature-evidence check raised: {exc}"
-            )
+            failure = f"bundle signature-evidence check raised: {exc}"
+            result.analysis_errors.append(failure)
+            result.analysis_failures.append(failure)
 
     return result

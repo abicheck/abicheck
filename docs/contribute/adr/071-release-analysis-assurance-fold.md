@@ -325,10 +325,17 @@ pass.
 
 **Decision.**
 
-1. Non-empty bundle `analysis_errors` lowers the release's analysis
-   assurance. It contributes `1` to the existing `ANALYSIS_ASSURANCE` axis
-   (ADR-064), folded with `max` into the per-member fold of §3. No new axis
-   and no new exit number.
+1. A failed bundle analysis step lowers the release's analysis assurance.
+   The failure records are `BundleDiffResult.analysis_failures`, the subset
+   of `analysis_errors` written when the snapshot build, `compare_bundle` or
+   the signature-evidence check raises. A scope notice that
+   `analysis_errors` also lists (manifest entries withheld for out-of-scope
+   members, a member skipped by the stored-pair path) is **not** a failure:
+   it stays visible but belongs to the completeness axis (ADR-065 D6), so
+   under `scope.on_incomplete: warn` it still contributes `0`. A failure
+   contributes `1` to the existing `ANALYSIS_ASSURANCE` axis (ADR-064),
+   folded with `max` into the per-member fold of §3. No new axis and no new
+   exit number.
 2. Unlike the per-member contribution, it is **not** gated on
    `assurance.require_complete`. `require_complete` decides whether
    *weaker-but-present* evidence is acceptable; a cross-library analysis
@@ -343,7 +350,11 @@ pass.
    both the live directory/package route and the stored `compare
    --bundle-facts` route.
 5. The report states it: the Markdown "Bundle Analysis Warnings" section
-   says the exit is at least `1`, and the CLI prints a stderr notice.
+   says the exit is at least `1`, the CLI prints a stderr notice, JUnit gets
+   a `bundle-analysis` error suite, and the top-level
+   `analysis_assurance_exit_contribution` (primary JSON and `summary.json`,
+   which also carries `bundle_analysis_errors`) is `max` of the member fold
+   and this floor, so aggregate and the Action's deferred gate read it.
 
 **Migration.** A release whose bundle analysis already failed and whose
 members were clean now exits `1` instead of `0`. This is the intended fix

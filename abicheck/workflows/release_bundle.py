@@ -188,6 +188,7 @@ def run_bundle_analysis(
             per_library=list(per_lib_results),
             policy=policy,
             analysis_errors=[f"bundle snapshot could not be built: {exc}"],
+            analysis_failures=[f"bundle snapshot could not be built: {exc}"],
         )
         if manifest_note is not None:
             failed.analysis_errors.append(manifest_note)
