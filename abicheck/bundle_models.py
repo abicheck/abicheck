@@ -699,10 +699,6 @@ class BundleDiffResult:
     #: stderr. Plain strings; scope notices (withheld manifest entries,
     #: skipped members) are listed here too, for display only.
     analysis_errors: list[str] = field(default_factory=list)
-    #: The subset of *analysis_errors* that records a failed analysis step
-    #: (snapshot build, ``compare_bundle`` or the signature check raised).
-    #: Only these floor the release exit (ADR-071, 2026-11-21 amendment).
-    analysis_failures: list[str] = field(default_factory=list)
     #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
     #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
     #: findings were always scored under the bare *policy* name alone, even
@@ -764,6 +760,11 @@ class BundleDiffResult:
     #: kind) present in the bundle but outside the resolution graph, stated
     #: rather than silently dropped. Empty for a pure-ELF comparison.
     resolution_not_applicable_members: dict[str, str] = field(default_factory=dict)
+    #: The subset of *analysis_errors* that records a failed analysis step
+    #: (snapshot build, ``compare_bundle`` or the signature check raised).
+    #: Only these floor the release exit (ADR-071, 2026-11-21 amendment).
+    #: At the tail so a positional caller keeps binding ``policy_file``.
+    analysis_failures: list[str] = field(default_factory=list)
 
     @property
     def bundle_verdict(self) -> Verdict:

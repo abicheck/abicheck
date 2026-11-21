@@ -66,6 +66,10 @@ _S2_BUNDLE_FIELDS = (
     # ADR-062 A1.8's non-ELF membership fact: appended after the existing
     # tail for the identical reason.
     "resolution_not_applicable_members",
+    # ADR-071's 2026-11-21 amendment: the failed-analysis subset of
+    # `analysis_errors` that floors the release exit, appended for the
+    # identical reason.
+    "analysis_failures",
 )
 _S2_TARGET_FIELDS = (
     "scope_completeness_exit",
