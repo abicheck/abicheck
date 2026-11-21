@@ -164,6 +164,9 @@ CARRIED_FLAG_EDITS = frozenset(
         "l3_threadsafe_statics_disabled",  # -fno-threadsafe-statics (build data)
         "l3_stdlib_assertions",  # _GLIBCXX_ASSERTIONS (build data)
         "l3_whole_program_vtables",  # -fwhole-program-vtables (build data)
+        "union_rebuild_packed",  # -fpack-struct=1 on a union and its envelope
+        "union_rebuild_packed_alignment_only",  # -fpack-struct=1: alignof only
+        "bitfield_rebuild_packed_alignment_only",  # -fpack-struct=1: alignof only
     }
 )
 
@@ -189,6 +192,10 @@ BINARY_VISIBLE_FLAG_EDITS = frozenset(
         "l3_sanitizer_enabled",  # sanitizer runtime imports
         "l3_asan_enabled",  # __asan_* imports
         "l3_rtti_disabled",  # typeinfo symbols
+        # -O2 controls of the c_layout fragments: no layout fact changes, so
+        # there is nothing to carry; their exact assertion is an absence.
+        "union_rebuild_optimized",
+        "bitfield_rebuild_optimized",
     }
 )
 

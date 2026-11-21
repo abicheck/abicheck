@@ -1,6 +1,7 @@
 """The host CPU is a run-time capability of a corpus cell, never a config fact.
 
-Ten operators emit x86 asm or pass x86 ``-m`` switches, and the corpus builds
+Ten operators emit x86 asm or pass x86 ``-m`` switches (and the union/bit-field
+fragments follow an x86-64 layout model), and the corpus builds
 natively, so they need an x86 host. That need is ``EditOp.host_arch``, read
 by ``capability_gap`` when the cell runs: on another CPU the cell is
 *unavailable* (a host gap, counted as such), not *not-applicable* (missing
@@ -26,6 +27,37 @@ LINUX_ELF = ("linux", "elf")
 # Written out from what each edit emits (x86 asm, ``-m``/``-z x86-64-v3``
 # switches, the SysV x86-64 calling convention), not read from the operators.
 X86_ONLY = {
+    # The union/bit-field fragments: their exact rows come from a SysV
+    # x86-64 layout model (abiforge/model/layout_model.py).
+    "union_member_retyped_same_size",
+    "union_member_retyped_same_size_back",
+    "union_member_added_same_layout",
+    "union_member_removed_same_layout",
+    "union_char_extent_7_to_8",
+    "union_char_extent_8_to_9",
+    "union_char_extent_15_to_16",
+    "union_char_extent_16_to_17",
+    "union_char_only_extent_8_to_9",
+    "union_rebuild_packed",
+    "union_rebuild_packed_alignment_only",
+    "union_rebuild_optimized",
+    "bitfield_width_1_to_7",
+    "bitfield_width_7_to_8",
+    "bitfield_width_8_to_9",
+    "bitfield_width_9_to_15",
+    "bitfield_width_15_to_16",
+    "bitfield_width_16_to_17",
+    "bitfield_width_17_to_31",
+    "bitfield_width_31_to_32",
+    "bitfield_width_17_to_16_shrink",
+    "bitfield_width_16_to_17_behind_barrier",
+    "bitfield_barrier_inserted_before_7",
+    "bitfield_barrier_inserted_before_17",
+    "bitfield_barrier_inserted_after_17",
+    "bitfield_barrier_removed_after_17",
+    "bitfield_barrier_removed_before_7",
+    "bitfield_rebuild_packed_alignment_only",
+    "bitfield_rebuild_optimized",
     "text_relocation_introduced",
     "text_relocation_removed",
     "x86_isa_level_raised",

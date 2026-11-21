@@ -21,6 +21,10 @@ Purpose and claims: `README.md`.
 
 ## Ground truth
 
+- Exact rows (`model/exact.py`, `EditOp.exact`) come from an independent
+  model checked against the compiler, never from a checker. A scope names
+  which kinds and entities an assertion judges; rows the configuration's
+  evidence cannot establish become unknown (`evidence-limited`), never pass.
 - An expectation comes from the edit's ABI meaning, never from a checker's
   answer. An `oracle-conflict` cell means the expectation is wrong.
 - A checker disagreement is fixed in the checker, or recorded in `known.py`
@@ -46,7 +50,10 @@ Purpose and claims: `README.md`.
   `runtime_floor` (a raised libc version floor), `dependencies` (an import no
   library in the DT_NEEDED closure provides), `source_evidence` (what only
   L4 source replay or the L5 source graph sees; the gated `cxx_src` seed),
-  `source_tree` (what only a multi-file, multi-TU tree shows; `cxx_tree`). The
+  `source_tree` (what only a multi-file, multi-TU tree shows; `cxx_tree`),
+  `fragments` (union and bit-field edits on the gated `c_layout` seed, with
+  exact rows from `model/layout_model.py`; campaign:
+  `python -m abiforge.run.fragment_campaign OUT`). The
   `EditOp` type is `model/opkit.py`. The ChangeKind scope table (which kinds
   are in scope, and why not the rest) is `coverage_scope.py`.
 - **Seeds** (`model/seeds.py`): a seed's `build.*` roles carry compile and link

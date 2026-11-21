@@ -79,7 +79,12 @@ def minimal_evidence_sets(op: EditOp, base: Config) -> frozenset[frozenset[str]]
     if op.carrier:
         # A build-flag edit is seen only through the atoms that record the flag
         # (``EditOp.carrier``): an alternative without one cannot observe it.
-        alts = {a for a in alts if a & op.carrier}
+        # When no alternative records the flag (a kind only a header dump
+        # observes, such as an alignment), the edit is seen by that
+        # alternative *plus* a carrier atom: headers dumped with the build's
+        # flags, as a cell with DWARF or build data does.
+        carried = {a for a in alts if a & op.carrier}
+        alts = carried or {a | {c} for a in alts for c in op.carrier}
     return frozenset(a for a in alts if not any(b < a for b in alts))
 
 

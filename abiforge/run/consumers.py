@@ -18,6 +18,8 @@ C shapes are C89 and also compile as C++ (the C++ seed has the same core).
 
 from __future__ import annotations
 
+from abiforge.model.fragments import LAYOUT_FIXTURES, consumer_text
+
 _C_CALL = r"""#include <stdio.h>
 #include "edit_seed.h"
 int main(void) {
@@ -366,6 +368,9 @@ CONSUMERS: dict[str, dict[str, str]] = {
     "cxx_alt": {"call": _XA_CALL},
     "c_opaque": {"handle": _OPQ_HANDLE, "call": _OPQ_CALL},
     "c_byval": {"value": _BV_VALUE, "call": _BV_CALL},
+    # c_layout: fill every fixture through the library, read it back by value
+    # with the old header's layout (model/fragments).
+    "c_layout": {"layout": consumer_text(LAYOUT_FIXTURES)},
     "cxx_src": {"call": _SRC_CALL},
     "cxx_tree": {"call": _TREE_CALL},
 }

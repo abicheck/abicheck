@@ -113,6 +113,11 @@ class EditOp:
     # the edit provably leaves alone and ``nm`` finds in both libraries, each
     # a forbidden claim. 0 = none (every operator written before claims).
     witnesses: int = 0
+    # Config-dependent exact ground truth (``model.exact``): the expectation
+    # fields (``assertions``, ``expected``, verdict bounds) this config's
+    # layout model gives. Applied before ``rules``; ``precondition`` names the
+    # configs the model does not cover, so none is guessed.
+    exact: Callable[[Config], Mapping[str, object]] | None = None
 
     def applies_to(self, seed: Seed) -> bool:
         if seed.gate_role is not None and seed.gate_role not in self.roles:
@@ -189,6 +194,8 @@ class EditOp:
         kinds the configuration observes (``observability_floor``, plan B1), then
         the licences *facts* (the binary oracle's, ``run.binfacts``) confirm."""
         exp = self.base()
+        if self.exact is not None:
+            exp = replace(exp, **self.exact(config))  # type: ignore[arg-type]
         for rule in self.rules:
             if rule.when(config):
                 exp = rule.apply(exp)

@@ -266,6 +266,8 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "bv.s": "struct",
     "bv.api": "function",
     "bv": "function",
+    # c_layout (union and bit-field fragments; lf.gate admits an operator)
+    "lf": "struct",
     # cxx_alt
     "xa.uniq": "inline_function",
     "xa.str": "std_string",
@@ -358,7 +360,7 @@ ROLE_CONSTRUCT: dict[str, str] = {
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
 GATE_ROLES = frozenset(
-    {"alt.gate", "xa.gate", "src.gate", "tree.gate", "opq.gate", "bv.gate"}
+    {"alt.gate", "xa.gate", "src.gate", "tree.gate", "opq.gate", "bv.gate", "lf.gate"}
 )
 
 # Language feature an operator needs -> the construct it exercises.
@@ -490,6 +492,24 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "bitfield_width_within_unit": "bitfield_width_absorbed",
         "bitfield_width_crosses_unit": "bitfield_width_shifts",
         "bitfield_became_field": "bitfield_to_field",
+        # c_layout bit-field fragments (operators/fragments): the class each
+        # takes under default packing, where the model reads it.
+        "bitfield_width_1_to_7": "bitfield_width_shifts",
+        "bitfield_width_7_to_8": "bitfield_width_shifts",
+        "bitfield_width_8_to_9": "bitfield_width_shifts",
+        "bitfield_width_9_to_15": "bitfield_width_shifts",
+        "bitfield_width_15_to_16": "bitfield_width_shifts",
+        "bitfield_width_16_to_17": "bitfield_width_shifts",
+        "bitfield_width_17_to_31": "bitfield_width_absorbed",
+        "bitfield_width_31_to_32": "bitfield_width_absorbed",
+        "bitfield_width_17_to_16_shrink": "bitfield_width_shifts",
+        "bitfield_width_16_to_17_behind_barrier": "bitfield_width_absorbed",
+        "bitfield_barrier_inserted_before_7": "bitfield_barrier_shifts",
+        "bitfield_barrier_inserted_before_17": "bitfield_barrier_absorbed",
+        "bitfield_barrier_inserted_after_17": "bitfield_barrier_shifts",
+        "bitfield_barrier_removed_after_17": "bitfield_barrier_shifts",
+        "bitfield_barrier_removed_before_7": "bitfield_barrier_shifts",
+        "bitfield_rebuild_packed_alignment_only": "packing_change",
         "record_alignment_raised": "record_align_change",
         "cxx_record_added": "record_added",
         "record_lost_trivially_copyable": "record_triviality_change",

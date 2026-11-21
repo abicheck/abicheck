@@ -72,6 +72,7 @@ from abiforge.run.tiers import (
     ATTRIBUTION_PR,
     BUILD_DATA_PR,
     DEPENDENCY_PR,
+    FRAGMENTS_PR,
     KIND_REACH_PR,
     SOURCE_EVIDENCE_PR,
     STRIPPED_HEADERS,
@@ -667,6 +668,7 @@ def test_pr_tier_guards_every_axis() -> None:
         + len(SOURCE_EVIDENCE_PR)
         + len(DEPENDENCY_PR)
         + len(ATTRIBUTION_PR)
+        + len(FRAGMENTS_PR)
     )
     # Four stripped {B,H} guards (C and C++, gcc and clang: the primary
     # configuration is an axis value of its own) sit on top of the 20.

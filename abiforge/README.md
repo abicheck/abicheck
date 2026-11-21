@@ -50,7 +50,13 @@ separate claims and keeps them apart:
    enumeration is proved complete in Lean (`formal/`, `formal/FRAGMENT.md`).
 3. **The checker detects the space**: the run reports, per tier, which
    expected finding kinds the checker produced, and every disagreement is
-   either fixed in the checker or recorded in `known.py`.
+   either fixed in the checker or recorded in `known.py`. Where an operator
+   states exact rows (`model/exact.py`: kind, entity, member, old/new values
+   with units, multiplicity, inside a declared scope), a right verdict and
+   right kinds are not enough: a wrong member, value, missing, duplicated
+   or unexpected in-scope row is a `wrong-detail` mismatch, and a row the
+   configuration's evidence cannot establish is unknown (`evidence-limited`),
+   never a pass.
 
 What is proved, what is tested and what is assumed follows
 `formal/README.md` § Boundaries: the abstract space and operators can be
@@ -91,6 +97,25 @@ offsets, affected functions). `python -m abiforge.run.competitors OUT
 --select pilot` runs abicheck, abidiff, ABI Dumper→ABICC and ABICC on XML
 descriptors on the same built pairs (`dwarf+headers` and
 `stripped+headers`); receipts in `receipts/competitors/`.
+
+## Union and bit-field fragments
+
+`operators/fragments.py` generates the union and bit-field edits of the
+compatibility-space research on the `c_layout` seed (`model/fragments.py`):
+same-size union retypes, member add/remove at fixed layout, `char[N]`
+extents around 8 and 16 bytes, bit-field widths 1/7/8/9/15/16/17/31/32,
+`unsigned : 0` barriers inserted and removed before and after a field,
+packing rebuilds (including alignment-only fixtures) and `-O2` controls.
+Each operator's exact rows come per configuration from an independent
+layout model (`model/layout_model.py`, SysV x86-64 gcc/clang, default
+packing and `-fpack-struct=1`); `tests/test_abiforge_layout_model.py`
+checks that model against compiler probes and raw DWARF. Other
+configurations are not applicable, with the reason. The model is finite
+evidence over this fragment, not a statement about all of C or C++.
+
+```bash
+python -m abiforge.run.fragment_campaign OUT   # receipt.json + cells.csv
+```
 
 ## Boundaries
 

@@ -255,6 +255,9 @@ def _findings(result: DiffResult) -> tuple[Finding, ...]:
             symbol=ch.symbol,
             qualified_name=ch.qualified_name,
             impact=effective_category(ch, *sets).name,
+            field_name=ch.field_name,
+            old_value=None if ch.old_value is None else str(ch.old_value),
+            new_value=None if ch.new_value is None else str(ch.new_value),
         )
         for ch in result.changes
     )

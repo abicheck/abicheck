@@ -41,6 +41,12 @@ class Finding:
     symbol: str
     qualified_name: str | None = None
     impact: str | None = None
+    # The member a field-level finding is about (the report's ``field_name``)
+    # and the finding's own old/new values, verbatim from the typed result:
+    # what an exact assertion (``model.exact``) compares, never report prose.
+    field_name: str | None = None
+    old_value: str | None = None
+    new_value: str | None = None
 
     def names(self) -> frozenset[str]:
         """Every spelling the finding is attributed under."""
@@ -53,7 +59,13 @@ class Finding:
     def describe(self) -> str:
         q = f" ({self.qualified_name})" if self.qualified_name else ""
         imp = f" [{self.impact}]" if self.impact else ""
-        return f"{self.kind} {self.symbol}{q}{imp}"
+        mem = f"::{self.field_name}" if self.field_name else ""
+        val = (
+            f" {self.old_value}->{self.new_value}"
+            if self.old_value is not None or self.new_value is not None
+            else ""
+        )
+        return f"{self.kind} {self.symbol}{mem}{q}{val}{imp}"
 
 
 @dataclass(frozen=True)

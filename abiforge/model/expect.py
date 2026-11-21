@@ -26,6 +26,9 @@ and classifies the cell. Classes, most severe first:
   finding to an entity the edit cannot have affected (``EntityClaim``): an
   unchanged function reported removed, a private type blamed for a public
   ABI break.
+- ``wrong-detail``: the verdict and kinds are right, but an exact assertion
+  (``model.exact``) finds a wrong entity, member or value, a missing or
+  duplicated row, or an unexpected row inside its declared scope.
 - ``wrong-kind``: the verdict is right, an expected kind is missing (or a
   required kind is not attributed to the entity the edit changed).
 - ``refused``: abicheck declined to compare (e.g. a profile mismatch). Not
@@ -45,6 +48,7 @@ from dataclasses import dataclass, field, replace
 
 from abiforge.checkers.abicheck import default_verdict, observable_at
 from abiforge.model.config import Config
+from abiforge.model.exact import FindingAssertion
 from abiforge.model.finding import EntityClaim, Finding
 from abiforge.model.producer_capabilities import dwarf_witness_present
 
@@ -63,6 +67,7 @@ MISMATCH_CLASSES = (
     "false-positive",
     "wrong-verdict",
     "false-attribution",
+    "wrong-detail",
     "wrong-kind",
     "refused",
 )
@@ -85,6 +90,11 @@ class Expectation:
     # ``needs`` are absent): a run that is otherwise clean is reported as
     # ``evidence-limited`` (unknown), never as ``agree``.
     undecided: str = ""
+    # Exact finding assertions (``model.exact``): the multiset of rows the
+    # report must hold in each assertion's declared scope. Judged only on
+    # structured findings; an operator without them keeps the kind-set
+    # judgement above unchanged.
+    assertions: tuple[FindingAssertion, ...] = ()
 
     @property
     def benign(self) -> bool:
@@ -138,6 +148,9 @@ class Expectation:
             for claim in self.claims:
                 if (why := claim.violation(findings, impact_of)) is not None:
                     out.append(why)
+        if findings is not None:
+            for assertion in self.assertions:
+                out.extend(assertion.judge(findings).problems)
         return out
 
 
@@ -249,6 +262,9 @@ def observability_floor(
         seen = frozenset()
     hidden = edit - seen
     claims, undecided = _floor_claims(exp.claims, config)
+    assertions, unknown = _floor_assertions(exp.assertions, config)
+    exp = replace(exp, assertions=assertions)
+    undecided = "; ".join(filter(None, (undecided, unknown)))
     if undecided:
         exp = replace(
             exp, undecided="; ".join(filter(None, (exp.undecided, undecided)))
@@ -307,6 +323,44 @@ def _floor_claims(
         if seen:
             out.append(replace(c, kinds=seen))
     return tuple(out), "; ".join(undecided)
+
+
+def _floor_assertions(
+    assertions: tuple[FindingAssertion, ...], config: Config
+) -> tuple[tuple[FindingAssertion, ...], str]:
+    """(the assertions narrowed to what *config* observes, why any is undecided).
+
+    An assertion whose ``needs`` atoms *config* lacks is dropped as undecided.
+    A kind *config* does not observe, or whose rows need atoms it lacks
+    (``FindingAssertion.kind_needs``), leaves the scope: its expected rows are
+    then *unknown*, never passed, and a stray finding of it is not judged.
+    A narrowed scope with no expected row of the dropped kind is not unknown:
+    the assertion simply makes no claim about that kind there.
+    """
+    out: list[FindingAssertion] = []
+    unknown: list[str] = []
+    atoms = config.evidence_set.atoms
+    for a in assertions:
+        if not a.needs <= atoms:
+            unknown.append(
+                f"exact assertion ({a.why or 'rows'}) needs {sorted(a.needs)} "
+                f"evidence, absent at {config.evidence_label}"
+            )
+            continue
+        hidden = frozenset(
+            k
+            for k in a.scope.kinds
+            if not kind_observable(k, config)
+            or not a.kind_needs.get(k, frozenset()) <= atoms
+        )
+        narrowed = a.without_kinds(
+            hidden,
+            f"{sorted(hidden)} rows are not observable at {config.evidence_label}",
+        )
+        if narrowed.unknown:
+            unknown.append(narrowed.unknown)
+        out.append(narrowed)
+    return tuple(out), "; ".join(unknown)
 
 
 def binary_depth_cap(exp: Expectation, config: Config) -> Expectation:
@@ -480,6 +534,15 @@ def reconcile(
             "the verdict is within bounds, but the report attributes a finding "
             "to an entity the edit cannot have affected",
         )
+    if any(p.startswith("exact ") for p in problems) and not any(
+        p.startswith(("missing expected", "none of")) for p in problems
+    ):
+        return Reconciled(
+            "wrong-detail",
+            problems,
+            "the verdict and kinds are within bounds, but an exact assertion's "
+            "rows (entity, member, value or multiplicity) do not match",
+        )
     if problems:
         return Reconciled("wrong-kind", problems)
     if exp.undecided:
@@ -524,6 +587,10 @@ def issue_keys(problems: tuple[str, ...] | list[str]) -> frozenset[str]:
             r"missing claim on (\S+): none of \[.*\] attributed to it", p
         ):
             keys.add(f"missing-claim:{m.group(1)}")
+        elif m := re.fullmatch(
+            r"exact (missing|unexpected|unreadable) (.*?)(?: \(x\d+\))?", p
+        ):
+            keys.add(f"exact-{m.group(1)}:{m.group(2)}")
         elif m := re.fullmatch(r"abicheck refused to compare \((.*)\)", p):
             keys |= {f"refused:{e.strip()}" for e in m.group(1).split(",")}
         else:

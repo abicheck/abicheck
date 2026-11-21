@@ -3834,5 +3834,302 @@
   "verdict_min": "BREAKING",
   "verdict_max": null,
   "observable": true
+ },
+ "union_member_retyped_same_size|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_member_retyped_same_size_back|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_member_added_same_layout|c_layout": {
+  "any_of": [],
+  "expected": [
+   "UNION_FIELD_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": "COMPATIBLE_WITH_RISK",
+  "verdict_min": "COMPATIBLE"
+ },
+ "union_member_removed_same_layout|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_char_extent_7_to_8|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_char_extent_8_to_9|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_char_extent_15_to_16|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_char_extent_16_to_17|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_char_only_extent_8_to_9|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_SIZE_CHANGED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_rebuild_packed|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_ALIGNMENT_CHANGED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_rebuild_packed_alignment_only|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_ALIGNMENT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_rebuild_optimized|c_layout": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "bitfield_width_1_to_7|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_7_to_8|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_8_to_9|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_9_to_15|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_15_to_16|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_16_to_17|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_17_to_31|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_31_to_32|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_17_to_16_shrink|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_width_16_to_17_behind_barrier|c_layout": {
+  "any_of": [],
+  "expected": [
+   "FIELD_BITFIELD_CHANGED",
+   "SONAME_BUMP_RECOMMENDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_barrier_inserted_before_7|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_barrier_inserted_before_17|c_layout": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
+ },
+ "bitfield_barrier_inserted_after_17|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_barrier_removed_after_17|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_barrier_removed_before_7|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_rebuild_packed_alignment_only|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_ALIGNMENT_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "bitfield_rebuild_optimized|c_layout": {
+  "any_of": [],
+  "expected": [],
+  "observable": true,
+  "verdict_max": "COMPATIBLE",
+  "verdict_min": "NO_CHANGE"
  }
 }

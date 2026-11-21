@@ -227,3 +227,32 @@ def test_computing_the_record_runs_no_toolchain_probe(gate, monkeypatch):
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(shutil, "which", forbidden)
     assert known_record(KNOWN, gate.known_entry_key)
+
+
+def test_dropping_the_producer_from_a_pack1_entry_is_widening_on_the_real_grid(gate):
+    """The probe grid covers -fpack-struct=1: a pack-1 entry records real cells,
+    and lifting its gcc restriction (keeping pack 1) is caught as widening."""
+    gcc_pack1 = lambda c: c.producer.family == "gcc" and c.flags.pack == 1  # noqa: E731
+    any_pack1 = lambda c: c.flags.pack == 1  # noqa: E731
+    recorded = known_record([Synthetic("e", gcc_pack1)], _key)
+    assert recorded["e#0"], "the probe grid never builds -fpack-struct=1"
+    current = known_record([Synthetic("e", any_pack1)], _key)
+    (problem,) = gate.known_when_widening(current, recorded)
+    assert problem.startswith("widening, needs review")
+
+
+def test_a_stripped_pack1_entry_records_cells_and_its_widening_is_caught(gate):
+    """Stripped {B,H} is its own lane of the grid: an entry gated on it records
+    real cells, and dropping the stripped condition is caught as widening."""
+    stripped_pack1 = lambda c: c.stripped and c.flags.pack == 1  # noqa: E731
+    any_headers_pack1 = lambda c: c.evidence == "headers" and c.flags.pack == 1  # noqa: E731
+    recorded = known_record([Synthetic("e", stripped_pack1)], _key)
+    assert recorded["e#0"], "the probe grid never builds a stripped {B,H} cell"
+    current = known_record([Synthetic("e", any_headers_pack1)], _key)
+    (problem,) = gate.known_when_widening(current, recorded)
+    assert problem.startswith("widening, needs review")
+
+
+def test_a_header_backend_entry_records_cells(gate):
+    clang_headers = lambda c: c.evidence == "headers" and c.header_backend == "clang"  # noqa: E731
+    assert known_record([Synthetic("e", clang_headers)], _key)["e#0"]
