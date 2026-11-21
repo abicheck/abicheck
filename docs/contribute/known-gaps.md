@@ -142,7 +142,6 @@ dependency walk and debug roots to every member. No open gap remains.
 `false-clean` — a GNU-unique binding change is missed when the static's owner left the binary.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_disabled` entry in abiforge/known.py, which fails once the answer changes -->
 
-
 #### castxml records no `volatile` qualifier on a member function (2026-11-08)
 
 **Status (2026-11-08): OPEN.** `int touch() volatile;` mangles as `_ZNV...` and DWARF (generation 45) records `is_volatile=True`, but the castxml header lane records `is_volatile=False`, so a dropped or added `volatile` on a method is seen only through the mangled-name change (`func_removed` + `func_added`), not `func_cv_changed`. Owner: `extract/headers/castxml/functions.py`.
