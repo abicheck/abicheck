@@ -6,7 +6,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 
 | Disposition | ADRs |
 |---|---|
-| surfaced | 51 |
+| surfaced | 52 |
 | partial | 15 |
 | gap | 8 |
 | internal | 22 |
@@ -111,6 +111,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-092](../adr/092-native-gcc-header-backend.md) | partial | UC-ARCH-c-library, UC-ARCH-cpp-library | `cli: dump --header`<br>`cli: compare`<br>`api: abicheck.service.run_dump_request` | Experimental GCC support still lacks native header graphs, full macro/template coverage and multi-TU/source replay. |
 | [ADR-093](../adr/093-declared-change-kind-relations-and-observability.md) | gap | — | — | Design only; observable_at, kind relations and the policy resolution pass are not implemented yet (plan abicheck-abiforge-completeness WS-1, WS-5). |
 | [ADR-094](../adr/094-one-change-assessment-across-axes.md) | gap | — | — | Proposed roadmap ADR, partially implemented; only D8's call evaluator (compare/call_interface.py) exists, with no verdict effect. No ChangeAssessment or compare_report.assessments field exists yet. |
+| [ADR-095](../adr/095-header-layout-without-build-flag-evidence.md) | surfaced | — | `cli: compare` | — |
 
 ## Use cases by user task
 

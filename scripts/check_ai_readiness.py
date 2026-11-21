@@ -3615,10 +3615,7 @@ ABIFORGE_KNOWN_BASELINE: tuple[str, ...] = (
     # primary cell records six pre-existing header-cell mismatches.
     # The ratchet is decreasing-only again from here.
     "array_grown_into_padding|cxx_more|wrong-kind||none-of:TYPE_FIELD_OFFSET_CHANGED;none-of:TYPE_SIZE_CHANGED|BREAKING|A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)",
-    "enum_append_wide_value|c_core|false-clean||missing:SONAME_BUMP_RECOMMENDED;weaker-than:BREAKING|COMPATIBLE|A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)",
     "enum_underlying_narrow|cxx_classes|false-positive||stronger-than:COMPATIBLE_WITH_RISK|BREAKING|A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)",
-    "field_added_in_tail_padding|cxx_more|false-clean||missing:SONAME_BUMP_RECOMMENDED;none-of:TYPE_SIZE_CHANGED;weaker-than:BREAKING|COMPATIBLE|A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)",
-    "field_inserted_in_padding|cxx_more|false-clean||missing:SONAME_BUMP_RECOMMENDED;none-of:TYPE_FIELD_OFFSET_CHANGED;none-of:TYPE_SIZE_CHANGED;weaker-than:BREAKING|COMPATIBLE|A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)",
     "field_removed_without_shrink|cxx_more|wrong-kind||none-of:TYPE_FIELD_OFFSET_CHANGED;none-of:TYPE_SIZE_CHANGED|BREAKING|A config-level layout flag a public header cannot carry: stripped {B,H} reads the layout without it (reduced-assurance signal pending the WS-2 ADR, plan §11.2)",
     # PENDING MAINTAINER APPROVAL (union/bit-field fragments PR): the
     # c_layout exact assertions expose a pre-existing castxml-vs-gcc layout

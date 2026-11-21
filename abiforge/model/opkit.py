@@ -27,6 +27,7 @@ from abiforge.model.expect import (
     Expectation,
     Rule,
     binary_depth_cap,
+    flag_invisible_layout,
     observability_floor,
 )
 from abiforge.model.finding import EntityClaim
@@ -192,7 +193,17 @@ class EditOp:
     ) -> Expectation:
         """The ground truth for *config*: the base, the first matching rule, then the
         kinds the configuration observes (``observability_floor``, plan B1), then
-        the licences *facts* (the binary oracle's, ``run.binfacts``) confirm."""
+        the licences *facts* (the binary oracle's, ``run.binfacts``) confirm,
+        then ADR-095's stripped-headers layout-flag rule."""
+        return flag_invisible_layout(
+            self._expect_at(config, facts),
+            config,
+            lambda other: self._expect_at(other, facts),
+        )
+
+    def _expect_at(
+        self, config: Config, facts: Mapping[str, bool] | None
+    ) -> Expectation:
         exp = self.base()
         if self.exact is not None:
             exp = replace(exp, **self.exact(config))  # type: ignore[arg-type]
