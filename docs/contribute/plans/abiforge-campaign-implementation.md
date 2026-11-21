@@ -162,3 +162,15 @@ invalidate earlier inputs, so final success must revalidate all planned bindings
 All28 stress variants and12 runner unit tests passed after repair. Preserve this
 regression when integrating manifests into abiforge. Continue treating environment,
 input integrity, terminal execution and semantic-obligation success as distinct.
+
+
+## Union, bit-field and language-mode expansion
+
+The [language-fragment campaign](abiforge-language-fragments-campaign.md) adds 312
+probe configurations and 87 selected public checker comparisons. Union member
+changes survive equal size/alignment; bit-field width and barrier effects depend
+on packing and may preserve total size. Therefore neither size-only nor generic
+layout-only equivalence is an adequate universal reduction key. Preserve the
+named observation projection in every certificate. Alignment deltas outside the
+passing checker projections remain open evidence obligations. C11/C17/C23 agree
+with C++20 on 4,080 shared-fragment vectors, not on arbitrary language constructs.
