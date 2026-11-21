@@ -1,0 +1,176 @@
+# Abiforge campaign integration roadmap
+
+Reviewed local `b0b879398` and the existing `origin/main` ref at `691862f` using read-only Git inspection. This roadmap implements the inventory and fragment-validation parts of the research plan at `f2f143e232` first. Use a report-only campaign alongside existing corpus tiers. Its unit is a directed old/new case × target/toolchain × evidence lane × consumer context × observation. Each result needs that denominator and the scope predicate that generated it. Generator points, finding kinds, observations and executions have different denominators. The campaign describes specific fragments of a declared ABI contract. It supplies no percentage of all C++.
+
+## Existing integration points
+
+| Owner | Existing behavior | Campaign integration |
+|---|---|---|
+| `../../abiforge/model/edit_model.py`, `../../abiforge/model/space.py` | `EditClass` enumerates modeled edits. `Point`, `infeasible`, `cell_points`, and `coverage` model the existing construct/edit/configuration space and track represented points. | Maintain an independent obligation inventory that links to edit classes and points where appropriate. Give separate IDs to consumer placement and exposure contexts and retain inventory entries without an operator. |
+| `../../abiforge/model/seeds.py`, `../../abiforge/model/opkit.py`, `../../abiforge/operators/__init__.py` | `Seed.render` and `build_args` render roles and compiler switches. `EditOp.applies_to` checks roles and gate roles. `requires` handles standards, asymmetric evidence and preconditions. `new_flags` applies a rebuild. `OPERATORS` is the registry. | Render bounded case descriptors through isolated, uniquely named seeds and scoped operators. Reuse rebuild flags and role text. Keep bulk fixture generation out of the default registry until a case earns promotion. |
+| `../../abiforge/model/expect.py`, `../../abiforge/model/observable.py`, `../../abiforge/run/binfacts.py` | `EditOp.expect` combines base truth, first matching rule, evidence floor and binary licences. `kind_observable` and `min_level_cells` express finding observability. `binary_facts` already provides independently measured binary facts for selected licences. | Preserve the latent source/layout/protocol observation before projecting it into finder obligations for each lane. Generalize structured side/pair observations beside binfacts, with their own provenance. Derive expected kinds through explicit mappings, with a separate gap when no existing kind expresses the observation. |
+| `../../abiforge/run/harness.py`, `../../abiforge/run/cells.py`, `../../abiforge/run/exec.py` | `build`, `BaselineCache`, `NewBuildCache`, and `run_cell` build, check feasibility, and reconcile. `ExecutionOracle.truth` runs old consumers with the replacement DSO, syntax-checks against new headers, and compares common layout probe keys. `minimize` shrinks a failing configuration. | Reuse the build seam. Add campaign-specific probe sources and labelled matched controls. A missing probe key needs an explicit unknown. Keep per-observation status alongside `ExecTruth`, whose binary/source booleans are too coarse for protocol-vs-runtime disagreements. Failure minimization and suite reduction need separate receipts. |
+| `../../abiforge/coverage.py`, `../../abiforge/run/report.py`, `../../abiforge/run/tiers.py` | `CellRecord.verified` intersects owed and produced kinds for a passing cell, excluding derived kinds. `make_record` and `ran_consumers` track modeled points. `coverage_ledger.json` and `check_floor` maintain tier floors. Nightly selection uses `pairwise` and `uncovered_pairs`. | Keep a versioned campaign sidecar keyed to the cell ID. `CellRecord.from_json` rejects unknown fields. Publish exact fragment coverage separately and use existing tier selection as a baseline. |
+| Cached `origin/main`, #2150 and #2152 | `run/competitors.py:run_case` and `verify_inputs` run shared checker adapters. `run/competitor_truth.py:probe_layout` and `detail_truth` provide compiler layout/source evidence. `model/finding.py` and `run/witness.py:witness_claims` support entity claims, with initially narrow witness eligibility. | Reuse report normalization and claim scoring when based on that revision. Extend witnesses for typed records, members and function context as needed. A tool verdict and agreement among tools are comparison outputs. Run the campaign oracle even with every tool adapter disabled. |
+
+The formal lane already has proof sources and JSON exports under `../../formal/lean/AbiLean`, Python realizers under `../../formal/experiments`, and `tests/test_formal_*_fragment.py` checks. The `../../.github/workflows/formal-lean.yml` includes the scheduled E16 dense job with an execution minimum. `../../formal/RECORD_EDIT_FRAGMENT.md` and its checked-in full/reduced/per-case receipts provide a template for layered scoring and cost accounting. TLA+ traces under `formal/tla` provide a precedent for checking lifecycle invariants. Existing proof exports, tier floors, and regression BugClass entries in `tests/regressions/manifest_abiforge.py` have distinct purposes. None currently records a full directed campaign inventory and a certificate for every omission.
+
+## Fragment work packages
+
+### P1 — Packing, expose what each evidence lane can prove
+
+**Existing seams.** `operators/__init__.py:rebuild_pack_struct` rebuilds to pack 1 with specialized truth for its fixed seed shape. `operators/layout.py:_pack` selects rules for edits under an existing pack cap. `operators/build_data.py:_packing_not_tighter` supports the build-data case and `model/config.py:Flags.pack` carries the switch. `abicheck/compare/record_packing.py:packing_state` and `record_packing_changes` infer packing from supported recorded layout, while debug layout findings and build-flag differences take other routes. Keep the evidence carrier distinction even when the fixture header text is identical.
+
+**Inputs and limits.** `../packing-pilot/results.json` has byte-only and padded pointer-use controls. The parent `../packing-campaign/run.py` used 340 ordinary records of lengths 1–4 over unsigned scalar widths 1/2/4/8, four caps 1/2/4/8 and GCC O0/O2. All 2,720 compiler layouts matched the arithmetic model. In 16 whole-library public DWARF comparisons, the parent audited 5,440 size and 20,032 member-offset obligations with zero errors. The 5,440 directed type/cap pairs include identity comparisons. Of these, 884 changed alignment alone. The full layout tuple partitions the per-type configuration pairs into 4,438 representative pairs, a reduction of 18.4%. The quotient is a finite model result. The `../packing-campaign/alignment-audit.json` reports `alignment_bits = None` for all 1,360 type records across the four cap snapshots. For every affected comparison this is unknown, including when both sides lack alignment. The size/offset audit leaves those alignment-only obligations open, and grouping by layout does not preserve flag provenance or all consumer effects.
+
+**Implement.** Import the scalar grammar and independent `layout` recurrence into a formal experiment adapter. Reuse `Seed.render`, `Flags.pack` and `harness.build` to generate both sides. Key facts by record/member and include size, alignment, and all named offsets, then score build-data flag evidence separately. Run DWARF, compiler-matched headers, stripped binary and build-data lanes as actually supported. Carry exact old/new cap and producer command to every observation. Use explicit probe expressions for nested or nontrivial shapes and direct producer/consumer tests for the padded and byte-only controls. Keep packing with by-value, `alignas`, arrays, nesting, unions and bit-fields as separately scoped extensions.
+
+**Accept when** dense replay recovers the reported size/offset totals and exposes all 884 alignment-only obligations with either a correct alignment witness or a named evidence gap. Same-cap and byte-only controls must reject invented layout changes. A changed build flag may still legitimately report build provenance. The finite certificate maps all 5,440 rows within the layout-only projection; it singles out identity and same-layout/different-flag controls in the checker study. Dense runs remain available even if the reduced study reproduces their conclusions.
+
+### A1 — Register arguments and contextual spill
+
+**Existing seams.** `operators/layout.py` has `record_lost_trivially_copyable`, a fixed by-value copy-constructor edit. `run/exec.py:build_consumers` and `ExecutionOracle._pair` supply the replacement harness. `abicheck/compare/function_signature.py` has declared calling-convention changes and the checker also reports record field edits. Neither a field finding nor a declared convention change identifies actual placement for each function's register prefix.
+
+**Inputs and limits.** `../call-abi-pilot/REPORT.md` tests SysV AMD64 scalar prefixes with II→DD, II→ID, ID→DI, three identities, and destructor removal. `../call-abi-pilot/select.py` records a per-profile 99→9 grid reduction for protocol equality. `../call-abi-pilot/lean/RegisterCutoff.lean` proves bounded bank-demand and spill predicates with integer representatives 0/5/6 and FP 0/7/8. Preservation of the ordered old/new location comparison also needs the argument about identical prefixes, identical stack payload locations on double spill, and ordered registers on the both-fit branch. Absolute stack addresses are outside this projection. Invisible-reference removal has accidental runtime matches. `../union-register-context/reproduce.py` supplies an independent context counterexample shape with the same record size and alignment and a different classification before both banks exhaust.
+
+**Implement.** Add typed role descriptors for fixed-arity C-linkage functions, record shape and prefix counts, initially only Linux x86-64 SysV, ordinary aligned two-eightbyte layouts with bounded bank demand. Model ordered locations independently of the checker and confirm a sample with matched assembly or capture shims. Store both side protocols and payload outputs separately. Keep invisible-reference and union cases in separate strata and guard out variadics, hidden return inputs and other calling conventions. Score named functions individually in batched libraries.
+
+**Accept when** the dense 9×11 grid and its nine representatives agree on the declared protocol equality bit for the trivial profiles, and the proof/checker for the certificate covers all branches of that equality. Check below/at/above each bank boundary and mixed-order swaps. Preserve the destructor accidental-match rows as protocol disagreements. Include saturation-misclassification and mixed-order mutants, plus the union double-spill control. Link context-insensitive checker results to the affected function and evidence lane.
+
+### R1 — Return protocol and hidden destination consumption
+
+**Existing seams.** `formal/RET_FRAGMENT.md`, `formal/experiments/ret_fragment.py` and `struct_ret_fragment.py`, with the matching Lean exports, already cover bounded scalar/record returns. `abicheck/compare/record_return_convention.py:return_convention` classifies a subset using size/fields and returns unknown for undecided fields. `returned_by_value_records` and `record_return_convention_changes` are useful attachment points to inspect. `operators/__init__.py:func_return_type_change` covers a declared return-type edit.
+
+**Inputs and limits.** `../return-abi-pilot/REPORT.md`, its `../return-abi-pilot/cross-opt-summary.json`, `../return-abi-o2/results.json` and `../sret-input-pilot/results.json` separate result channel from incidental register contents. At O0 the two II-origin return-class edits each preserve the sentinel in 33 of 99 incompatible calls. The pilot DWARF reports identify member-type changes for the three register mutations and convention findings for destructor removal. The input pilot observes explicit argument delivery after removal of the hidden destination. Its runtime values can include address-dependent data.
+
+**Implement.** Reuse the record-return realizer pattern and build adapters. Separate register return class/order, hidden destination writes, explicit argument placement, and incidental payload outcome. Use a producer/caller assembly witness or matched compiled shims, independent of `return_convention`. Record caller and provider optimization independently and verify which DSO was loaded. Keep the tested destructor direction and same-version sret controls. A reverse hidden-write scenario needs its own safe fixture design before it enters the runner.
+
+**Accept when** the two accidental-match slices still score protocol differences, all matched controls pass, and the hidden-destination case separately verifies storage writes and the shifted integer inputs while retaining FP inputs as controls. Score member-type and actual convention obligations separately. Select by return class only for an explicitly prefix-independent result-location observation. Retain the prefix and cross-opt matrix for runtime and argument delivery claims.
+
+### E1 — Enum values, representation and propagation
+
+**Existing seams.** `model/edit_model.py:_enum_edits`, `operators/enums.py:_operators`, and `model/probes.py:enum_probe_text` cover unscoped, fixed and scoped seed families. `operators/__init__.py` includes `enum_append_wide_value`, underlying narrowing and `rebuild_short_enums`. `abicheck/compare/enum_underlying.py:enum_underlying_size_detector` and `type_layout_diff.py` provide header and debug routes. `../../formal/ENUM_FRAGMENT.md` already verifies generation/decoding for 11,372 bounded C11 edits and proves `EnumFragment.obs_eq_iff_key` for 32 keys keyed on added/removed/revalued enumerators. The existing key preserves enumerator finding identity and verdict in that fragment. Numeric old/new values and representation need separate treatment.
+
+**Implement.** Adapt the completed `../enum-campaign/REPORT.md`. Its GCC 14 C++20 O0/O2 matrix uses 19 inferred and two fixed-underlying cases, with short enums explicitly on and off. In `enum-campaign/run.py`, reuse the pattern in `expected_probe`, `dwarf_facts`, and `comparisons`: pinned baselines, compiler expressions and an independent DIE reader precede public checker scoring. Compact and array embeddings change sizes and offsets, while the padded record retains size and alignment as its tail moves. Equal-width signedness and fixed-width no-change controls are already available. Register placement and runtime behavior remain unmeasured in this campaign. For the integrated inventory use two oracle layers: recurrence with explicit-initializer resets for enumerator values, and compiler probes for underlying signedness/size/alignment, parent layout and compile-use results. Add enum-only exposure, by-value argument/return and record-member contexts separately. Record fixed versus inferred underlying type, permitted initializer grammar, compiler/language standard, signed/unsigned threshold neighbors, pack and short-enum flags. Use fixed explicit same-width edits and aliases as controls. Add separate projections for numeric value, name lookup, underlying representation, parent layout and ABI location. Preserve exact old/new values when scoring a finding payload.
+
+**Accept when** Formal E reproduces against its own export and the new receipt has independent old/new value and representation facts for each in-scope context. Include an implicit chain stopped by an explicit initializer, unchanged numeric value after a respelling, an underlying-width boundary that propagates into a parent record, and a fixed-underlying control. For same-width signedness differences, record observed semantics separately from the underlying-size finding. Demonstrate that a value-only key cannot certify representation or parent layout. Keep any candidate extended quotient empirical until a proof or a dense finite equivalence check covers its precise projection.
+
+### L1 — Generalize the receipt pattern before composing fragments
+
+`../layout-cutoff-pilot/STATUS.md` already checks `LayoutCutoff.insertion_trace_exact` against `AbiLean.Layout.offsetsFrom` for ordinary size=alignment scalars and arbitrary finite suffixes, preserving the moved/not-moved trace. Place that proof against the existing formal module and export representative IDs, reachable transitions and distinguishing continuations. The mutation study shows transition witnesses miss successor faults without a continuation and both reduced suites miss a length-triggered mutant. Preserve those controls. Use the array/vector, nested and checker experiments as evidence for separate context restrictions. Require observable-specific congruence before reusing a nested summary, and retain long/deep stress and independent dense checks for implementation behavior.
+
+## Shared implementation order and acceptance
+
+1. **Inventory and planning.** Add a versioned fragment descriptor under `formal/experiments` and a campaign adapter beside `abiforge/run/cells.py`. The independent inventory lists rule/citation, grammar version, allowed edits and target ABI, old/new exposure, consumer shape, observation, configuration guard and evidence requirement, with links to `EditClass`/operator/detector where present. Separate invalid source, outside modeled scope, unavailable producer/consumer, missing evidence, and unimplemented observation. Existing role/standard/capability checks stay at their current seams. Acceptance: every planned ID gets a stable reason-coded outcome, and a disabled toolchain changes availability without changing grammar or feasibility. Join unknown exposure conservatively in any future product profile.
+2. **Truth and adapters.** Materialize both compiler sides and oracle records ahead of scoring. For each declared observation retain value, unit, side, entity, method, exact inputs, and supported/unknown/failed state. Use old/old and new/new before trusting cross-runs, loader identity before comparing payloads, probe-key completeness before comparing layouts, and compare expected entity and payload before awarding a finding match. Invalid baselines, timeouts and unsupported disassembly remain visible. Acceptance: changing only abicheck output leaves the oracle artifact byte-equivalent after removing machine-local paths/timing, and seeded false attribution, incidental payload success, and missing-evidence controls get different statuses.
+3. **Reduction certificate.** Export fragment/schema version, premise checker and model/proof/export digests, projection and units, theorem or finite check ID, dense domain and input hash, deterministic representative rule, all case→representative mappings keyed by observation scope, and exclusions with reasons. Verify membership, complete coverage, representative self-mapping, and equality of the projected required observations. Label theorem-backed, finite exhaustively checked, and heuristic selection distinctly. Record compiler realization and checker-transfer evidence separately. Acceptance: tampering with a mapping or digest, deleting a boundary or changing ABI/flags without recertification fails verification. A missing premise retains the dense case or records unknown. No omitted case is counted as executed.
+4. **Manifest and replay.** Write a planned run manifest before executing and append/finalize one result per planned key. Include repo commit and dirty patch/source hash, fixture/DSO/client/normalized report hashes, compiler/target/binutils and checker versions, full producer and consumer argv, evidence flags per side, artifact references, oracle/certificate versions, selection/shard seed, status/reason, and stage timings. Keep raw reports, compiler logs and loader evidence addressable. Test interrupted shards, retries and merges, configuration asymmetry and zero executions. Acceptance: duplicate keys with conflicting payloads fail, a missing shard is incomplete, and a selective rerun can rebuild the documented fixture from one manifest row. Use existing comparator receipts and `CellRecord` IDs for linking. Use the regression BugClass manifest only when a specific counterexample graduates into a regression test.
+5. **Shadow evaluation and promotion.** Run dense and certified subsets over the same planned space. Report modeled, feasible, available, selected, executed, observed, oracle-confirmed, finding-matched, missed, unexpected, wrong-attribution, unknown and failed totals per fragment and lane. Show how many omitted rows have certified observation equivalence. Report times for generation, build, probing, extraction, checker comparison, selection and certificate validation with cache state and concurrency. Compare the dense baseline and existing tier selection. Keep cross-opt and held-out stress/mutants visible. Acceptance: both plans replay and compare on equivalent lanes, zero-execution lanes stay incomplete, and any dense-only disagreement has a retained reproducer. Promote a small set of decisive controls through `tests/test_abiforge_*` and the existing tier workflow after the shadow study. Tier-floor changes require separate evidence for implementation transfer.
+
+## Remaining uncertainty
+
+The packing receipt establishes bounded scalar layout and DWARF size/offset conformance. Alignment remains unknown in all four audited snapshots, and the layout quotient has no general proof or checker-transfer guarantee. The register proof covers capacity and spill under its stated demand bounds. Ordered protocol equivalence still needs its own proof bridge. Return and enum observations are target- and compiler-specific, with unmeasured enum call placement and evidence gaps tracked per lane. The shadow campaign, full certificate verifier, and production integration are proposed work.
+
+
+See the [configuration campaign](abiforge-configuration-campaign.md) for measured results and executable reproduction scripts.
+
+
+## Implemented research prototypes
+
+The [evidence and certificate campaign](abiforge-evidence-certificate-campaign.md) now provides executable finite certificate build/verify and negative tests. Matching headers close all1360 measured alignment availability gaps; this remains distinct from integration into production abiforge.
+
+
+The [packing/enum interaction campaign](abiforge-interaction-campaign.md) adds
+64 configurations and31 checker audits. Thirty of48 four-corner comparisons have
+non-additive layout effects. Implementation acceptance must include joint edits,
+nested member offsets at unchanged outer size, and width-preserving flag controls.
+The12 storage signatures do not replace enum-value or flag-provenance coverage.
+
+Next integration slice: move the finite certificate prototype into the formal
+experiment adapter with explicit fragment/version inputs, then add a report-only
+campaign manifest and evidence-lane status to abiforge. Preserve dense replay.
+Do not lower CI floors until dense-versus-selected conformance passes for each
+claimed observation and evidence lane. No full-ABI closure is claimed here.
+
+
+## Independent scopes and resumable execution
+
+The [nested configuration campaign](abiforge-nested-config-campaign.md) adds
+256 independently packed inner/outer configurations plus48 explicit-alignas
+configurations. A single shared pack cap cannot represent the96 measured cases
+with outer cap below inner cap. Add distinct type-definition and containing-record
+placement contexts to campaign descriptors; do not overwrite completed inner size
+or array stride with outer packing. Preserve nested member observations independently
+of outer extents. Selected checker audits passed; this establishes a generator-model
+extension, not a new production checker defect.
+
+The [runner prototype](abiforge-campaign-runner-prototype.md) implements manifest,
+resume, atomic receipts and completeness audit outside production abiforge. Integrate
+through existing run/cells and report seams only after schema review. Keep completion
+(all planned cells have valid terminal receipts) separate from success (all required
+observations pass); an unknown timeout must never close an observation obligation.
+
+
+## Main reconciliation and precision follow-up
+
+Read-only review of main691862f6740c5e5bfc66326e29925dff56de3d91 confirms
+entity-level Finding/EntityClaim and shared checker adapters already exist (#2152,
+#2150). Reuse these instead of implementing a second entity-claim mechanism.
+No abicheck production files changed between the experimental baseline and this
+main revision; experiments remain explicitly pinned to their recorded baseline.
+
+A scoped mutation audit loaded main's `abiforge/model/finding.py` and projected a
+real field-offset finding through Finding(kind,symbol,impact). Changing the record
+name failed EntityClaim as expected; changing only field_name, old_value or new_value
+left the projection identical and passed the same entity claim. This is a limitation
+of this projection, not a claim that every abiforge oracle misses the mutation.
+Extend the campaign adapter with field identity, units and exact old/new payload
+obligations; retain the current entity checks. Acceptance: all three payload/member
+mutants fail the new audit while the valid baseline passes.
+
+The [nested reduction certificate](abiforge-nested-reduction-certificate.md) now
+verifies256 configurations against30 full-layout representatives. A shared-pack-only
+mapping fails on96 cases; omitting inner alignment creates80 colliding unordered
+pairs. Omitting stride alone creates none in this matrix because inner size already
+determines stride. This is finite observation preservation, not checker-report or
+whole-ABI equivalence.
+
+The runner prototype now supports explicit `env_allowlist`: controlled cells inherit
+only declared present variables, whose values and presence enter the binding.
+Environment changes reject stale resume/audit. Legacy specs remain inherited and
+therefore retain the old limitation. Host/kernel and transitive toolchain identity
+still require additional provenance. Eleven runner and seven nested-certificate
+tests passed independently in the parent session.
+
+Reproduce the [finding projection audit](abiforge-finding-projection-audit.md).
+
+
+## Adversarial campaign and repair acceptance
+
+The [adversarial campaign](abiforge-adversarial-campaign.md) exercised327 distinct
+variants:240 exact finding score iterations,59 certificate mutations/controls and
+28 runner stress variants. These reuse existing compiler evidence and must not
+increase the compiled ABI coverage denominator. Repeating the28 stress variants
+after the fix is a validation rerun, not28 new distinct scenarios.
+
+Exact field/payload/cardinality scoring rejected all208 mutated reports and accepted
+32 valid/reordered controls. A coarse kind/entity set baseline accepted120 mutants;
+this is not an assessment of all existing abiforge oracles. Certificate verifiers
+rejected51 invalid inputs and accepted8 harmless changes, with no unexpected result.
+The runner stress found and repaired one false-completeness defect: later cells can
+invalidate earlier inputs, so final success must revalidate all planned bindings.
+All28 stress variants and12 runner unit tests passed after repair. Preserve this
+regression when integrating manifests into abiforge. Continue treating environment,
+input integrity, terminal execution and semantic-obligation success as distinct.
+
+
+## Union, bit-field and language-mode expansion
+
+The [language-fragment campaign](abiforge-language-fragments-campaign.md) adds 312
+probe configurations and 87 selected public checker comparisons. Union member
+changes survive equal size/alignment; bit-field width and barrier effects depend
+on packing and may preserve total size. Therefore neither size-only nor generic
+layout-only equivalence is an adequate universal reduction key. Preserve the
+named observation projection in every certificate. Alignment deltas outside the
+passing checker projections remain open evidence obligations. C11/C17/C23 agree
+with C++20 on 4,080 shared-fragment vectors, not on arbitrary language constructs.
