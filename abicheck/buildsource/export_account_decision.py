@@ -53,6 +53,7 @@ from .export_accounting import (
     ACCOUNT_EXTERNAL_DEP,
     ACCOUNT_OWN_TYPE_INSTANTIATION,
     ACCOUNT_PUBLIC,
+    ACCOUNT_PUBLIC_LOCAL_ENTITY,
     ACCOUNT_PUBLIC_TEMPLATE,
     _account_undocumented_export,
     _external_dependency_origin,
@@ -74,6 +75,7 @@ __all__ = [
     "account_export",
     "accounting_context",
     "accounting_scope",
+    "public_local_entity_owner",
     "undocumented_export_count",
 ]
 
@@ -103,6 +105,36 @@ def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
     return tuple({s for s in (decl.mangled, decl.name) if s})
 
 
+#: Itanium prefixes of a function-local entity (``_ZZ <encoding> E <entity>``)
+#: and of the guard variable of one (``_ZGVZ ...``).
+_LOCAL_ENTITY_PREFIXES = ("_ZGVZ", "_ZZ")
+
+
+def public_local_entity_owner(sym: str, public_syms: frozenset[str]) -> str | None:
+    """The publicly declared function owning local entity *sym*, or ``None``.
+
+    A header inline function's static local (``_ZZ8edit_ctrvE1n``), its guard
+    (``_ZGVZ8edit_ctrvE1n``) or a string literal is exported (weak, or
+    ``STB_GNU_UNIQUE``) only to keep the owner's one-definition rule; no source
+    can name it, so its documentation is the owner's declaration. The owner is
+    ``_Z`` + the ``<encoding>`` that ends at one of *sym*'s ``E`` markers; it
+    counts only when it is itself in *public_syms*, so a local of a private
+    function stays undocumented.
+    """
+    for prefix in _LOCAL_ENTITY_PREFIXES:
+        if not sym.startswith(prefix):
+            continue
+        body = sym[len(prefix) :]
+        end = body.find("E")
+        while end > 0:
+            owner = "_Z" + body[:end]
+            if owner in public_syms:
+                return owner
+            end = body.find("E", end + 1)
+        return None
+    return None
+
+
 @dataclass(frozen=True)
 class ExportAccount:
     """What one export is, and the evidence that says so.
@@ -110,7 +142,8 @@ class ExportAccount:
     *category* is one of ``export_accounting``'s ``ACCOUNT_*`` buckets.
     *origin_lib* names the dependency an ``ACCOUNT_EXTERNAL_DEP`` leak came
     from; *public_template* the public template an
-    ``ACCOUNT_PUBLIC_TEMPLATE`` export instantiates; *hint* where the header
+    ``ACCOUNT_PUBLIC_TEMPLATE`` export instantiates; *local_owner* the public
+    function an ``ACCOUNT_PUBLIC_LOCAL_ENTITY`` export is a local of; *hint* where the header
     text declares an export no parsed declaration covers; *decl* a
     non-public declaration the snapshot does carry for it.
     """
@@ -120,6 +153,7 @@ class ExportAccount:
     public_template: str | None = None
     hint: DeclarationHint | None = None
     decl: Function | Variable | None = None
+    local_owner: str | None = None
 
     @property
     def documented(self) -> bool:
@@ -129,6 +163,7 @@ class ExportAccount:
             ACCOUNT_CXX_ARTIFACT,
             ACCOUNT_ALLOCATOR_INTERPOSER,
             ACCOUNT_PUBLIC_TEMPLATE,
+            ACCOUNT_PUBLIC_LOCAL_ENTITY,
         )
 
 
@@ -229,6 +264,9 @@ def account_export(sym: str, ctx: ExportAccountingContext) -> ExportAccount:
             return ExportAccount(ACCOUNT_EXTERNAL_DEP, origin_lib=origin, decl=decl)
     if is_cxx_class_artifact_symbol(sym):
         return ExportAccount(ACCOUNT_CXX_ARTIFACT)
+    local_owner = public_local_entity_owner(sym, ctx.public_syms)
+    if local_owner is not None:
+        return ExportAccount(ACCOUNT_PUBLIC_LOCAL_ENTITY, local_owner=local_owner)
     # An instantiation of a publicly declared template is public API a
     # consumer links against; "hide it" would break that consumer.
     template = public_template_for_export(sym, ctx.evidence)

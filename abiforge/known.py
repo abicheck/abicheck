@@ -31,8 +31,6 @@ GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
 )
-GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
-GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_FLAG_INVISIBLE_LAYOUT = (
     "A config-level layout flag a public header cannot carry: stripped {B,H} reads the "
@@ -198,17 +196,6 @@ _BREAKING = frozenset({"BREAKING"})
 # Platform-level operators (``abiforge.operators.platform``).
 _PLATFORM: tuple[Known, ...] = (
     Known(
-        "glibc_version_required_added",
-        _ELF,
-        "wrong-kind",
-        lambda c: c.producer.family == "gcc" and c.flags.opt == "O2",
-        "the -O2 gcc build needed nothing from libc before, so GLIBC_2.25 comes "
-        "with a newly needed libc.so.6 and reads symbol_version_required_added_compat",
-        GAP_NEW_LIB_TAGS,
-        issues=frozenset({"missing:SYMBOL_VERSION_REQUIRED_ADDED"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
-    ),
-    Known(
         "gnu_unique_static_added",
         frozenset({"cxx_more"}),
         "wrong-kind",
@@ -235,17 +222,6 @@ _PLATFORM: tuple[Known, ...] = (
             {"missing:SYMBOL_BINDING_LOST_UNIQUE", "weaker-than:COMPATIBLE_WITH_RISK"}
         ),
         verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "gnu_unique_static_added",
-        frozenset({"cxx_more"}),
-        "false-positive",
-        lambda c: c.producer.family == "clang" and c.evidence == "headers",
-        "clang exports edit_ctr's static local weak; against the header it "
-        "reads as an undeclared export (RISK) though no source can name it",
-        GAP_CLANG_INLINE_STATIC,
-        issues=frozenset({"stronger-than:COMPATIBLE"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
 )
 
