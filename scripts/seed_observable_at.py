@@ -57,6 +57,7 @@ FORMS: dict[str, tuple[tuple[tuple[str, ...], ...], str, tuple[str, ...], str]] 
     "B:MACHO": ((("B",),), "", ("macho",), "_OBS_B_MACHO"),
     "B:PE": ((("B",),), "", ("pe",), "_OBS_B_PE"),
     "B:ELF_MACHO": ((("B",),), "", ("elf", "macho"), "_OBS_B_ELF_MACHO"),
+    "B:ELF_X86_64": ((("B",),), "", ("elf",), "_OBS_B_ELF_X86_64"),
     "BHDOC": (
         (("B", "H"),),
         "the ratio counts exports against public-header declarations; a binary alone has no header records to compare with",
@@ -208,14 +209,19 @@ UNCLASSIFIED_REASONS: dict[str, str] = {
     "kabi_*": "kernel ABI symbol metadata: not covered by the ELF/PE/Mach-O sets",
 }
 
-FORMS.update(G3_FORMS)  # header-graph and DWARF-deleted families; see seed_observable_forms_g3.py
+FORMS.update(
+    G3_FORMS
+)  # header-graph and DWARF-deleted families; see seed_observable_forms_g3.py
 
 FORM_CODES = frozenset(FORMS)
 
 #: The language a form's condition is scoped to (``DH:C``, ``B:CXX``). Forms
 #: absent here are language-free.
 FORM_LANGUAGES: dict[str, tuple[str, ...]] = {"DH:C": ("c",), "B:CXX": ("cxx",)}
-FORM_ARCHES: dict[str, tuple[str, ...]] = {"DH:ELF_X86_64": ("x86_64",)}
+FORM_ARCHES: dict[str, tuple[str, ...]] = {
+    "DH:ELF_X86_64": ("x86_64",),
+    "B:ELF_X86_64": ("x86_64",),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,7 +451,10 @@ def _constants_block(codes: set[str]) -> list[str]:
         ]
         if rationale:
             parts.append(f'rationale="{rationale}"')
-        axes = (("platform", ", ".join(f"Platform.{x.upper()}" for x in platforms)), ("arch", ", ".join(f"Arch.{x.upper()}" for x in FORM_ARCHES.get(code, ()))))
+        axes = (
+            ("platform", ", ".join(f"Platform.{x.upper()}" for x in platforms)),
+            ("arch", ", ".join(f"Arch.{x.upper()}" for x in FORM_ARCHES.get(code, ()))),
+        )
         cond = [f"{k}=frozenset({{{v}}})" for k, v in axes if v]
         if cond:
             parts.append(f"condition=ObservabilityCondition({', '.join(cond)})")
@@ -685,7 +694,11 @@ def apply_decisions(dry_run: bool) -> dict[str, int]:
         used = {"observable"}
         if any(FORMS[c][2] for d in decs for c in d.codes):
             used |= {"ObservabilityCondition", "Platform"}
-        used |= {"Arch"} if any(FORM_ARCHES.get(c) for d in decs for c in d.codes) else set()
+        used |= (
+            {"Arch"}
+            if any(FORM_ARCHES.get(c) for d in decs for c in d.codes)
+            else set()
+        )
         lines.insert(imp, f"from .observability import {', '.join(sorted(used))}\n")
         text = _ruff_format(path, "".join(lines))
         if text.count("\n") <= PRODUCTION_LINE_CAP:

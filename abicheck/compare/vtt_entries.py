@@ -89,8 +89,16 @@ def _diff_vtt_entries(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             )
             continue
         o_entries, n_entries = old_map.get(vtt), new_map.get(vtt)
-        if o_entries is None or n_entries is None or len(o_entries) != len(n_entries):
-            record_declined(vtt, "VTT entry targets were not read for this VTT")
+        expected = new_vtts[vtt] // word
+        if (
+            o_entries is None
+            or n_entries is None
+            or len(o_entries) != expected
+            or len(n_entries) != expected
+        ):
+            record_declined(
+                vtt, "VTT entry targets were not read for every slot of this VTT"
+            )
             continue
         unknown = []
         for index, (o, n) in enumerate(zip(o_entries, n_entries, strict=True)):

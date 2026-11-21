@@ -34,7 +34,7 @@ the "Adding a new ChangeKind" procedure names those five modules by name.
 
 from __future__ import annotations
 
-from .observability import ObservabilityCondition, Platform, observable
+from .observability import ELF_X86_64, observable
 from .registry import (
     ChangeEntity,
     ChangeKindMeta,
@@ -44,9 +44,7 @@ from .registry import (
 )
 
 _OBS_B = observable(("B",))
-_OBS_B_ELF = observable(
-    ("B",), condition=ObservabilityCondition(platform=frozenset({Platform.ELF}))
-)
+_OBS_B_ELF_X86_64 = observable(("B",), condition=ELF_X86_64)
 _OBS_DH = observable(
     ("B", "D"),
     ("B", "H"),
@@ -74,7 +72,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "vtt_entry_target_changed",
         _B,
-        observable_at=(_OBS_B_ELF,),
+        observable_at=(_OBS_B_ELF_X86_64,),
         impact="An entry of a class's VTT (virtual-table-table, `_ZTT`) now "
         "points at a different address point, while the VTT kept its size. "
         "Constructors and destructors of a class with virtual bases install "

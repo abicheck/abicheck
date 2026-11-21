@@ -44,7 +44,8 @@ __all__ = ["read_vtt_entries"]
 
 _VTT_PREFIX = "_ZTT"
 #: x86-64 relocation types whose value is ``S + A``.
-_R_X86_64_SYMBOLIC = {1, 6}  # R_X86_64_64, R_X86_64_GLOB_DAT
+_R_X86_64_64 = 1  # S + A
+_R_X86_64_GLOB_DAT = 6  # S (the addend is not applied)
 _R_X86_64_RELATIVE = 8
 _WORD = 8
 
@@ -62,6 +63,10 @@ def read_vtt_entries(
     an empty map when the library exports no VTT.
     """
     if elf["e_machine"] != "EM_X86_64" or elf.elfclass != 64:
+        return None
+    if not meta.symbols:
+        # No export was read (or the export read failed): "no VTT" would be
+        # a claim the parse cannot support, so the map stays unknown.
         return None
     vtts = {
         s.name: s.size
@@ -85,6 +90,7 @@ def _read(
 
     objects: dict[str, tuple[int, int]] = {}  # name -> (start, size)
     vtt_starts: dict[str, int] = {}
+    versions = _symbol_versions(elf)
     for section in elf.iter_sections():
         if not isinstance(section, SymbolTableSection):
             continue
@@ -101,21 +107,35 @@ def _read(
                 objects[sym.name] = (-1, 0)
                 continue
             objects[sym.name] = span
-            if section["sh_type"] == "SHT_DYNSYM" and sym.name in vtts:
+            if (
+                section["sh_type"] == "SHT_DYNSYM"
+                and sym.name in vtts
+                and _backed(elf, shndx, span)
+            ):
                 vtt_starts[sym.name] = span[0]
+    # Only the VTT words are read: other relocations are never resolved.
+    slots = {
+        start + i * _WORD
+        for name, start in vtt_starts.items()
+        for i in range(vtts[name] // _WORD)
+    }
 
     relocs: dict[int, _Resolved | None] = {}
     for section in elf.iter_sections():
         if isinstance(section, RelrRelocationSection):
             for rel in section.iter_relocations():
                 off = int(rel["r_offset"])
-                relocs[off] = ("addr", _read_word(elf, off))
+                if off in slots:
+                    relocs[off] = ("addr", _read_word(elf, off))
         elif isinstance(section, RelocationSection):
             if not section.is_RELA():
                 return None
             symtab = elf.get_section(section["sh_link"])
+            dynamic = section["sh_link"] == _dynsym_index(elf)
             for rel in section.iter_relocations():
-                relocs[int(rel["r_offset"])] = _resolve(rel, symtab)
+                off = int(rel["r_offset"])
+                if off in slots:
+                    relocs[off] = _resolve(rel, symtab, versions if dynamic else None)
 
     index = _CoverIndex(objects)
     out: dict[str, tuple[VttEntryTarget | None, ...]] = {}
@@ -130,19 +150,85 @@ def _read(
     return out
 
 
-def _resolve(rel: Any, symtab: Any) -> _Resolved | None:
-    """One RELA relocation as an address or an unresolved ``(symbol, addend)``."""
+def _resolve(
+    rel: Any, symtab: Any, versions: dict[int, str | None] | None
+) -> _Resolved | None:
+    """One RELA relocation as an address or an unresolved ``(symbol, addend)``.
+
+    An imported symbol carries its required version (``_ZTV1V@V2``): two
+    versions of one name can be two tables. A version that cannot be read
+    leaves the target unknown.
+    """
     rtype = rel["r_info_type"]
-    addend = int(rel["r_addend"])
     if rtype == _R_X86_64_RELATIVE:
-        return ("addr", addend)
-    if rtype not in _R_X86_64_SYMBOLIC or symtab is None:
+        return ("addr", int(rel["r_addend"]))
+    if rtype == _R_X86_64_64:
+        addend = int(rel["r_addend"])
+    elif rtype == _R_X86_64_GLOB_DAT:
+        addend = 0
+    else:
         return None
-    sym = symtab.get_symbol(rel["r_info_sym"])
+    if symtab is None:
+        return None
+    index = rel["r_info_sym"]
+    sym = symtab.get_symbol(index)
     shndx = sym.entry["st_shndx"]
     if shndx == "SHN_UNDEF" or shndx == 0:
-        return ("sym", sym.name, addend) if sym.name else None
+        if not sym.name:
+            return None
+        if versions is None:
+            return ("sym", sym.name, addend)
+        if index not in versions:
+            return ("sym", sym.name, addend)  # unversioned import
+        version = versions[index]
+        if version is None:
+            return None
+        return ("sym", f"{sym.name}@{version}", addend)
     return ("addr", int(sym.entry["st_value"]) + addend)
+
+
+def _dynsym_index(elf: Any) -> int | None:
+    for i, section in enumerate(elf.iter_sections()):
+        if section["sh_type"] == "SHT_DYNSYM":
+            return i
+    return None
+
+
+def _symbol_versions(elf: Any) -> dict[int, str | None]:
+    """``{.dynsym index: required version name}`` for versioned imports.
+
+    Indexes with no version (``VER_NDX_LOCAL``/``GLOBAL``) are absent; an
+    index naming a version this file does not declare maps to None.
+    """
+    from elftools.elf.gnuversions import GNUVerNeedSection, GNUVerSymSection
+
+    names: dict[int, str] = {}
+    versym = None
+    for section in elf.iter_sections():
+        if isinstance(section, GNUVerNeedSection):
+            for _verneed, auxiliaries in section.iter_versions():
+                for aux in auxiliaries:
+                    names[int(aux["vna_other"])] = aux.name
+        elif isinstance(section, GNUVerSymSection):
+            versym = section
+    out: dict[int, str | None] = {}
+    if versym is None:
+        return out
+    for index in range(versym.num_symbols()):
+        ndx = versym.get_symbol(index).entry["ndx"]
+        if isinstance(ndx, int) and ndx & 0x7FFF > 1:
+            out[index] = names.get(ndx & 0x7FFF)
+    return out
+
+
+def _backed(elf: Any, shndx: int, span: tuple[int, int]) -> bool:
+    """Whether the symbol's whole span lies in file-backed section bytes."""
+    section = elf.get_section(shndx)
+    if section is None or section["sh_type"] == "SHT_NOBITS":
+        return False
+    start, size = span
+    base = int(section["sh_addr"])
+    return base <= start and start + size <= base + int(section["sh_size"])
 
 
 def _read_word(elf: Any, address: int) -> int | None:

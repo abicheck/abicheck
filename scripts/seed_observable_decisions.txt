@@ -165,7 +165,7 @@ vtable_slot_count_changed        B:ELF_MACHO
 vtable_thunk_offset_changed      B:ELF_MACHO
 vtable_thunk_set_changed         B:ELF_MACHO
 vtt_slot_count_changed           B:ELF_MACHO
-vtt_entry_target_changed         B:ELF  # compare/vtt_entries.py: x86-64 ELF dynamic relocations of the exported _ZTT
+vtt_entry_target_changed         B:ELF_X86_64  # compare/vtt_entries.py: x86-64 ELF dynamic relocations of the exported _ZTT
 # -- platform: ELF / Mach-O / PE header and dynamic facts (B) --------------
 abi_tag_changed                  B:ELF
 allocator_replacement_added      B:ELF

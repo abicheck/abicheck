@@ -197,3 +197,59 @@ def test_unread_fact_round_trips_as_unknown(tmp_path):
     save_snapshot(_snap(None), path)
     assert "elf_vtt_entries" not in path.read_text()
     assert load_snapshot(path).elf.vtt_entries is None
+
+
+# ── relocation forms and imported-table identity (review follow-ups) ───────
+
+
+class _Sym:
+    def __init__(self, name: str, shndx: object, value: int = 0) -> None:
+        self.name = name
+        self.entry = {"st_shndx": shndx, "st_value": value}
+
+
+class _Symtab:
+    def __init__(self, *syms: _Sym) -> None:
+        self._syms = syms
+
+    def get_symbol(self, index: int) -> _Sym:
+        return self._syms[index]
+
+
+def _rel(rtype: int, index: int, addend: int) -> dict:
+    return {"r_info_type": rtype, "r_info_sym": index, "r_addend": addend}
+
+
+def test_glob_dat_ignores_its_addend_and_r64_keeps_it():
+    from abicheck.extract.elf_vtt_entries import _resolve
+
+    tab = _Symtab(_Sym("", 0), _Sym("_ZTV3ext", "SHN_UNDEF"), _Sym("_ZTV1A", 5, 0x100))
+    # R_X86_64_GLOB_DAT writes S: two addends, one target.
+    assert _resolve(_rel(6, 1, 0), tab, None) == _resolve(_rel(6, 1, 16), tab, None)
+    assert _resolve(_rel(6, 2, 24), tab, None) == ("addr", 0x100)
+    # R_X86_64_64 writes S + A.
+    assert _resolve(_rel(1, 1, 16), tab, None) == ("sym", "_ZTV3ext", 16)
+    assert _resolve(_rel(1, 2, 24), tab, None) == ("addr", 0x118)
+    assert _resolve(_rel(8, 0, 0x4C28), tab, None) == ("addr", 0x4C28)
+    assert _resolve(_rel(2, 1, 0), tab, None) is None  # PC32: unsupported
+
+
+def test_imported_table_keeps_its_required_version():
+    from abicheck.extract.elf_vtt_entries import _resolve
+
+    tab = _Symtab(_Sym("", 0), _Sym("_ZTV1V", "SHN_UNDEF"))
+    v1 = _resolve(_rel(1, 1, 16), tab, {1: "V1"})
+    v2 = _resolve(_rel(1, 1, 16), tab, {1: "V2"})
+    assert v1 == ("sym", "_ZTV1V@V1", 16) and v2 == ("sym", "_ZTV1V@V2", 16)
+    assert _resolve(_rel(1, 1, 16), tab, {}) == ("sym", "_ZTV1V", 16)
+    assert _resolve(_rel(1, 1, 16), tab, {1: None}) is None  # unreadable version
+
+
+@pytest.mark.parametrize("short_side", ["old", "new"])
+def test_stored_rows_shorter_than_the_vtt_decline(short_side):
+    full, short = _OLD, _OLD[:3]  # a 32-byte VTT holds four entries
+    old, new = (short, full) if short_side == "old" else (full, short)
+    result = compare(_snap(old), _snap(new))
+    assert _vtt_findings(result) == []
+    ((entity, _reason),) = _declined(result)
+    assert entity == "_ZTT1D"
