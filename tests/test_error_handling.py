@@ -284,8 +284,15 @@ class TestCheckerEdgeCases:
         vtable_changes = [
             c for c in r.changes if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
         ]
-        assert len(vtable_changes) == 1
-        assert "reordered" in vtable_changes[0].description
+        # One class finding, plus one per moved entry (no per-function
+        # vtable_index here, so the declared sequence names them).
+        (cls,) = [c for c in vtable_changes if c.symbol == "W"]
+        assert "reordered" in cls.description
+        assert sorted(c.symbol for c in vtable_changes if c is not cls) == [
+            "_ZA",
+            "_ZB",
+            "_ZC",
+        ]
 
     def test_empty_vtable_to_nonempty_is_breaking(self):
         t_old = RecordType(name="W", kind="class", vtable=[])
