@@ -40,3 +40,11 @@ The latter two experiments use identical source text for both providers. Both br
 The earlier budget of 38 review rows and 164 planned tests was a manual allocation. It has no mathematical relationship to the measured layout count of 38. Report coverage separately for each bounded domain and operation. Establish a reduction rule before extrapolating to more fields, nested types or other ABIs.
 
 Sources: [WG14 N1256](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1256.pdf), [AMD64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI), [Itanium C++ ABI](https://itanium-cxx-abi.github.io/cxx-abi/abi.html), [WG21 P0012R1](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0012r1.html), [WG21 P0482R6](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0482r6.html).
+
+## Old-client results for three aggregate operations and C++ subobjects
+
+Run `python3 research/standard-space/operations.py` on the same GCC/G++ 14.2 Linux AMD64 profile. The 280 C99 controls exercise five shapes (II, IS, SI, SS, III). For each shape there is one return, one pointer read and 54 variadic extractions. The variadic client has one fixed integer marker, then 0–5 integer and 0–8 floating variadic prefix arguments. Both baseline and same-source replacement were run. The observer checks field values, including a three-long result above the two-eightbyte register threshold. It does not inspect return registers or va_list cursor locations directly.
+
+Swapping the first two named long fields in two- and three-long records changed the old client's result from 11 to 22 in all six operation/shape pairs. Sizes and field transport classes were held constant. For these mutations a register classifier alone cannot establish compatibility.
+
+For both C++98 and C++03, growing the primary base made the old client's secondary-base address differ from the provider's address. Calls using the provider's correct base pointer still returned 33 after construction and 11 during base construction. Swapping virtual slots instead preserved the base address but changed these results to 44 and 22 respectively. The client callback runs inside a virtual-base hierarchy. A VTT-only mutation remains open. See operations.csv for both stages of each experiment. These fixtures measure runtime observations independently of the generator and checker.
