@@ -1338,21 +1338,16 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     directly_referenced = _directly_referenced(old, new)
-    old_unions = _build_type_map(
-        t
-        for t in old.declarations.types
-        if t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
+    old_unions, new_unions = (
+        _build_type_map(
+            t
+            for t in snap.declarations.types
+            if t.is_union
+            and _is_abi_surface_type(
+                t, exclude_stdlib=excl, directly_referenced=directly_referenced
+            )
         )
-    )
-    new_unions = _build_type_map(
-        t
-        for t in new.declarations.types
-        if t.is_union
-        and _is_abi_surface_type(
-            t, exclude_stdlib=excl, directly_referenced=directly_referenced
-        )
+        for snap in (old, new)
     )
     # Same legacy-snapshot cv-fact concern as _diff_type_field_pair (Codex
     # review, PR #582).
