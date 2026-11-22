@@ -26,8 +26,9 @@ adapter, device image, private implementation or runtime behavior.
 | v2::array::empty, full, zeros, wrap with queue | abiforge.run.onedal_sycl | Count of empty allocation, initialized data and wrapped value |
 | v1::homogen_table::wrap with queue | abiforge.run.onedal_sycl and dependency_consumer.cpp | Shape and visibility of producer data |
 | v1::row_accessor::pull and column_accessor::pull returning dal::array | abiforge.run.onedal_sycl | First element from the queue overload |
+| v1::csr_table::wrap and both v1::csr_accessor::pull queue overloads | csr_consumer.cpp | Full one-based matrix, then a zero-based one-row slice through caller-supplied arrays |
 
-These witnesses directly call 14 of the 59 inventory rows. Seven generated
+These witnesses directly call 17 of the 59 inventory rows. Seven generated
 bridge exports were withdrawn together. The checker attributed all seven to
 sycl_overload_set_removed, the unchanged control returned NO_CHANGE, the old
 queue consumer failed to load and its rebuild failed. The host sibling ran and
@@ -57,6 +58,15 @@ requires intervening versions and a GPU. The Level Zero GPU selector reported
 no matching device here. Run the same executable on a GPU runner with
 ONEAPI_DEVICE_SELECTOR=level_zero:gpu and record its device and driver.
 
+The CSR fixture builds with the same command by substituting csr_consumer.cpp.
+It passed on all three matched CPU configurations.
+
+The plugin scanner previously skipped both Intel 2025.0.4 adapters because
+their exported dispatch root is urGetGlobalProcAddrTable. After accepting that
+root, static scans retained 21 exports each for OpenCL and Level Zero in
+2025.0.4 and 2025.3.2. The generated plugin campaign separately checks addition,
+removal, entry-point edits and an unchanged control for this export shape.
+
 ## Event dependency mutations
 
     python event_mutations.py "$SDK" /tmp/onedal-event-mutations
@@ -79,10 +89,19 @@ The runtime test detects the dropped dependency on this schedule. A delayed
 consumer could observe 42 even with the mutation. A successful single run
 cannot establish ordering in general.
 
+A separate minimal L2 comparison kept a host sibling and shortened a queue
+function template by one defaulted event-list argument. The checker emitted
+overload_set_rerouted and classified the pair COMPATIBLE_WITH_RISK. This leaves
+a source-classification gap when a formerly supported call no longer compiles.
+For the full oneDAL header the baseline dump completed, but extraction of the
+mutated header was killed (exit 137, approximately 1.4 GiB intermediate AST),
+including on a sequential disk-backed retry. There is no full-header checker
+verdict for that pair. The compiler rejection in the table above is verified.
+
 ## Remaining witnesses
 
-Prioritize queue read/write contracts for CSR (including both pull overloads),
-caller-owned row/column buffers, push, and chunked arrays. Next exercise
+Prioritize caller-owned row/column buffers, push, CSR device allocations,
+and chunked arrays. Next exercise
 multi-rank USM communicators and preview dispatch, multi-block partial updates,
 and real Level Zero execution. Report a direct declaration witness, an
 independent mutation and its checker verdict separately for each extension.

@@ -35,8 +35,8 @@ Supports two plugin interface generations:
   ``urGetPlatformProcAddrTable``, ``urGetDeviceProcAddrTable``, ...) —
   individual per-verb symbols are no longer exported at all in that shape,
   so the loader resolves real entry points indirectly through these
-  tables. ``urGetAdapterProcAddrTable`` plays the current generation's
-  validity-marker role that ``urAdapterGet`` plays for the older one.
+  tables. The 2025.0.4 OpenCL and Level Zero adapters expose the global
+  table getter (``urGetGlobalProcAddrTable``) in place of the adapter getter.
 
 Both interfaces use the same detection approach: glob for plugin libraries,
 parse ``.dynsym`` via pyelftools, match symbol patterns.  No SYCL compiler
@@ -76,13 +76,11 @@ _UR_SYMBOL_RE = re.compile(r"^ur[A-Z]\w+$")
 _PI_PLUGIN_NAME_RE = re.compile(r"^libpi_(\w+)\.so")
 _UR_PLUGIN_NAME_RE = re.compile(r"^libur_adapter_(\w+)\.so")
 
-# The validity-marker entry point for each of the two UR export shapes
-# (module docstring): the older per-verb-symbol generation, and the current
-# function-pointer-table-getter generation. A UR plugin is valid if EITHER
-# is present -- accepting only one would silently reject the other real,
-# currently-shipping generation as "not a valid UR adapter".
+# The loader-facing root exports seen in direct and table-based adapters.
 _UR_LEGACY_ENTRYPOINT = "urAdapterGet"
-_UR_TABLE_ENTRYPOINT = "urGetAdapterProcAddrTable"
+_UR_ROOT_EXPORTS = frozenset(
+    {_UR_LEGACY_ENTRYPOINT, "urGetAdapterProcAddrTable", "urGetGlobalProcAddrTable"}
+)
 
 # Backend type detection from plugin library name.
 _BACKEND_MAP: dict[str, str] = {
@@ -253,16 +251,8 @@ def parse_sycl_plugin(so_path: Path) -> SyclPluginInfo | None:
     if ur_match:
         plugin_name = ur_match.group(1)
         entry_points = _extract_plugin_symbols(so_path, _UR_SYMBOL_RE)
-        if (
-            _UR_LEGACY_ENTRYPOINT not in entry_points
-            and _UR_TABLE_ENTRYPOINT not in entry_points
-        ):
-            log.warning(
-                "Plugin %s missing both %s and %s — not a valid UR adapter",
-                so_path,
-                _UR_LEGACY_ENTRYPOINT,
-                _UR_TABLE_ENTRYPOINT,
-            )
+        if _UR_ROOT_EXPORTS.isdisjoint(entry_points):
+            log.warning("Plugin %s missing UR adapter root entry point", so_path)
             return None
         return SyclPluginInfo(
             name=plugin_name,

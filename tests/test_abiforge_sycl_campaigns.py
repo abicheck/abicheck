@@ -30,7 +30,7 @@ def test_pi_and_ur_export_mutations(tmp_path: Path) -> None:
     if shutil.which("cc") is None:
         pytest.skip("needs a C compiler")
     rows = _run("sycl_plugins", tmp_path)
-    assert len(rows) == 12
+    assert len(rows) == 17
     assert all(row["matches"] for row in rows.values())
 
 

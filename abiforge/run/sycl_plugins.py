@@ -83,6 +83,11 @@ def main() -> int:
         for iface, filename, entries in (
             ("pi", "libpi_opencl.so", _PI),
             ("ur", "libur_adapter_opencl.so", _UR),
+            (
+                "ur-global",
+                "libur_adapter_opencl.so",
+                ("urGetGlobalProcAddrTable", "urGetDeviceProcAddrTable"),
+            ),
         ):
             plugin = root / filename
             snaps = {}

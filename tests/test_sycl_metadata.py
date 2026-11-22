@@ -253,14 +253,19 @@ class TestParseSyclPlugin:
         ):
             assert parse_sycl_plugin(so) is None
 
-    def test_ur_plugin_table_generation_recognized(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "root", ["urGetAdapterProcAddrTable", "urGetGlobalProcAddrTable"]
+    )
+    def test_ur_plugin_table_generation_recognized(
+        self, tmp_path: Path, root: str
+    ) -> None:
         """The current UR export shape (verified against a real Intel
         oneAPI 2026.1 install, G30 pilot validation) exports only
         urGet<Category>ProcAddrTable getters -- no legacy urAdapterGet at
         all. Must be recognized as a valid plugin, not silently rejected."""
         so = _write_elf(tmp_path, "libur_adapter_level_zero.so")
         table_symbols = [
-            "urGetAdapterProcAddrTable",
+            root,
             "urGetPlatformProcAddrTable",
             "urGetDeviceProcAddrTable",
             "urGetContextProcAddrTable",
