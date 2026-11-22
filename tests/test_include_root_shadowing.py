@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _abicheck_subprocess import abicheck_command
 
 from abicheck.header_utils import _implicit_header_includes
 
@@ -75,7 +76,7 @@ def test_dump_parses_umbrella_whose_package_ships_endian_h(tmp_path: Path) -> No
     subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(lib), str(src)], check=True)
     out = tmp_path / "snap.json"
     proc = subprocess.run(
-        ["abicheck", "dump", str(lib), "-H", str(pkg / "api.h"), "-o", str(out)],
+        abicheck_command("dump", lib, "-H", pkg / "api.h", "-o", out),
         capture_output=True,
         text=True,
         check=False,

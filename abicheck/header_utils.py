@@ -243,7 +243,7 @@ def _implicit_header_includes(headers: list[Path]) -> list[Path]:
         # `-I` would let its flat names shadow libc headers -- protobuf's
         # `include/google/protobuf/endian.h` captured glibc's `<endian.h>` from
         # `sys/types.h` and broke the whole parse.
-        if h.is_dir() or not roots or h.parent in roots:
+        if h.is_dir() or not roots or h.parent.name.lower() in _INCLUDE_ROOT_NAMES:
             _add(h if h.is_dir() else h.parent)
         for ancestor in roots:
             _add(ancestor)
