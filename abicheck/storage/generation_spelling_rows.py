@@ -794,4 +794,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "spellings. A castxml parameter whose written type is va_list now records "
         "Param.is_va_list as present; an older snapshot's unsupported fact is not compared."
     ),
+    92: GenerationSpellingChange(
+        "Inferred -H roots: an interior -H dir is no longer searched; no rewrite applies."
+    ),
 }

@@ -318,7 +318,11 @@ def test_merge_into_keeps_other_tiers():
     prior = {"results": [1], "source_results": [2], "generated_utc": "t0"}
     merged = ht.merge_into(
         prior,
-        {"header_results": [{"lib": "a"}], "generated_utc": "t1", "abicheck_version": "v"},
+        {
+            "header_results": [{"lib": "a"}],
+            "generated_utc": "t1",
+            "abicheck_version": "v",
+        },
     )
     assert merged["results"] == [1] and merged["source_results"] == [2]
     assert (
