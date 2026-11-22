@@ -23,7 +23,8 @@ on:
         required: false
         default: "both"
         type: choice
-        options: ["binary", "source", "both"]
+        # `both` = binary + source; the L2 `header` tier runs alone when chosen.
+        options: ["binary", "source", "both", "header"]
   schedule:
     # Weekly, Monday 05:31 UTC — offset from the other scheduled lanes.
     - cron: "31 5 * * 1"
@@ -58,6 +59,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        contains(github.event.pull_request.labels.*.name, 'eval'))
       && github.event.inputs.tier != 'source'
+      && github.event.inputs.tier != 'header'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -125,6 +127,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        contains(github.event.pull_request.labels.*.name, 'eval'))
       && github.event.inputs.tier != 'binary'
+      && github.event.inputs.tier != 'header'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -186,6 +189,74 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: eval-source-tier
+          path: |
+            skills-src/evaluation/field/results
+            skills-src/evaluation/field/REPORT.md
+
+  header-tier:
+    name: Header tier (L2) coverage
+    # Exploratory and non-gating (FOLLOWUPS H4): binary + public headers per
+    # manifest `headers:` block. A fetch or header-compile failure is a
+    # per-row error, and continue-on-error keeps the job from failing the run.
+    # Same PR-label opt-in; skipped for a `tier: binary`/`tier: source` dispatch.
+    if: >-
+      (github.event_name != 'pull_request' ||
+       contains(github.event.pull_request.labels.*.name, 'eval'))
+      && github.event.inputs.tier != 'binary'
+      && github.event.inputs.tier != 'source'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install system tools
+        # zstd: extract .conda archives; binutils: readelf.
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: zstd binutils
+
+      # `compare --header` runs the L2 header parse -- CastXML.
+      - uses: ./.github/actions/setup-castxml
+
+      - name: Install abicheck + tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pyyaml
+
+      - name: Run header tier (non-gating)
+        # See the binary-tier step's comment on why `only` goes through `env:`.
+        env:
+          ONLY_INPUT: ${{ github.event.inputs.only }}
+        run: |
+          set -euo pipefail
+          ONLY=()
+          if [ -n "${ONLY_INPUT:-}" ]; then
+            ONLY=(--only "$ONLY_INPUT")
+          fi
+          python skills-src/evaluation/field/runner.py --tier header ${ONLY[@]+"${ONLY[@]}"}
+
+      - name: Write header tier to job summary
+        if: always()
+        run: |
+          {
+            echo "## Eval header-tier (L2)"
+            echo ""
+            awk '/^## Header tier/{f=1;print;next} /^## /{f=0} f' skills-src/evaluation/field/REPORT.md 2>/dev/null || echo "(no header-tier report)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload header-tier results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: eval-header-tier
           path: |
             skills-src/evaluation/field/results
             skills-src/evaluation/field/REPORT.md

@@ -119,6 +119,68 @@ def test_resolve_side_umbrella_includes_and_deps(monkeypatch, tmp_path):
     assert res["includes"] == [inc, inc + "/oneapi", str(tmp_path / "absl" / "include")]
 
 
+def test_resolve_side_dep_include_is_relative_to_package_root(monkeypatch, tmp_path):
+    # glib's glibconfig.h lives in the `glib` package's lib/glib-2.0/include,
+    # which has no include/ tree at all.
+    monkeypatch.setattr(
+        cf,
+        "resolve_headers_pkg",
+        _fake_fs(tmp_path, {"libglib": ["glib-2.0/gio/gio.h"]}),
+    )
+    seen = []
+
+    def fetch(pkg, ver):
+        seen.append((pkg, ver))
+        return str(tmp_path / f"root-{pkg}-{ver}")
+
+    monkeypatch.setattr(cf, "fetch_extract", fetch)
+    entry = {
+        "lib": "glib",
+        "conda_pkg": "libglib",
+        "old": "1",
+        "new": "2",
+        "headers": {
+            "umbrella": ["glib-2.0/gio/gio.h"],
+            "deps": [
+                {"pkg": "glib", "old": "1", "new": "2", "include": ["lib/x", "lib/y"]}
+            ],
+        },
+    }
+    res = ht.resolve_side(entry, "old")
+    root = str(tmp_path / "root-glib-1")
+    assert res["includes"][1:] == [root + "/lib/x", root + "/lib/y"]
+    assert seen == [("glib", "1")]
+
+
+def test_repodata_files_indexes_removed_archives_below_live_builds():
+    repo = {
+        "packages.conda": {
+            "p-1.0-h_1.conda": {"name": "p", "version": "1.0", "build_number": 1},
+        },
+        "removed": [
+            "p-1.0-hx_3.conda",
+            "p-2.0-h612f066_0.conda",
+            "q-x-1.tar.bz2",
+            "junk",
+        ],
+    }
+    idx = cf.repodata_files(repo, "linux-64")
+    by_base = {f["basename"]: f for f in idx["p"]}
+    assert by_base["linux-64/p-2.0-h612f066_0.conda"]["version"] == "2.0"
+    assert by_base["linux-64/p-1.0-hx_3.conda"]["attrs"]["build_number"] == 3
+    assert idx["q"][0]["version"] == "x"
+    assert "junk" not in idx
+    cf_files = idx["p"]
+    old = cf.list_files
+    try:
+        cf.list_files = lambda pkg, subdir="linux-64": cf_files
+        # live build 1 wins over removed build 3 of the same version
+        assert cf.pick("p", "1.0")["basename"] == "linux-64/p-1.0-h_1.conda"
+        assert cf.pick("p", "2.0")["basename"] == "linux-64/p-2.0-h612f066_0.conda"
+    finally:
+        cf.list_files = old
+
+
 def test_resolve_side_missing_umbrella_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(cf, "resolve_headers_pkg", _fake_fs(tmp_path, {"z": ["z.h"]}))
     entry = {

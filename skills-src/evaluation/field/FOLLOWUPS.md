@@ -411,7 +411,7 @@ network-enabled run.
   with it; `tests/test_dry_run_contract.py` covers the dry-run contract but
   no test pins the size term itself today (open).
 
-### H4. Fetch devel/include + dependency header packages — **shipped (harness); acceptance partial**
+### H4. Fetch devel/include + dependency header packages — **shipped (harness + CI job); protobuf open**
 - **Context.** `condafetch.py` fetches only the single runtime package, which
   for several libs (zlib, xz-liblzma, openblas) ships no `include/` tree; and
   header scans of split libraries need dependency include roots (protobuf→absl,
@@ -438,10 +438,26 @@ network-enabled run.
   logic tested in `tests/test_eval_header_tier.py`.
 - **Live (2026-11-21).** zlib, pcre2 (`-DPCRE2_CODE_UNIT_WIDTH=8`), lz4, onetbb,
   onednn, onedal all compared at L2 (see REPORT.md).
-- **Still open.** Not yet wired into `eval-suite.yml` (no header-tier job), and
-  the split-dependency cases the acceptance names — protobuf→abseil,
-  glib→gio, hdf5/libjpeg-turbo umbrellas — have no `headers:` block yet; their
-  `deps:` versions must be discovered per release.
+- **Wired (2026-11-22).** `eval-suite.yml` has a non-gating `header-tier` job
+  (`continue-on-error`, same `eval`-label / dispatch opt-in, dispatch
+  `tier: header`; binary/source jobs skip for it). Live L2 rows added:
+  libjpeg-turbo (`turbojpeg.h`) COMPATIBLE_WITH_RISK, hdf5 (`hdf5.h`) BREAKING,
+  glib (`glib-2.0/gio/gio.h` + `deps: glib` for `lib/glib-2.0/include`'s
+  `glibconfig.h`, via the new per-dep `include:` list relative to the package
+  root) BREAKING. `condafetch.repodata_files()` now also indexes the
+  repodata `removed` list (still served by the CDN), so libprotobuf 6.34.1 —
+  dropped from the index — is fetchable again; a live build beats a removed one.
+- **Still open: protobuf→abseil.** With `umbrella: google/protobuf/message.h`
+  and `deps: [{pkg: libabseil, old: "20260107.1", new: "20260817.0"}]` (the
+  abseil pins of libprotobuf 6.34.1 `h612f066_0` and 7.35.1 `h8a00109_4` in
+  conda-forge repodata), castxml fails on the old side: glibc's
+  `sys/types.h:176` `#include <endian.h>` resolves to
+  `google/protobuf/endian.h`, whose `port_def.inc` pulls
+  `absl/base/attributes.h` inside the glibc `extern "C"` block ("templates must
+  have C++ linkage"). Something on the compare path puts the umbrella's own
+  directory on the include path ahead of the system dirs; that is a product
+  question (header-dir include shadowing a system header), not a manifest
+  one, so no protobuf `headers:` block is committed.
 
 ### H5. Add oneDAL / oneTBB / oneDNN entries — **shipped (binary + header tiers); no source block**
 - **Context.** Split oneAPI packages exercise the devel-package + umbrella-

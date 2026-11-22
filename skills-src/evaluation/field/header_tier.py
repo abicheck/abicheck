@@ -20,6 +20,9 @@ row with ``error``; nothing here raises into the runner. The ``headers:`` block
       include: [glib-2.0]        # extra include dirs, relative to the include root
       deps:                      # dependency header packages (extra -I roots)
         - {pkg: libabseil, old: "20250127.1", new: "20250512.1"}
+        - {pkg: glib, old: "2.86.4", new: "2.88.1",
+           include: [lib/glib-2.0/include]}  # dirs relative to the package
+                                              # root (no include/ required)
 """
 from __future__ import annotations
 
@@ -58,6 +61,10 @@ def resolve_side(entry: dict, which: str) -> dict:
     includes = [inc] + [os.path.join(inc, d) for d in hb.get("include", [])]
     for dep in hb.get("deps", []):
         dver = str(dep[which])
+        if dep.get("include"):  # explicit dirs under the package root
+            root = cf.fetch_extract(dep["pkg"], dver)
+            includes.extend(os.path.join(root, d) for d in dep["include"])
+            continue
         _, dinc = cf.resolve_headers_pkg(dep["pkg"], dver, [dep["pkg"]])
         includes.append(dinc)
     return {"package": pkg, "include_root": inc, "headers": headers, "includes": includes}

@@ -671,12 +671,12 @@
       "old": "1.2.13",
       "new": "1.3.1",
       "expect": null,
-      "fetch_s": 17.81,
+      "fetch_s": 12.59,
       "header_pkg": "zlib",
       "umbrella": [
         "zlib.h"
       ],
-      "compare_s": 3.622,
+      "compare_s": 2.626,
       "exit": 0,
       "verdict": "COMPATIBLE_WITH_RISK",
       "evidence_tier": "header_aware",
@@ -695,13 +695,13 @@
       "old": "1.9.3",
       "new": "1.10.0",
       "expect": null,
-      "fetch_s": 1.97,
+      "fetch_s": 2.17,
       "header_pkg": "lz4-c",
       "umbrella": [
         "lz4.h",
         "lz4frame.h"
       ],
-      "compare_s": 2.962,
+      "compare_s": 2.855,
       "exit": 4,
       "verdict": "BREAKING",
       "evidence_tier": "header_aware",
@@ -710,9 +710,33 @@
       "confidence": "high",
       "breaking": 9,
       "source_breaks": 0,
-      "risk_changes": 36,
+      "risk_changes": 37,
       "compatible_additions": 16,
-      "total_changes": 64
+      "total_changes": 65
+    },
+    {
+      "lib": "libjpeg-turbo",
+      "tier": "header",
+      "old": "3.0.0",
+      "new": "3.1.4.1",
+      "expect": null,
+      "fetch_s": 2.12,
+      "header_pkg": "libjpeg-turbo",
+      "umbrella": [
+        "turbojpeg.h"
+      ],
+      "compare_s": 1.768,
+      "exit": 0,
+      "verdict": "COMPATIBLE_WITH_RISK",
+      "evidence_tier": "header_aware",
+      "assurance": "complete",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 0,
+      "source_breaks": 0,
+      "risk_changes": 2,
+      "compatible_additions": 6,
+      "total_changes": 11
     },
     {
       "lib": "pcre2",
@@ -720,12 +744,12 @@
       "old": "10.44",
       "new": "10.47",
       "expect": null,
-      "fetch_s": 3.36,
+      "fetch_s": 3.72,
       "header_pkg": "pcre2",
       "umbrella": [
         "pcre2.h"
       ],
-      "compare_s": 4.834,
+      "compare_s": 3.195,
       "exit": 0,
       "verdict": "COMPATIBLE_WITH_RISK",
       "evidence_tier": "header_aware",
@@ -739,17 +763,65 @@
       "total_changes": 169
     },
     {
+      "lib": "hdf5",
+      "tier": "header",
+      "old": "1.8.20",
+      "new": "2.1.0",
+      "expect": null,
+      "fetch_s": 5.31,
+      "header_pkg": "hdf5",
+      "umbrella": [
+        "hdf5.h"
+      ],
+      "compare_s": 7.547,
+      "exit": 4,
+      "verdict": "BREAKING",
+      "evidence_tier": "header_aware",
+      "assurance": "complete",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 1174,
+      "source_breaks": 14,
+      "risk_changes": 2300,
+      "compatible_additions": 1357,
+      "total_changes": 4930
+    },
+    {
+      "lib": "glib",
+      "tier": "header",
+      "old": "2.86.4",
+      "new": "2.88.1",
+      "expect": null,
+      "fetch_s": 7.75,
+      "header_pkg": "libglib",
+      "umbrella": [
+        "glib-2.0/gio/gio.h"
+      ],
+      "compare_s": 12.673,
+      "exit": 4,
+      "verdict": "BREAKING",
+      "evidence_tier": "header_aware",
+      "assurance": "complete",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 2,
+      "source_breaks": 0,
+      "risk_changes": 2452,
+      "compatible_additions": 56,
+      "total_changes": 2517
+    },
+    {
       "lib": "onetbb",
       "tier": "header",
       "old": "2022.2.0",
       "new": "2022.3.0",
       "expect": null,
-      "fetch_s": 1.75,
+      "fetch_s": 1.17,
       "header_pkg": "tbb-devel",
       "umbrella": [
         "oneapi/tbb.h"
       ],
-      "compare_s": 280.091,
+      "compare_s": 178.927,
       "exit": 4,
       "verdict": "BREAKING",
       "evidence_tier": "header_aware",
@@ -768,12 +840,12 @@
       "old": "3.8.1",
       "new": "3.9.1",
       "expect": null,
-      "fetch_s": 1.93,
+      "fetch_s": 2.28,
       "header_pkg": "onednn",
       "umbrella": [
         "oneapi/dnnl/dnnl.h"
       ],
-      "compare_s": 16.761,
+      "compare_s": 8.033,
       "exit": 4,
       "verdict": "BREAKING",
       "evidence_tier": "header_aware",
@@ -782,9 +854,9 @@
       "confidence": "high",
       "breaking": 1,
       "source_breaks": 0,
-      "risk_changes": 547,
+      "risk_changes": 549,
       "compatible_additions": 28,
-      "total_changes": 602
+      "total_changes": 604
     },
     {
       "lib": "onedal",
@@ -792,12 +864,12 @@
       "old": "2026.1.0",
       "new": "2026.2.0",
       "expect": null,
-      "fetch_s": 2.04,
+      "fetch_s": 3.43,
       "header_pkg": "dal-include",
       "umbrella": [
         "oneapi/dal.hpp"
       ],
-      "compare_s": 197.46,
+      "compare_s": 89.019,
       "exit": 0,
       "verdict": "COMPATIBLE_WITH_RISK",
       "evidence_tier": "header_aware",
@@ -812,7 +884,7 @@
     }
   ],
   "header_run": {
-    "generated_utc": "2026-11-21T22:17:56+00:00",
-    "abicheck_version": "abicheck 0.8.0+g8bf620406 (abicheck/abicheck)"
+    "generated_utc": "2026-11-22T05:29:23+00:00",
+    "abicheck_version": "abicheck 0.8.0+g02c27e369 (abicheck/abicheck)"
   }
 }
