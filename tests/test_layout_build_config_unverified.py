@@ -242,7 +242,10 @@ def test_abiforge_owes_reduced_assurance_only_at_stripped_headers(
     from abiforge.run.harness import label_toolchain
 
     op = OP_BY_NAME[op_name]
-    base = default_config(SEED_BY_NAME[seed_name].lang, label_toolchain("gcc"))
+    base = replace(
+        default_config(SEED_BY_NAME[seed_name].lang, label_toolchain("gcc")),
+        platform=("linux", "elf"),
+    )
     flagged = replace(base, flags=Flags(**flags), evidence="headers")
     stripped = op.expect(replace(flagged, stripped=True))
     assert any(LAYOUT_CONFIG_SIGNAL in g for g in stripped.any_of)
@@ -256,3 +259,11 @@ def test_abiforge_owes_reduced_assurance_only_at_stripped_headers(
     )
     plain = op.expect(replace(base, evidence="headers", stripped=True))
     assert plain.verdict_max == "COMPATIBLE_WITH_RISK"
+    # A PE build keeps no PDB, so its unstripped headers cell is {B,H} for
+    # layout as well: the same reduced assurance is owed, and allowed.
+    pe = ("win32", "pe")
+    pe_flagged = op.expect(replace(flagged, platform=pe))
+    assert any(LAYOUT_CONFIG_SIGNAL in g for g in pe_flagged.any_of)
+    assert pe_flagged.verdict_min == "COMPATIBLE_WITH_RISK"
+    pe_plain = op.expect(replace(base, evidence="headers", platform=pe))
+    assert pe_plain.verdict_max == "COMPATIBLE_WITH_RISK"

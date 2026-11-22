@@ -604,6 +604,18 @@ def issue_keys(problems: tuple[str, ...] | list[str]) -> frozenset[str]:
 LAYOUT_CONFIG_SIGNAL = "LAYOUT_BUILD_CONFIG_UNVERIFIED"
 
 
+def _layout_debug_unreadable(config: Config) -> bool:
+    """A ``headers`` cell whose layout the checker reads from headers alone.
+
+    Stripped ``{B,H}`` has no DWARF; a PE build keeps MinGW's DWARF in the
+    DLL, but PE layout debug evidence is read from a PDB, which these builds
+    do not produce. Either way no debug layout can confirm the build flags.
+    """
+    if config.evidence != "headers":
+        return False
+    return config.stripped or config.platform[1] == "pe"
+
+
 def flag_invisible_layout(
     exp: Expectation, config: Config, expect_at: Callable[[Config], Expectation]
 ) -> Expectation:
@@ -619,7 +631,7 @@ def flag_invisible_layout(
     * any build of such an edit may read ``COMPATIBLE_WITH_RISK`` (the
       benign ceiling rises by one step, never to a break).
     """
-    if not config.stripped or config.build_data or config.sources:
+    if not _layout_debug_unreadable(config) or config.build_data or config.sources:
         return exp
     plain = replace(config.flags, pack=None, short_enums=False)
     default = expect_at(replace(config, flags=plain))
