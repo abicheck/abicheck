@@ -23,6 +23,8 @@ _OPERATIONS = {
     "table_wrap": "d::homogen_table::wrap(ARGS p, 1, 1).get_row_count() + 6",
     "row_pull": "d::row_accessor<const float>{d::homogen_table::wrap(ARGS p, 1, 1)}.pull(ARGS d::range{0, 1}).get_data()[0]",
     "column_pull": "d::column_accessor<const float>{d::homogen_table::wrap(ARGS p, 1, 1)}.pull(ARGS 0).get_data()[0]",
+    "array_empty": "d::array<float>::empty(ARGS 7 ALLOC).get_count()",
+    "array_zeros": "7 + d::array<float>::zeros(ARGS 1 ALLOC).get_data()[0]",
     "array_full": "d::array<float>::full(ARGS 1, *p ALLOC).get_data()[0]",
 }
 _PREAMBLE = """#include <oneapi/dal/array.hpp>

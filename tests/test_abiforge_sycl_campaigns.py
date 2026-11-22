@@ -41,5 +41,5 @@ def test_onedal_queue_consumers(tmp_path: Path) -> None:
             "set ABIFORGE_ONEDAL_PREFIX to a oneDAL/DPC++ SDK with a shared-USM device"
         )
     rows = _run("onedal_sycl", tmp_path, "--prefix", prefix)
-    assert len(rows["compare-withdrawn"]["affected"]) == 5
+    assert len(rows["compare-withdrawn"]["affected"]) == 7
     assert all(row["matches"] for row in rows.values())

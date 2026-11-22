@@ -132,7 +132,7 @@ coverage from checker conformance and product-specific coverage.
 
 ### oneDAL SYCL consumer campaign (Linux)
 
-The optional SDK campaign builds five queue overloads and their host siblings
+The optional SDK campaign builds seven queue overloads and their host siblings
 against oneDAL, withdraws the queue overloads from a generated bridge, runs
 already-linked consumers, recompiles their source, and checks the exact grouped
 removals through the abicheck CLI. It also compares the unchanged bridge. These
