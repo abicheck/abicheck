@@ -51,6 +51,7 @@ class SymbolBinding:
     provider: str | None  # DSO path that provides it (None if missing)
     status: BindingStatus
     explanation: str  # Human-readable reason
+    required_version_unavailable: bool = False
 
 
 def compute_bindings(graph: DependencyGraph) -> list[SymbolBinding]:
@@ -315,6 +316,7 @@ def _resolve_import(
     found_name_hidden_only = False  # found but all versions are hidden/internal
     first_provider = None  # first provider with a visible matching symbol
     first_hidden_provider = None  # first provider where symbol exists but is hidden
+    unversioned_candidate = False
 
     for provider_path in load_order:
         # Skip self — a DSO doesn't provide its own imports.
@@ -338,6 +340,9 @@ def _resolve_import(
             continue  # hidden symbols cannot satisfy external refs
 
         if has_visible:
+            unversioned_candidate |= any(
+                not ver and vis not in ("hidden", "internal") for ver, _, vis in versions
+            )
             found_name_visible = True
             found_name_hidden_only = False
             if first_provider is None:
@@ -367,7 +372,7 @@ def _resolve_import(
             if match is not None:
                 return match
 
-    return _make_not_found_binding(
+    unresolved = _make_not_found_binding(
         consumer,
         sym_name,
         required_version,
@@ -377,3 +382,12 @@ def _resolve_import(
         first_provider,
         first_hidden_provider,
     )
+    # A strong, versioned relocation cannot bind to a different explicit
+    # version. Keep unversioned-provider fallback and weak references advisory.
+    unresolved.required_version_unavailable = (
+        unresolved.status == BindingStatus.VERSION_MISMATCH
+        and bool(required_version)
+        and not is_weak
+        and not unversioned_candidate
+    )
+    return unresolved

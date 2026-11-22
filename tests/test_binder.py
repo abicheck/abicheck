@@ -153,6 +153,7 @@ class TestVersionedSymbols:
         )
         bindings = compute_bindings(graph)
         assert bindings[0].status == BindingStatus.VERSION_MISMATCH
+        assert bindings[0].required_version_unavailable
 
     def test_unversioned_import_matches_default(self):
         graph = _make_graph(
