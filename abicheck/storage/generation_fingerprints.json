@@ -240,7 +240,7 @@
       "abicheck/pdb_parser.py": "cfcb071ded9843b10834a236b6d61ca2db9522fb6d18d535a0f3861cb8a6caf6",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
       "abicheck/pe_metadata.py": "179d05863acd9039f6dddfcf07e121475f03feeec6ba6512afc9e94875105c7e",
-      "abicheck/sycl_metadata.py": "935beb105608248ceb159902a08e76f084e5450f1e8a1ff4c9c041cbefeccc77",
+      "abicheck/sycl_metadata.py": "6a718f9630264440046c91c782d1e0b8f353ffb4680cd45155e7d87213d09965",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
       "abicheck/workflows/dump/elf_fallback.py": "31947cad933371a0d3863476ad34e1f9e3e60f8474b2eddbe161fdc1182eb2fa",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "f41f147778a821cfdda857982c347879e21feacb482585d4216cb66f584db42f",
+    "fingerprint": "08412a545bcb2e75ba5559a7193e1a51f429c7470bff82b6f4258e8fdae9b881",
     "generation": 93,
-    "reason": "Classic PI extension exports and DPC++ 2025 host AST replay."
+    "reason": "Recognize UR global dispatch roots and persist plugin inventory read failures."
   },
   "resolver": {
     "files": {

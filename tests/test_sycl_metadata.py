@@ -134,6 +134,17 @@ class TestExtractPluginSymbols:
         with _patch_elf([_make_dynsym([_make_sym("not_a_pi_symbol")])]):
             assert _extract_plugin_symbols(so, _PI_SYMBOL_RE) == []
 
+    def test_denied_plugin_read_marks_inventory_failed(self, tmp_path: Path) -> None:
+        from abicheck.model.availability import FactStatus
+
+        (tmp_path / "libsycl.so").touch()
+        _write_elf(tmp_path, "libpi_cuda.so")
+        with patch("builtins.open", side_effect=PermissionError("permission denied")):
+            metadata = parse_sycl_metadata(tmp_path)
+        assert metadata is not None
+        assert metadata.plugin_inventory_status is FactStatus.FAILED
+        assert "permission denied" in metadata.plugin_scan_errors[0]
+
     def test_parse_error_returns_empty(self, tmp_path: Path) -> None:
         from elftools.common.exceptions import ELFError
 

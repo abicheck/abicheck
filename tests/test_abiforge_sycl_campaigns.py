@@ -30,7 +30,14 @@ def test_pi_and_ur_export_mutations(tmp_path: Path) -> None:
     if shutil.which("cc") is None:
         pytest.skip("needs a C compiler")
     rows = _run("sycl_plugins", tmp_path)
-    assert len(rows) == 17
+    from abicheck.model.availability import FactStatus
+    from abicheck.serialization import load_snapshot
+
+    failed = load_snapshot(tmp_path / "unreadable.json").sycl
+    assert failed is not None
+    assert failed.plugin_inventory_status is FactStatus.FAILED
+    assert "libur_adapter_opencl.so" in failed.plugin_scan_errors[0]
+    assert len(rows) == 18
     assert all(row["matches"] for row in rows.values())
 
 

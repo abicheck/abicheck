@@ -115,6 +115,13 @@ def main() -> int:
                 if iface == "pi" and "entrypoint" in kind:
                     expected.append("sycl_pi_version_changed")
                 rows[stem] = compare(out, stem, snaps[before], snaps[after], expected)
+            if iface == "ur-global":
+                plugin.write_bytes(b"invalid ELF")
+                incomplete = out / "unreadable.json"
+                dump(runtime, incomplete)
+                rows["unreadable"] = compare(
+                    out, "extended-unreadable", snaps["extended"], incomplete, []
+                )
             plugin.unlink()
         # Same consumer and exports, first with an additional search directory,
         # then with the implementation marker changed at that same location.

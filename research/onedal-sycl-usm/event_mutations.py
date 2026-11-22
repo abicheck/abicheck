@@ -67,6 +67,18 @@ def main():
             "-o",
             str(exe),
         ]
+        if lane in ("baseline", "remove_parameter"):
+            probe = CONSUMER.with_name("event_call_forms.cpp")
+            subprocess.run(
+                [
+                    *command[: command.index(str(CONSUMER))],
+                    "-fsyntax-only",
+                    "-DEXPECT_EVENTS=" + ("1" if lane == "baseline" else "0"),
+                    str(probe),
+                ],
+                env=env,
+                check=True,
+            )
         build = subprocess.run(command, env=env, capture_output=True, text=True)
         if lane == "remove_parameter":
             if build.returncode and "no matching function" in build.stderr:

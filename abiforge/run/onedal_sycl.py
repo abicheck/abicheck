@@ -43,16 +43,24 @@ def generate(directory: Path, queues: bool) -> None:
         "#pragma once",
         "namespace sycl { inline namespace _V1 { class queue; } }",
     ]
+    exports = []
     source = [_PREAMBLE, '#include "api.hpp"']
     for name, expression in _OPERATIONS.items():
-        for with_queue in [False, True] if queues else [False]:
+        for with_queue in (False, True):
             args = "sycl::queue& q, " if with_queue else ""
             signature = f"int {name}({args}float* p)"
             body = expression.replace("ARGS ", "q, " if with_queue else "").replace(
                 " ALLOC", ", sycl::usm::alloc::shared" if with_queue else ""
             )
-            header.append(signature + ";")
+            if queues or not with_queue:
+                header.append(signature + ";")
+                suffix = "RN4sycl3_V15queueEPf" if with_queue else "Pf"
+                exports.append(f"_Z{len(name)}{name}{suffix};")
+
             source.append(f"{signature} {{ return static_cast<int>({body}); }}")
+    (directory / "exports.map").write_text(
+        "{ global: " + " ".join(exports) + " local: *; };\n"
+    )
     (directory / "api.hpp").write_text("\n".join(header) + "\n")
     (directory / "bridge.cpp").write_text("\n".join(source) + "\n")
 
@@ -102,6 +110,7 @@ def main() -> int:
                 "-shared",
                 "-fPIC",
                 str(side / "bridge.cpp"),
+                f"-Wl,--version-script={side / 'exports.map'}",
                 *links,
                 "-o",
                 str(side / "libbridge.so"),
@@ -205,9 +214,11 @@ def main() -> int:
             "kinds": kinds,
             "affected": affected,
             "matches": (
-                report["verdict"] == "NO_CHANGE" and not affected
+                report["verdict"] == "NO_CHANGE" and not kinds and not affected
                 if side == old
-                else report["verdict"] == "BREAKING" and set(affected) == expected
+                else report["verdict"] == "BREAKING"
+                and Counter(affected) == Counter(expected)
+                and kinds == {"sycl_overload_set_removed": 1}
             ),
         }
     print(json.dumps(receipt, indent=2))

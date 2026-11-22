@@ -35,6 +35,7 @@ from __future__ import annotations
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
+from .model.availability import FactStatus
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.sycl_facts import SyclMetadata
@@ -261,6 +262,10 @@ def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     changes: list[Change] = []
     changes.extend(_diff_implementation(o, n))
+    changes.extend(_diff_plugin_search_paths(o, n))
+    changes.extend(_diff_runtime_version(o, n))
+    if any(m.plugin_inventory_status is FactStatus.FAILED for m in (o, n)):
+        return changes
     # Earlier stored ELF extractions dropped every piext symbol. Its absence
     # cannot prove a change, including in the version inferred from it.
     comparable_extensions = all(
@@ -278,7 +283,5 @@ def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(
         _diff_plugin_entrypoints(o, n, comparable_extensions=comparable_extensions)
     )
-    changes.extend(_diff_plugin_search_paths(o, n))
-    changes.extend(_diff_runtime_version(o, n))
     changes.extend(_diff_backend_driver_reqs(o, n))
     return changes

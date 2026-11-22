@@ -85,6 +85,12 @@ tests host-visible readiness for this path.
 | Forward an empty vector, preserve public signature | succeeds | 0 | 2 |
 | Remove the public event parameter | explicit-event call rejected | — | — |
 
+The compiler also checks four qualified call expressions in event_call_forms.cpp.
+Both headers accept the host call and the queue call with default arguments.
+Only the original accepts an explicit event vector, with either default or
+explicit layout. All eight assertions passed independently on the 2025.2, 2025.9 and 2025.11
+headers (24 compiler-checked outcomes).
+
 The runtime test detects the dropped dependency on this schedule. A delayed
 consumer could observe 42 even with the mutation. A successful single run
 cannot establish ordering in general.
@@ -93,10 +99,22 @@ A separate minimal L2 comparison kept a host sibling and shortened a queue
 function template by one defaulted event-list argument. The checker emitted
 overload_set_rerouted and classified the pair COMPATIBLE_WITH_RISK. This leaves
 a source-classification gap when a formerly supported call no longer compiles.
-For the full oneDAL header the baseline dump completed, but extraction of the
-mutated header was killed (exit 137, approximately 1.4 GiB intermediate AST),
-including on a sequential disk-backed retry. There is no full-header checker
-verdict for that pair. The compiler rejection in the table above is verified.
+The ordinary dual-pass scan of the full header exhausted memory (exit 137).
+A second host-only L2 experiment precompiled just sycl/sycl.hpp with icpx
+2025.0.4, C++17, -fno-sycl -Xclang -fsycl-is-host,
+-DONEDAL_DATA_PARALLEL -D__SYCL_ANY_DEVICE_HAS_ANY_ASPECT__=1 and the SDK
+include, include/sycl and include/sycl/stl_wrappers directories. Use the same
+flags in compile.options/defines and add -include-pch and the absolute PCH
+path for both dumps. Keep temporary output outside the PCH input directory.
+Both dumps used the original libonedal_dpc.so.3. The complete public
+homogen.hpp remained outside the PCH on each side. L2 extraction took 2.0 s
+and 1.9 s, respectively, and both dumps explicitly contain the expected queue
+signature. These timings exclude PCH creation and binary extraction. Comparing both snapshots through abicheck.checker.compare
+returned COMPATIBLE_WITH_RISK with one overload_set_rerouted for wrap. The two
+compiler-rejected explicit-event calls are a demonstrated false negative for
+source-break severity. Full CLI JSON rendering hit the memory limit after
+collecting 51,495 findings (51,489 exported_not_public when the full binary is
+paired with this single public header).
 
 ## Remaining witnesses
 
