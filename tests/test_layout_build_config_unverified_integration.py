@@ -12,13 +12,21 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # Builds and strips ELF shared objects (GNU strip --strip-debug): the
+    # layout-flag signal is about the Linux ELF {B,H} path.
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="needs an ELF toolchain"
+    ),
+]
 
 _CASES = {
     "pack": (
