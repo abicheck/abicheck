@@ -27,9 +27,10 @@ class TestImplicitHeaderIncludes:
         assert _implicit_header_includes([umb]) == [inc]
 
     def test_nested_umbrella_adds_include_root_ancestor(self, tmp_path):
-        # include/oneapi/tbb.h → both its parent (include/oneapi) and the
-        # conventional include root (include/) must be on the search path so
-        # `#include "oneapi/tbb/..."` resolves.
+        # include/oneapi/tbb.h → the conventional include root (include/) is
+        # on the search path so `#include "oneapi/tbb/..."` resolves; the
+        # interior parent (include/oneapi) is not, since its flat names would
+        # shadow libc headers (see test_include_root_shadowing.py).
         from abicheck.header_utils import _implicit_header_includes
 
         root = tmp_path / "include"
@@ -38,7 +39,7 @@ class TestImplicitHeaderIncludes:
         umb = nested / "tbb.h"
         umb.write_text("// umbrella")
         dirs = _implicit_header_includes([umb])
-        assert nested in dirs
+        assert nested not in dirs
         assert root in dirs
 
     def test_namespace_directory_adds_include_root_ancestor(self, tmp_path):
@@ -272,11 +273,10 @@ class TestResolveInferredHeaderRoots:
         nested = root / "oneapi"
         inc, toks = resolve_inferred_header_roots([umb], [], gcc_options=f"-I {root}")
         assert inc == []
-        # the include root is in the build context → not re-emitted at all
+        # the include root is in the build context → not re-emitted at all;
+        # the interior parent (oneapi) is never inferred under a root
         assert str(root) not in toks
-        # the nested ancestor is not in the build context → deferred via -isystem
-        assert str(nested) in toks
-        assert toks[toks.index(str(nested)) - 1] == "-isystem"
+        assert str(nested) not in toks
 
     def test_build_context_dir_attached_form_deduped(self, tmp_path):
         # The attached spelling (-I<dir>) is parsed too, so the root is skipped.

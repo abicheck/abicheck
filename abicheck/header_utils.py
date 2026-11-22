@@ -210,8 +210,8 @@ def _implicit_header_includes(headers: list[Path]) -> list[Path]:
     """Include directories implied by the ``-H`` inputs themselves.
 
     A ``-H`` *directory* is its own include root; a ``-H`` *file* contributes
-    its parent directory **plus** any ancestor conventionally named ``include``/
-    ``inc``. Adding these to the compiler search path lets quote/angle includes
+    any ancestor conventionally named ``include``/``inc``, and its own parent
+    directory only when it has no such ancestor (see the loop's comment). Adding these to the compiler search path lets quote/angle includes
     written relative to the public-header root resolve without a separate ``-I``
     (the abicheck P3 finding) — both the umbrella-at-root case (oneDNN's
     ``include/dnnl.hpp``) and the nested-umbrella case (oneTBB's
@@ -235,10 +235,18 @@ def _implicit_header_includes(headers: list[Path]) -> list[Path]:
         # also walk up to any conventional include root — a `-H include/oneapi`
         # (dir) or `-H include/oneapi/tbb.h` (file) still writes includes
         # relative to `include/`, so that root must be on the path too.
-        _add(h if h.is_dir() else h.parent)
-        for ancestor in h.parents:
-            if ancestor.name.lower() in _INCLUDE_ROOT_NAMES:
-                _add(ancestor)
+        roots = [a for a in h.parents if a.name.lower() in _INCLUDE_ROOT_NAMES]
+        # A file's own directory is added only when no conventional root sits
+        # above it (a flat layout, where that directory *is* the root). Under
+        # a root, the root already resolves `<pkg/sub/x.h>` and the file's own
+        # quoted includes resolve beside it; adding the interior directory as
+        # `-I` would let its flat names shadow libc headers -- protobuf's
+        # `include/google/protobuf/endian.h` captured glibc's `<endian.h>` from
+        # `sys/types.h` and broke the whole parse.
+        if h.is_dir() or not roots or h.parent in roots:
+            _add(h if h.is_dir() else h.parent)
+        for ancestor in roots:
+            _add(ancestor)
     return dirs
 
 
