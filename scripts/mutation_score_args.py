@@ -90,7 +90,8 @@ def build_parser(
         "--shard",
         help=(
             "K/N: when this run would measure the whole population, measure "
-            "only shard K's modules (a deterministic partition of only_mutate). "
+            "only shard K's functions (a deterministic partition of the "
+            "only_mutate functions; one module's functions may span shards). "
             "A diff-scoped run is not split: shard 1 runs it, the rest skip."
         ),
     )
