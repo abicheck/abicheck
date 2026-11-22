@@ -368,7 +368,9 @@ def test_a_resolved_finding_never_scores_even_when_redundant() -> None:
 @pytest.mark.parametrize("kind", list(_EXISTENCE))
 def test_binary_only_export_does_not_claim_header_absence(kind: ChangeKind) -> None:
     change = Change(kind, "_Z1fv", "old wording")
-    text = existence_description(change, ExportAccount(acct.ACCOUNT_UNDECLARED), from_headers=False)
+    text = existence_description(
+        change, ExportAccount(acct.ACCOUNT_UNDECLARED), from_headers=False
+    )
     assert text is not None
     assert "public declaration not verified from headers" in text
     assert "outside the public headers" not in text

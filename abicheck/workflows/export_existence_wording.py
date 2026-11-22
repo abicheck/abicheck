@@ -172,6 +172,8 @@ def describe_export_existence(
         if exported is None:
             continue
         decision = account_export(change.symbol, accounting_context(side, exported))
-        description = existence_description(change, decision, from_headers=side.from_headers)
+        description = existence_description(
+            change, decision, from_headers=side.from_headers
+        )
         if description is not None:
             change.description = description
