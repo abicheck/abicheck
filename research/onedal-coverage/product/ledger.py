@@ -24,6 +24,9 @@ for row in rows:
         witness='visitor.csv'
     row['independent_edit_witness']=witness
     row['edit_family']=('virtual_reorder' if kind=='virtual_slot' else 'struct_swap_fields') if witness else ''
+    if kind == 'cxx_method' and row['symbol'] == '_ZN4daal8services10interface16Status5clearEv':
+        row['independent_edit_witness'] = 'status-clear.csv'
+        row['edit_family'] = 'no_op_clear'
 with gzip.open('ledger.csv.gz','wt') as f:
     w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
 mapped={r['symbol'] for r in rows if r['providers']}
