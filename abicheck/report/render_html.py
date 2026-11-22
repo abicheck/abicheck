@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
+from typing import Any
 
 from ..demangle import demangle as _demangle_symbol, demangle_text
 from ..html_template import _VERDICT_STYLE
@@ -657,6 +658,8 @@ class ScopedVerdictData:
     verdict_value: str
     exit_code: int | None
     exit_code_scheme: str | None
+    #: JSON's ``consumer_impact_summary`` for a ``--used-by`` run, else ``None``.
+    consumer_impact: dict[str, Any] | None = None
 
 
 def render_analysis_caveats_html(messages: list[str] | tuple[str, ...]) -> str:
@@ -696,8 +699,26 @@ def render_scoped_verdict(data: ScopedVerdictData | None) -> str:
         f"Informational only ({h(exit_note)}) — the CLI process's own exit "
         f"code and Compatibility verdict above always come from the "
         f"full-library result."
-        f"</div></div>"
+        f"</div>{_consumer_impact_line(data.consumer_impact)}</div>"
     )
+
+
+def _consumer_impact_line(summary: dict[str, Any] | None) -> str:
+    """ "N of M consumers affected", the HTML twin of JSON's
+    ``consumer_impact_summary`` and JUnit's ``abicheck.consumer_impact.*``."""
+    if summary is None:
+        return ""
+    h = html.escape
+    text = (
+        f"{int(summary.get('affected', 0))} of {int(summary.get('evaluated', 0))} "
+        f"evaluated consumers affected ({int(summary.get('total', 0))} supplied)"
+    )
+    unreadable = [str(p) for p in summary.get("unreadable_paths") or ()]
+    if unreadable:
+        text += f"; {len(unreadable)} unreadable, not evaluated: " + ", ".join(
+            unreadable
+        )
+    return f"<div class='bc-metric consumer-impact'>{h(text)}</div>"
 
 
 @dataclass(frozen=True)

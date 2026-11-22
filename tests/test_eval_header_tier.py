@@ -119,6 +119,95 @@ def test_resolve_side_umbrella_includes_and_deps(monkeypatch, tmp_path):
     assert res["includes"] == [inc, inc + "/oneapi", str(tmp_path / "absl" / "include")]
 
 
+def test_resolve_side_dep_include_is_relative_to_package_root(monkeypatch, tmp_path):
+    # glib's glibconfig.h lives in the `glib` package's lib/glib-2.0/include,
+    # which has no include/ tree at all.
+    monkeypatch.setattr(
+        cf,
+        "resolve_headers_pkg",
+        _fake_fs(tmp_path, {"libglib": ["glib-2.0/gio/gio.h"]}),
+    )
+    seen = []
+
+    def fetch(pkg, ver):
+        seen.append((pkg, ver))
+        return str(tmp_path / f"root-{pkg}-{ver}")
+
+    monkeypatch.setattr(cf, "fetch_extract", fetch)
+    entry = {
+        "lib": "glib",
+        "conda_pkg": "libglib",
+        "old": "1",
+        "new": "2",
+        "headers": {
+            "umbrella": ["glib-2.0/gio/gio.h"],
+            "deps": [
+                {"pkg": "glib", "old": "1", "new": "2", "include": ["lib/x", "lib/y"]}
+            ],
+        },
+    }
+    res = ht.resolve_side(entry, "old")
+    root = str(tmp_path / "root-glib-1")
+    assert res["includes"][1:] == [root + "/lib/x", root + "/lib/y"]
+    assert seen == [("glib", "1")]
+
+
+def test_repodata_files_indexes_removed_archives_below_live_builds():
+    repo = {
+        "packages.conda": {
+            "p-1.0-h_1.conda": {"name": "p", "version": "1.0", "build_number": 1},
+        },
+        "removed": [
+            "p-1.0-hx_3.conda",
+            "p-2.0-h612f066_0.conda",
+            "q-x-1.tar.bz2",
+            "junk",
+        ],
+    }
+    idx = cf.repodata_files(repo, "linux-64")
+    by_base = {f["basename"]: f for f in idx["p"]}
+    assert by_base["linux-64/p-2.0-h612f066_0.conda"]["version"] == "2.0"
+    assert by_base["linux-64/p-1.0-hx_3.conda"]["attrs"]["build_number"] == 3
+    assert idx["q"][0]["version"] == "x"
+    assert "junk" not in idx
+    cf_files = idx["p"]
+    old = cf.list_files
+    try:
+        cf.list_files = lambda pkg, subdir="linux-64": cf_files
+        # live build 1 wins over removed build 3 of the same version
+        assert cf.pick("p", "1.0")["basename"] == "linux-64/p-1.0-h_1.conda"
+        assert cf.pick("p", "2.0")["basename"] == "linux-64/p-2.0-h612f066_0.conda"
+    finally:
+        cf.list_files = old
+
+
+@pytest.mark.parametrize(
+    "files, chosen",
+    [
+        # live .tar.bz2 beats a removed .conda of the same version
+        (
+            [("p-1-h_1.tar.bz2", 1, False), ("p-1-h_3.conda", 3, True)],
+            "p-1-h_1.tar.bz2",
+        ),
+        # among live builds .conda wins at equal build number
+        ([("p-1-h_1.tar.bz2", 1, False), ("p-1-h_1.conda", 1, False)], "p-1-h_1.conda"),
+        # among live builds .conda wins even over a higher-build .tar.bz2
+        ([("p-1-h_2.tar.bz2", 2, False), ("p-1-h_1.conda", 1, False)], "p-1-h_1.conda"),
+        # only removed builds: still fetchable, highest wins
+        ([("p-1-h_1.conda", 1, True), ("p-1-h_2.conda", 2, True)], "p-1-h_2.conda"),
+    ],
+)
+def test_pick_prefers_live_over_removed_regardless_of_format(
+    monkeypatch, files, chosen
+):
+    rows = [
+        {"basename": b, "version": "1", "attrs": {"build_number": n, "removed": r}}
+        for b, n, r in files
+    ]
+    monkeypatch.setattr(cf, "list_files", lambda pkg, subdir="linux-64": list(rows))
+    assert cf.pick("p", "1")["basename"] == chosen
+
+
 def test_resolve_side_missing_umbrella_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(cf, "resolve_headers_pkg", _fake_fs(tmp_path, {"z": ["z.h"]}))
     entry = {
@@ -255,14 +344,41 @@ def test_scan_header_one_happy_path(monkeypatch):
 def test_merge_into_keeps_other_tiers():
     prior = {"results": [1], "source_results": [2], "generated_utc": "t0"}
     merged = ht.merge_into(
-        prior, {"header_results": [3], "generated_utc": "t1", "abicheck_version": "v"}
+        prior,
+        {
+            "header_results": [{"lib": "a"}],
+            "generated_utc": "t1",
+            "abicheck_version": "v",
+        },
     )
     assert merged["results"] == [1] and merged["source_results"] == [2]
     assert (
-        merged["header_results"] == [3]
+        merged["header_results"] == [{"lib": "a"}]
         and merged["header_run"]["generated_utc"] == "t1"
     )
     assert "header_results" not in prior
+
+
+@pytest.mark.parametrize(
+    "prior_libs, run_libs",
+    [
+        (["a", "b", "c"], ["b"]),
+        (["a", "b", "c"], ["d"]),
+        (["a", "b"], ["b", "e"]),
+        ([], ["a"]),
+        (["a", "b"], []),
+    ],
+)
+def test_merge_into_subset_run_replaces_only_its_own_rows(prior_libs, run_libs):
+    """An ``--only`` header run keeps every other library's row (it used to
+    replace the whole header table with just the subset)."""
+    prior = {"header_results": [{"lib": x, "v": "old"} for x in prior_libs]}
+    run = {"header_results": [{"lib": x, "v": "new"} for x in run_libs]}
+    rows = ht.merge_into(prior, run)["header_results"]
+    libs = [r["lib"] for r in rows]
+    assert libs == prior_libs + [x for x in run_libs if x not in prior_libs]
+    for r in rows:
+        assert r["v"] == ("new" if r["lib"] in run_libs else "old")
 
 
 def test_manifest_header_blocks_are_well_formed():

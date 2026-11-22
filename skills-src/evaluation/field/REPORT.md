@@ -40,15 +40,19 @@
 
 ## Header tier (L2: binary + headers, non-gating)
 
-- entries: **6** | compared: **6**
+- entries: **10** | compared: **10**
 
 | lib | old→new | header pkg | umbrella | verdict | exit | assurance | evidence | break/src/risk | cmp s |
 |---|---|---|---|---|---|---|---|---|---|
-| zlib | 1.2.13→1.3.1 | `zlib` | `zlib.h` | COMPATIBLE_WITH_RISK | 0 | complete | header_aware | 0/0/2 | 3.622 |
-| lz4 | 1.9.3→1.10.0 | `lz4-c` | `lz4.h`, `lz4frame.h` | BREAKING | 4 | complete | header_aware | 9/0/36 | 2.962 |
-| pcre2 | 10.44→10.47 | `pcre2` | `pcre2.h` | COMPATIBLE_WITH_RISK | 0 | complete | header_aware | 0/0/158 | 4.834 |
-| onetbb | 2022.2.0→2022.3.0 | `tbb-devel` | `oneapi/tbb.h` | BREAKING | 4 | partial | header_aware | 6/10/46 | 280.091 |
-| onednn | 3.8.1→3.9.1 | `onednn` | `oneapi/dnnl/dnnl.h` | BREAKING | 4 | complete | header_aware | 1/0/547 | 16.761 |
-| onedal | 2026.1.0→2026.2.0 | `dal-include` | `oneapi/dal.hpp` | COMPATIBLE_WITH_RISK | 0 | partial | header_aware | 0/0/131 | 197.46 |
+| zlib | 1.2.13→1.3.1 | `zlib` | `zlib.h` | COMPATIBLE_WITH_RISK | 0 | complete | header_aware | 0/0/2 | 2.626 |
+| lz4 | 1.9.3→1.10.0 | `lz4-c` | `lz4.h`, `lz4frame.h` | BREAKING | 4 | complete | header_aware | 9/0/37 | 2.855 |
+| libjpeg-turbo | 3.0.0→3.1.4.1 | `libjpeg-turbo` | `turbojpeg.h` | COMPATIBLE_WITH_RISK | 0 | complete | header_aware | 0/0/2 | 1.768 |
+| pcre2 | 10.44→10.47 | `pcre2` | `pcre2.h` | COMPATIBLE_WITH_RISK | 0 | complete | header_aware | 0/0/158 | 3.195 |
+| hdf5 | 1.8.20→2.1.0 | `hdf5` | `hdf5.h` | BREAKING | 4 | complete | header_aware | 1174/14/2300 | 7.547 |
+| glib | 2.86.4→2.88.1 | `libglib` | `glib-2.0/gio/gio.h` | BREAKING | 4 | complete | header_aware | 2/0/2452 | 12.673 |
+| onetbb | 2022.2.0→2022.3.0 | `tbb-devel` | `oneapi/tbb.h` | BREAKING | 4 | partial | header_aware | 6/10/46 | 178.927 |
+| onednn | 3.8.1→3.9.1 | `onednn` | `oneapi/dnnl/dnnl.h` | BREAKING | 4 | complete | header_aware | 1/0/549 | 8.033 |
+| onedal | 2026.1.0→2026.2.0 | `dal-include` | `oneapi/dal.hpp` | COMPATIBLE_WITH_RISK | 0 | partial | header_aware | 0/0/131 | 89.019 |
+| protobuf | 6.34.1→7.35.1 | `libprotobuf` | `google/protobuf/message.h` | BREAKING | 4 | partial | header_aware | 290/132/3457 | 721.868 |
 
 > `abicheck compare OLD.so NEW.so --header … -I … -D …` per entry's manifest `headers:` block. Exit is the compare exit code. Reproduce: `python skills-src/evaluation/field/runner.py --tier header`.

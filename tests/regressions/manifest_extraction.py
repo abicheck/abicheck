@@ -1152,4 +1152,25 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "target": ("other_table", "same_table_other_offset", "imported_table"),
         },
     ),
+    BugClass(
+        id="extraction.inferred_include_root_shadows_system_header",
+        invariant=(
+            "An include directory abicheck infers from -H inputs never makes a "
+            "package header shadow a system header: under an include/inc root "
+            "only the root is inferred, so a package's flat endian.h or string.h "
+            "cannot capture libc's <endian.h> or <string.h>."
+        ),
+        fixed_by=(2161,),
+        seed_tests=(
+            "tests/test_include_root_shadowing.py",
+            "tests/test_header_utils_inferred_roots.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "root_name": ("include", "inc", "Include"),
+            "depth": ("1", "2", "3"),
+            "layout": ("flat", "at_root", "nested"),
+        },
+    ),
 )

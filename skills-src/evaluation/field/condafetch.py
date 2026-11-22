@@ -94,6 +94,21 @@ def repodata_files(repodata, subdir):
                 "attrs": {"subdir": rec.get("subdir", subdir),
                           "build_number": rec.get("build_number", 0)},
             })
+    # ``removed`` lists archives pulled from the index but still served by the
+    # CDN (e.g. libprotobuf 6.34.1); parse name-version-build from the filename.
+    for fn in repodata.get("removed") or []:
+        stem = fn.removesuffix(".conda").removesuffix(".tar.bz2")
+        parts = stem.rsplit("-", 2)
+        if len(parts) != 3 or stem == fn:
+            continue
+        name, version, build = parts
+        bn = build.rsplit("_", 1)[-1]
+        out.setdefault(name, []).append({
+            "basename": f"{subdir}/{fn}",
+            "version": version,
+            "attrs": {"subdir": subdir, "build_number": int(bn) if bn.isdigit() else 0,
+                      "removed": True},
+        })
     return out
 
 
@@ -181,9 +196,12 @@ def pick(pkg, version, subdir="linux-64"):
     fs = [f for f in list_files(pkg, subdir) if f["version"] == version]
     if not fs:
         raise SystemExit(f"no files for {pkg} {version} in {subdir}")
-    conda = [f for f in fs if f["basename"].endswith(".conda")]
-    pool = conda or fs
-    pool.sort(key=lambda f: (f["attrs"].get("build_number", 0), f["basename"]))
+    # a live build always beats one the index has since removed, whatever its
+    # archive format; .conda is preferred only among builds of the same status
+    live = [f for f in fs if not f["attrs"].get("removed", False)]
+    pool = live or fs
+    pool.sort(key=lambda f: (f["basename"].endswith(".conda"),
+                             f["attrs"].get("build_number", 0), f["basename"]))
     return pool[-1]
 
 def download(pkg, version, subdir="linux-64"):

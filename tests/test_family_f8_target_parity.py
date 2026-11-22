@@ -757,3 +757,45 @@ def test_clang_backend_names_typedef_anonymous_tags_like_castxml(
     for name in ("point_t", "span_t"):
         assert got_records.get(name) == want_records[name], (name, got_records)
     assert got_enums.get("level_t") == want_enums["level_t"], got_enums
+
+
+# ── Install-layout cell: extraction.inferred_include_root_shadows_system_header
+# The same header installed flat or under include/<pkg>/ beside libc-named
+# siblings (protobuf ships include/google/protobuf/endian.h) yields the same
+# surface. The sibling is an #error, so a shadowed <endian.h> fails the dump.
+_LAYOUT_HEADER = "#include <sys/types.h>\n#include <string.h>\nint lay_api(size_t n);\n"
+
+
+def _layout_dump(tmp_path: Path, nested: bool) -> set[str]:
+    root = tmp_path / ("nested" if nested else "flat")
+    hdr_dir = root / "include" / "pkg" if nested else root / "flat"
+    hdr_dir.mkdir(parents=True)
+    hdr = hdr_dir / "api.h"
+    hdr.write_text(_LAYOUT_HEADER)
+    if nested:
+        for name in ("endian.h", "string.h"):
+            (hdr_dir / name).write_text(f'#error "{name} shadowed the libc header"\n')
+    src = root / "api.c"
+    src.write_text("#include <stddef.h>\nint lay_api(size_t n) { return (int)n; }\n")
+    lib = root / "libapi.so"
+    subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(lib), str(src)], check=True)
+    out = root / "snap.json"
+    proc = subprocess.run(
+        abicheck_command("dump", lib, "-H", hdr, "-o", out),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return {f.name for f in load_snapshot(out).declarations.functions}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    _CASTXML is None or shutil.which("gcc") is None or os.name == "nt",
+    reason="needs castxml and gcc on an ELF host",
+)
+def test_install_layout_parity_with_libc_named_siblings(tmp_path: Path) -> None:
+    flat = _layout_dump(tmp_path, nested=False)
+    assert "lay_api" in flat  # vacuity guard: the oracle parsed the header
+    assert _layout_dump(tmp_path, nested=True) == flat

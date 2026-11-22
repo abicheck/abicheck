@@ -20,6 +20,9 @@ row with ``error``; nothing here raises into the runner. The ``headers:`` block
       include: [glib-2.0]        # extra include dirs, relative to the include root
       deps:                      # dependency header packages (extra -I roots)
         - {pkg: libabseil, old: "20250127.1", new: "20250512.1"}
+        - {pkg: glib, old: "2.86.4", new: "2.88.1",
+           include: [lib/glib-2.0/include]}  # dirs relative to the package
+                                              # root (no include/ required)
 """
 from __future__ import annotations
 
@@ -58,6 +61,10 @@ def resolve_side(entry: dict, which: str) -> dict:
     includes = [inc] + [os.path.join(inc, d) for d in hb.get("include", [])]
     for dep in hb.get("deps", []):
         dver = str(dep[which])
+        if dep.get("include"):  # explicit dirs under the package root
+            root = cf.fetch_extract(dep["pkg"], dver)
+            includes.extend(os.path.join(root, d) for d in dep["include"])
+            continue
         _, dinc = cf.resolve_headers_pkg(dep["pkg"], dver, [dep["pkg"]])
         includes.append(dinc)
     return {"package": pkg, "include_root": inc, "headers": headers, "includes": includes}
@@ -152,9 +159,13 @@ def merge_into(prior: dict, header_payload: dict) -> dict:
     """*prior* results with *header_payload*'s ``header_results`` folded in (pure).
 
     Keeps every other tier's rows and the prior run's metadata, recording the
-    header run's own timestamp/version under ``header_run``.
+    header run's own timestamp/version under ``header_run``. Header rows merge
+    by ``lib``: a subset run (``--only``) replaces only its own libraries' rows,
+    keeping the rest in manifest order with new libraries appended.
     """
     merged = dict(prior)
-    merged["header_results"] = header_payload.get("header_results", [])
+    fresh = {r.get("lib"): r for r in header_payload.get("header_results", [])}
+    rows = [fresh.pop(r.get("lib"), r) for r in prior.get("header_results", [])]
+    merged["header_results"] = rows + list(fresh.values())
     merged["header_run"] = {k: header_payload.get(k) for k in ("generated_utc", "abicheck_version")}
     return merged

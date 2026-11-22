@@ -232,7 +232,7 @@
       "abicheck/extract/tu_jobs.py": "6ed530395738f83bc46664a6ae9e91fa7286a2a6bb81e4fbb723447f6524b070",
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
-      "abicheck/header_utils.py": "05efbcfa5999722c6651f0802449aad5c20888c0465ab5aa43ee5e872a02586f",
+      "abicheck/header_utils.py": "37916294f10c30dc6de85240d8b10410f6ca7c6ac0b1f4fecbda0b1bfceab830",
       "abicheck/macho_metadata.py": "002115ba2e956218205cb34ff5a7afb12f0661e7fe942ba1f628bd813daf99f8",
       "abicheck/model/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
       "abicheck/pdb_metadata.py": "d9e3674206483d001ebfd2853748b657a33d1f36cf9c99d63ed4c7a9669cf353",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "39f4f4ca8d98188fc250297fa49bf624550cba1db5fbc110c754c5b56599d283",
-    "generation": 91,
-    "reason": "castxml multi-dimensional arrays spelled in C order; castxml va_list parameters read from original_type (generation 91)"
+    "fingerprint": "12bacfbd3bfd86a9d728e7b5304b189584f93c3fcfa57806bcb66f5cdb0f8f70",
+    "generation": 92,
+    "reason": "bumped to 92 for a semantic change"
   },
   "resolver": {
     "files": {
