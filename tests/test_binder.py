@@ -366,3 +366,28 @@ class TestRealBinary:
             assert isinstance(b.status, BindingStatus)
             assert b.consumer
             assert b.symbol
+
+
+@pytest.mark.parametrize(
+    ("binding", "version", "expected"),
+    [
+        (ElfSymbolBinding.GLOBAL, "V2", "fail"),
+        (ElfSymbolBinding.WEAK, "V2", "warn"),
+        (ElfSymbolBinding.GLOBAL, "", "warn"),
+        (ElfSymbolBinding.GLOBAL, "V1", "pass"),
+    ],
+)
+def test_import_version_loadability(monkeypatch, binding, version, expected):
+    from abicheck import stack_checker
+
+    graph = _make_graph(
+        {
+            "/app": (["libapi.so"], [], [_imp("value", "V1", binding)]),
+            "/libapi.so": ([], [_sym("value", version=version)], []),
+        },
+        edges=[("/app", "/libapi.so")],
+    )
+    monkeypatch.setattr(
+        stack_checker, "resolve_dependencies", lambda *args, **kwargs: graph
+    )
+    assert stack_checker.check_single_env(Path("/app")).loadability.value == expected
