@@ -1,0 +1,5 @@
+case,client_exit,loadability,abi_risk
+reachable,0,pass,warn
+missing,127,fail,warn
+wrong_version,127,fail,warn
+unreachable,127,fail,warn

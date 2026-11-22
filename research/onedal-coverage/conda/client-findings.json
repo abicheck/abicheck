@@ -1,0 +1,233 @@
+[
+  {
+    "kind": "func_removed_elf_only",
+    "symbol": "_ZN4daal10algorithms13decision_tree10regression8training10interface15Input3setENS3_7InputIdERKNS_8services10interface19SharedPtrINS_15data_management10interface112NumericTableEEE",
+    "description": "Removed exported symbol (public declaration not verified from headers): _ZN4daal10algorithms13decision_tree10regression8training10interface15Input3setENS3_7InputIdERKNS_8services10interface19SharedPtrINS_15data_management10interface112NumericTableEEE",
+    "old_value": "_ZN4daal10algorithms13decision_tree10regression8training10interface15Input3setENS3_7InputIdERKNS_8services10interface19SharedPtrINS_15data_management10interface112NumericTableEEE",
+    "new_value": null,
+    "review_evidence": null,
+    "severity": "breaking",
+    "demangled_symbol": "daal::algorithms::decision_tree::regression::training::interface1::Input::set(daal::algorithms::decision_tree::regression::training::InputId, daal::services::interface1::SharedPtr<daal::data_management::interface1::NumericTable> const&)",
+    "surface_facts": {
+      "declared_in_headers": "unknown",
+      "in_public_contract": "unknown",
+      "binary_exported": "true"
+    },
+    "operation": "removed",
+    "entity": "function",
+    "finding_id": "62b2740e745bed3d",
+    "canonical_finding_id": "8260e7cecb3c68b7",
+    "recommended_action": "recompile_and_relink_required",
+    "evidence_status": "artifact_proven",
+    "impact": "Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+    "symbol_binding": "global",
+    "reachability_state": "unknown",
+    "contract_relevance": "IN_CONTRACT",
+    "contract_reason_code": "all_mode_normalized_entity",
+    "contract_assurance": "complete",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 4,
+    "contract_evidence_refs": [
+      "public_header:old"
+    ]
+  },
+  {
+    "kind": "func_removed_elf_only",
+    "symbol": "_ZN4daal10algorithms13decision_tree10regression8training10interface16Result8allocateIfEENS_8services10interface16StatusEPKNS0_10interface15InputEPKNS2_10interface19ParameterEi",
+    "description": "Removed exported symbol (public declaration not verified from headers): _ZN4daal10algorithms13decision_tree10regression8training10interface16Result8allocateIfEENS_8services10interface16StatusEPKNS0_10interface15InputEPKNS2_10interface19ParameterEi",
+    "old_value": "_ZN4daal10algorithms13decision_tree10regression8training10interface16Result8allocateIfEENS_8services10interface16StatusEPKNS0_10interface15InputEPKNS2_10interface19ParameterEi",
+    "new_value": null,
+    "review_evidence": null,
+    "severity": "breaking",
+    "demangled_symbol": "daal::services::interface1::Status daal::algorithms::decision_tree::regression::training::interface1::Result::allocate<float>(daal::algorithms::interface1::Input const*, daal::algorithms::decision_tree::regression::interface1::Parameter const*, int)",
+    "surface_facts": {
+      "declared_in_headers": "unknown",
+      "in_public_contract": "unknown",
+      "binary_exported": "true"
+    },
+    "operation": "removed",
+    "entity": "function",
+    "finding_id": "b2f8d3899477e159",
+    "canonical_finding_id": "7044cb40f9ad816d",
+    "recommended_action": "recompile_and_relink_required",
+    "evidence_status": "artifact_proven",
+    "impact": "Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+    "symbol_binding": "weak",
+    "reachability_state": "unknown",
+    "contract_relevance": "IN_CONTRACT",
+    "contract_reason_code": "all_mode_normalized_entity",
+    "contract_assurance": "complete",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 4,
+    "contract_evidence_refs": [
+      "public_header:old"
+    ]
+  },
+  {
+    "kind": "func_removed_elf_only",
+    "symbol": "_ZN4daal10algorithms13decision_tree10regression8training10interface16ResultC1Ev",
+    "description": "Removed exported C++ ABI artifact (constructor) of a class, accounted for by its class's declaration: _ZN4daal10algorithms13decision_tree10regression8training10interface16ResultC1Ev",
+    "old_value": "_ZN4daal10algorithms13decision_tree10regression8training10interface16ResultC1Ev",
+    "new_value": null,
+    "review_evidence": null,
+    "severity": "breaking",
+    "demangled_symbol": "daal::algorithms::decision_tree::regression::training::interface1::Result::Result()",
+    "surface_facts": {
+      "declared_in_headers": "unknown",
+      "in_public_contract": "unknown",
+      "binary_exported": "true"
+    },
+    "operation": "removed",
+    "entity": "function",
+    "finding_id": "eb8fb94fd08564d2",
+    "canonical_finding_id": "4b74d80fc3c87e13",
+    "recommended_action": "recompile_and_relink_required",
+    "evidence_status": "artifact_proven",
+    "impact": "Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+    "symbol_binding": "global",
+    "reachability_state": "unknown",
+    "contract_relevance": "IN_CONTRACT",
+    "contract_reason_code": "all_mode_normalized_entity",
+    "contract_assurance": "complete",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 4,
+    "contract_evidence_refs": [
+      "public_header:old"
+    ]
+  },
+  {
+    "kind": "func_removed_elf_only",
+    "symbol": "_ZN4daal10algorithms13decision_tree10regression8training10interface25BatchIfLNS3_6MethodE0EEC1ERKS7_",
+    "description": "Removed exported symbol (public declaration not verified from headers): _ZN4daal10algorithms13decision_tree10regression8training10interface25BatchIfLNS3_6MethodE0EEC1ERKS7_",
+    "old_value": "_ZN4daal10algorithms13decision_tree10regression8training10interface25BatchIfLNS3_6MethodE0EEC1ERKS7_",
+    "new_value": null,
+    "review_evidence": null,
+    "severity": "breaking",
+    "demangled_symbol": "daal::algorithms::decision_tree::regression::training::interface2::Batch<float, (daal::algorithms::decision_tree::regression::training::Method)0>::Batch(daal::algorithms::decision_tree::regression::training::interface2::Batch<float, (daal::algorithms::decision_tree::regression::training::Method)0> const&)",
+    "surface_facts": {
+      "declared_in_headers": "unknown",
+      "in_public_contract": "unknown",
+      "binary_exported": "true"
+    },
+    "operation": "removed",
+    "entity": "function",
+    "finding_id": "331bd820b5eb5cef",
+    "canonical_finding_id": "122aef9f1e0bae5d",
+    "recommended_action": "recompile_and_relink_required",
+    "evidence_status": "artifact_proven",
+    "impact": "Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+    "symbol_binding": "global",
+    "reachability_state": "unknown",
+    "contract_relevance": "IN_CONTRACT",
+    "contract_reason_code": "all_mode_normalized_entity",
+    "contract_assurance": "complete",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 4,
+    "contract_evidence_refs": [
+      "public_header:old"
+    ]
+  },
+  {
+    "kind": "func_removed_elf_only",
+    "symbol": "_ZN4daal10algorithms13decision_tree10regression8training10interface25BatchIfLNS3_6MethodE0EEC1Ev",
+    "description": "Removed exported symbol (public declaration not verified from headers): _ZN4daal10algorithms13decision_tree10regression8training10interface25BatchIfLNS3_6MethodE0EEC1Ev",
+    "old_value": "_ZN4daal10algorithms13decision_tree10regression8training10interface25BatchIfLNS3_6MethodE0EEC1Ev",
+    "new_value": null,
+    "review_evidence": null,
+    "severity": "breaking",
+    "demangled_symbol": "daal::algorithms::decision_tree::regression::training::interface2::Batch<float, (daal::algorithms::decision_tree::regression::training::Method)0>::Batch()",
+    "surface_facts": {
+      "declared_in_headers": "unknown",
+      "in_public_contract": "unknown",
+      "binary_exported": "true"
+    },
+    "operation": "removed",
+    "entity": "function",
+    "finding_id": "bf1ef3c3fc55b2ce",
+    "canonical_finding_id": "979c943ffaecdfb0",
+    "recommended_action": "recompile_and_relink_required",
+    "evidence_status": "artifact_proven",
+    "impact": "Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+    "symbol_binding": "global",
+    "reachability_state": "unknown",
+    "contract_relevance": "IN_CONTRACT",
+    "contract_reason_code": "all_mode_normalized_entity",
+    "contract_assurance": "complete",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 4,
+    "contract_evidence_refs": [
+      "public_header:old"
+    ]
+  },
+  {
+    "kind": "func_removed_elf_only",
+    "symbol": "_ZNK4daal10algorithms13decision_tree10regression10interface15Model11traverseDFSERNS0_10tree_utils10interface115TreeNodeVisitorINS5_10regression10interface118LeafNodeDescriptorEEE",
+    "description": "Removed exported symbol (public declaration not verified from headers): _ZNK4daal10algorithms13decision_tree10regression10interface15Model11traverseDFSERNS0_10tree_utils10interface115TreeNodeVisitorINS5_10regression10interface118LeafNodeDescriptorEEE",
+    "old_value": "_ZNK4daal10algorithms13decision_tree10regression10interface15Model11traverseDFSERNS0_10tree_utils10interface115TreeNodeVisitorINS5_10regression10interface118LeafNodeDescriptorEEE",
+    "new_value": null,
+    "review_evidence": null,
+    "severity": "breaking",
+    "demangled_symbol": "daal::algorithms::decision_tree::regression::interface1::Model::traverseDFS(daal::algorithms::tree_utils::interface1::TreeNodeVisitor<daal::algorithms::tree_utils::regression::interface1::LeafNodeDescriptor>&) const",
+    "surface_facts": {
+      "declared_in_headers": "unknown",
+      "in_public_contract": "unknown",
+      "binary_exported": "true"
+    },
+    "operation": "removed",
+    "entity": "function",
+    "finding_id": "ee14cad1790acd96",
+    "canonical_finding_id": "6c923fda1dc3a17a",
+    "recommended_action": "recompile_and_relink_required",
+    "evidence_status": "artifact_proven",
+    "impact": "Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+    "symbol_binding": "global",
+    "reachability_state": "unknown",
+    "contract_relevance": "IN_CONTRACT",
+    "contract_reason_code": "all_mode_normalized_entity",
+    "contract_assurance": "complete",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 4,
+    "contract_evidence_refs": [
+      "public_header:old"
+    ]
+  },
+  {
+    "kind": "func_removed_elf_only",
+    "symbol": "_ZNK4daal10algorithms13decision_tree10regression8training10interface16Result3getENS3_8ResultIdE",
+    "description": "Removed exported symbol (public declaration not verified from headers): _ZNK4daal10algorithms13decision_tree10regression8training10interface16Result3getENS3_8ResultIdE",
+    "old_value": "_ZNK4daal10algorithms13decision_tree10regression8training10interface16Result3getENS3_8ResultIdE",
+    "new_value": null,
+    "review_evidence": null,
+    "severity": "breaking",
+    "demangled_symbol": "daal::algorithms::decision_tree::regression::training::interface1::Result::get(daal::algorithms::decision_tree::regression::training::ResultId) const",
+    "surface_facts": {
+      "declared_in_headers": "unknown",
+      "in_public_contract": "unknown",
+      "binary_exported": "true"
+    },
+    "operation": "removed",
+    "entity": "function",
+    "finding_id": "6f690f7a6bf7f305",
+    "canonical_finding_id": "83af974853be5c8a",
+    "recommended_action": "recompile_and_relink_required",
+    "evidence_status": "artifact_proven",
+    "impact": "Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+    "symbol_binding": "global",
+    "reachability_state": "unknown",
+    "contract_relevance": "IN_CONTRACT",
+    "contract_reason_code": "all_mode_normalized_entity",
+    "contract_assurance": "complete",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 4,
+    "contract_evidence_refs": [
+      "public_header:old"
+    ]
+  }
+]

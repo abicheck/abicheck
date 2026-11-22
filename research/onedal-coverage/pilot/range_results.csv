@@ -1,0 +1,10 @@
+case,lane,client_exit,checker_exit,verdict,kinds
+old,symbols,0,0,NO_CHANGE,
+old,dwarf,0,0,NO_CHANGE,
+old,headers,0,0,NO_CHANGE,"exported_not_public,private_header_leak"
+swap,symbols,1,1,UNCONFIRMED,
+swap,dwarf,1,4,BREAKING,"type_field_offset_changed,type_field_offset_changed"
+swap,headers,1,4,BREAKING,"type_field_offset_changed,type_field_offset_changed,exported_not_public,private_header_leak"
+alias,symbols,0,1,UNCONFIRMED,
+alias,dwarf,0,0,COMPATIBLE_WITH_RISK,"abi_equivalent_type_changed,abi_equivalent_type_changed,abi_equivalent_type_changed"
+alias,headers,0,0,COMPATIBLE_WITH_RISK,"abi_equivalent_type_changed,abi_equivalent_type_changed,abi_equivalent_type_changed,exported_not_public,private_header_leak"

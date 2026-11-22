@@ -1,0 +1,96 @@
+{
+  "verdict": "BREAKING",
+  "summary": {
+    "breaking": 2,
+    "source_breaks": 0,
+    "risk_changes": 8067,
+    "compatible_additions": 0,
+    "quality_issues": 1,
+    "informational": 0,
+    "total_changes": 8070,
+    "binary_compatibility_pct": 0.0,
+    "affected_pct": 100.0,
+    "change_inventory": {
+      "compatibility_changes": 3,
+      "compatibility_breaking": 2,
+      "compatibility_source_breaks": 0,
+      "compatibility_risk": 0,
+      "compatibility_compatible": 1,
+      "hygiene_introduced": 0,
+      "hygiene_resolved": 0,
+      "hygiene_persistent": 8067,
+      "hygiene_not_evaluated": 0
+    }
+  },
+  "counts": {
+    "type_field_offset_changed": 2,
+    "exported_not_public": 8067,
+    "soname_bump_recommended": 1
+  },
+  "selected": [
+    {
+      "kind": "type_field_offset_changed",
+      "symbol": "SplitNodeDescriptor",
+      "description": "Field offset changed: SplitNodeDescriptor::featureIndex (192 \u2192 256 bits)",
+      "old_value": "192",
+      "new_value": "256",
+      "review_evidence": null,
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "8d90d04f2e840936",
+      "canonical_finding_id": "0697b52210abeca7",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "Old code reads/writes fields at stale offsets; silent data corruption.",
+      "field_name": "featureIndex",
+      "source_location": "/workspace/scratch/143427d83e70/dal-conda/original/algorithms/tree_utils/tree_utils.h:58",
+      "affected_symbols": [
+        "onSplitNode"
+      ],
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old",
+        "public_header:new"
+      ]
+    },
+    {
+      "kind": "type_field_offset_changed",
+      "symbol": "SplitNodeDescriptor",
+      "description": "Field offset changed: SplitNodeDescriptor::featureValue (256 \u2192 192 bits)",
+      "old_value": "256",
+      "new_value": "192",
+      "review_evidence": null,
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "ccdb7ae8527b8291",
+      "canonical_finding_id": "0e4b321dd50fe572",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "Old code reads/writes fields at stale offsets; silent data corruption.",
+      "field_name": "featureValue",
+      "source_location": "/workspace/scratch/143427d83e70/dal-conda/original/algorithms/tree_utils/tree_utils.h:58",
+      "affected_symbols": [
+        "onSplitNode"
+      ],
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old",
+        "public_header:new"
+      ]
+    }
+  ]
+}

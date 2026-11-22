@@ -1,0 +1,6 @@
+case,client_exit,checker,findings
+base_level_impurity,1,BREAKING,"type_field_offset_changed,type_field_offset_changed"
+slots,1,BREAKING,"type_vtable_changed,type_vtable_changed,type_vtable_changed"
+field_alias,0,COMPATIBLE_WITH_RISK,abi_equivalent_type_changed
+nonvirtual,0,COMPATIBLE,"func_added,public_surface_grew"
+identity,0,NO_CHANGE,

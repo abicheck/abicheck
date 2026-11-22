@@ -1,0 +1,69 @@
+{
+  "verdict": "BREAKING",
+  "summary": {
+    "breaking": 9237,
+    "source_breaks": 0,
+    "risk_changes": 16,
+    "compatible_additions": 1899,
+    "quality_issues": 59,
+    "informational": 1,
+    "total_changes": 11214,
+    "binary_compatibility_pct": 27.0,
+    "affected_pct": 73.0,
+    "change_inventory": {
+      "compatibility_changes": 11214,
+      "compatibility_breaking": 9237,
+      "compatibility_source_breaks": 0,
+      "compatibility_risk": 16,
+      "compatibility_compatible": 1959,
+      "hygiene_introduced": 0,
+      "hygiene_resolved": 0,
+      "hygiene_persistent": 0,
+      "hygiene_not_evaluated": 0
+    }
+  },
+  "counts": {
+    "vtable_slot_count_changed": 1,
+    "func_likely_renamed": 16,
+    "func_removed_elf_only": 5709,
+    "func_added": 922,
+    "var_removed_elf_only": 1708,
+    "var_added": 977,
+    "visibility_leak": 1,
+    "soname_changed": 1,
+    "exported_object_alignment_reduced": 44,
+    "imported_symbol_added": 2,
+    "imported_symbol_removed": 12,
+    "symbol_leaked_from_dependency_changed": 2,
+    "instantiation_missing_from_binary": 1651,
+    "internal_template_leaks_via_public_api": 152,
+    "overload_set_rerouted": 15,
+    "public_surface_shrank": 1
+  },
+  "selected": [
+    {
+      "kind": "soname_changed",
+      "symbol": "DT_SONAME",
+      "description": "SONAME changed: 'libonedal_core.so.3' \u2192 'libonedal_core.so.4'",
+      "old_value": "libonedal_core.so.3",
+      "new_value": "libonedal_core.so.4",
+      "review_evidence": null,
+      "severity": "risk",
+      "operation": "modified",
+      "entity": "binary",
+      "finding_id": "708dc6547e37910b",
+      "canonical_finding_id": "f349d2f17b44d4bd",
+      "recommended_action": "verify_deployment_compatibility",
+      "evidence_status": "contextual_risk",
+      "impact": "SONAME changed. Already-compiled consumers record the old SONAME in DT_NEEDED and can fail to load unless the old SONAME remains available. The exported ABI surface may still be compatible, but deployment action is required.",
+      "reachability_state": "unknown",
+      "contract_relevance": "NOT_APPLICABLE",
+      "contract_reason_code": "non_entity_finding",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "COMPATIBLE_WITH_RISK",
+      "gate_contribution": 0,
+      "contract_evidence_refs": []
+    }
+  ]
+}
