@@ -58,10 +58,11 @@ for name,file,pair,edit in cases:
                 lib=target
             libs.append(lib)
         report=d/(lane+".json")
+        report.unlink(missing_ok=True)
         opts= ["--header","old="+str(old/"probe.hpp"),"--header","new="+str(d/"probe.hpp"),"-I","old="+str(old),"-I","new="+str(d)] if lane=="headers" else []
         with (d/(lane+".log")).open("w") as log:
             rc=call([sys.executable,"-m","abicheck.cli","compare",*libs,*opts,"-o","json="+str(report)],stdout=log,stderr=log).returncode
-        data=json.loads(report.read_text()) if report.exists() else {}
+        data=json.loads(report.read_text())
         rows.append([name,lane,client,rc,data.get("verdict"),",".join(str(c.get("kind")) for c in data.get("changes",[]))])
         print(rows[-1],flush=True)
 with open("results.csv","w") as f:
