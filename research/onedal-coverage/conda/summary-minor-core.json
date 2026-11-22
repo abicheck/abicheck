@@ -1,0 +1,34 @@
+{
+  "verdict": "UNCONFIRMED",
+  "summary": {
+    "breaking": 0,
+    "source_breaks": 0,
+    "risk_changes": 0,
+    "compatible_additions": 7,
+    "quality_issues": 25,
+    "informational": 1,
+    "total_changes": 33,
+    "binary_compatibility_pct": 100.0,
+    "affected_pct": 0.0,
+    "change_inventory": {
+      "compatibility_changes": 33,
+      "compatibility_breaking": 0,
+      "compatibility_source_breaks": 0,
+      "compatibility_risk": 0,
+      "compatibility_compatible": 33,
+      "hygiene_introduced": 0,
+      "hygiene_resolved": 0,
+      "hygiene_persistent": 0,
+      "hygiene_not_evaluated": 0
+    }
+  },
+  "counts": {
+    "func_added": 5,
+    "var_added": 2,
+    "visibility_leak": 1,
+    "exported_object_alignment_reduced": 20,
+    "imported_symbol_removed": 4,
+    "public_surface_grew": 1
+  },
+  "selected": []
+}

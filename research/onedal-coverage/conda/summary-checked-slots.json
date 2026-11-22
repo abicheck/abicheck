@@ -1,0 +1,124 @@
+{
+  "verdict": "BREAKING",
+  "summary": {
+    "breaking": 3,
+    "source_breaks": 0,
+    "risk_changes": 8067,
+    "compatible_additions": 0,
+    "quality_issues": 1,
+    "informational": 0,
+    "total_changes": 8071,
+    "binary_compatibility_pct": 0.0,
+    "affected_pct": 100.0,
+    "change_inventory": {
+      "compatibility_changes": 4,
+      "compatibility_breaking": 3,
+      "compatibility_source_breaks": 0,
+      "compatibility_risk": 0,
+      "compatibility_compatible": 1,
+      "hygiene_introduced": 0,
+      "hygiene_resolved": 0,
+      "hygiene_persistent": 8067,
+      "hygiene_not_evaluated": 0
+    }
+  },
+  "counts": {
+    "type_vtable_changed": 3,
+    "exported_not_public": 8067,
+    "soname_bump_recommended": 1
+  },
+  "selected": [
+    {
+      "kind": "type_vtable_changed",
+      "symbol": "TreeNodeVisitor",
+      "description": "vtable reordered: TreeNodeVisitor",
+      "old_value": "onSplitNode, onLeafNode",
+      "new_value": "onLeafNode, onSplitNode",
+      "review_evidence": {
+        "kind": "declared_vtable_sequence",
+        "old_entries": [
+          "onSplitNode",
+          "onLeafNode"
+        ],
+        "new_entries": [
+          "onLeafNode",
+          "onSplitNode"
+        ]
+      },
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "278b5951c11e419e",
+      "canonical_finding_id": "fff2aee5e3e4e51d",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "The observed virtual-interface sequence changed. Added, removed, replaced, or reordered entries can affect fixed vtable offsets; inspect the recorded delta. An append-only header sequence does not by itself prove the emitted layout or all consumers are compatible.",
+      "source_location": "/workspace/scratch/143427d83e70/dal-conda/original/algorithms/tree_utils/tree_utils.h:74",
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old",
+        "public_header:new"
+      ]
+    },
+    {
+      "kind": "type_vtable_changed",
+      "symbol": "onSplitNode",
+      "description": "position in the declared vtable sequence changed for onSplitNode: 0 \u2192 1",
+      "old_value": "position 0",
+      "new_value": "position 1",
+      "review_evidence": null,
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "aa859bb02f66089b",
+      "canonical_finding_id": "cecd68bf6b10796e",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "The observed virtual-interface sequence changed. Added, removed, replaced, or reordered entries can affect fixed vtable offsets; inspect the recorded delta. An append-only header sequence does not by itself prove the emitted layout or all consumers are compatible.",
+      "source_location": "/workspace/scratch/143427d83e70/dal-conda/original/algorithms/tree_utils/tree_utils.h:82",
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "all_mode_normalized_entity",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old"
+      ]
+    },
+    {
+      "kind": "type_vtable_changed",
+      "symbol": "onLeafNode",
+      "description": "position in the declared vtable sequence changed for onLeafNode: 1 \u2192 0",
+      "old_value": "position 1",
+      "new_value": "position 0",
+      "review_evidence": null,
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "f9ea773816130a57",
+      "canonical_finding_id": "ea71e4cef59b0229",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "The observed virtual-interface sequence changed. Added, removed, replaced, or reordered entries can affect fixed vtable offsets; inspect the recorded delta. An append-only header sequence does not by itself prove the emitted layout or all consumers are compatible.",
+      "source_location": "/workspace/scratch/143427d83e70/dal-conda/original/algorithms/tree_utils/tree_utils.h:89",
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "all_mode_normalized_entity",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old"
+      ]
+    }
+  ]
+}

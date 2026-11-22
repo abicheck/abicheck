@@ -1,0 +1,60 @@
+{
+  "verdict": "COMPATIBLE_WITH_RISK",
+  "summary": {
+    "breaking": 0,
+    "source_breaks": 0,
+    "risk_changes": 8068,
+    "compatible_additions": 0,
+    "quality_issues": 0,
+    "informational": 0,
+    "total_changes": 8068,
+    "binary_compatibility_pct": 100.0,
+    "affected_pct": 0.0,
+    "change_inventory": {
+      "compatibility_changes": 1,
+      "compatibility_breaking": 0,
+      "compatibility_source_breaks": 0,
+      "compatibility_risk": 1,
+      "compatibility_compatible": 0,
+      "hygiene_introduced": 0,
+      "hygiene_resolved": 0,
+      "hygiene_persistent": 8067,
+      "hygiene_not_evaluated": 0
+    }
+  },
+  "counts": {
+    "abi_equivalent_type_changed": 1,
+    "exported_not_public": 8067
+  },
+  "selected": [
+    {
+      "kind": "abi_equivalent_type_changed",
+      "symbol": "SplitNodeDescriptor",
+      "description": "Type spelling changed between ABI-identical types: SplitNodeDescriptor double -> feature_t (same size, alignment and register class; a source-level change only)",
+      "old_value": "double",
+      "new_value": "feature_t",
+      "review_evidence": null,
+      "severity": "risk",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "d1b4e78c5251d732",
+      "canonical_finding_id": "28007de11119ddfc",
+      "recommended_action": "verify_deployment_compatibility",
+      "evidence_status": "contextual_risk",
+      "impact": "A parameter, return, field or variable was retyped between two types the compiler passes, stores and returns identically (same size, alignment and register class: long -> long long on LP64, char -> signed char, an enum -> its unsigned underlying integer, __int128 -> unsigned __int128, a float vector -> a double of the same size). The compiled ABI is unchanged, so an existing binary keeps working. The declared type is different, though: a source that overloads on it, a template instantiated over it, or a function pointer of the old type can see the difference, so the change is recorded as a source-level risk.",
+      "field_name": "featureValue",
+      "source_location": "/workspace/scratch/143427d83e70/dal-conda/original/algorithms/tree_utils/tree_utils.h:58",
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "COMPATIBLE_WITH_RISK",
+      "gate_contribution": 0,
+      "contract_evidence_refs": [
+        "public_header:old",
+        "public_header:new"
+      ]
+    }
+  ]
+}
