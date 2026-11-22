@@ -4,23 +4,26 @@
 
 Each tier job (binary, source, header) passes ``github.event.inputs.only``
 through ``env:`` and quotes it into an argv array. This executes each job's
-real ``run:`` script under bash with a hostile ``ONLY_INPUT`` and a stub
-``python`` on ``PATH``, and checks that nothing the payload asks for happens
-and that the whole value arrives as one ``--only`` argument.
+real ``run:`` step through ``_workflow_exec.run_step`` with a hostile
+``ONLY_INPUT`` and a stub ``python`` on ``PATH``, and checks that nothing the
+payload asks for happens and that the whole value arrives as one ``--only``
+argument.
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable, require_bash
-from _yaml_fast import safe_load
+from _workflow_exec import find_run_step, require_bash, run_step
 
-_WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/eval-suite.yml"
-
+_WORKFLOW = "eval-suite.yml"
+_STEPS = (
+    ("binary-tier", "Run binary tier (fail on verdict drift)"),
+    ("source-tier", "Run source tier (coverage; gated only against systemic breakage)"),
+    ("header-tier", "Run header tier (non-gating)"),
+)
 _PAYLOADS = (
     "zlib; touch PWNED",
     "$(touch PWNED)",
@@ -32,29 +35,23 @@ _PAYLOADS = (
 )
 
 
-def _runner_steps() -> list[tuple[str, str]]:
-    jobs = safe_load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-    steps = []
-    for name, job in jobs.items():
-        for step in job.get("steps", []):
-            run = step.get("run", "")
-            if "runner.py" in run and "ONLY_INPUT" in str(step.get("env", {})):
-                steps.append((name, run))
-    return steps
+@pytest.mark.parametrize("job, step_name", _STEPS, ids=[j for j, _ in _STEPS])
+def test_tier_step_routes_only_through_env(job: str, step_name: str) -> None:
+    step = find_run_step(_WORKFLOW, job, step_name)
+    assert "ONLY_INPUT" in (step.get("env") or {})
+    assert "inputs.only" not in step["run"]
 
 
-def test_every_tier_job_routes_only_through_env() -> None:
-    jobs = {name for name, _ in _runner_steps()}
-    assert {"binary-tier", "source-tier", "header-tier"} <= jobs, jobs
-
-
+@pytest.mark.skipif(
+    os.name == "nt", reason="the python stub needs a shebang script exec'd from PATH"
+)
 @pytest.mark.parametrize("payload", _PAYLOADS)
-@pytest.mark.parametrize("job_run", _runner_steps(), ids=lambda s: s[0])
+@pytest.mark.parametrize("job, step_name", _STEPS, ids=[j for j, _ in _STEPS])
 def test_hostile_only_input_is_one_inert_argument(
-    tmp_path: Path, job_run: tuple[str, str], payload: str
+    tmp_path: Path, job: str, step_name: str, payload: str
 ) -> None:
     require_bash()
-    _, run = job_run
+    step = find_run_step(_WORKFLOW, job, step_name)
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
     argv_log = tmp_path / "argv"
@@ -63,13 +60,16 @@ def test_hostile_only_input_is_one_inert_argument(
         f'#!/bin/sh\nfor a in "$@"; do printf "%s\\0" "$a"; done > "{argv_log}"\n'
     )
     stub.chmod(0o755)
-    env = {
-        "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
-        "ONLY_INPUT": payload,
-        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
-    }
-    subprocess.run(
-        [bash_executable(), "-e", "-c", run], cwd=tmp_path, env=env, check=False
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    run_step(
+        step,
+        workspace=workspace,
+        env={
+            "PATH": f"{stub_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "ONLY_INPUT": payload,
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+        },
     )
     assert not list(tmp_path.rglob("PWNED*"))
     args = argv_log.read_text().split("\0")[:-1]
