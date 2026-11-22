@@ -115,7 +115,7 @@ def run(root: Path) -> None:
         ]:
             report = case / (lane + ".json")
             report.unlink(missing_ok=True)
-            subprocess.run(
+            comparison = subprocess.run(
                 [
                     sys.executable,
                     "-m",
@@ -128,7 +128,12 @@ def run(root: Path) -> None:
                     "json=" + str(report),
                 ],
                 capture_output=True,
+                text=True,
             )
+            if not report.is_file():
+                raise RuntimeError(
+                    f"{name}/{lane}: checker exited {comparison.returncode} without a report: {comparison.stderr}"
+                )
             data = json.loads(report.read_text())
             rows.append((name, *observed, lane, data["verdict"]))
     with (root / "results.csv").open("w") as stream:
