@@ -104,7 +104,11 @@ def _compute_loadability(
     """Determine the loadability verdict for a candidate environment."""
     if not graph.nodes:
         return StackVerdict.FAIL
-    if graph.unresolved or missing:
+    if (
+        graph.unresolved
+        or missing
+        or any(b.required_version_unavailable for b in version_mismatches)
+    ):
         return StackVerdict.FAIL
     if version_mismatches:
         return StackVerdict.WARN

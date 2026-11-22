@@ -153,6 +153,23 @@ class TestVersionedSymbols:
         )
         bindings = compute_bindings(graph)
         assert bindings[0].status == BindingStatus.VERSION_MISMATCH
+        assert bindings[0].required_version_unavailable
+
+    @pytest.mark.parametrize(
+        ("binding", "provided_version"),
+        [(ElfSymbolBinding.WEAK, "V2"), (ElfSymbolBinding.GLOBAL, "")],
+    )
+    def test_version_mismatch_with_possible_fallback(self, binding, provided_version):
+        graph = _make_graph(
+            {
+                "/app": (["libapi.so"], [], [_imp("value", "V1", binding)]),
+                "/libapi.so": ([], [_sym("value", version=provided_version)], []),
+            },
+            edges=[("/app", "/libapi.so")],
+        )
+        (result,) = compute_bindings(graph)
+        assert result.status == BindingStatus.VERSION_MISMATCH
+        assert not result.required_version_unavailable
 
     def test_unversioned_import_matches_default(self):
         graph = _make_graph(
@@ -349,3 +366,28 @@ class TestRealBinary:
             assert isinstance(b.status, BindingStatus)
             assert b.consumer
             assert b.symbol
+
+
+@pytest.mark.parametrize(
+    ("binding", "version", "expected"),
+    [
+        (ElfSymbolBinding.GLOBAL, "V2", "fail"),
+        (ElfSymbolBinding.WEAK, "V2", "warn"),
+        (ElfSymbolBinding.GLOBAL, "", "warn"),
+        (ElfSymbolBinding.GLOBAL, "V1", "pass"),
+    ],
+)
+def test_import_version_loadability(monkeypatch, binding, version, expected):
+    from abicheck import stack_checker
+
+    graph = _make_graph(
+        {
+            "/app": (["libapi.so"], [], [_imp("value", "V1", binding)]),
+            "/libapi.so": ([], [_sym("value", version=version)], []),
+        },
+        edges=[("/app", "/libapi.so")],
+    )
+    monkeypatch.setattr(
+        stack_checker, "resolve_dependencies", lambda *args, **kwargs: graph
+    )
+    assert stack_checker.check_single_env(Path("/app")).loadability.value == expected
