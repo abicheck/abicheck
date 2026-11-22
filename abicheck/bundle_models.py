@@ -762,8 +762,7 @@ class BundleDiffResult:
     resolution_not_applicable_members: dict[str, str] = field(default_factory=dict)
     #: The subset of *analysis_errors* that records a failed analysis step
     #: (snapshot build, ``compare_bundle`` or the signature check raised).
-    #: Only these floor the release exit (ADR-071, 2026-11-21 amendment).
-    #: At the tail so a positional caller keeps binding ``policy_file``.
+    #: Only these floor the release exit (ADR-071); at the tail for positional callers.
     analysis_failures: list[str] = field(default_factory=list)
 
     @property
