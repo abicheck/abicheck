@@ -412,6 +412,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "struct_field_type_changed",
         "struct_packing_changed",
         "struct_packing_mode_changed",
+        "layout_build_config_unverified",
         "struct_return_convention_changed",
         "struct_size_changed",
         "suppression_reachability_unknown",

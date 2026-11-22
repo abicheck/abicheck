@@ -15,15 +15,15 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **435**
-- Kinds with at least one real source: **219**
+- Total kinds: **436**
+- Kinds with at least one real source: **220**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 114
+- Kinds per source: catalog 159, field_shapes 9, integration 115
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 130 | 64 |
-| L1 | 66 | 7 |
+| L1 | 67 | 7 |
 | L2 | 79 | 38 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
@@ -226,6 +226,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `graph_coverage_insufficient_for_suppression` | COMPATIBLE | 0 | 0 | 0 |
 | `inline_namespace_version_bumped` | BREAKING | 1 | 0 | 0 |
 | `integer_model_changed` | BREAKING | 1 | 0 | 0 |
+| `layout_build_config_unverified` | RISK | 0 | 0 | 2 |
 | `param_pointer_level_changed` | BREAKING | 1 | 0 | 0 |
 | `polymorphic_type_non_virtual_dtor` | RISK | 1 | 0 | 0 |
 | `secondary_vtable_group_changed` | BREAKING | 1 | 0 | 0 |

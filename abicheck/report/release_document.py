@@ -323,8 +323,41 @@ def evidence_contract_error_entries(
     ]
 
 
+def release_assurance_exit_key(assurance_terms: Any, bundle_result: Any) -> int | None:
+    """The release's top-level ``analysis_assurance_exit_contribution``:
+    ``max`` of the per-member fold (ADR-071 D6) and a failed bundle analysis
+    (2026-11-21 amendment), so aggregate and the Action's deferred gate read
+    the same floor the exit does. ``None`` when neither applies (key omitted,
+    as before)."""
+    from ..policy.release_exit_decision import release_bundle_analysis_contribution
+
+    failures = getattr(bundle_result, "analysis_failures", None) or ()
+    bundle = release_bundle_analysis_contribution(failures)
+    if assurance_terms is not None and assurance_terms.section is not None:
+        return max(int(assurance_terms.decision.exit_contribution), bundle)
+    return bundle or None
+
+
+def _bundle_failure_error_entries(bundle_result: Any) -> list[dict[str, object]]:
+    """One JUnit error suite for a failed bundle analysis (ADR-071's
+    2026-11-21 amendment): it floors the exit, so the XML must not read
+    ``errors="0"``."""
+    failures = list(getattr(bundle_result, "analysis_failures", None) or ())
+    if not failures:
+        return []
+    return [
+        {
+            "library": "bundle-analysis",
+            "error": "Cross-library (bundle) analysis did not complete: "
+            + "; ".join(failures)
+            + ". Contributes 1 to the release exit code (analysis assurance).",
+        }
+    ]
+
+
 def _junit_error_libraries(
     library_results: Sequence[dict[str, object]],
+    bundle_result: Any = None,
 ) -> list[dict[str, object]]:
     """The error testsuites JUnit renders: an ``ERROR``/``not_comparable``
     member (ADR-050 D2 -- ``reason`` carries its message) plus a member
@@ -343,7 +376,7 @@ def _junit_error_libraries(
         for entry in evidence_contract_error_entries(library_results)
         if entry["library"] not in already
     ]
-    return error_libs
+    return error_libs + _bundle_failure_error_entries(bundle_result)
 
 
 def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> ReleaseReport:
@@ -385,6 +418,9 @@ def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> Release
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
         failed_member_contribution=terms.decision.failed_member_exit_contribution,
         require_complete_analysis=ev.require_complete_analysis,
+        bundle_analysis_failures=(
+            ev.bundle_result.analysis_failures if ev.bundle_result is not None else ()
+        ),
     ).to_dict()
     return ReleaseReport(
         evaluation=ev,
@@ -408,7 +444,7 @@ def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> Release
         disposition_audit=release_disposition_audit_block(
             library_results, ev.matrix_result, ev.severity_config, ev.bundle_result
         ),
-        junit_error_libraries=_junit_error_libraries(library_results),
+        junit_error_libraries=_junit_error_libraries(library_results, ev.bundle_result),
         surface_changes=live_surface_changes(library_results, terms.record),
     )
 
@@ -548,9 +584,9 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
         # ADR-071 D6; the top-level contribution is the key report schema
         # 2.40 defines and aggregate/the Action's deferred gate read.
         summary["analysis_assurance"] = a_terms.section
-        summary["analysis_assurance_exit_contribution"] = (
-            a_terms.decision.exit_contribution
-        )
+    assurance_key = release_assurance_exit_key(a_terms, ev.bundle_result)
+    if assurance_key is not None:
+        summary["analysis_assurance_exit_contribution"] = assurance_key
     if any("contract_coverage_exit_contribution" in lib for lib in library_results):
         # ADR-049 Phase 7; the failure count stays real even when
         # `contract.unresolved: warn` zeroes the contribution.

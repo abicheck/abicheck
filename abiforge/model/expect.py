@@ -596,3 +596,84 @@ def issue_keys(problems: tuple[str, ...] | list[str]) -> frozenset[str]:
         else:
             raise ValueError(f"unrecognized problem text: {p!r}")
     return frozenset(keys)
+
+
+#: ADR-095's reduced-assurance kind: abicheck's answer when a compatible layout
+#: conclusion rests on padding or an int-sized enum that a config-level layout
+#: flag the public header cannot carry would remove.
+LAYOUT_CONFIG_SIGNAL = "LAYOUT_BUILD_CONFIG_UNVERIFIED"
+
+
+def _layout_debug_unreadable(config: Config) -> bool:
+    """A ``headers`` cell whose layout the checker reads from headers alone.
+
+    Stripped ``{B,H}`` has no DWARF; a PE build keeps MinGW's DWARF in the
+    DLL, but PE layout debug evidence is read from a PDB, which these builds
+    do not produce. Either way no debug layout can confirm the build flags.
+    """
+    if config.evidence != "headers":
+        return False
+    return config.stripped or config.platform[1] == "pe"
+
+
+def flag_invisible_layout(
+    exp: Expectation, config: Config, expect_at: Callable[[Config], Expectation]
+) -> Expectation:
+    """ADR-095 at the expectation: stripped ``{B,H}`` without build data or
+    sources cannot see ``-fpack-struct`` or ``-fshort-enums``.
+
+    *expect_at* gives the same operator's expectation at another config. Where
+    the edit is benign under the default layout but a break under a layout
+    flag, the headers alone cannot decide which build they describe:
+
+    * the flagged build owes the reduced-assurance kind and
+      ``COMPATIBLE_WITH_RISK`` (the break itself is evidence-limited);
+    * any build of such an edit may read ``COMPATIBLE_WITH_RISK`` (the
+      benign ceiling rises by one step, never to a break).
+    """
+    if not _layout_debug_unreadable(config) or config.build_data or config.sources:
+        return exp
+    plain = replace(config.flags, pack=None, short_enums=False)
+    default = expect_at(replace(config, flags=plain))
+    if not _clean_benign(default):
+        return exp
+    if (
+        config.flags != plain
+        and VERDICT_RANK[exp.verdict_min] >= VERDICT_RANK["BREAKING"]
+    ):
+        return Expectation(
+            # Either the reduced-assurance kind, or the break itself where the
+            # header parse did receive the flag.
+            any_of=(
+                (frozenset({LAYOUT_CONFIG_SIGNAL}) | exp.expected.union(*exp.any_of))
+                - ADVISORY_KINDS,
+            ),
+            verdict_min="COMPATIBLE_WITH_RISK",
+            verdict_max=None,
+            note=f"{exp.note} [ADR-095: stripped headers cannot see the layout flag]".strip(),
+            undecided=(
+                "ADR-095: the break comes from a layout flag the public header does not "
+                "carry; stripped {B,H} can only report reduced assurance"
+            ),
+        )
+    if (
+        _clean_benign(exp)
+        and exp.verdict_max != "COMPATIBLE_WITH_RISK"
+        and any(
+            VERDICT_RANK[
+                expect_at(replace(config, flags=replace(plain, **v))).verdict_min
+            ]
+            >= VERDICT_RANK["BREAKING"]
+            for v in ({"pack": 1}, {"short_enums": True})
+        )
+    ):
+        return replace(exp, verdict_max="COMPATIBLE_WITH_RISK")
+    return exp
+
+
+def _clean_benign(exp: Expectation) -> bool:
+    return (
+        exp.observable
+        and exp.verdict_max is not None
+        and VERDICT_RANK[exp.verdict_max] <= VERDICT_RANK["COMPATIBLE_WITH_RISK"]
+    )

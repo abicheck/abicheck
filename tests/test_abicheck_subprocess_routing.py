@@ -59,6 +59,10 @@ DATA_ARGV_ALLOWANCE: dict[str, tuple[int, str]] = {
         1,
         "a tuple of repository roots to scan; not an argv",
     ),
+    "tests/test_eval_header_tier.py": (
+        1,
+        "expected argv asserted against the field harness's compare_cmd builder; nothing is spawned",
+    ),
 }
 
 

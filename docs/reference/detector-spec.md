@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (435 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (436 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -195,6 +195,7 @@ One row per `ChangeKind` (435 total). Columns fuse the verdict partition (`check
 | `kabi_symbol_namespace_changed` | breaking | `BREAKING` | `error` | L0 | `kabi_symbol_namespace_changed` | [case176](examples/case176_kabi_symbol_namespace_changed.md) |
 | `kabi_symbol_removed` | breaking | `BREAKING` | `error` | L0 | `kabi_symbol_removed` | — |
 | `layer_coverage_asymmetric` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `layer_coverage_asymmetric` | — |
+| `layout_build_config_unverified` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `layout_build_config_unverified` | — |
 | `layout_unverifiable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `layout_unverifiable` | — |
 | `libcpp_abi_version_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `libcpp_abi_version_changed` | — |
 | `library_version_downgraded` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `library_version_downgraded` | — |

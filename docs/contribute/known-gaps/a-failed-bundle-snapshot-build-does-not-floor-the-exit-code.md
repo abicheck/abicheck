@@ -3,13 +3,17 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # A failed bundle snapshot build is reported but does not floor the exit code
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed](../archive/known-gaps-closed.md)
+
+**Status (2026-11-21): CLOSED** by the [ADR-071 2026-11-21 amendment](../adr/071-release-analysis-assurance-fold.md#amendment-2026-11-21-a-failed-bundle-analysis-lowers-release-assurance). A directory/package `compare` whose bundle (cross-library) analysis failed -- a `BundleDiffResult.analysis_failures` record (a subset of `analysis_errors`) from a raising bundle snapshot build, a raising `compare_bundle`, or a raising signature-evidence check -- now has lowered analysis assurance: the release exit resolver (`policy/release_exit_decision.resolve_release_exit_decision_for_report`) folds `1` into the `ANALYSIS_ASSURANCE` axis with `max`, unconditionally, so a clean release exits `1` and a higher code is never lowered. The JSON `exit` block and top-level `analysis_assurance_exit_contribution`, the `--output-dir` summary, JUnit, the Markdown "Bundle Analysis Warnings" section and a stderr notice all state it. Regression tests: `tests/test_fail_closed_error_paths.py::test_failed_bundle_axis_floors_the_release_exit_code` (public CLI, all three producers x clean/breaking release) and `::test_bundle_failure_floor_is_max_folded`.
+
+*The rest of this page is the original 2026-11-13 description of the gap, kept as history.*
 
 **Status (2026-11-13): OPEN.**
 

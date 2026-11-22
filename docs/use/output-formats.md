@@ -1034,6 +1034,13 @@ that result, never in place of it:
   (schema 3.3). `evaluated` excludes an unreadable-advisory consumer (there
   is no verdict to call affected or not); `affected` counts an evaluated
   consumer whose own verdict is neither `NO_CHANGE` nor `COMPATIBLE`.
+  SARIF carries the same numbers as the run-level
+  `properties.scopedGate.consumerImpactSummary` object (`total`,
+  `evaluated`, `affected`, `unreadableAdvisory`, `unreadablePaths`); JUnit
+  carries them as testsuite properties `abicheck.consumer_impact.total`,
+  `.evaluated`, `.affected`, `.unreadable_advisory`, plus one
+  `abicheck.consumer_impact.unreadable_path` per unreadable advisory
+  consumer.
 - `required_symbol_contract` — the equivalent single object for
   `consumers.required_symbols`.
 - `consumer_scope` — one object stating what a consumer-only assessment would

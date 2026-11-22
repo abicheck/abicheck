@@ -1303,5 +1303,8 @@
  "writable_executable_segment|qn": "sig:ns::Foo\u001fwritable_executable_segment\u001fold\u001fnew\u001fwritable_executable_segment on Foo",
  "x86_isa_baseline_raised|disamb": "sig:Foo\u001fx86_isa_baseline_raised\u001fold\u001fnew\u001fx86_isa_baseline_raised on Foo",
  "x86_isa_baseline_raised|plain": "sig:Foo\u001fx86_isa_baseline_raised\u001fold\u001fnew\u001fx86_isa_baseline_raised on Foo",
- "x86_isa_baseline_raised|qn": "sig:ns::Foo\u001fx86_isa_baseline_raised\u001fold\u001fnew\u001fx86_isa_baseline_raised on Foo"
+ "x86_isa_baseline_raised|qn": "sig:ns::Foo\u001fx86_isa_baseline_raised\u001fold\u001fnew\u001fx86_isa_baseline_raised on Foo",
+ "layout_build_config_unverified|plain": "sig:Foo\u001flayout_build_config_unverified\u001fold\u001fnew\u001flayout_build_config_unverified on Foo",
+ "layout_build_config_unverified|qn": "sig:ns::Foo\u001flayout_build_config_unverified\u001fold\u001fnew\u001flayout_build_config_unverified on Foo",
+ "layout_build_config_unverified|disamb": "sig:Foo\u001flayout_build_config_unverified\u001fold\u001fnew\u001flayout_build_config_unverified on Foo"
 }

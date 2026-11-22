@@ -258,6 +258,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "kabi_symbol_removed",
             }
         ),
+        "layout_build_config": frozenset({"layout_build_config_unverified"}),
         "layout_descriptor": frozenset(
             {
                 "base_class_offset_changed",

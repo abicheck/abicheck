@@ -305,38 +305,230 @@ def test_pdb_lookup_failure_marks_debug_section_failed(
     }
 
 
-@pytest.mark.known_gap_canary
-def test_failed_bundle_axis_does_not_floor_the_release_exit_code(monkeypatch) -> None:
-    """Canary for known-gaps.md "A failed bundle snapshot build is reported
-    but does not floor the exit code": the release exit ladder has no input
-    for a failed bundle axis, so an otherwise clean release exits 0 even
-    though its report records the failure. Raising it needs an ADR (ADR-071
-    rules out folding it into the per-pair assurance axis)."""
+# ── R4: a failed bundle axis floors the release exit (ADR-071, 2026-11-21) ──
+#
+# Every producer of ``BundleDiffResult.analysis_errors`` on the live
+# directory-compare path, driven through the public CLI. The oracle is the
+# amendment's rule stated independently of the resolver:
+# exit == max(exit the same release reaches with no bundle failure, 1).
+
+
+def _raise(exc: Exception):
+    def boom(*_args, **_kwargs):
+        raise exc
+
+    return boom
+
+
+def _force_bundle_build_failure(monkeypatch) -> str:
+    monkeypatch.setattr(
+        bundle_mod, "build_bundle_snapshot_mixed", _raise(OSError("eio"))
+    )
+    return "bundle snapshot could not be built: eio"
+
+
+def _force_compare_bundle_failure(monkeypatch) -> str:
+    monkeypatch.setattr(bundle_mod, "compare_bundle", _raise(RuntimeError("bug")))
+    return "bundle analysis raised: bug"
+
+
+def _force_signature_check_failure(monkeypatch) -> str:
+    import abicheck.bundle_signature_evidence as sig_mod
+
+    monkeypatch.setattr(
+        sig_mod, "find_unverified_signature_findings", _raise(KeyError("sig"))
+    )
+    return "bundle signature-evidence check raised: 'sig'"
+
+
+_PRODUCERS = {
+    "snapshot_build": _force_bundle_build_failure,
+    "compare_bundle": _force_compare_bundle_failure,
+    "signature_check": _force_signature_check_failure,
+}
+
+
+def _snap(lib: str, version: str, *, with_bar: bool):
+    from abicheck.model import AbiSnapshot, Function, Visibility
+
+    names = ["foo", "bar"] if with_bar else ["foo"]
+    funcs = [
+        Function(name=n, mangled=n, return_type="int", visibility=Visibility.PUBLIC)
+        for n in names
+    ]
+    return AbiSnapshot(library=lib, version=version, functions=funcs, from_headers=True)
+
+
+def _release_operands(tmp_path: Path, *, breaking: bool, operand: str):
+    """OLD/NEW release operands: directories of snapshots, or stored
+    BundleFacts documents holding the same members (``compare --bundle-facts``'s
+    stored-pair route)."""
+    from abicheck.model.bundle_facts import BundleFacts
+    from abicheck.serialization import save_bundle_facts, snapshot_to_json
+
+    sides = {
+        side: {
+            lib: _snap(
+                lib,
+                "1" if side == "old" else "2",
+                with_bar=side == "old" or not (breaking and lib == "liba.so"),
+            )
+            for lib in ("liba.so", "libb.so")
+        }
+        for side in ("old", "new")
+    }
+    paths = []
+    for side, members in sides.items():
+        if operand == "bundle_facts":
+            path = tmp_path / f"{side}.bundlefacts.json"
+            save_bundle_facts(
+                BundleFacts(variant_fingerprint="fp", per_library_snapshots=members),
+                path,
+                format="json",
+            )
+        else:
+            path = tmp_path / side
+            path.mkdir()
+            for lib, snap in members.items():
+                (path / f"{lib}.json").write_text(
+                    snapshot_to_json(snap), encoding="utf-8"
+                )
+        paths.append(path)
+    return paths
+
+
+def _run_release(
+    tmp_path: Path, *, breaking: bool, operand: str = "directory"
+) -> tuple[int, dict, str]:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    old, new = _release_operands(tmp_path, breaking=breaking, operand=operand)
+    md = tmp_path / "report.md"
+    args = ["compare", str(old), str(new), "-o", "json=-", "-o", f"markdown={md}"]
+    if operand == "directory":
+        # The live route's other two artifacts: JUnit and the summary sidecar.
+        args += ["-o", f"junit={tmp_path / 'report.xml'}"]
+        args += ["-o", f"json={tmp_path / 'out'}/"]
+    result = CliRunner().invoke(main, args)
+    return result.exit_code, json.loads(result.stdout), md.read_text("utf-8")
+
+
+def _junit_errors(tmp_path: Path) -> int:
+    import defusedxml.ElementTree as ET
+
+    root = ET.parse(tmp_path / "report.xml").getroot()
+    return int(root.get("errors", "0"))
+
+
+def _summary(tmp_path: Path) -> dict:
+    return json.loads((tmp_path / "out" / "summary.json").read_text("utf-8"))
+
+
+_OPERANDS = ("directory", "bundle_facts")
+
+
+@pytest.mark.parametrize("operand", _OPERANDS)
+@pytest.mark.parametrize("breaking", [False, True], ids=["clean", "breaking"])
+def test_release_without_bundle_failure_is_unfloored(
+    tmp_path, breaking, operand
+) -> None:
+    from abicheck.workflows.aggregate.report_gate import analysis_assurance_exit
+
+    code, payload, _ = _run_release(tmp_path, breaking=breaking, operand=operand)
+    assert "bundle_analysis_errors" not in payload
+    assert code == (4 if breaking else 0)
+    assert analysis_assurance_exit(payload) == 0
+    if operand == "directory":
+        assert _junit_errors(tmp_path) == 0
+        assert analysis_assurance_exit(_summary(tmp_path)) == 0
+
+
+# A stored BundleFacts pair builds its bundle snapshots from the stored facts,
+# not through `build_bundle_snapshot_mixed`, so that producer is live-only.
+_CASES = [
+    (operand, producer)
+    for operand in _OPERANDS
+    for producer in sorted(_PRODUCERS)
+    if not (operand == "bundle_facts" and producer == "snapshot_build")
+]
+
+
+@pytest.mark.parametrize("breaking", [False, True], ids=["clean", "breaking"])
+@pytest.mark.parametrize(("operand", "producer"), _CASES)
+def test_failed_bundle_axis_floors_the_release_exit_code(
+    monkeypatch, tmp_path, operand, producer, breaking
+) -> None:
+    from abicheck.workflows.aggregate.report_gate import analysis_assurance_exit
+
+    message = _PRODUCERS[producer](monkeypatch)
+    code, payload, markdown = _run_release(tmp_path, breaking=breaking, operand=operand)
+    assert message in payload["bundle_analysis_errors"]
+    expected = max(4 if breaking else 0, 1)
+    assert code == expected
+    assert payload["exit"]["code"] == expected  # report and process agree
+    # The aggregate / deferred-gate reader sees the same floor.
+    assert analysis_assurance_exit(payload) == 1
+    assert "Bundle Analysis Warnings" in markdown
+    assert "release exit code is at least 1" in markdown
+    if operand == "directory":
+        assert _junit_errors(tmp_path) >= 1
+        summary = _summary(tmp_path)
+        assert summary["exit"]["code"] == expected
+        assert analysis_assurance_exit(summary) == 1
+        assert message in summary["bundle_analysis_errors"]
+
+
+@pytest.mark.parametrize(
+    "with_failure", [False, True], ids=["note_only", "note+failure"]
+)
+def test_a_scope_notice_alone_does_not_floor(
+    monkeypatch, tmp_path, with_failure
+) -> None:
+    """A withheld-manifest scope notice is listed in ``bundle_analysis_errors``
+    but is the completeness axis's business (ADR-065 D6): it never floors a
+    clean release by itself, and never hides a genuine failure beside it."""
+    import abicheck.workflows.release_bundle as rb
+
+    note = "bundle manifest entries withheld: libgone.so (out of scope)"
+    real = rb.scope_manifest_to_members
+    monkeypatch.setattr(
+        rb, "scope_manifest_to_members", lambda m, r: (real(m, r)[0], note)
+    )
+    if with_failure:
+        _force_compare_bundle_failure(monkeypatch)
+    code, payload, markdown = _run_release(tmp_path, breaking=False)
+    assert note in payload["bundle_analysis_errors"]
+    assert code == payload["exit"]["code"] == (1 if with_failure else 0)
+    assert ("release exit code is at least 1" in markdown) is with_failure
+    assert _junit_errors(tmp_path) == (1 if with_failure else 0)
+
+
+@pytest.mark.parametrize("require_complete", [False, True])
+@pytest.mark.parametrize("errors", [(), ("x",), ("x", "y")], ids=["none", "one", "two"])
+@pytest.mark.parametrize(
+    "verdict", ["NO_CHANGE", "COMPATIBLE", "API_BREAK", "BREAKING", "ERROR"]
+)
+def test_bundle_failure_floor_is_max_folded(verdict, errors, require_complete) -> None:
     from abicheck.policy.release_exit_decision import (
         resolve_release_exit_decision_for_report,
     )
 
-    monkeypatch.setattr(
-        bundle_mod, "build_bundle_snapshot", _failing_build("both", OSError("eio"))
-    )
-    members = {"libcore.so": Path("libcore.so")}
-    library_results: list[dict[str, object]] = [
-        {
-            "library": "libcore.so",
-            "verdict": "NO_CHANGE",
-            "_diff_result": _diff("libcore.so", Verdict.NO_CHANGE),
-        }
+    rows: list[dict[str, object]] = [
+        {"library": "a", "verdict": verdict, "analysis_assurance_status": "complete"}
     ]
-    result, worst = collect_bundle_result(
-        library_results,
-        members,
-        dict(members),
-        manifest_path=None,
-        bundle_system_providers=(),
-        worst_verdict="NO_CHANGE",
-    )
-    assert result is not None and result.analysis_errors
-    decision = resolve_release_exit_decision_for_report(
-        worst, False, [], None, 0, library_results, require_complete_analysis=True
-    )
-    assert decision.code == 0
+    base = resolve_release_exit_decision_for_report(
+        verdict, False, [], None, 0, rows, require_complete_analysis=require_complete
+    ).code
+    floored = resolve_release_exit_decision_for_report(
+        verdict,
+        False,
+        [],
+        None,
+        0,
+        rows,
+        require_complete_analysis=require_complete,
+        bundle_analysis_failures=errors,
+    ).code
+    assert floored == (max(base, 1) if errors else base)

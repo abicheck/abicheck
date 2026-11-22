@@ -80,7 +80,7 @@
     },
     {
       "path": "abicheck/buildsource/cross_source_checks.py",
-      "baseline_lines": 1693,
+      "baseline_lines": 1686,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -718,7 +718,7 @@
     },
     {
       "path": "abicheck/sarif.py",
-      "baseline_lines": 1203,
+      "baseline_lines": 1199,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",

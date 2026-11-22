@@ -16,6 +16,34 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A failed bundle snapshot build is reported but does not floor the exit code (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED** by the [ADR-071 2026-11-21 amendment](../adr/071-release-analysis-assurance-fold.md#amendment-2026-11-21-a-failed-bundle-analysis-lowers-release-assurance). A directory/package `compare` whose bundle (cross-library) analysis failed -- non-empty `BundleDiffResult.analysis_errors` from a raising bundle snapshot build, a raising `compare_bundle`, or a raising signature-evidence check -- now has lowered analysis assurance: the release exit resolver (`policy/release_exit_decision.resolve_release_exit_decision_for_report`) folds `1` into the `ANALYSIS_ASSURANCE` axis with `max`, unconditionally, so a clean release exits `1` and a higher code is never lowered. The JSON `exit` block, the `--output-dir` summary, the Markdown "Bundle Analysis Warnings" section and a stderr notice all state it. Regression tests: `tests/test_fail_closed_error_paths.py::test_failed_bundle_axis_floors_the_release_exit_code` (public CLI, all three producers x clean/breaking release) and `::test_bundle_failure_floor_is_max_folded`. [Full write-up](../known-gaps/a-failed-bundle-snapshot-build-does-not-floor-the-exit-code.md)
+
+### A version requirement on a newly needed library reads as compatible, whatever its version (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED.** Fixed by #2097: a newly needed provider's version nodes are measured against the binary-wide floor, never below the architecture's `GLIBC_` baseline (`compare/elf_version_floor.py`), so `GLIBC_2.25` from a newly needed `libc.so.6` reports `symbol_version_required_added` and `runtime_floor_raised`, while nodes at or below the baseline (`GLIBC_2.2.5` on x86-64) stay `symbol_version_required_added_compat`. Re-verified on the edit corpus: every `glibc_version_required_added` cell, gcc `-O2` included, agrees, so the strict xfail was removed.
+
+**Status (2026-11-12): OPEN.** `diff_platform_elf_symbols` reports a new `.gnu.version_r` tag as `symbol_version_required_added_compat` whenever its library was neither required nor `DT_NEEDED` before. A library whose old build imported nothing from libc (an `-O2` build linked `--as-needed`) and now calls `getrandom` gains `libc.so.6` with `GLIBC_2.25`: a runtime floor that did not exist before reads as compatible, and no `runtime_floor_raised` is reported. `needed_added` keeps the verdict at `COMPATIBLE_WITH_RISK`, so no verdict reads cleaner. Found by the edit corpus (`glibc_version_required_added` on `c_elf`, gcc `-O2`). Owner: `diff_platform_elf_symbols.py`.
+`wrong-kind` — the new glibc floor is named as a compatible requirement.
+
+### An inline function's static local, exported by clang, reads as an undeclared export (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED.** `buildsource/export_account_decision.account_export` accounts an Itanium local entity (`_ZZ <encoding> E ...`, and its guard `_ZGVZ ...`) whose owning function a public header declares as `public_function_local_entity`, a documented category: no source can name it, its owner's declaration documents it. A local of a function no public header declares stays an undeclared export, so a genuine leak is still reported. The `*_elf_only` existence findings word the same decision (`workflows/export_existence_wording.py`). Tests: `tests/test_inline_local_static_export_accounting.py` (grammar-built owner/entity product, and clang/gcc compiled libraries with a real undeclared export beside the public locals). Re-verified on the edit corpus: every `gnu_unique_static_added` clang cell agrees.
+
+**Status (2026-11-12): OPEN.** clang emits a public-header inline function's static local (`_ZZ8edit_ctrvE1n`) as a weak export (gcc as `STB_GNU_UNIQUE`). With public headers the new export reads as `exported_not_public` and the addition becomes `COMPATIBLE_WITH_RISK`, though no source can name a function-local static: it exists only to keep the inline function's ODR. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, clang). Owner: `buildsource/cross_source_checks.py` (`exported_not_public`).
+`false-positive` — adding a header inline function with a static local reads as a risk under clang.
+
+### The composite Action's single write slot could leave its coverage/assurance/severity floors without a structured report (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED.** `-o FORMAT=DESTINATION` is repeatable (plan slice 7m), so `action/run.sh` injects its internal `-o json=$PR_JSON` sidecar beside every caller `extra-args` export set that names no JSON destination (`_extra_args_write_would_conflict` only suppresses it when the caller already exports JSON, which `_json_report_src` then reads). A step with `extra-args: -o text=...` keeps the caller's export and its unconditional coverage/assurance/severity-category floors. Regression test: `tests/test_action_non_json_extra_args_export_floors.py` (every non-JSON caller format, both primaries, coverage-only/severity/both).
+
+**Former status (2026-10-09): POLICY_NOTE.** When `--write` was single-valued, a caller's non-JSON `--write` displaced the sidecar and the floors went blind for that run; accepted in `action/AGENTS.md` at the time.
+
+### castxml spells a multi-dimensional array with its bounds reversed (closed 2026-11-21)
+
+**Status (2026-11-21): CLOSED.** Not a castxml bug: castxml 0.7.0 nests `int m[2][3]` correctly (an `ArrayType` of 2 of an `ArrayType` of 3), and abicheck's `extract/headers/castxml/type_resolution.py` appended each outer bound after the inner ones. Extractor generation 91 spells the nested chain outermost first (`int[2][3]`, as the clang backend and DWARF do), and `storage/castxml_array_migration.migrate_castxml_array_order` reverses each run of adjacent bounds in a stored pre-91 castxml snapshot, so an old baseline compares clean. Regressions: `tests/test_castxml_written_type_integration.py` (real castxml against the C declarator and the clang backend), `tests/test_castxml_array_order_migration.py`.
+
 ### Affected-symbol attribution ignores identifier boundaries (closed 2026-11-19)
 
 **Status (2026-11-19): CLOSED.** `_build_type_to_funcs` and `_build_type_embed_index` keep the Aho-Corasick prefilter but count a hit only when it occurs as a whole identifier (`compare/type_name_boundary.py`; `::` stays a boundary, scoped same-name types are `type_symbol_disambiguation`'s job). The record-edit fragment (`formal/RECORD_EDIT_FRAGMENT.md`) had re-measured it on 925 of 9252 records in every evidence lane; regression: `tests/test_affected_symbols_identifier_boundary.py`.

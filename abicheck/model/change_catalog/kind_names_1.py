@@ -603,4 +603,9 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "imported_symbol_unprovided",
         "with resolved-dependency evidence (--follow-deps) on both sides: a self-contained library (every strong import provided by its DT_NEEDED closure) gained a strong import nothing in that closure provides -- the dynamic linker fails to load it → BREAKING",
     ),
+    (
+        "LAYOUT_BUILD_CONFIG_UNVERIFIED",
+        "layout_build_config_unverified",
+        "ADR-095: header-derived layout with no build-flag evidence on either side reads a change as compatible only because of padding or enum width that a config-level layout flag (-fpack-struct, -fshort-enums) would remove → COMPATIBLE_WITH_RISK",
+    ),
 )

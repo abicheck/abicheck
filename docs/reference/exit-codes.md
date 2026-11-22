@@ -372,7 +372,9 @@ present in `-o json=...` output (`analysis_assurance` — a top-level key on
 `compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
-is purely informational until a caller opts in. Setting `.abicheck.yml`'s
+is purely informational until a caller opts in. The one exception is a failed
+bundle (cross-library) analysis on a directory/package `compare`, which
+contributes `1` without the opt-in (see below). Setting `.abicheck.yml`'s
 `assurance.require_complete: true` (config-only -- no CLI flag; the former
 `compare --require-complete-analysis` flag was demoted here entirely) makes
 `compare` additionally contribute exit `1`
@@ -412,7 +414,18 @@ had complete evidence. A release can be scope-`complete` with a `partial`
 analysis, or scope-`incomplete` with a complete analysis over what ran; on a
 tie both are named in `reasons`.
 
-**Without `assurance.require_complete: true` every pre-existing invocation's
+**A failed bundle (cross-library) analysis** on a directory/package
+`compare` -- the bundle snapshot could not be built, `compare_bundle` raised,
+or the signature-evidence check raised, each listed in the report's
+`bundle_analysis_errors` -- also contributes `1` to this axis,
+**without** `assurance.require_complete`: an analysis that did not run is
+never a clean pass. It folds with `max`, so it never lowers a higher code, and the release's top-level
+`analysis_assurance_exit_contribution` and JUnit output carry it. A scope
+notice listed in `bundle_analysis_errors` (manifest entries withheld because
+their members are out of scope, a skipped member) does not: it belongs to the
+completeness axis.
+
+Apart from that, **without `assurance.require_complete: true` every pre-existing invocation's
 exit code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
 

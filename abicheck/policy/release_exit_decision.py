@@ -48,10 +48,13 @@ from .exit_decision_precedence import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .release_assurance import ReleaseAssuranceDecision
 
 __all__ = [
     "release_analysis_assurance_contribution",
+    "release_bundle_analysis_contribution",
     "release_evidence_contract_contribution",
     "resolve_release_exit_decision_for_report",
     "resolve_release_exit_decision_with_assurance",
@@ -94,6 +97,23 @@ def release_analysis_assurance_contribution(
         ),
         default=0,
     )
+
+
+def release_bundle_analysis_contribution(
+    bundle_analysis_failures: Sequence[str],
+) -> int:
+    """ADR-071's 2026-11-21 amendment: ``1`` when the release's bundle
+    (cross-library) analysis recorded any failure, else ``0``.
+
+    Reads ``BundleDiffResult.analysis_failures``, not ``analysis_errors``: a
+    scope notice (a withheld manifest entry, a skipped member) is listed
+    there too and is the completeness axis's business (ADR-065 D6).
+
+    Unconditional (not gated on ``assurance.require_complete``): a check that
+    did not run is a failed analysis, not merely weaker evidence, and must
+    never read as a clean pass.
+    """
+    return 1 if any(bundle_analysis_failures) else 0
 
 
 def release_additions_review_contribution(
@@ -290,6 +310,7 @@ def resolve_release_exit_decision_for_report(
     no_comparison_completed_contribution: int = 0,
     require_complete_analysis: bool = False,
     failed_member_contribution: int = 0,
+    bundle_analysis_failures: Sequence[str] = (),
 ) -> ExitDecision:
     """ADR-064 stage 1b: the release fan-out's persisted, explainable
     ``exit`` block.
@@ -345,6 +366,13 @@ def resolve_release_exit_decision_for_report(
     scanning an empty *library_results* would silently drop its exit ``4``
     to ``0`` (found by the reachable-state parity harness).
     """
+    # ADR-071 amendment (2026-11-21): a release whose bundle (cross-library)
+    # analysis failed -- non-empty *bundle_analysis_failures*, the
+    # `BundleDiffResult.analysis_failures` records, never a scope notice --
+    # has lower
+    # analysis assurance than a release whose bundle check ran, whatever
+    # `assurance.require_complete` says. It floors 0 -> 1 on the assurance
+    # axis (folded with `max`); it never lowers a higher code.
     not_comparable = worst_verdict == "not_comparable"
     severity_scheme_active = severity_exit_code is not None
     removed_required_library = fail_on_removed and bool(removed_keys)
@@ -378,8 +406,11 @@ def resolve_release_exit_decision_for_report(
         verdict_or_severity_contribution=verdict_or_severity_contribution,
         removed_required_library=removed_required_library,
         contract_coverage_contribution=contract_coverage_exit_contribution,
-        analysis_assurance_contribution=release_analysis_assurance_contribution(
-            library_results, require_complete=require_complete_analysis
+        analysis_assurance_contribution=max(
+            release_analysis_assurance_contribution(
+                library_results, require_complete=require_complete_analysis
+            ),
+            release_bundle_analysis_contribution(bundle_analysis_failures),
         ),
         evidence_contract_error_contribution=release_evidence_contract_contribution(
             library_results
@@ -408,6 +439,7 @@ def resolve_release_exit_decision_with_assurance(
     no_comparison_completed_exit_contribution: int = 0,
     failed_member_exit_contribution: int = 0,
     assurance_decision: ReleaseAssuranceDecision | None = None,
+    bundle_analysis_failures: Sequence[str] = (),
 ) -> ExitDecision:
     """The release decision a directory/package ``compare`` exits on.
 
@@ -445,4 +477,5 @@ def resolve_release_exit_decision_with_assurance(
             assurance_decision is not None and assurance_decision.require_complete
         ),
         failed_member_contribution=failed_member_exit_contribution,
+        bundle_analysis_failures=bundle_analysis_failures,
     )

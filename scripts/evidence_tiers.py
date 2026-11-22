@@ -317,6 +317,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "enum_member_value_changed": "L1",
     "enum_member_removed": "L1",
     "enum_member_added": "L1",
+    "layout_build_config_unverified": "L1",
     "enum_underlying_size_changed": "L1",
     "enum_member_renamed": "L1",
     "calling_convention_changed": "L1",

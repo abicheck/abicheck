@@ -62,6 +62,10 @@ from ._template_defaults import (
     template_default_findings,
 )
 from ._unobserved_finding import UnobservedFinding
+from ._unparsed_headers import (
+    UNPARSED_HEADERS_DIMENSION,
+    unparsed_header_findings,
+)
 from ._unreadable_sections import (
     UNREADABLE_SECTION_DIMENSION,
     unreadable_section_findings,
@@ -124,6 +128,11 @@ UNOBSERVED_DIMENSIONS: tuple[UnobservedDimension, ...] = (
     ),
     UnobservedDimension(
         SCOPE_FALLBACK_DIMENSION, f"{_PKG}._scope_fallback", scope_fallback_findings
+    ),
+    UnobservedDimension(
+        UNPARSED_HEADERS_DIMENSION,
+        f"{_PKG}._unparsed_headers",
+        unparsed_header_findings,
     ),
     UnobservedDimension(
         DEPTH_PROJECTION_DIMENSION,

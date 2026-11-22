@@ -206,6 +206,26 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "layout_build_config_unverified",
+        _R,
+        observable_at=(
+            observable(
+                ("B", "H"),
+                rationale="declared in the public header and present in the export table",
+            ),
+        ),
+        impact="A change reads as layout-compatible only because the header-derived "
+        "layout has padding (or an int-sized enum) that a config-level layout flag "
+        "the header cannot carry (-fpack-struct, -fshort-enums) would remove. Neither "
+        "side has DWARF or build data saying which flags the library was built with, so "
+        "compatibility is not established. Supply DWARF, build data (compile_commands.json) "
+        "or the layout flags (-fpack-struct=N, -fshort-enums) used by the build to confirm.",
+        description_template="'{name}': {new}. The layout was read from headers only (no DWARF, no build data); a build-time layout flag such as -fpack-struct or -fshort-enums would make this a break. Compatibility is not established.",
+        entity=_ENT.ANALYSIS,
+        contract_subject=_CS.ANALYSIS,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "libcpp_abi_version_changed",
         _R,
         impact="The libc++ ABI version changed (e.g. _LIBCPP_ABI_VERSION 1 → 2). "

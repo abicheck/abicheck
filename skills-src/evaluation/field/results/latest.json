@@ -663,5 +663,156 @@
       },
       "verdict_matches_expected": true
     }
-  ]
+  ],
+  "header_results": [
+    {
+      "lib": "zlib",
+      "tier": "header",
+      "old": "1.2.13",
+      "new": "1.3.1",
+      "expect": null,
+      "fetch_s": 17.81,
+      "header_pkg": "zlib",
+      "umbrella": [
+        "zlib.h"
+      ],
+      "compare_s": 3.622,
+      "exit": 0,
+      "verdict": "COMPATIBLE_WITH_RISK",
+      "evidence_tier": "header_aware",
+      "assurance": "complete",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 0,
+      "source_breaks": 0,
+      "risk_changes": 2,
+      "compatible_additions": 0,
+      "total_changes": 2
+    },
+    {
+      "lib": "lz4",
+      "tier": "header",
+      "old": "1.9.3",
+      "new": "1.10.0",
+      "expect": null,
+      "fetch_s": 1.97,
+      "header_pkg": "lz4-c",
+      "umbrella": [
+        "lz4.h",
+        "lz4frame.h"
+      ],
+      "compare_s": 2.962,
+      "exit": 4,
+      "verdict": "BREAKING",
+      "evidence_tier": "header_aware",
+      "assurance": "complete",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 9,
+      "source_breaks": 0,
+      "risk_changes": 36,
+      "compatible_additions": 16,
+      "total_changes": 64
+    },
+    {
+      "lib": "pcre2",
+      "tier": "header",
+      "old": "10.44",
+      "new": "10.47",
+      "expect": null,
+      "fetch_s": 3.36,
+      "header_pkg": "pcre2",
+      "umbrella": [
+        "pcre2.h"
+      ],
+      "compare_s": 4.834,
+      "exit": 0,
+      "verdict": "COMPATIBLE_WITH_RISK",
+      "evidence_tier": "header_aware",
+      "assurance": "complete",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 0,
+      "source_breaks": 0,
+      "risk_changes": 158,
+      "compatible_additions": 9,
+      "total_changes": 169
+    },
+    {
+      "lib": "onetbb",
+      "tier": "header",
+      "old": "2022.2.0",
+      "new": "2022.3.0",
+      "expect": null,
+      "fetch_s": 1.75,
+      "header_pkg": "tbb-devel",
+      "umbrella": [
+        "oneapi/tbb.h"
+      ],
+      "compare_s": 280.091,
+      "exit": 4,
+      "verdict": "BREAKING",
+      "evidence_tier": "header_aware",
+      "assurance": "partial",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 6,
+      "source_breaks": 10,
+      "risk_changes": 46,
+      "compatible_additions": 15,
+      "total_changes": 105
+    },
+    {
+      "lib": "onednn",
+      "tier": "header",
+      "old": "3.8.1",
+      "new": "3.9.1",
+      "expect": null,
+      "fetch_s": 1.93,
+      "header_pkg": "onednn",
+      "umbrella": [
+        "oneapi/dnnl/dnnl.h"
+      ],
+      "compare_s": 16.761,
+      "exit": 4,
+      "verdict": "BREAKING",
+      "evidence_tier": "header_aware",
+      "assurance": "complete",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 1,
+      "source_breaks": 0,
+      "risk_changes": 547,
+      "compatible_additions": 28,
+      "total_changes": 602
+    },
+    {
+      "lib": "onedal",
+      "tier": "header",
+      "old": "2026.1.0",
+      "new": "2026.2.0",
+      "expect": null,
+      "fetch_s": 2.04,
+      "header_pkg": "dal-include",
+      "umbrella": [
+        "oneapi/dal.hpp"
+      ],
+      "compare_s": 197.46,
+      "exit": 0,
+      "verdict": "COMPATIBLE_WITH_RISK",
+      "evidence_tier": "header_aware",
+      "assurance": "partial",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 0,
+      "source_breaks": 0,
+      "risk_changes": 131,
+      "compatible_additions": 172,
+      "total_changes": 316
+    }
+  ],
+  "header_run": {
+    "generated_utc": "2026-11-21T22:17:56+00:00",
+    "abicheck_version": "abicheck 0.8.0+g8bf620406 (abicheck/abicheck)"
+  }
 }

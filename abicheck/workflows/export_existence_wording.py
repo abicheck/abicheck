@@ -48,6 +48,7 @@ from ..buildsource.export_accounting import (
     ACCOUNT_INTERNAL_NS,
     ACCOUNT_OWN_TYPE_INSTANTIATION,
     ACCOUNT_PUBLIC,
+    ACCOUNT_PUBLIC_LOCAL_ENTITY,
     ACCOUNT_PUBLIC_TEMPLATE,
     ACCOUNT_TEMPLATE_INST,
 )
@@ -106,6 +107,12 @@ def existence_description(change: Change, decision: ExportAccount) -> str | None
         )
     if category == ACCOUNT_PUBLIC:
         return f"{lead} symbol of a public declaration: {sym}"
+    if category == ACCOUNT_PUBLIC_LOCAL_ENTITY:
+        return (
+            f"{lead} function-local entity of public function "
+            f"{decision.local_owner}, exported to keep its one definition; "
+            f"no source can name it: {sym}"
+        )
     if category == ACCOUNT_CXX_ARTIFACT:
         what = cxx_class_artifact_kind(sym) or "compiler-emitted artifact"
         if what in (KIND_CONSTRUCTOR, KIND_DESTRUCTOR):

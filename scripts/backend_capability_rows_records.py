@@ -641,36 +641,28 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _PARTIAL,
         note=(
-            "clang side wired in G31 Phase C continued (schema v23), "
-            "x86-64 System V spelling only — the one ABI verified there; "
-            "an unrecognized target's real `va_list` still reads `False`. "
-            "castxml has never populated this fact, so "
-            '`diff_symbols._diff_param_va_list` only trusts a `"clang"`-'
-            'producer pair — NOT `"hybrid"` either, unlike the now-'
-            "symmetric `is_restrict` above, since a hybrid merge keeps "
-            "castxml's own params verbatim for every matched function and "
-            "castxml never populates this fact at all (see its own "
-            "docstring)."
+            "castxml does not pass this legacy bridge field; it constructs "
+            "`is_va_list_fact` directly (row below): since extractor generation 91 the parameter's written "
+            "type (`original_type`, else `type`) is followed through its "
+            "typedef chain to `__builtin_va_list` "
+            "(`extract/headers/castxml/type_resolution.param_is_va_list`), "
+            "which is target-independent. clang side wired in G31 Phase C "
+            "continued (schema v23), x86-64 System V spelling only; an "
+            "unrecognized target's real `va_list` still reads `False`. "
+            '`diff_symbols._diff_param_va_list` compares only a same-producer '
+            'pair (`"clang"` or `"castxml"`), never `"hybrid"` or a mix.'
         ),
     ),
     FactRow(
         "Param",
         "is_va_list_fact",
-        _NONE,
+        _FULL,
         _PARTIAL,
         note=(
-            "`Fact[bool]` sibling of `is_va_list`, now "
-            "constructed directly by both backends. castxml is `NONE`: it "
-            "explicitly states `Fact.unsupported()` — a deliberate status, "
-            "not a hardcoded default, but a status carrying no determined "
-            "value is not extraction, the same distinction this matrix "
-            "already draws for a hardcoded `False`/`None` legacy field (a "
-            "review round on the PR that added this row caught the earlier "
-            "`PARTIAL` claim conflating 'the wrapper is constructed' with "
-            "'a fact was determined'). clang is `PARTIAL`, matching "
-            "`is_va_list` above exactly: the wrapped value is the same "
-            "x86-64-System-V-only determination, `Fact.present(bool)` "
-            "around it doesn't change its precision."
+            "`Fact[bool]` sibling of `is_va_list`, constructed directly by "
+            "both backends: castxml `Fact.present` since generation 91 "
+            "(`unsupported` before, never compared), clang `Fact.partial` "
+            "around the same x86-64-System-V-only determination."
         ),
     ),
     FactRow(

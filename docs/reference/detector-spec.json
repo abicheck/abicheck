@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 435,
+  "count": 436,
   "detectors": [
     {
       "kind": "abi_equivalent_type_changed",
@@ -1701,6 +1701,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "layer_coverage_asymmetric",
+      "examples": ""
+    },
+    {
+      "kind": "layout_build_config_unverified",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "layout_build_config_unverified",
       "examples": ""
     },
     {

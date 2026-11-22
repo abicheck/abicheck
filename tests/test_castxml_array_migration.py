@@ -31,7 +31,7 @@ from abicheck.storage.generation_migrations import FACT_GENERATIONS_KEY
 _CASES = (
     pytest.param("double[2]", "double[1]", id="one-dim"),
     pytest.param("int[1]", "int[0]", id="single-element"),
-    pytest.param("char[10][3]", "char[9][2]", id="two-dim"),
+    pytest.param("char[10][3]", "char[2][9]", id="two-dim"),
     pytest.param("const float*[8]", "const float*[7]", id="pointer-elements"),
     pytest.param("Box<int[3]>[4]", "Box<int[3]>[3]", id="template-arg-kept"),
     pytest.param("Box<int[3]>", "Box<int[3]>", id="only-template-arg"),

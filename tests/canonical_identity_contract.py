@@ -311,6 +311,7 @@ UNVERIFIED = frozenset(
         "kabi_symbol_namespace_changed",
         "kabi_symbol_removed",
         "layer_coverage_asymmetric",
+        "layout_build_config_unverified",
         "layout_unverifiable",
         "libcpp_abi_version_changed",
         "library_version_downgraded",

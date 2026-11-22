@@ -31,8 +31,6 @@ GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
 )
-GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
-GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_FLAG_INVISIBLE_LAYOUT = (
     "A config-level layout flag a public header cannot carry: stripped {B,H} reads the "
@@ -169,7 +167,8 @@ _BACKEND_GAPS: tuple[Known, ...] = (
             ("param_became_va_list", "PARAM_BECAME_VA_LIST"),
             ("param_lost_va_list", "PARAM_LOST_VA_LIST"),
         )
-        for backend in ("castxml", "gcc")
+        # castxml reads the written typedef chain since generation 91.
+        for backend in ("gcc",)
     ),
     _backend_gap(
         "func_exception_spec_widened",
@@ -198,17 +197,6 @@ _BREAKING = frozenset({"BREAKING"})
 # Platform-level operators (``abiforge.operators.platform``).
 _PLATFORM: tuple[Known, ...] = (
     Known(
-        "glibc_version_required_added",
-        _ELF,
-        "wrong-kind",
-        lambda c: c.producer.family == "gcc" and c.flags.opt == "O2",
-        "the -O2 gcc build needed nothing from libc before, so GLIBC_2.25 comes "
-        "with a newly needed libc.so.6 and reads symbol_version_required_added_compat",
-        GAP_NEW_LIB_TAGS,
-        issues=frozenset({"missing:SYMBOL_VERSION_REQUIRED_ADDED"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
-    ),
-    Known(
         "gnu_unique_static_added",
         frozenset({"cxx_more"}),
         "wrong-kind",
@@ -235,17 +223,6 @@ _PLATFORM: tuple[Known, ...] = (
             {"missing:SYMBOL_BINDING_LOST_UNIQUE", "weaker-than:COMPATIBLE_WITH_RISK"}
         ),
         verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "gnu_unique_static_added",
-        frozenset({"cxx_more"}),
-        "false-positive",
-        lambda c: c.producer.family == "clang" and c.evidence == "headers",
-        "clang exports edit_ctr's static local weak; against the header it "
-        "reads as an undeclared export (RISK) though no source can name it",
-        GAP_CLANG_INLINE_STATIC,
-        issues=frozenset({"stronger-than:COMPATIBLE"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
 )
 
@@ -403,52 +380,6 @@ KNOWN: tuple[Known, ...] = (
             {"none-of:TYPE_FIELD_OFFSET_CHANGED", "none-of:TYPE_SIZE_CHANGED"}
         ),
         verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "field_added_in_tail_padding",
-        frozenset({"cxx_more"}),
-        "false-clean",
-        lambda c: c.stripped and c.flags.pack == 1,
-        "-fpack-struct=1 leaves no tail padding: the header dump keeps the padding, so "
-        "the grown record reads COMPATIBLE while the binary breaks (sizeof 5 -> 6)",
-        GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset(
-            {
-                "missing:SONAME_BUMP_RECOMMENDED",
-                "none-of:TYPE_SIZE_CHANGED",
-                "weaker-than:BREAKING",
-            }
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "field_inserted_in_padding",
-        frozenset({"cxx_more"}),
-        "false-clean",
-        lambda c: c.stripped and c.flags.pack == 1,
-        "-fpack-struct=1 leaves no hole: an inserted field moves the offset of the field "
-        "after it, which the header dump (no flag) does not show, so the change reads COMPATIBLE",
-        GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset(
-            {
-                "missing:SONAME_BUMP_RECOMMENDED",
-                "none-of:TYPE_FIELD_OFFSET_CHANGED",
-                "none-of:TYPE_SIZE_CHANGED",
-                "weaker-than:BREAKING",
-            }
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "enum_append_wide_value",
-        frozenset({"c_core"}),
-        "false-clean",
-        lambda c: c.stripped and c.header_backend == "clang" and c.flags.short_enums,
-        "-fshort-enums: appending a wide value grows the enum from 1 to 2 bytes; the header "
-        "dump without the flag sees an enum of int size, so the change reads COMPATIBLE",
-        GAP_FLAG_INVISIBLE_LAYOUT,
-        issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
-        verdicts=frozenset({"COMPATIBLE"}),
     ),
     Known(
         "enum_underlying_narrow",

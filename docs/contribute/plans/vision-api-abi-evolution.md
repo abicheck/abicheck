@@ -450,9 +450,11 @@ object — "N of M consumers affected" (`total`/`evaluated`/`affected`/
 (`cli_helpers_compare._consumer_impact_summary`) — and each `used_by[]`
 entry gains the new fields only when a manifest consumer actually supplied
 them, so a bare `--used-by <path>` consumer's entry is byte-for-byte
-unchanged (report schema 3.3, additive; SARIF/JUnit/HTML do not yet carry
-`consumer_impact_summary` — JSON only for now, tracked as a small
-remaining gap rather than folded into "Missing" above). The GitHub Action
+unchanged (report schema 3.3, additive). SARIF (`runs[0].properties.scopedGate.consumerImpactSummary`)
+and JUnit (`abicheck.consumer_impact.*` testsuite properties) carry
+`consumer_impact_summary` too (2026-11-21), read from the envelope's
+`ScopedGateFacts` (`report/scoped_gate_facts.py`) rather than recomputed per
+renderer; HTML does not yet, a small remaining gap. The GitHub Action
 gained a matching `used-by-manifest` input (space-separated, repeated
 `--used-by-manifest`), validated the same way `used-by` is
 (`action/validate-inputs.sh`, `action/run.sh`).

@@ -58,7 +58,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 - **Five layers of evidence, not one.** Binary, debug info, headers, build flags, sources. Each layer finds breaks the others miss and removes false positives the weaker ones raise.
 - **It says what it could not check.** Missing evidence is reported, never silently passed.
 - **Additions count.** A compatible release still lists every new function, variable, and enumerator, with a version-bump recommendation, so surface growth is reviewed rather than assumed.
-- **435 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
+- **436 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
 - **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
 - **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), and a typed [Python API](#python-api). Pure Python, Linux/Windows/macOS.
 
