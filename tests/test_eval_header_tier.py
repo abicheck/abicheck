@@ -317,14 +317,37 @@ def test_scan_header_one_happy_path(monkeypatch):
 def test_merge_into_keeps_other_tiers():
     prior = {"results": [1], "source_results": [2], "generated_utc": "t0"}
     merged = ht.merge_into(
-        prior, {"header_results": [3], "generated_utc": "t1", "abicheck_version": "v"}
+        prior,
+        {"header_results": [{"lib": "a"}], "generated_utc": "t1", "abicheck_version": "v"},
     )
     assert merged["results"] == [1] and merged["source_results"] == [2]
     assert (
-        merged["header_results"] == [3]
+        merged["header_results"] == [{"lib": "a"}]
         and merged["header_run"]["generated_utc"] == "t1"
     )
     assert "header_results" not in prior
+
+
+@pytest.mark.parametrize(
+    "prior_libs, run_libs",
+    [
+        (["a", "b", "c"], ["b"]),
+        (["a", "b", "c"], ["d"]),
+        (["a", "b"], ["b", "e"]),
+        ([], ["a"]),
+        (["a", "b"], []),
+    ],
+)
+def test_merge_into_subset_run_replaces_only_its_own_rows(prior_libs, run_libs):
+    """An ``--only`` header run keeps every other library's row (it used to
+    replace the whole header table with just the subset)."""
+    prior = {"header_results": [{"lib": x, "v": "old"} for x in prior_libs]}
+    run = {"header_results": [{"lib": x, "v": "new"} for x in run_libs]}
+    rows = ht.merge_into(prior, run)["header_results"]
+    libs = [r["lib"] for r in rows]
+    assert libs == prior_libs + [x for x in run_libs if x not in prior_libs]
+    for r in rows:
+        assert r["v"] == ("new" if r["lib"] in run_libs else "old")
 
 
 def test_manifest_header_blocks_are_well_formed():

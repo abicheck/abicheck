@@ -411,7 +411,7 @@ network-enabled run.
   with it; `tests/test_dry_run_contract.py` covers the dry-run contract but
   no test pins the size term itself today (open).
 
-### H4. Fetch devel/include + dependency header packages — **shipped (harness + CI job); protobuf open**
+### H4. Fetch devel/include + dependency header packages — **shipped (harness + CI job; all four split-dependency cases live)**
 - **Context.** `condafetch.py` fetches only the single runtime package, which
   for several libs (zlib, xz-liblzma, openblas) ships no `include/` tree; and
   header scans of split libraries need dependency include roots (protobuf→absl,
@@ -447,17 +447,18 @@ network-enabled run.
   root) BREAKING. `condafetch.repodata_files()` now also indexes the
   repodata `removed` list (still served by the CDN), so libprotobuf 6.34.1 —
   dropped from the index — is fetchable again; a live build beats a removed one.
-- **Still open: protobuf→abseil.** With `umbrella: google/protobuf/message.h`
+- **protobuf→abseil (2026-11-22).** With `umbrella: google/protobuf/message.h`
   and `deps: [{pkg: libabseil, old: "20260107.1", new: "20260817.0"}]` (the
-  abseil pins of libprotobuf 6.34.1 `h612f066_0` and 7.35.1 `h8a00109_4` in
-  conda-forge repodata), castxml fails on the old side: glibc's
-  `sys/types.h:176` `#include <endian.h>` resolves to
-  `google/protobuf/endian.h`, whose `port_def.inc` pulls
-  `absl/base/attributes.h` inside the glibc `extern "C"` block ("templates must
-  have C++ linkage"). Something on the compare path puts the umbrella's own
-  directory on the include path ahead of the system dirs; that is a product
-  question (header-dir include shadowing a system header), not a manifest
-  one, so no protobuf `headers:` block is committed.
+  abseil pins of libprotobuf 6.34.1 `h612f066_0` and 7.35.1 `h8a00109_4`),
+  castxml first failed: glibc's `sys/types.h` `#include <endian.h>` resolved to
+  `google/protobuf/endian.h`. Cause was in abicheck itself:
+  `header_utils._implicit_header_includes` added every `-H` file's own
+  directory as `-I`, so an interior package directory shadowed libc. Fixed
+  there (under an `include`/`inc` root only the root is inferred;
+  `tests/test_include_root_shadowing.py`). protobuf now compares live at L2:
+  BREAKING, assurance partial. Also fixed: an `--only` header run replaced the
+  whole header table in `results/latest.json`; `header_tier.merge_into` now
+  merges rows by `lib`.
 
 ### H5. Add oneDAL / oneTBB / oneDNN entries — **shipped (binary + header tiers); no source block**
 - **Context.** Split oneAPI packages exercise the devel-package + umbrella-

@@ -40,7 +40,7 @@
 
 ## Header tier (L2: binary + headers, non-gating)
 
-- entries: **9** | compared: **9**
+- entries: **10** | compared: **10**
 
 | lib | old→new | header pkg | umbrella | verdict | exit | assurance | evidence | break/src/risk | cmp s |
 |---|---|---|---|---|---|---|---|---|---|
@@ -53,5 +53,6 @@
 | onetbb | 2022.2.0→2022.3.0 | `tbb-devel` | `oneapi/tbb.h` | BREAKING | 4 | partial | header_aware | 6/10/46 | 178.927 |
 | onednn | 3.8.1→3.9.1 | `onednn` | `oneapi/dnnl/dnnl.h` | BREAKING | 4 | complete | header_aware | 1/0/549 | 8.033 |
 | onedal | 2026.1.0→2026.2.0 | `dal-include` | `oneapi/dal.hpp` | COMPATIBLE_WITH_RISK | 0 | partial | header_aware | 0/0/131 | 89.019 |
+| protobuf | 6.34.1→7.35.1 | `libprotobuf` | `google/protobuf/message.h` | BREAKING | 4 | partial | header_aware | 290/132/3457 | 721.868 |
 
 > `abicheck compare OLD.so NEW.so --header … -I … -D …` per entry's manifest `headers:` block. Exit is the compare exit code. Reproduce: `python skills-src/evaluation/field/runner.py --tier header`.

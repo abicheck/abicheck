@@ -159,9 +159,13 @@ def merge_into(prior: dict, header_payload: dict) -> dict:
     """*prior* results with *header_payload*'s ``header_results`` folded in (pure).
 
     Keeps every other tier's rows and the prior run's metadata, recording the
-    header run's own timestamp/version under ``header_run``.
+    header run's own timestamp/version under ``header_run``. Header rows merge
+    by ``lib``: a subset run (``--only``) replaces only its own libraries' rows,
+    keeping the rest in manifest order with new libraries appended.
     """
     merged = dict(prior)
-    merged["header_results"] = header_payload.get("header_results", [])
+    fresh = {r.get("lib"): r for r in header_payload.get("header_results", [])}
+    rows = [fresh.pop(r.get("lib"), r) for r in prior.get("header_results", [])]
+    merged["header_results"] = rows + list(fresh.values())
     merged["header_run"] = {k: header_payload.get(k) for k in ("generated_utc", "abicheck_version")}
     return merged

@@ -73,7 +73,9 @@ libraries:
   - {lib: icu,           conda_pkg: icu,           old: "75.1",    new: "78.3",    expect: BREAKING,             so_stem: libicui18n}
   - {lib: hdf5,          conda_pkg: hdf5,          old: "1.8.20",  new: "2.1.0",   expect: BREAKING,             so_stem: libhdf5,
      headers: {umbrella: ["hdf5.h"]}}
-  - {lib: protobuf,      conda_pkg: libprotobuf,   old: "6.34.1",  new: "7.35.1",  expect: BREAKING,             so_stem: libprotobuf}
+  - {lib: protobuf,      conda_pkg: libprotobuf,   old: "6.34.1",  new: "7.35.1",  expect: BREAKING,             so_stem: libprotobuf,
+     headers: {umbrella: ["google/protobuf/message.h"],
+               deps: [{pkg: libabseil, old: "20260107.1", new: "20260817.0"}]}}
   - {lib: glib,          conda_pkg: libglib,       old: "2.86.4",  new: "2.88.1",  expect: COMPATIBLE_WITH_RISK, so_stem: libgio,
      headers: {umbrella: ["glib-2.0/gio/gio.h"], include: ["glib-2.0"],
                deps: [{pkg: glib, old: "2.86.4", new: "2.88.1", include: ["lib/glib-2.0/include"]}]}}

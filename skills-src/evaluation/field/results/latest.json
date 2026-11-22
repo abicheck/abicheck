@@ -881,10 +881,34 @@
       "risk_changes": 131,
       "compatible_additions": 172,
       "total_changes": 316
+    },
+    {
+      "lib": "protobuf",
+      "tier": "header",
+      "old": "6.34.1",
+      "new": "7.35.1",
+      "expect": null,
+      "fetch_s": 14.81,
+      "header_pkg": "libprotobuf",
+      "umbrella": [
+        "google/protobuf/message.h"
+      ],
+      "compare_s": 721.868,
+      "exit": 4,
+      "verdict": "BREAKING",
+      "evidence_tier": "header_aware",
+      "assurance": "partial",
+      "effective_depth": "headers",
+      "confidence": "high",
+      "breaking": 290,
+      "source_breaks": 132,
+      "risk_changes": 3457,
+      "compatible_additions": 628,
+      "total_changes": 5092
     }
   ],
   "header_run": {
-    "generated_utc": "2026-11-22T05:29:23+00:00",
-    "abicheck_version": "abicheck 0.8.0+g02c27e369 (abicheck/abicheck)"
+    "generated_utc": "2026-11-22T05:53:24+00:00",
+    "abicheck_version": "abicheck 0.8.0+gd50bcecb5 (abicheck/abicheck)"
   }
 }
