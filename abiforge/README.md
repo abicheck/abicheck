@@ -129,3 +129,28 @@ The [compatibility-space reduction research plan](../docs/contribute/plans/abifo
 collects prior work, proof obligations, experiments and acceptance criteria for
 reducing validation cost beyond bounded enumeration. It distinguishes model
 coverage from checker conformance and product-specific coverage.
+
+### oneDAL SYCL consumer campaign (Linux)
+
+The optional SDK campaign builds five queue overloads and their host siblings
+against oneDAL, withdraws the queue overloads from a generated bridge, runs
+already-linked consumers, recompiles their source, and checks the exact grouped
+removals through the abicheck CLI. It also compares the unchanged bridge. These
+cells are independent of the plain C/C++ operator ledger.
+
+```bash
+micromamba create -y -p "$PWD/sdk" -c https://software.repos.intel.com/python/conda \
+    dpcpp_impl_linux-64=2025.0.4 dal=2025.2 dal-include=2025.2
+python -m abiforge.run.onedal_sycl results --prefix "$PWD/sdk"
+```
+
+The execution oracle requires a SYCL device with shared USM. The JSON receipt
+retains loader and compiler outcomes separately from checker verdicts.
+
+`python -m abiforge.run.sycl_plugins OUT` exercises PI and UR inventory
+changes without an SDK. It builds real ELF plugins, resolves their entry points
+in a fresh process, edits the installation in place, and compares stored dumps
+with the snapshot cache enabled. The fixtures exercise the exported loader
+interface only.
+
+Run both integration tests with `ABIFORGE_ONEDAL_PREFIX="$PWD/sdk" pytest -m integration tests/test_abiforge_sycl_campaigns.py`.

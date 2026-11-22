@@ -1020,3 +1020,29 @@ class TestPluginKeyingPiAndUr:
         changes = _diff_plugin_entrypoints(old, new)
         assert len(changes) == 1
         assert "piDevicesGet" in changes[0].description
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_stored_pre_extension_inventory(reverse):
+    legacy = AbiSnapshot(
+        library="libsycl.so",
+        version="1",
+        fact_generations=(92, 4, 15),
+        sycl=_make_sycl(
+            pi_version="1.0", plugins=[_make_plugin(entry_points=["piPluginInit"])]
+        ),
+    )
+    fresh = AbiSnapshot(
+        library="libsycl.so",
+        version="2",
+        sycl=_make_sycl(
+            pi_version="1.1",
+            plugins=[
+                _make_plugin(
+                    entry_points=["piPluginInit", "piextDeviceSelect", "piDeviceGet"]
+                )
+            ],
+        ),
+    )
+    changes = _diff_sycl(fresh, legacy) if reverse else _diff_sycl(legacy, fresh)
+    assert [c.symbol for c in changes] == ["sycl::pi::level_zero::piDeviceGet"]

@@ -30,15 +30,9 @@ from .generation_spelling_types import GenerationSpellingChange
 __all__ = ["SPELLING_MIGRATIONS"]
 
 
-#: Every row's reason cites the commit that introduced the generation and what
-#: an audit of that commit's extractor diff found. Rows without rewrites were
-#: audited by reading the diff over the fingerprinted extractor scope
-#: (``generation_fingerprints.json``) and confirmed empirically: the frozen
-#: corpus under ``tests/fixtures/generations/``, dumped at each generation's
-#: last main commit, spells every entity like a fresh dump once these
-#: rewrites are applied (``tests/test_generation_corpus.py``).
-#: ``scripts/check_ai_readiness.py``'s ``generation-corpus`` check refuses a
-#: row whose reason is empty or a bare "no change" placeholder.
+#: Each reason records the extractor change and any spelling rewrites.
+#: The frozen corpus checks all generations against the current spellings.
+#: The generation-corpus gate rejects missing or placeholder reasons.
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
         "85d745b9a (#1538): first stamped generation; the baseline every "
@@ -796,5 +790,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     ),
     92: GenerationSpellingChange(
         "Inferred -H roots: an interior -H dir is no longer searched; no rewrite applies."
+    ),
+    93: GenerationSpellingChange(
+        "PI plugin ELF extraction now includes piext exports in the entry point list "
+        "and inferred interface version. Replay older DPC++ host AST jobs. No spelling rewrite."
     ),
 }

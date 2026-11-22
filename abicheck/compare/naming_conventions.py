@@ -271,7 +271,9 @@ INTERNAL_TEMPLATE_LEAK = register_severity_raising_heuristic(
 # From diff_cpp_patterns.py
 # -------------------------------------------------------------------------
 
-_SYCL_QUEUE_PARAM_RE = re.compile(r"\bsycl\s*::\s*queue\b")
+_SYCL_QUEUE_PARAM_RE = re.compile(
+    r"(?:::)?(?:cl\s*::\s*)?sycl\s*::\s*(?:_V1\s*::\s*)?queue"
+)
 
 
 def _strip_param_decorators(type_str: str) -> str:
@@ -289,7 +291,8 @@ def _has_sycl_queue_first_param(
         return False
     first = fn.params[0]
     type_str = first.type or ""
-    if _SYCL_QUEUE_PARAM_RE.search(type_str):
+    base = _strip_param_decorators(type_str)
+    if _SYCL_QUEUE_PARAM_RE.fullmatch(base):
         return True
     if type_qualified_index is None:
         return False
@@ -302,11 +305,11 @@ def _has_sycl_queue_first_param(
     # an ambiguous bare name (multiple distinct qualified names, e.g. both
     # ``mylib::queue`` and ``sycl::queue``) can't be resolved from the type
     # alone and must not guess.
-    qnames = type_qualified_index.get(_strip_param_decorators(type_str))
+    qnames = type_qualified_index.get(base)
     if not qnames or len(qnames) != 1:
         return False
     (qname,) = qnames
-    return bool(qname and _SYCL_QUEUE_PARAM_RE.search(qname))
+    return bool(qname and _SYCL_QUEUE_PARAM_RE.fullmatch(qname))
 
 
 #: Registered name heuristic (design-hardening Phase 5): the ``sycl::queue``

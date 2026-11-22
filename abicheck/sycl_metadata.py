@@ -69,7 +69,7 @@ log = logging.getLogger(__name__)
 # PI (Plugin Interface): DPC++ legacy — piCamelCase symbols, libpi_*.so
 # UR (Unified Runtime):  DPC++ current — urCamelCase symbols, libur_adapter_*.so
 # ---------------------------------------------------------------------------
-_PI_SYMBOL_RE = re.compile(r"^pi[A-Z]\w+$")
+_PI_SYMBOL_RE = re.compile(r"^pi(?:ext)?[A-Z]\w+$")
 _UR_SYMBOL_RE = re.compile(r"^ur[A-Z]\w+$")
 
 # Library name → (plugin_name, interface_type)

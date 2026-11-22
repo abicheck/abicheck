@@ -223,6 +223,26 @@ def test_probe_rejects_a_device_plan_it_cannot_replay(probe):
     assert resolve_dpcpp_acquisition("icpx", "host", None, ())[1] is False
 
 
+def test_old_icpx_replays_host_after_rejecting_new_driver_flag(monkeypatch, tmp_path):
+    import abicheck.deadline as deadline
+
+    def driver(cmd, **kwargs):
+        if "-fsycl-host-only" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 1, "", "icpx: error: unknown argument: '-fsycl-host-only'"
+            )
+        assert "-fsycl" in cmd
+        return subprocess.CompletedProcess(cmd, 0, "", _DEVICE_JOB + "\n" + _HOST_JOB)
+
+    monkeypatch.setattr(deadline, "run_bounded", driver)
+    jobs = dumper_dpcpp_jobs.sycl_host_replay_jobs(
+        ["icpx", "-fsycl", "-fsycl-host-only", "-Xclang", "-ast-dump=json", "a.cpp"],
+        tmp_path,
+    )
+    assert jobs is not None
+    assert "-ast-dump=json" not in jobs[0] and "-fsycl-is-host" in jobs[1]
+
+
 def test_probe_reports_a_single_host_pass(probe):
     install, seen = probe
     install(stderr=_HOST_JOB)

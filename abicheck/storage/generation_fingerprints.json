@@ -42,7 +42,7 @@
       "abicheck/extract/dependency_header_roots.py": "1eaf11025d92166b6c05dfbc73e52eb859225dc33200905fbf179f2fb61b789a",
       "abicheck/extract/detached_debug.py": "c20829397d3ac53e2e1dd3f4bc23a92098daadc566c745458aac94a7f6ce0c3a",
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
-      "abicheck/extract/dpcpp_jobs.py": "af360b567dd497b4ca16995fb19b820dbcd7ad6ff23d4c8448659841e4c47b96",
+      "abicheck/extract/dpcpp_jobs.py": "8456ea9b1b3fb6eefa552481a28fee080bfe81ca2cd17f9fcd22db9c64b9d262",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_abi_fact.py": "b169fadd8bb32ee4e67f9c70d46e5392215f648fac55d0c782aeabe51bc58495",
       "abicheck/extract/dwarf_calling_conventions.py": "3944725995f3cb59ee04d7a6dddb67ce82fd8a10e976f244903885efd1b65f98",
@@ -240,7 +240,7 @@
       "abicheck/pdb_parser.py": "cfcb071ded9843b10834a236b6d61ca2db9522fb6d18d535a0f3861cb8a6caf6",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
       "abicheck/pe_metadata.py": "179d05863acd9039f6dddfcf07e121475f03feeec6ba6512afc9e94875105c7e",
-      "abicheck/sycl_metadata.py": "10d6bb8dbd898b6f43c66f898fd1a964790705cadb5addac9d5801e47b341758",
+      "abicheck/sycl_metadata.py": "935beb105608248ceb159902a08e76f084e5450f1e8a1ff4c9c041cbefeccc77",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
       "abicheck/workflows/dump/elf_fallback.py": "31947cad933371a0d3863476ad34e1f9e3e60f8474b2eddbe161fdc1182eb2fa",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "12bacfbd3bfd86a9d728e7b5304b189584f93c3fcfa57806bcb66f5cdb0f8f70",
-    "generation": 92,
-    "reason": "bumped to 92 for a semantic change"
+    "fingerprint": "f41f147778a821cfdda857982c347879e21feacb482585d4216cb66f584db42f",
+    "generation": 93,
+    "reason": "Classic PI extension exports and DPC++ 2025 host AST replay."
   },
   "resolver": {
     "files": {

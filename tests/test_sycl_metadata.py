@@ -73,10 +73,18 @@ def _write_elf(tmp_path: Path, name: str) -> Path:
 class TestExtractPluginSymbols:
     def test_collects_matching_symbols(self, tmp_path: Path) -> None:
         so = _write_elf(tmp_path, "libpi_cuda.so")
-        syms = [_make_sym("piPluginInit"), _make_sym("piDevicesGet")]
+        syms = [
+            _make_sym(n)
+            for n in (
+                "piPluginInit",
+                "piDevicesGet",
+                "piextUSMHostAlloc",
+                "piextension",
+            )
+        ]
         with _patch_elf([_make_dynsym(syms)]):
             result = _extract_plugin_symbols(so, _PI_SYMBOL_RE)
-        assert result == ["piDevicesGet", "piPluginInit"]  # sorted
+        assert result == ["piDevicesGet", "piPluginInit", "piextUSMHostAlloc"]
 
     def test_non_regular_file_returns_empty(self) -> None:
         # /dev/null is a char device — TOCTOU guard rejects it.

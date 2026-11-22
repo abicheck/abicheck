@@ -70,8 +70,9 @@ def _host_only_single_pass(
     jobs = _driver_jobs(cmd)
     if jobs is None:
         return True  # cannot ask: keep the documented host-only behaviour
-    return _split_device_host(jobs) is not None or not any(
-        "-fsycl-is-device" in job for job in jobs
+    return bool(jobs) and (
+        _split_device_host(jobs) is not None
+        or not any("-fsycl-is-device" in job for job in jobs)
     )
 
 
@@ -93,6 +94,18 @@ def _driver_jobs(cmd: list[str]) -> list[list[str]] | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
+    if proc.returncode:
+        # Intel 2025.0 rejects the newer spelling. Its ordinary SYCL plan
+        # still has the same two jobs. Only use that plan when we can replay
+        # it explicitly: the caller cannot run the rejected driver command.
+        if (
+            "-fsycl-host-only" in cmd
+            and "unknown argument: '-fsycl-host-only'" in proc.stderr
+        ):
+            ordinary = _driver_jobs([arg for arg in cmd if arg != "-fsycl-host-only"])
+            if ordinary is not None and _split_device_host(ordinary) is not None:
+                return ordinary
+        return []
     return [
         split_command_line(line)
         for line in proc.stderr.splitlines()

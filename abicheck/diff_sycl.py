@@ -120,6 +120,8 @@ def _diff_plugins(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
 def _diff_plugin_entrypoints(
     old: SyclMetadata,
     new: SyclMetadata,
+    *,
+    comparable_extensions: bool = True,
 ) -> list[Change]:
     """Detect added/removed entry points within plugins that exist in both."""
     changes: list[Change] = []
@@ -133,6 +135,9 @@ def _diff_plugin_entrypoints(
         name = key[1]  # (interface_type, name)
         old_eps = set(old_plugin.entry_points)
         new_eps = set(new_plugin.entry_points)
+        if key[0] == "pi" and not comparable_extensions:
+            old_eps = {ep for ep in old_eps if not ep.startswith("piext")}
+            new_eps = {ep for ep in new_eps if not ep.startswith("piext")}
         iface = new_plugin.interface_type.upper()  # "PI" or "UR"
 
         for ep in sorted(old_eps - new_eps):
@@ -256,9 +261,23 @@ def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     changes: list[Change] = []
     changes.extend(_diff_implementation(o, n))
-    changes.extend(_diff_pi_version(o, n))
+    # Earlier stored ELF extractions dropped every piext symbol. Its absence
+    # cannot prove a change, including in the version inferred from it.
+    comparable_extensions = all(
+        snap.fact_generations is None or snap.fact_generations[0] >= 93
+        for snap in (old, new)
+    )
+    if comparable_extensions or not any(
+        p.interface_type == "pi"
+        and any(ep.startswith("piext") for ep in p.entry_points)
+        for metadata in (o, n)
+        for p in metadata.plugins
+    ):
+        changes.extend(_diff_pi_version(o, n))
     changes.extend(_diff_plugins(o, n))
-    changes.extend(_diff_plugin_entrypoints(o, n))
+    changes.extend(
+        _diff_plugin_entrypoints(o, n, comparable_extensions=comparable_extensions)
+    )
     changes.extend(_diff_plugin_search_paths(o, n))
     changes.extend(_diff_runtime_version(o, n))
     changes.extend(_diff_backend_driver_reqs(o, n))
