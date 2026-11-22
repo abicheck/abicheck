@@ -76,6 +76,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -114,6 +115,7 @@ from mutation_scope import (  # noqa: E402
     shard_drift_gate,
     unit_key,
 )
+from mutation_score_args import build_parser  # noqa: E402
 
 __all__ = [
     "SURVIVOR_BASELINE",
@@ -1209,389 +1211,312 @@ def _measurement_is_complete(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", action="store_true", help="Run `mutmut run` first.")
-    parser.add_argument(
-        "--results-file", help="Read results from a file ('-' for stdin)."
-    )
-    parser.add_argument(
-        "--mutants-dir",
-        default="mutants",
-        help="Directory holding mutmut's artifacts (default: mutants).",
-    )
-    parser.add_argument(
-        "--baseline", type=int, default=None, help="Global-total baseline override."
-    )
-    parser.add_argument(
-        "--baseline-file",
-        default=str(DEFAULT_BASELINE_FILE),
-        help="Per-module baseline JSON (default: mutation-baseline.json).",
-    )
-    parser.add_argument(
-        "--write-baseline",
-        action="store_true",
-        help="Write the measurement to --baseline-file instead of gating on it.",
-    )
-    parser.add_argument(
-        "--diff-scoped",
-        action="store_true",
-        help="Fail on any survivor in a function changed vs --base-ref.",
-    )
-    parser.add_argument(
-        "--base-ref", default="origin/main", help="Base ref for --diff-scoped."
-    )
-    parser.add_argument("--diff-file", help="Read the diff from a file instead of git.")
-    parser.add_argument(
-        "--scope-run-to-diff",
-        action="store_true",
-        help=(
-            "With --run --diff-scoped (and not --require-baseline): pass "
-            "mutmut run the MUTANT_NAMES of only the only_mutate module(s) "
-            "this diff touches, so the expensive test-execution phase runs "
-            "against a fraction of the mutant population instead of all of "
-            "[tool.mutmut].only_mutate every time. Falls back to an "
-            "unscoped (full) run whenever the scope cannot be established "
-            "as safe — never widens the gate, only ever the amount of work "
-            "it costs to satisfy it."
-        ),
-    )
-    parser.add_argument(
-        "--scope-run-to-functions",
-        action="store_true",
-        help=(
-            "Like --scope-run-to-diff, but when no baseline of either kind "
-            "exists, execute only the mutants of the only_mutate functions "
-            "this diff changed: without a baseline the diff-scoped gate is "
-            "the only reader of any mutant's outcome, so nothing it reads is "
-            "dropped. Falls back to --scope-run-to-diff otherwise."
-        ),
-    )
-    parser.add_argument(
-        "--shard",
-        help=(
-            "K/N: when this run would measure the whole population, measure "
-            "only shard K's modules (a deterministic partition of only_mutate). "
-            "A diff-scoped run is not split: shard 1 runs it, the rest skip."
-        ),
-    )
-    parser.add_argument(
-        "--plan-shards",
-        type=int,
-        metavar="N",
-        help=(
-            "Print, as a JSON list, the shard indices (of N) that would have "
-            "work under the other arguments, and exit 0 without running "
-            "mutmut. The workflow's resolve job uses it so a run that is not "
-            "split starts one runner instead of N, N-1 of which only skip."
-        ),
-    )
-    parser.add_argument(
-        "--require-baseline",
-        action="store_true",
-        help=(
-            "Fail if no baseline is available. The scheduled drift lane uses "
-            "this so it cannot silently degrade to report-only."
-        ),
-    )
-    parser.add_argument(
-        "--diff-only",
-        action="store_true",
-        help=(
-            "With --run --diff-scoped: gate only the functions this diff changed, "
-            "and never widen to the whole population (the PR lane). A diff that "
-            "changes no mutable function runs nothing; drift is the weekly run's."
-        ),
-    )
-    parser.add_argument("--json", help="Write a machine-readable receipt here.")
-    args = parser.parse_args(argv)
+class _RunScope:
+    """What this invocation's `mutmut run` measures (``mode`` "full" = all)."""
 
-    # Fetched once, up front, whenever it will be needed at all: by run-scoping
-    # below (if requested) and, either way, by the diff-scoped gate further
-    # down. See _load_diff_text's own docstring for why this also has to
-    # happen before --run, not just before gating.
-    #
-    # Not fetched at all under --write-baseline, even with --diff-scoped also
-    # given: that branch returns before the diff-scoped gate below ever runs
-    # (records the *whole* population, unconditionally), and run-scoping is
-    # separately disabled under --write-baseline already (`and not
-    # args.write_baseline` a few lines down) -- so nothing downstream ever
-    # reads diff_text in this mode. Loading it anyway meant an offline
-    # checkout with no origin/main, a stale --base-ref, or an unreadable
-    # --diff-file could fail a baseline-recording run before the multi-hour
-    # mutmut invocation it exists to protect even started -- exactly the
-    # "fails before paying for the run" case _load_diff_text's own docstring
-    # argues for elsewhere, but here failing the thing that doesn't need the
-    # diff at all (Codex review).
-    diff_text: str | None = None
-    if args.diff_scoped and not args.write_baseline:
-        diff_text, err = _load_diff_text(args)
-        if diff_text is None:
-            return err if err is not None else 1
+    def __init__(self) -> None:
+        self.patterns: list[str] | None = None
+        self.modules: set[str] = set()
+        self.mode = "full"
+        self.shard_units: list[tuple[str, str]] = []
 
-    # Read early (cheap, side-effect-free) so the scoping decision below can
-    # see them: whether a per-module baseline exists changes whether scoping
-    # is safe at all, not just how a later gate reads. Reused verbatim by the
-    # baseline-comparison block further down instead of re-reading.
-    baseline_modules = load_baseline(Path(args.baseline_file))
-    function_baseline = load_function_baseline(Path(args.baseline_file))
-    total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
 
-    if (
-        args.require_baseline
-        and not args.write_baseline
-        and not (baseline_modules is not None or total_baseline is not None)
-    ):
-        # Decided before paying for `mutmut run`: no measurement can satisfy
-        # this, so a multi-hour run that ends in this same error is pure waste.
-        # Keyed on the baseline, not on --diff-scoped: that gate only sees the
-        # functions this branch changed, so a weakened test covering another
-        # function would otherwise exit 0 (Codex review).
-        if args.plan_shards:
-            # One job is enough to report this failure; N would report it N times.
-            print(json.dumps([1]))
-            return 0
-        print(
-            "ERROR: --require-baseline was passed but no baseline is available "
-            f"({args.baseline_file} is missing/invalid and SURVIVOR_BASELINE is "
-            "unset), so nothing in this run can answer whether the survivor set "
-            "grew. --diff-scoped does not substitute: it only looks at the "
-            "functions this branch changed. Establish the baseline once with "
-            "the workflow_dispatch lane (write_baseline: true), then re-enable "
-            "this lane."
-        )
-        return 1
+class _Measurement(NamedTuple):
+    """What the gathered results say, before any gate reads them."""
 
-    scope_patterns: list[str] | None = None
-    scope_modules: set[str] = set()
-    scope_mode = "full"
-    shard_units: list[tuple[str, str]] = []
-    diff_only_empty = False
-    if (
-        args.run
-        and not args.results_file
+    text: str
+    stats: dict | None
+    records: list
+    survivors: int
+    unresolved: int
+    unresolved_for_gate: int
+    by_module: dict
+    gather_seconds: float
+
+
+def _missing_required_baseline(args: argparse.Namespace) -> int:
+    """Report --require-baseline with no baseline; decided before `mutmut run`.
+
+    No measurement can satisfy it, so a multi-hour run ending in this same
+    error is pure waste. Keyed on the baseline, not on --diff-scoped: that gate
+    only sees changed functions, so a weakened test covering another function
+    would otherwise exit 0 (Codex review).
+    """
+    if args.plan_shards:
+        # One job is enough to report this failure; N would report it N times.
+        print(json.dumps([1]))
+        return 0
+    print(
+        "ERROR: --require-baseline was passed but no baseline is available "
+        f"({args.baseline_file} is missing/invalid and SURVIVOR_BASELINE is "
+        "unset), so nothing in this run can answer whether the survivor set "
+        "grew. --diff-scoped does not substitute: it only looks at the "
+        "functions this branch changed. Establish the baseline once with "
+        "the workflow_dispatch lane (write_baseline: true), then re-enable "
+        "this lane."
+    )
+    return 1
+
+
+def _runs_mutmut(args: argparse.Namespace) -> bool:
+    """Does this invocation itself execute `mutmut run`?
+
+    `_gather()` checks --results-file *before* --run and returns those saved
+    results unconditionally when both are given, so --run alone does not mean
+    mutmut is re-executed. Scoping and run-time metrics must not apply to a
+    saved results file (Codex review).
+    """
+    return bool(args.run and not args.results_file)
+
+
+def _function_scope(
+    args: argparse.Namespace,
+    diff_text: str | None,
+    baseline_modules: dict | None,
+    total_baseline: int | None,
+    scope: _RunScope,
+) -> bool:
+    """Scope the run to the changed functions when that is safe.
+
+    Returns whether a --diff-only run found nothing in scope to run.
+    --diff-only scopes by function whatever the baseline: it never runs the
+    drift gates that need the full population (those are weekly). The diff
+    readers must see every entry; the same trust checks module scoping applies
+    (see diff_touches_outside_only_mutate).
+    """
+    if not (
+        _runs_mutmut(args)
         and args.diff_scoped
         and args.scope_run_to_functions
         and not args.require_baseline
         and not args.write_baseline
-        # --diff-only scopes by function whatever the baseline: it never runs
-        # the drift gates that need the full population (those are weekly).
         and (args.diff_only or (baseline_modules is None and total_baseline is None))
         and diff_text is not None
-        # The diff readers below must see every entry; the same trust checks
-        # module scoping applies (see diff_touches_outside_only_mutate).
         and not diff_has_unparseable_git_header(diff_text)
         and not diff_lacks_git_headers_for_its_hunks(diff_text)
     ):
-        fn_only_mutate = load_only_mutate_globs()
-        if fn_only_mutate:
-            removed_fn = parse_removed_lines(diff_text)
-            read_base_fn = _base_reader(args.base_ref)
-            touched_fn = changed_functions(
-                parse_changed_lines(diff_text), REPO_ROOT, removed_fn, read_base_fn
-            )
-            patterns, whole = function_run_scope(
-                touched_fn,
-                fn_only_mutate,
-                unresolved_removals(removed_fn, read_base_fn),
-                MODULE_SCOPE,
-            )
-            # Nothing in scope changed: keep the run a real one (it may be
-            # validating lane infrastructure) and let it shard instead.
-            if patterns:
-                scope_patterns, scope_modules, scope_mode = patterns, whole, "functions"
-                print(
-                    f"mutation-score: scoping this run to {len(patterns)} changed "
-                    "function/module pattern(s): " + ", ".join(patterns)
-                )
-            elif args.diff_only:
-                diff_only_empty = True
-    if (
-        scope_patterns is None
-        and args.run
+        return False
+    fn_only_mutate = load_only_mutate_globs()
+    if not fn_only_mutate:
+        return False
+    removed_fn = parse_removed_lines(diff_text)
+    read_base_fn = _base_reader(args.base_ref)
+    touched_fn = changed_functions(
+        parse_changed_lines(diff_text), REPO_ROOT, removed_fn, read_base_fn
+    )
+    patterns, whole = function_run_scope(
+        touched_fn,
+        fn_only_mutate,
+        unresolved_removals(removed_fn, read_base_fn),
+        MODULE_SCOPE,
+    )
+    # Nothing in scope changed: keep the run a real one (it may be validating
+    # lane infrastructure) and let it shard instead.
+    if not patterns:
+        return bool(args.diff_only)
+    scope.patterns, scope.modules, scope.mode = patterns, whole, "functions"
+    print(
+        f"mutation-score: scoping this run to {len(patterns)} changed "
+        "function/module pattern(s): " + ", ".join(patterns)
+    )
+    return False
+
+
+def _diff_module_scope(
+    args: argparse.Namespace,
+    diff_text: str | None,
+    baseline_modules: dict | None,
+    total_baseline: int | None,
+    scope: _RunScope,
+) -> None:
+    """Scope the run to the only_mutate module(s) the diff touches, when safe.
+
+    A module-scope edit (outside every function) has no mutant of its own for
+    check_diff_scoped() to attribute; only check_per_module() catches it under
+    scoping, since the global-total gate skips a scoped run. With only the
+    legacy global total configured (no per-module baseline) no gate would be
+    left for such an edit, so that case falls back to a full run -- the same
+    "when in doubt, pay for the full population" answer this predicate family
+    gives for every case it cannot establish as safe (Codex review).
+    """
+    if not (
+        scope.patterns is None
+        and _runs_mutmut(args)
         and not args.diff_only
-        # _gather() checks --results-file *before* --run and returns those
-        # saved results unconditionally when both are given (a pre-existing
-        # quirk, unchanged here) — so --run alone does not mean mutmut is
-        # about to be re-executed. Scoping (and the scope-aware unresolved
-        # gate below, which depends on it) must not activate over a saved
-        # results file: nothing there is guaranteed to reflect a scoped run,
-        # and treating its out-of-scope "not checked"/timeout/etc. records as
-        # exempt could mask a real gap in what was actually measured (Codex
-        # review).
-        and not args.results_file
         and args.diff_scoped
         and args.scope_run_to_diff
         and not args.require_baseline
         and not args.write_baseline
-        # A module-scope edit (one outside every function) has no mutant of
-        # its own for check_diff_scoped() to attribute — by design, it is
-        # "scored by the per-module drift gate below" instead (that
-        # function's own docstring). check_per_module() is the only thing
-        # that can catch it under scoping (the global-total gate now skips
-        # itself for a scoped run, on purpose — see that block's own
-        # comment for why comparing a scoped population against a
-        # whole-repository total is unsound). Without a per-module baseline
-        # to run check_per_module() against, a scoped run with only the
-        # legacy global total configured would have *no* gate left standing
-        # for such an edit at all: check_diff_scoped() can't attribute it,
-        # check_per_module() doesn't run (no baseline_modules), and the
-        # global-total check now declines to score a partial population
-        # (Codex review). Falls back to a full run instead — the same
-        # "when in doubt, pay for the full population" answer this predicate
-        # family already gives for every other case it can't establish as
-        # safe, not a new heuristic.
         and not (total_baseline is not None and baseline_modules is None)
     ):
-        # Guaranteed non-None: this branch requires args.diff_scoped, which is
-        # exactly the condition under which the block above either set
-        # diff_text or already returned.
-        assert diff_text is not None
-        only_mutate = load_only_mutate_globs()
-        scope_patterns = mutant_run_scope(diff_text, only_mutate)
-        if scope_patterns is not None and only_mutate is not None:
-            scope_modules = diff_touched_only_mutate_modules(diff_text, only_mutate)
-            print(
-                "mutation-score: scoping this run to "
-                f"{len(scope_modules)}/{len(only_mutate)} only_mutate module(s): "
-                + ", ".join(sorted(scope_modules))
-            )
-            scope_mode = "diff"
+        return
+    # Guaranteed non-None: args.diff_scoped without --write-baseline is
+    # exactly when main() fetched diff_text (or already returned).
+    assert diff_text is not None
+    only_mutate = load_only_mutate_globs()
+    scope.patterns = mutant_run_scope(diff_text, only_mutate)
+    if scope.patterns is not None and only_mutate is not None:
+        scope.modules = diff_touched_only_mutate_modules(diff_text, only_mutate)
+        print(
+            "mutation-score: scoping this run to "
+            f"{len(scope.modules)}/{len(only_mutate)} only_mutate module(s): "
+            + ", ".join(sorted(scope.modules))
+        )
+        scope.mode = "diff"
 
-    if args.diff_only and args.run and not args.results_file and scope_patterns is None:
-        return diff_only_stop(args.plan_shards, diff_only_empty)
 
+def _shard_scope(
+    args: argparse.Namespace, scope: _RunScope, global_total_only: bool
+) -> int | None:
+    """Narrow the run to shard K/N's functions; an exit code ends the run."""
+    try:
+        shard_k, shard_n = parse_shard(args.shard)
+    except ValueError as e:
+        print(f"ERROR: --shard: {e}")
+        return 1
+    shard_only_mutate = load_only_mutate_globs()
+    unsplittable = not is_splittable(
+        scope.patterns, shard_only_mutate, global_total_only
+    )
+    if unsplittable and shard_k > 1:
+        print(f"mutation-score: shard {args.shard} has nothing to run")
+        return 0
+    if unsplittable or not shard_only_mutate:
+        return None
+    scope.shard_units = shard_assignment(shard_only_mutate, shard_k, shard_n, REPO_ROOT)
+    if not scope.shard_units:
+        # More shards than functions. An empty pattern list would make
+        # `mutmut run` measure the *whole* population, not none of it.
+        print(f"mutation-score: shard {args.shard} has no function assigned")
+        return 0
+    scope.patterns = [function_scope_pattern(m, q) for m, q in scope.shard_units]
+    scope.modules, scope.mode = {m for m, _ in scope.shard_units}, "shard"
+    print(
+        f"mutation-score: shard {args.shard} measures {len(scope.shard_units)} "
+        "function(s) across: " + ", ".join(sorted(scope.modules))
+    )
+    return None
+
+
+def _plan_scope(
+    args: argparse.Namespace,
+    diff_text: str | None,
+    baseline_modules: dict | None,
+    total_baseline: int | None,
+) -> tuple[_RunScope, int | None]:
+    """Decide what the run measures; a non-None exit code ends the run."""
+    scope = _RunScope()
+    diff_only_empty = _function_scope(
+        args, diff_text, baseline_modules, total_baseline, scope
+    )
+    _diff_module_scope(args, diff_text, baseline_modules, total_baseline, scope)
+    if args.diff_only and _runs_mutmut(args) and scope.patterns is None:
+        return scope, diff_only_stop(args.plan_shards, diff_only_empty)
     # A global-total-only baseline cannot be scored per shard.
     global_total_only = total_baseline is not None and baseline_modules is None
     if args.plan_shards:
         if args.plan_shards < 1:
             print("ERROR: --plan-shards must be >= 1")
-            return 1
+            return scope, 1
         only = load_only_mutate_globs()
-        splittable = is_splittable(scope_patterns, only, global_total_only)
+        splittable = is_splittable(scope.patterns, only, global_total_only)
         print(json.dumps(planned_shards(args.plan_shards, only, splittable, REPO_ROOT)))
-        return 0
-
+        return scope, 0
     if args.shard and not args.results_file:
-        try:
-            shard_k, shard_n = parse_shard(args.shard)
-        except ValueError as e:
-            print(f"ERROR: --shard: {e}")
-            return 1
-        shard_only_mutate = load_only_mutate_globs()
-        unsplittable = not is_splittable(
-            scope_patterns, shard_only_mutate, global_total_only
-        )
-        if unsplittable and shard_k > 1:
-            print(f"mutation-score: shard {args.shard} has nothing to run")
-            return 0
-        if not unsplittable and shard_only_mutate:
-            shard_units = shard_assignment(
-                shard_only_mutate, shard_k, shard_n, REPO_ROOT
-            )
-            if not shard_units:
-                # More shards than functions. An empty pattern list would make
-                # `mutmut run` measure the *whole* population, not none of it.
-                print(f"mutation-score: shard {args.shard} has no function assigned")
-                return 0
-            scope_patterns = [function_scope_pattern(m, q) for m, q in shard_units]
-            scope_modules, scope_mode = {m for m, _ in shard_units}, "shard"
-            print(
-                f"mutation-score: shard {args.shard} measures {len(shard_units)} "
-                "function(s) across: " + ", ".join(sorted(scope_modules))
-            )
+        return scope, _shard_scope(args, scope, global_total_only)
+    return scope, None
 
+
+def _no_output_exit(args: argparse.Namespace) -> int:
+    """Exit code when `_gather` produced no text at all."""
+    if args.run:
+        print(
+            "ERROR: --run requested but mutmut produced no output (not "
+            "installed / could not start). Failing so the mutation gate is "
+            "not a silent no-op."
+        )
+        return 1
+    if args.results_file:
+        # An explicitly named input that could not be read is a failed
+        # invocation: a scripted offline check must not report success having
+        # processed no results at all (Codex review).
+        print(
+            f"ERROR: --results-file {args.results_file} could not be read, "
+            "so there are no mutation results to gate on."
+        )
+        return 1
+    return 0
+
+
+def _measure(
+    args: argparse.Namespace, scope: _RunScope
+) -> tuple[_Measurement | None, int]:
+    """Gather and parse the results; ``None`` means exit with the code given."""
     gather_started = time.monotonic()
-    text, stats = _gather(args, scope_patterns)
+    text, stats = _gather(args, scope.patterns)
     gather_seconds = time.monotonic() - gather_started
     if text is None:
-        if args.run:
-            print(
-                "ERROR: --run requested but mutmut produced no output (not "
-                "installed / could not start). Failing so the mutation gate is "
-                "not a silent no-op."
-            )
-            return 1
-        if args.results_file:
-            # An explicitly named input that could not be read is a failed
-            # invocation, not an optional one. Sharing the "no tool, nothing
-            # to do" exit meant a scripted offline check reported success
-            # having processed no results at all (Codex review) — the same
-            # can't-fail shape as the --run branch above, reached from the
-            # other direction.
-            print(
-                f"ERROR: --results-file {args.results_file} could not be read, "
-                "so there are no mutation results to gate on."
-            )
-            return 1
-        return 0
-
+        return None, _no_output_exit(args)
     complete, why = _measurement_is_complete(text, stats)
     if not complete:
         print(f"mutation-score: unmeasurable — {why}")
-        # An explicitly named input counts the same as --run: the caller
-        # supplied results and asked for a verdict on them, so "cannot tell"
-        # is a failure, not a skip. Only a bare invocation — no run, no input
-        # — has genuinely nothing to measure (Codex review).
-        return 1 if (args.run or args.results_file) else 0
-
+        # An explicitly named input counts the same as --run: "cannot tell" is
+        # a failure, not a skip. Only a bare invocation has genuinely nothing
+        # to measure (Codex review).
+        return None, 1 if (args.run or args.results_file) else 0
     records = parse_mutant_records(text)
-    # Per-mutant listings are the strong source; a summary-only text (an older
-    # capture, or a clean run whose only signal is the final render) still has
-    # to yield a count, so fall back to the summary readers -- which take the
-    # LAST render, never the first. `by_module` is necessarily empty in that
-    # case: a summary carries no attribution, and inventing one would be worse
-    # than reporting none.
+    # Per-mutant listings are the strong source; a summary-only text still has
+    # to yield a count, so fall back to the summary readers (which take the
+    # LAST render). `by_module` is then necessarily empty: a summary carries
+    # no attribution, and inventing one would be worse than reporting none.
     if records:
         survivors = sum(1 for r in records if r.is_survivor)
     else:
         survivors = parse_survivors(text) or 0
     unresolved = count_unresolved(text)
-    # A scoped run deliberately never test-executes mutants outside
-    # `scope_modules` — every one of them reads "not checked", which
-    # `count_unresolved`/`MutantRecord.is_unresolved` correctly treat as an
-    # unresolved measurement (as they must for a *genuinely* interrupted run).
-    # Gating on the unscoped total here would fail every scoped run on the
-    # out-of-scope population it deliberately never measured. `unresolved`
-    # itself (the informational, whole-population figure printed below and
-    # written to the receipt) is untouched.
+    # A scoped run never test-executes mutants outside its patterns -- each
+    # reads "not checked", an unresolved measurement. Gating on the unscoped
+    # total would fail every scoped run on the population it deliberately
+    # never measured. `unresolved` (whole-population, for the receipt) stays.
     unresolved_for_gate = (
         sum(
             1
             for r in records
             if r.is_unresolved
-            and any(fnmatch.fnmatch(r.key, p) for p in scope_patterns)
+            and any(fnmatch.fnmatch(r.key, p) for p in scope.patterns)
         )
-        if scope_patterns is not None
+        if scope.patterns is not None
         else unresolved
     )
-    by_module = survivors_by_module(records)
+    return _Measurement(
+        text,
+        stats,
+        records,
+        survivors,
+        unresolved,
+        unresolved_for_gate,
+        survivors_by_module(records),
+        gather_seconds,
+    ), 0
 
+
+def _results_are_inconsistent(
+    args: argparse.Namespace, scope: _RunScope, m: _Measurement
+) -> bool:
+    """Refuse results the gates cannot trust; prints why."""
     if (
-        scope_mode == "shard"
-        and records
+        scope.mode == "shard"
+        and m.records
         and not report_unassigned(
-            ((r.module_path, r.function) for r in records),
+            ((r.module_path, r.function) for r in m.records),
             mutation_units(load_only_mutate_globs() or [], REPO_ROOT),
         )
     ):
-        return 1
-
-    # Two independent sources must agree. `mutmut results`' per-mutant listing
-    # and `mutmut export-cicd-stats`' counters are produced by the same run, so
-    # a disagreement means this parser no longer understands the output — which
-    # a permitted `mutmut>=3.7,<4` update can cause. Without this check the
-    # unparsed output degrades to zero survivors while the stats report real
-    # ones, and `_measurement_is_complete` accepts the stats as proof the run
-    # happened, so every gate passes (Codex review).
+        return True
     # A summary-only text ("🙁 3") yields a survivor *count* with no
-    # attribution: `by_module` is empty, so the per-module gate compares
-    # nothing and reports success, and `--write-baseline` would record
-    # `total_survivors: 0` — silently discarding every survivor and then
-    # gating future runs against that fiction (Codex review). Counting is fine
-    # for the global-total check; anything that needs to know *where* the
-    # survivors are must refuse this input.
-    if survivors and not records:
+    # attribution: the per-module gate would compare nothing and pass, and
+    # --write-baseline would record `total_survivors: 0` (Codex review).
+    if m.survivors and not m.records:
         needs_attribution = (
             args.write_baseline
             or args.diff_scoped
@@ -1599,80 +1524,51 @@ def main(argv: list[str] | None = None) -> int:
         )
         if needs_attribution:
             print(
-                f"ERROR: {survivors} surviving mutant(s) reported, but the "
+                f"ERROR: {m.survivors} surviving mutant(s) reported, but the "
                 "results carry no per-mutant listing to attribute them to a "
                 "module or function. Per-module gating, --diff-scoped and "
                 "--write-baseline all need that attribution; re-run with "
                 "`mutmut results` output rather than a summary."
             )
-            return 1
-
-    if stats is not None and "survived" in stats and stats["survived"] != survivors:
+            return True
+    # Two independent sources of the same run must agree; a disagreement means
+    # this parser no longer understands the output (a permitted mutmut update
+    # can cause it), and unparsed output would degrade to zero survivors.
+    if (
+        m.stats is not None
+        and "survived" in m.stats
+        and m.stats["survived"] != m.survivors
+    ):
         print(
-            f"ERROR: parsed {survivors} surviving mutant(s) but "
-            f"mutants/mutmut-cicd-stats.json reports {stats['survived']}. The "
+            f"ERROR: parsed {m.survivors} surviving mutant(s) but "
+            f"mutants/mutmut-cicd-stats.json reports {m.stats['survived']}. The "
             "two disagree, so this build's parser no longer matches mutmut's "
             "output — refusing to gate on either number. Check whether mutmut "
             "changed its `results` format."
         )
-        return 1
+        return True
+    return False
 
-    msg = f"mutation-score: {survivors} surviving mutant(s)"
-    if stats:
-        msg += f" of {stats.get('total', '?')} total"
-    if unresolved:
-        msg += f", {unresolved} unresolved (suspicious/no-tests/segfault/not checked)"
-    timeouts = count_timeouts(records)
+
+def _print_summary(m: _Measurement) -> None:
+    msg = f"mutation-score: {m.survivors} surviving mutant(s)"
+    if m.stats:
+        msg += f" of {m.stats.get('total', '?')} total"
+    if m.unresolved:
+        msg += f", {m.unresolved} unresolved (suspicious/no-tests/segfault/not checked)"
+    timeouts = count_timeouts(m.records)
     if timeouts:
         msg += f", {timeouts} timed out (counted as detected)"
     print(msg)
-    print("\n".join(survivor_listing(by_module)))
+    print("\n".join(survivor_listing(m.by_module)))
 
-    exit_code = 0
-    # baseline_modules / function_baseline / total_baseline: read early, above
-    # the run-scoping decision — reused as-is here.
-    #: Is there a *drift* reference — the only thing that can answer "did the
-    #: survivor set grow", for any function, changed or not?
-    baseline_available = baseline_modules is not None or total_baseline is not None
-    #: Did any check in this run actually have something to compare against?
-    #: A run that gated nothing must never be reported as a pass. Derived
-    #: rather than defaulted to True: a plain report-only invocation (no
-    #: --diff-scoped, no baseline of either kind) passes through none of the
-    #: branches below, so a `True` default made its receipt claim a gate that
-    #: never ran — exactly the "green for a run that checked nothing" shape
-    #: this flag exists to expose (Codex review). A baseline is a real gate on
-    #: its own; --diff-scoped only becomes one once it has a changed function
-    #: to scope to, which is decided below.
-    gated = baseline_available
-    # "Report-only" means there is genuinely nothing to be measured against.
-    # Once any gate is active, an unresolved run is a failed measurement.
-    gating_active = args.diff_scoped or baseline_available
 
-    if unresolved_for_gate and (gating_active or args.write_baseline):
-        print(
-            f"ERROR: {unresolved_for_gate} mutant(s) did not resolve ("
-            "suspicious/no-tests/segfault) — the measurement is incomplete; fix "
-            "or silence them so the survivor count is trustworthy."
-        )
-        exit_code = 1
-        if args.write_baseline:
-            # Never bake an under-resolved run into the committed baseline: the
-            # recorded number would understate the real survivor set and every
-            # later run would gate against a fiction.
-            print(
-                "ERROR: refusing to write a baseline from an unresolved run "
-                f"({args.baseline_file} left untouched)."
-            )
-            return 1
-
-    if args.write_baseline and not _run_reached_its_end(text, stats):
-        # `mutmut results` prints a plain listing with no progress counter, so
-        # a capture truncated after a few lines is indistinguishable from a
-        # complete one by its own content. That is tolerable for gating (a
-        # short capture can only under-report, and the run that produced it is
-        # the caller's own), but not for *recording* — a partial survivor set
-        # written as the baseline becomes the thing every later run is scored
-        # against, and the loss is silent and permanent (Codex review).
+def _write_baseline(args: argparse.Namespace, scope: _RunScope, m: _Measurement) -> int:
+    """Record the measurement as the baseline (never from a partial capture)."""
+    if not _run_reached_its_end(m.text, m.stats):
+        # A truncated `mutmut results` listing is indistinguishable from a
+        # complete one by its content; recording it would silently and
+        # permanently become what every later run is scored against.
         print(
             "ERROR: refusing to write a baseline from a capture that cannot "
             "prove it is complete. Record it from a real run (which exports "
@@ -1680,300 +1576,334 @@ def main(argv: list[str] | None = None) -> int:
             "results` listing."
         )
         return 1
+    mine = set(scope.shard_units)
+    sharded = scope.mode == "shard"
+    doc = render_baseline(
+        [r for r in m.records if (r.module_path, r.function) in mine]
+        if sharded
+        else m.records
+    )
+    # What this document measured, so `mutation_scope.py merge-baselines` can
+    # refuse shard parts that do not partition the units exactly.
+    doc["measured_units"] = sorted(
+        unit_key(u)
+        for u in (
+            scope.shard_units
+            if sharded
+            else mutation_units(load_only_mutate_globs() or [], REPO_ROOT)
+        )
+    )
+    Path(args.baseline_file).write_text(
+        json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8"
+    )
+    print(f"mutation-score: wrote baseline to {args.baseline_file}")
+    return 0
 
-    if args.write_baseline:
-        mine = set(shard_units)
-        doc = render_baseline(
-            [r for r in records if (r.module_path, r.function) in mine]
-            if scope_mode == "shard"
-            else records
-        )
-        # What this document measured, so `mutation_scope.py merge-baselines`
-        # can refuse shard parts that do not partition the units exactly.
-        doc["measured_units"] = sorted(
-            unit_key(u)
-            for u in (
-                shard_units
-                if scope_mode == "shard"
-                else mutation_units(load_only_mutate_globs() or [], REPO_ROOT)
-            )
-        )
-        Path(args.baseline_file).write_text(
-            json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8"
-        )
-        print(f"mutation-score: wrote baseline to {args.baseline_file}")
-        return exit_code
 
-    if args.diff_scoped:
-        # Fetched once, at the top of main() (before --run, for run-scoping);
-        # reused here rather than fetched a second time.
-        assert diff_text is not None, "args.diff_scoped implies diff_text was fetched"
-        removed = parse_removed_lines(diff_text)
-        read_base = _base_reader(args.base_ref)
-        touched = changed_functions(
-            parse_changed_lines(diff_text), REPO_ROOT, removed, read_base
+def _gate_diff_scoped(
+    args: argparse.Namespace,
+    diff_text: str,
+    m: _Measurement,
+    function_baseline: dict | None,
+    baseline_available: bool,
+) -> tuple[int, bool, bool]:
+    """The diff-scoped gate: ``(exit_code, gated, abort)``."""
+    removed = parse_removed_lines(diff_text)
+    read_base = _base_reader(args.base_ref)
+    touched = changed_functions(
+        parse_changed_lines(diff_text), REPO_ROOT, removed, read_base
+    )
+    unresolved_paths = unresolved_removals(removed, read_base)
+    if unresolved_paths:
+        # A branch whose only edit is a deleted guard has all of its evidence
+        # in the removed half. A removal in a module carrying a survivor is a
+        # failed measurement; elsewhere it cannot hide a failure, so a warning
+        # is the honest answer (Codex review).
+        at_risk = sorted(
+            {r.module_path for r in m.records if r.is_survivor}
+            & unresolved_paths
+            & pure_deletion_paths(diff_text)
         )
-        # Not `unresolved`: that name already holds the count of mutants
-        # that did not resolve, and it is written to the receipt further
-        # down. Shadowing it put a set of paths in that field (caught by the
-        # receipt's own test).
-        unresolved_paths = unresolved_removals(removed, read_base)
-        if unresolved_paths:
-            # Not a warning about a corner case: a branch whose only edit is a
-            # deleted guard has *all* of its evidence in the removed half, so
-            # saying nothing here would let a gate that resolved none of it
-            # print the same "OK" line as one that resolved all of it.
-            #
-            # Whether that is fatal depends on what the unresolved removals
-            # could have hidden. A removal in a module with no surviving
-            # mutant cannot hide a diff-scoped failure — there is no survivor
-            # to attribute — so warning is the honest answer. A removal in a
-            # module that *does* carry a survivor is a failed measurement:
-            # exiting 0 there is a pass the run never earned, whatever the
-            # warning says (Codex review).
-            at_risk = sorted(
-                {r.module_path for r in records if r.is_survivor}
-                & unresolved_paths
-                & pure_deletion_paths(diff_text)
-            )
+        print(
+            "mutation-score: WARNING — could not read "
+            + ", ".join(sorted(unresolved_paths))
+            + f" out of the base revision ({args.base_ref}), so lines "
+            "this branch *removed* from them were not attributed to any "
+            "function. The diff-scoped result below covers added and "
+            "modified lines only for those paths."
+        )
+        if at_risk:
             print(
-                "mutation-score: WARNING — could not read "
-                + ", ".join(sorted(unresolved_paths))
-                + f" out of the base revision ({args.base_ref}), so lines "
-                "this branch *removed* from them were not attributed to any "
-                "function. The diff-scoped result below covers added and "
-                "modified lines only for those paths."
+                "ERROR: those unattributed removals are in module(s) that "
+                "carry surviving mutants, so a survivor in a function this "
+                "branch gutted would go unreported: "
+                + ", ".join(at_risk)
+                + ". Fetch the base revision (the PR lane checks out with "
+                "fetch-depth: 0) and re-run."
             )
-            if at_risk:
-                print(
-                    "ERROR: those unattributed removals are in module(s) that "
-                    "carry surviving mutants, so a survivor in a function this "
-                    "branch gutted would go unreported: "
-                    + ", ".join(at_risk)
-                    + ". Fetch the base revision (the PR lane checks out with "
-                    "fetch-depth: 0) and re-run."
-                )
-                return 1
-        n_funcs = sum(len(v) for v in touched.values())
-        print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
-        if n_funcs:
-            # --diff-scoped is a real gate exactly when it has a changed
-            # function to scope to, whether or not that function has
-            # survivors — so this is set before the pass/fail split, not
-            # inside the "no survivors" arm.
-            gated = True
-        failures = check_diff_scoped(records, touched, function_baseline)
-        if failures:
-            print(
-                "ERROR: surviving mutants in functions this branch changed — a "
-                "mutation of code you just edited still passes the suite, so "
-                "the edit is executed but not verified:"
-            )
-            print("\n".join(failures))
-            exit_code = 1
-        elif n_funcs == 0 and not baseline_available:
-            # The test-only diff. This gate is attribution-based, so a branch
-            # that weakens assertions without touching a production function
-            # gives it nothing to scope to — and "OK" for a run that examined
-            # zero functions reads as a pass it never made (Codex review). The
-            # survivors such a branch creates are only visible as *drift*,
-            # which needs a baseline.
-            print(
-                "mutation-score: diff-scoped examined 0 changed functions and "
-                f"there is no baseline ({args.baseline_file} is absent and "
-                "SURVIVOR_BASELINE is unset), so this run GATED NOTHING. A "
-                "test-only change can only be checked as drift; record the "
-                "baseline once with the workflow_dispatch lane "
-                "(write_baseline: true)."
-            )
-        else:
-            print("mutation-score: diff-scoped OK (no survivors in changed functions)")
+            return 1, False, True
+    n_funcs = sum(len(v) for v in touched.values())
+    print(f"mutation-score: diff-scoped over {n_funcs} changed function(s)")
+    # A real gate exactly when it has a changed function to scope to.
+    gated = bool(n_funcs)
+    failures = check_diff_scoped(m.records, touched, function_baseline)
+    if failures:
+        print(
+            "ERROR: surviving mutants in functions this branch changed — a "
+            "mutation of code you just edited still passes the suite, so "
+            "the edit is executed but not verified:"
+        )
+        print("\n".join(failures))
+        return 1, gated, False
+    if n_funcs == 0 and not baseline_available:
+        # The test-only diff: "OK" for a run that examined zero functions
+        # reads as a pass it never made; such survivors are only visible as
+        # drift, which needs a baseline (Codex review).
+        print(
+            "mutation-score: diff-scoped examined 0 changed functions and "
+            f"there is no baseline ({args.baseline_file} is absent and "
+            "SURVIVOR_BASELINE is unset), so this run GATED NOTHING. A "
+            "test-only change can only be checked as drift; record the "
+            "baseline once with the workflow_dispatch lane "
+            "(write_baseline: true)."
+        )
+    else:
+        print("mutation-score: diff-scoped OK (no survivors in changed functions)")
+    return 0, gated, False
 
-    if baseline_modules is not None and scope_mode == "shard":
-        exit_code |= shard_drift_gate(
-            ((r.module_path, r.function, r.is_survivor) for r in records),
+
+def _gate_per_module(
+    args: argparse.Namespace,
+    scope: _RunScope,
+    m: _Measurement,
+    baseline_modules: dict | None,
+    function_baseline: dict | None,
+) -> int:
+    """The per-module (or per-shard) drift gate."""
+    if baseline_modules is not None and scope.mode == "shard":
+        return shard_drift_gate(
+            ((r.module_path, r.function, r.is_survivor) for r in m.records),
             baseline_modules,
             function_baseline,
-            shard_units,
+            scope.shard_units,
             args.baseline_file,
         )
-    elif args.diff_only:
-        # --diff-only measured only this diff's functions. Comparing that
-        # against the whole-population baseline would read every unmeasured
-        # module as improved, so the comparison is skipped; drift is the weekly
-        # full run's question.
+    if args.diff_only:
+        # Comparing a diff-only measurement against the whole-population
+        # baseline would read every unmeasured module as improved.
         print(
             "mutation-score: --diff-only: whole-population baseline comparisons "
             "skipped (the run measured only this diff's functions)"
         )
-    elif baseline_modules is not None:
-        failures, skipped_modules = check_per_module(
-            records, baseline_modules, scope_modules
-        )
-        if skipped_modules:
-            # A scoped run's own mutant test-execution never touched these
-            # modules (see check_per_module's own docstring) — say so rather
-            # than letting the "OK" below imply they were re-verified this
-            # run. Their baseline counts stand unchanged until a full
-            # (unscoped) run measures them again.
-            print(
-                "mutation-score: per-module baseline check skipped "
-                f"{len(skipped_modules)} module(s) this scoped run did not "
-                "test-execute (their baseline count was not re-verified): "
-                + ", ".join(skipped_modules)
-            )
-        if failures:
-            print(
-                "ERROR: per-module survivor count rose above baseline — a test "
-                "was weakened or new under-verified code landed:"
-            )
-            print("\n".join(failures))
-            exit_code = 1
-        elif scope_modules:
-            print(
-                "mutation-score: per-module baseline OK for the scoped "
-                f"module(s): {', '.join(sorted(scope_modules))}"
-            )
-        else:
-            print("mutation-score: per-module baseline OK")
-    else:
+        return 0
+    if baseline_modules is None:
         print(
             f"mutation-score: no per-module baseline at {args.baseline_file} — "
             "run with --write-baseline to establish it."
         )
+        return 0
+    failures, skipped_modules = check_per_module(
+        m.records, baseline_modules, scope.modules
+    )
+    if skipped_modules:
+        # Say so rather than letting "OK" imply these were re-verified; their
+        # counts stand until a full (unscoped) run measures them again.
+        print(
+            "mutation-score: per-module baseline check skipped "
+            f"{len(skipped_modules)} module(s) this scoped run did not "
+            "test-execute (their baseline count was not re-verified): "
+            + ", ".join(skipped_modules)
+        )
+    if failures:
+        print(
+            "ERROR: per-module survivor count rose above baseline — a test "
+            "was weakened or new under-verified code landed:"
+        )
+        print("\n".join(failures))
+        return 1
+    if scope.modules:
+        print(
+            "mutation-score: per-module baseline OK for the scoped "
+            f"module(s): {', '.join(sorted(scope.modules))}"
+        )
+    else:
+        print("mutation-score: per-module baseline OK")
+    return 0
 
+
+def _gate_global_total(
+    args: argparse.Namespace,
+    scope: _RunScope,
+    survivors: int,
+    total_baseline: int | None,
+) -> int:
+    """The legacy global-total survivor gate."""
     if args.diff_only:
-        pass  # reported with the per-module check above
-    elif total_baseline is None:
+        return 0  # reported with the per-module check
+    if total_baseline is None:
         print(
             "mutation-score: global-total baseline not set — report-only. The "
             "per-module baseline file is the preferred gate."
         )
-    elif scope_modules:
-        # The identical blind spot check_per_module() had (Codex review,
-        # round 14) applies here too, one level flatter: `survivors` is the
-        # *whole-records* survivor count, but a scoped run never
-        # test-executes a mutant outside `scope_modules` — every one of
-        # those reads "not checked", never "survived" — so `survivors` here
-        # is really only the scoped module(s)' own count, not the whole
-        # population's. Comparing it against a baseline established from a
-        # full run is meaningless in both directions: a real out-of-scope
-        # regression would silently read as "improved, please lower the
-        # baseline", and there's no partial baseline to fall back to the way
-        # check_per_module() has one per module — a "total" has no narrower
-        # population to restrict to, so the only sound answer is to skip the
-        # comparison outright rather than score it against the wrong
-        # population (Codex review).
+        return 0
+    if scope.modules:
+        # A scoped run never test-executes mutants outside its modules, so
+        # `survivors` is only the scoped count; comparing it to a full-run
+        # total is meaningless both ways, and a total has no narrower
+        # population to restrict to (Codex review).
         print(
             "mutation-score: global-total baseline check skipped — this run "
-            f"was scoped to {len(scope_modules)} module(s), so its "
+            f"was scoped to {len(scope.modules)} module(s), so its "
             f"{survivors} surviving mutant(s) is not the whole population's "
             f"count and cannot be compared against the recorded baseline of "
             f"{total_baseline}."
         )
-    elif survivors > total_baseline:
+        return 0
+    if survivors > total_baseline:
         print(f"ERROR: surviving mutants {survivors} exceed baseline {total_baseline}.")
-        exit_code = 1
-    elif survivors < total_baseline:
+        return 1
+    if survivors < total_baseline:
         print(
             f"mutation-score: {survivors} < baseline {total_baseline} — please "
             "lower SURVIVOR_BASELINE to lock in the improvement."
         )
     else:
         print(f"mutation-score: OK ({survivors} == baseline {total_baseline})")
+    return 0
+
+
+def _write_receipt(
+    args: argparse.Namespace,
+    scope: _RunScope,
+    m: _Measurement,
+    gated: bool,
+    exit_code: int,
+) -> None:
+    """Write the --json receipt.
+
+    The budget/efficiency metrics (run_seconds, mutants_measured,
+    mutants_per_second) describe *this invocation's own* measurement, so they
+    need `_runs_mutmut(args)`: a bare `mutmut results` read could publish a
+    fresh-looking count from an arbitrarily old or scoped database, and a
+    --results-file read time is not a run time (Codex review). For the same
+    reason `run_scope.mode` is "unknown" rather than "full" whenever this
+    invocation did not itself run mutmut: the provenance cannot tell whether
+    the run that produced the results was scoped (Codex review, PR #877).
+    """
+    ran = _runs_mutmut(args)
+    mutants_measured = None
+    mutants_per_second = None
+    if m.stats is not None and ran:
+        not_checked = m.stats.get("not_checked", 0)
+        mutants_measured = max(m.stats.get("total", 0) - not_checked, 0)
+        if m.gather_seconds > 0:
+            mutants_per_second = round(mutants_measured / m.gather_seconds, 3)
+    receipt = {
+        "survivors": m.survivors,
+        "unresolved": m.unresolved,
+        "unresolved_in_scope": m.unresolved_for_gate,
+        "stats": m.stats,
+        "by_module": m.by_module,
+        "gated": gated,
+        "exit_code": exit_code,
+        "run_seconds": round(m.gather_seconds, 3) if ran else None,
+        "mutants_measured": mutants_measured,
+        "mutants_per_second": mutants_per_second,
+        "run_scope": {
+            "mode": scope.mode if ran else "unknown",
+            "modules": sorted(scope.modules),
+            "patterns": scope.patterns,
+            "requested": bool(args.scope_run_to_diff or args.scope_run_to_functions),
+        },
+    }
+    Path(args.json).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+
+def _unresolved_gate(
+    args: argparse.Namespace, m: _Measurement, gating_active: bool
+) -> int:
+    """Fail a gated (or baseline-recording) run whose mutants did not resolve."""
+    if not (m.unresolved_for_gate and (gating_active or args.write_baseline)):
+        return 0
+    print(
+        f"ERROR: {m.unresolved_for_gate} mutant(s) did not resolve ("
+        "suspicious/no-tests/segfault) — the measurement is incomplete; fix "
+        "or silence them so the survivor count is trustworthy."
+    )
+    if args.write_baseline:
+        # An under-resolved baseline would understate the real survivor set
+        # and every later run would gate against a fiction.
+        print(
+            "ERROR: refusing to write a baseline from an unresolved run "
+            f"({args.baseline_file} left untouched)."
+        )
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser(__doc__, str(DEFAULT_BASELINE_FILE)).parse_args(argv)
+
+    # The diff is fetched once, up front -- before --run, so a bad --base-ref
+    # or --diff-file fails before paying for the run (see _load_diff_text). Not
+    # under --write-baseline: that mode records the whole population and never
+    # reads the diff, so an offline checkout must not fail it (Codex review).
+    diff_text: str | None = None
+    if args.diff_scoped and not args.write_baseline:
+        diff_text, err = _load_diff_text(args)
+        if diff_text is None:
+            return err if err is not None else 1
+
+    # Read early: whether a baseline exists changes whether scoping is safe.
+    baseline_modules = load_baseline(Path(args.baseline_file))
+    function_baseline = load_function_baseline(Path(args.baseline_file))
+    total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
+    #: A *drift* reference -- the only thing that can answer "did the survivor
+    #: set grow", for any function, changed or not.
+    baseline_available = baseline_modules is not None or total_baseline is not None
+
+    if args.require_baseline and not args.write_baseline and not baseline_available:
+        return _missing_required_baseline(args)
+
+    scope, stop = _plan_scope(args, diff_text, baseline_modules, total_baseline)
+    if stop is not None:
+        return stop
+
+    m, stop = _measure(args, scope)
+    if m is None:
+        return stop
+    if _results_are_inconsistent(args, scope, m):
+        return 1
+    _print_summary(m)
+
+    #: A run that gated nothing must never be reported as a pass, so this is
+    #: derived, not defaulted to True: a baseline is a gate on its own;
+    #: --diff-scoped becomes one only once it has a changed function (Codex
+    #: review).
+    gated = baseline_available
+    # Once any gate is active, an unresolved run is a failed measurement.
+    gating_active = args.diff_scoped or baseline_available
+    exit_code = _unresolved_gate(args, m, gating_active)
+    if exit_code and args.write_baseline:
+        return 1
+
+    if args.write_baseline:
+        return _write_baseline(args, scope, m) or exit_code
+
+    if args.diff_scoped:
+        assert diff_text is not None, "args.diff_scoped implies diff_text was fetched"
+        code, diff_gated, abort = _gate_diff_scoped(
+            args, diff_text, m, function_baseline, baseline_available
+        )
+        if abort:
+            return code
+        exit_code |= code
+        gated = gated or diff_gated
+
+    exit_code |= _gate_per_module(args, scope, m, baseline_modules, function_baseline)
+    exit_code |= _gate_global_total(args, scope, m.survivors, total_baseline)
 
     if args.json:
-        mutants_measured = None
-        mutants_per_second = None
-        # These are budget/efficiency metrics for *this invocation's own*
-        # measurement, not a report of whatever the local mutmut database
-        # happens to currently hold — so both require the same
-        # `args.run and not args.results_file` provenance bar run_seconds
-        # already holds itself to (that combination genuinely executes
-        # mutmut; --run alone does not, since --results-file wins and
-        # returns saved results unconditionally when both are given — see
-        # this same condition a few lines above `_gather()`'s own call).
-        # Without the bare-database-read case excluded too, a bare `mutmut
-        # results` read (no --run, no --results-file) would publish a
-        # fresh-looking mutants_measured from a database that could be
-        # arbitrarily old or itself the product of an earlier *scoped*
-        # run — self-consistent with `results_out` (both come from the same
-        # local mutants_dir at read time), but not evidence this invocation
-        # measured anything at all (Codex review). --results-file is the
-        # sibling, narrower case already fixed above: there `stats` isn't
-        # even self-consistent with `results_out`, since the latter is an
-        # arbitrary externally-supplied file with no relationship to
-        # whatever happens to be sitting in args.mutants_dir locally.
-        if stats is not None and args.run and not args.results_file:
-            not_checked = stats.get("not_checked", 0)
-            mutants_measured = max(stats.get("total", 0) - not_checked, 0)
-            if gather_seconds > 0:
-                mutants_per_second = round(mutants_measured / gather_seconds, 3)
-        Path(args.json).write_text(
-            json.dumps(
-                {
-                    "survivors": survivors,
-                    "unresolved": unresolved,
-                    "unresolved_in_scope": unresolved_for_gate,
-                    "stats": stats,
-                    "by_module": by_module,
-                    "gated": gated,
-                    "exit_code": exit_code,
-                    #: Budget/efficiency metrics (only meaningful for a real
-                    #: --run that actually invoked mutmut): how long
-                    #: `_gather` took, how many mutants were actually
-                    #: test-executed and at what rate, and whether this run
-                    #: scoped the expensive phase to a subset of
-                    #: `only_mutate` or fell back to the full population.
-                    #: `_gather()` checks --results-file *before* --run and
-                    #: returns those saved results unconditionally when both
-                    #: are given, without ever invoking mutmut — so
-                    #: `run_seconds` under that combination would otherwise
-                    #: be a near-zero file-read duration, not a real run
-                    #: time, and `mutants_per_second` derived from it would
-                    #: read as an implausibly fast "live" rate to anything
-                    #: consuming this receipt (Codex review).
-                    "run_seconds": (
-                        round(gather_seconds, 3)
-                        if args.run and not args.results_file
-                        else None
-                    ),
-                    "mutants_measured": mutants_measured,
-                    "mutants_per_second": mutants_per_second,
-                    #: "unknown" rather than "full" whenever this invocation
-                    #: didn't itself execute an unscoped `mutmut run` — a
-                    #: saved --results-file, or (Codex review, PR #877,
-                    #: twelfth round on this finding) a bare `--json` with
-                    #: neither --run nor --results-file, which reads the
-                    #: existing mutmut database as-is (the `mutmut results`
-                    #: path). Either way the measurement's own provenance
-                    #: carries no record of whether the run that produced it
-                    #: was itself scoped, so labeling it "full" would assert
-                    #: a fact this invocation cannot see — misleading trend/
-                    #: budget tooling that trusts this field the same way
-                    #: "full" is otherwise never a guess. Reuses the exact
-                    #: `args.run and not args.results_file` predicate
-                    #: `run_seconds` above already uses for "did this
-                    #: invocation actually invoke mutmut itself".
-                    "run_scope": {
-                        "mode": (
-                            scope_mode
-                            if args.run and not args.results_file
-                            else "unknown"
-                        ),
-                        "modules": sorted(scope_modules),
-                        "patterns": scope_patterns,
-                        "requested": bool(
-                            args.scope_run_to_diff or args.scope_run_to_functions
-                        ),
-                    },
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
+        _write_receipt(args, scope, m, gated, exit_code)
     return exit_code
 
 
