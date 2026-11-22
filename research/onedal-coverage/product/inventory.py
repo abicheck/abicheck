@@ -7,11 +7,13 @@ from collections import defaultdict
 from pathlib import Path
 
 from clang import cindex as ci
+from variants import variant_reader
 
 prefix, out = map(Path, sys.argv[1:3])
 inc = prefix.resolve() / 'include'
 out.mkdir(parents=True, exist_ok=True)
 ci.Config.set_library_file(os.environ.get('LIBCLANG', '/usr/lib/x86_64-linux-gnu/libclang-19.so.1'))
+variants = variant_reader(ci.Config.library_file)
 roots = ['daal.h'] + sorted(str(p.relative_to(inc)) for p in (inc/'oneapi/dal').rglob('*.hpp') if 'detail' not in p.parts and 'backend' not in p.parts and 'gpu' not in p.parts and 'spmd' not in p.parts)
 providers = defaultdict(set)
 clients = defaultdict(set)
@@ -58,6 +60,11 @@ def parse(group):
                 def record(cat,detail):
                     rows.add((key,cat,str(rel),detail,sym,','.join(sorted(providers.get(sym,()))),','.join(sorted(clients.get(sym,())))))
                 record(category,c.spelling)
+                if kind in ('CONSTRUCTOR','DESTRUCTOR') and c.semantic_parent.kind != ci.CursorKind.CLASS_TEMPLATE:
+                    for abi_name in variants(c):
+                        rows.add((key,kind.lower()+'_abi_variant',str(rel),c.spelling,abi_name,
+                                  ','.join(sorted(providers.get(abi_name,()))),
+                                  ','.join(sorted(clients.get(abi_name,())))))
                 if kind in ('FUNCTION_DECL','CXX_METHOD','FUNCTION_TEMPLATE','CONSTRUCTOR'):
                     for label,typ in [('return',c.result_type)]+[(f'arg{i}',p.type) for i,p in enumerate(c.get_arguments() or [])]:
                         if typ.kind != ci.TypeKind.INVALID and typ.get_canonical().kind==ci.TypeKind.RECORD:
