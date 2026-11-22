@@ -1164,6 +1164,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_include_root_shadowing.py",
             "tests/test_header_utils_inferred_roots.py",
+            "tests/test_family_f8_target_parity.py",
         ),
         public_surfaces=("cli",),
         axes={

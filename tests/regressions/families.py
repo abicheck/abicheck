@@ -650,6 +650,10 @@ _F5 = tuple(
 )
 _F8 = (
     "platform.version_floor_judged_from_nothing_not_baseline",
+    # A package installed with its headers under include/<pkg>/ parses the same
+    # as any other layout: an inferred -H directory never shadows libc
+    # (protobuf's include/google/protobuf/endian.h vs glibc <endian.h>).
+    "extraction.inferred_include_root_shadows_system_header",
     # The clang header backend left layout facts empty that castxml records
     # from the same headers (harness cells: test_clang_backend_layout_matches_castxml,
     # and catalog-wide test_clang_record_layout_matches_castxml_across_the_catalog).
