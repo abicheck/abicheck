@@ -155,6 +155,22 @@ class TestVersionedSymbols:
         assert bindings[0].status == BindingStatus.VERSION_MISMATCH
         assert bindings[0].required_version_unavailable
 
+    @pytest.mark.parametrize(
+        ("binding", "provided_version"),
+        [(ElfSymbolBinding.WEAK, "V2"), (ElfSymbolBinding.GLOBAL, "")],
+    )
+    def test_version_mismatch_with_possible_fallback(self, binding, provided_version):
+        graph = _make_graph(
+            {
+                "/app": (["libapi.so"], [], [_imp("value", "V1", binding)]),
+                "/libapi.so": ([], [_sym("value", version=provided_version)], []),
+            },
+            edges=[("/app", "/libapi.so")],
+        )
+        (result,) = compute_bindings(graph)
+        assert result.status == BindingStatus.VERSION_MISMATCH
+        assert not result.required_version_unavailable
+
     def test_unversioned_import_matches_default(self):
         graph = _make_graph(
             {

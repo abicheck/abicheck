@@ -341,7 +341,8 @@ def _resolve_import(
 
         if has_visible:
             unversioned_candidate |= any(
-                not ver and vis not in ("hidden", "internal") for ver, _, vis in versions
+                not ver and vis not in ("hidden", "internal")
+                for ver, _, vis in versions
             )
             found_name_visible = True
             found_name_hidden_only = False
