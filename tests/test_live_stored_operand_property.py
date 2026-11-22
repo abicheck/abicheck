@@ -246,6 +246,11 @@ def test_related_pair_reaches_modification_detectors() -> None:
         max_examples=150,
         deadline=None,
         database=None,
+        # A fixed seed: with a random one, 150 draws occasionally produced no
+        # typedef edit, so this guard failed by chance (seen in the mutmut
+        # stats run). The guard checks the strategy can reach the detectors,
+        # which one deterministic sample establishes.
+        derandomize=True,
         suppress_health_check=list(HealthCheck),
     )
     @given(pair=related_pair())

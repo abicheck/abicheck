@@ -350,6 +350,7 @@ def compute_scoped_verdict(
         verdict_value=scoped.gate_verdict,
         exit_code=scoped.gate_exit_code,
         exit_code_scheme=None if scheme is None else str(scheme),
+        consumer_impact=scoped.consumer_impact_summary,
     )
 
 
