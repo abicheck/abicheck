@@ -423,8 +423,7 @@ never a clean pass. It folds with `max`, so it never lowers a higher code, and t
 `analysis_assurance_exit_contribution` and JUnit output carry it. A scope
 notice listed in `bundle_analysis_errors` (manifest entries withheld because
 their members are out of scope, a skipped member) does not: it belongs to the
-completeness axis
-([ADR-071, 2026-11-21 amendment](../contribute/adr/071-release-analysis-assurance-fold.md#amendment-2026-11-21-a-failed-bundle-analysis-lowers-release-assurance)).
+completeness axis.
 
 Apart from that, **without `assurance.require_complete: true` every pre-existing invocation's
 exit code is unchanged**, exactly as `--contract`'s own coverage axis
