@@ -82,7 +82,9 @@ _REMOVAL_REACH = (
 )
 
 
-def existence_description(change: Change, decision: ExportAccount) -> str | None:
+def existence_description(
+    change: Change, decision: ExportAccount, *, from_headers: bool = True
+) -> str | None:
     """The description *decision* gives an existence finding, or ``None`` to
     keep the detector's own wording."""
     sym = change.symbol
@@ -136,6 +138,8 @@ def existence_description(change: Change, decision: ExportAccount) -> str | None
             f"{lead} symbol leaked from external dependency {decision.origin_lib}, "
             f"not part of this library's API{reach}: {sym}"
         )
+    if not from_headers:
+        return f"{lead} symbol (public declaration not verified from headers): {sym}"
     reason = {
         ACCOUNT_INTERNAL_NS: "it belongs to an internal namespace",
         ACCOUNT_TEMPLATE_INST: "a template instantiation with no public declaration",
@@ -168,6 +172,6 @@ def describe_export_existence(
         if exported is None:
             continue
         decision = account_export(change.symbol, accounting_context(side, exported))
-        description = existence_description(change, decision)
+        description = existence_description(change, decision, from_headers=side.from_headers)
         if description is not None:
             change.description = description
