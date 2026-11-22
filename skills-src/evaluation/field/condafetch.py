@@ -196,10 +196,11 @@ def pick(pkg, version, subdir="linux-64"):
     fs = [f for f in list_files(pkg, subdir) if f["version"] == version]
     if not fs:
         raise SystemExit(f"no files for {pkg} {version} in {subdir}")
-    conda = [f for f in fs if f["basename"].endswith(".conda")]
-    pool = conda or fs
-    # a live build always beats one the index has since removed
-    pool.sort(key=lambda f: (not f["attrs"].get("removed", False),
+    # a live build always beats one the index has since removed, whatever its
+    # archive format; .conda is preferred only among builds of the same status
+    live = [f for f in fs if not f["attrs"].get("removed", False)]
+    pool = live or fs
+    pool.sort(key=lambda f: (f["basename"].endswith(".conda"),
                              f["attrs"].get("build_number", 0), f["basename"]))
     return pool[-1]
 

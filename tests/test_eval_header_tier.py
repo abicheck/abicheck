@@ -181,6 +181,33 @@ def test_repodata_files_indexes_removed_archives_below_live_builds():
         cf.list_files = old
 
 
+@pytest.mark.parametrize(
+    "files, chosen",
+    [
+        # live .tar.bz2 beats a removed .conda of the same version
+        (
+            [("p-1-h_1.tar.bz2", 1, False), ("p-1-h_3.conda", 3, True)],
+            "p-1-h_1.tar.bz2",
+        ),
+        # among live builds .conda wins at equal build number
+        ([("p-1-h_1.tar.bz2", 1, False), ("p-1-h_1.conda", 1, False)], "p-1-h_1.conda"),
+        # among live builds .conda wins even over a higher-build .tar.bz2
+        ([("p-1-h_2.tar.bz2", 2, False), ("p-1-h_1.conda", 1, False)], "p-1-h_1.conda"),
+        # only removed builds: still fetchable, highest wins
+        ([("p-1-h_1.conda", 1, True), ("p-1-h_2.conda", 2, True)], "p-1-h_2.conda"),
+    ],
+)
+def test_pick_prefers_live_over_removed_regardless_of_format(
+    monkeypatch, files, chosen
+):
+    rows = [
+        {"basename": b, "version": "1", "attrs": {"build_number": n, "removed": r}}
+        for b, n, r in files
+    ]
+    monkeypatch.setattr(cf, "list_files", lambda pkg, subdir="linux-64": list(rows))
+    assert cf.pick("p", "1")["basename"] == chosen
+
+
 def test_resolve_side_missing_umbrella_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(cf, "resolve_headers_pkg", _fake_fs(tmp_path, {"z": ["z.h"]}))
     entry = {

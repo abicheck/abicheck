@@ -12,12 +12,12 @@ and that the whole value arrives as one ``--only`` argument.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
+from _workflow_exec import bash_executable, require_bash
+from _yaml_fast import safe_load
 
 _WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/eval-suite.yml"
 
@@ -33,7 +33,7 @@ _PAYLOADS = (
 
 
 def _runner_steps() -> list[tuple[str, str]]:
-    jobs = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    jobs = safe_load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
     steps = []
     for name, job in jobs.items():
         for step in job.get("steps", []):
@@ -48,12 +48,12 @@ def test_every_tier_job_routes_only_through_env() -> None:
     assert {"binary-tier", "source-tier", "header-tier"} <= jobs, jobs
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 @pytest.mark.parametrize("payload", _PAYLOADS)
 @pytest.mark.parametrize("job_run", _runner_steps(), ids=lambda s: s[0])
 def test_hostile_only_input_is_one_inert_argument(
     tmp_path: Path, job_run: tuple[str, str], payload: str
 ) -> None:
+    require_bash()
     _, run = job_run
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
@@ -68,7 +68,9 @@ def test_hostile_only_input_is_one_inert_argument(
         "ONLY_INPUT": payload,
         "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
     }
-    subprocess.run(["bash", "-e", "-c", run], cwd=tmp_path, env=env, check=False)
+    subprocess.run(
+        [bash_executable(), "-e", "-c", run], cwd=tmp_path, env=env, check=False
+    )
     assert not list(tmp_path.rglob("PWNED*"))
     args = argv_log.read_text().split("\0")[:-1]
     assert args[args.index("--only") + 1] == payload
