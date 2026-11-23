@@ -5806,6 +5806,7 @@ packages:
   - mkdocs-redirects ; extra == 'docs'
   - build ; extra == 'dist'
   - twine ; extra == 'dist'
+  - castxml==0.8.0 ; extra == 'castxml'
   requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/02/36/ecc85bc96c273dc8a11273ed4782272975e6338d4a3e9228621175edf0e3/jaraco_functools-4.6.0-py3-none-any.whl
   name: jaraco-functools

@@ -13,12 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Packaging/installation-docs contract: pip is the lightweight/core
-distribution, conda-forge is the recommended full-scanner installation, and
-neither README.md nor getting-started.md ever tells a reader to
-``pip install castxml`` (that installs the unmaintained legacy PyPI
-distribution abicheck's own version gate rejects by default -- see
-castxml_policy.py). Also checks pyproject.toml's core dependency list
+"""Packaging/installation-docs contract: pip is lightweight by default, the
+explicit ``castxml`` extra installs the maintained official wheel, and
+conda-forge remains the recommended full-scanner installation. Also checks pyproject.toml's core dependency list
 directly, as a fast belt-and-suspenders companion to the built-wheel check
 in scripts/check_distribution_metadata.py (which needs `build`/`twine`
 installed and dist/ populated, so it can't run in the default fast lane).
@@ -26,24 +23,14 @@ installed and dist/ populated, so it can't run in the default fast lane).
 
 from __future__ import annotations
 
-import re
 import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-_FENCED_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
-
 
 def _read(relpath: str) -> str:
     return (ROOT / relpath).read_text(encoding="utf-8")
-
-
-def _fenced_code_blocks(text: str) -> list[str]:
-    """Extract fenced code-block bodies -- the only place a reader would
-    actually copy-paste a command from, as opposed to inline-code mentioned
-    inside a "don't do this" warning sentence."""
-    return _FENCED_CODE_BLOCK_RE.findall(text)
 
 
 def test_pyproject_core_dependencies_have_no_castxml() -> None:
@@ -53,28 +40,23 @@ def test_pyproject_core_dependencies_have_no_castxml() -> None:
     assert not any("castxml" in d for d in core_deps), core_deps
 
 
-def test_pyproject_optional_extras_have_no_castxml() -> None:
+def test_castxml_is_an_explicit_pinned_optional_extra() -> None:
     with (ROOT / "pyproject.toml").open("rb") as f:
         project = tomllib.load(f)["project"]
     extras = project.get("optional-dependencies", {})
+    assert "castxml==0.8.0" in extras["castxml"]
     for extra_name, deps in extras.items():
-        lowered = [d.lower() for d in deps]
-        assert not any("castxml" in d for d in lowered), (extra_name, lowered)
+        if extra_name != "castxml":
+            assert not any("castxml" in d.lower() for d in deps), (extra_name, deps)
 
 
-def test_readme_never_recommends_pip_install_castxml() -> None:
-    """`pip install castxml` may be *mentioned* inline as something to warn
-    against, but must never appear as a runnable command in a fenced code
-    block -- that would be an actual recommendation to run it."""
+def test_readme_documents_the_supported_castxml_extra() -> None:
     text = _read("README.md")
-    for block in _fenced_code_blocks(text):
-        assert "pip install castxml" not in block.lower()
+    assert "pip install 'abicheck[castxml]'" in text
 
 
-def test_getting_started_never_recommends_pip_install_castxml() -> None:
-    text = _read("docs/start/getting-started.md")
-    for block in _fenced_code_blocks(text):
-        assert "pip install castxml" not in block.lower()
+def test_install_page_documents_the_supported_castxml_extra() -> None:
+    assert "abicheck[castxml]" in _read("docs/start/install.md")
 
 
 def test_readme_presents_conda_forge_before_pip_lightweight_install() -> None:

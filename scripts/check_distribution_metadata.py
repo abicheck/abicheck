@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import tarfile
 import tomllib
 import zipfile
@@ -53,20 +54,20 @@ def main() -> int:
     for field, expected in checks.items():
         if metadata.get(field) != expected:
             fail(f"wheel {field} is {metadata.get(field)!r}, expected {expected!r}")
-    # PyPI/pip-installed abicheck is the lightweight/core distribution: it must
-    # never pull in CastXML transitively, on any extra. `pip install abicheck`
-    # (or `abicheck[dev]`/`[docs]`/`[dist]`) installing
-    # CastXML would silently promote the legacy, unsupported PyPI `castxml`
-    # distribution (last released 0.4.5 in 2018 — see castxml_policy.py) into
-    # abicheck's default install path, contradicting the documented contract
-    # that a real L2 scanner setup comes from conda-forge or an explicitly
-    # managed CastXML/compiler install.
+    # Keep the base install scanner-free. The official CastXML wheel is only
+    # pulled by the explicit `[castxml]` extra; this lets pip users opt into L2
+    # without making every lightweight/core install download a native binary.
     requires_dist = metadata.get_all("Requires-Dist", [])
     castxml_requires = [r for r in requires_dist if "castxml" in r.lower()]
-    if castxml_requires:
+    unexpected_castxml = [
+        r
+        for r in castxml_requires
+        if not re.search(r";\s*extra\s*==\s*['\"]castxml['\"]", r, re.I)
+    ]
+    if unexpected_castxml:
         fail(
-            "wheel Requires-Dist pulls in castxml, which must never be a "
-            f"pip-installed abicheck dependency: {castxml_requires!r}"
+            "wheel Requires-Dist must keep castxml behind the explicit "
+            f"[castxml] extra: {unexpected_castxml!r}"
         )
     project_urls: dict[str, str] = {}
     for value in metadata.get_all("Project-URL", []):

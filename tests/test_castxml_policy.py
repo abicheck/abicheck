@@ -65,7 +65,7 @@ class TestEvaluateCastxmlVersion:
         assert result.reasons == []
 
     def test_legacy_pypi_version_rejected(self):
-        # The legacy PyPI `castxml` distribution's last release.
+        # The old PyPI 0.4.5 release has no supported bundled-Clang metadata.
         result = evaluate_castxml_version(_version_text("0.4.5", "8.0.0"))
         assert result.supported is False
         assert REASON_VERSION_BELOW_MINIMUM in result.reasons

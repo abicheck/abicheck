@@ -497,9 +497,9 @@ jobs:
   # ci.yml's unit-tests job) so the default-backend points — the genuine second
   # `clang` invocation every non-clang-frontend dump pays, the more common
   # real-world case — are actually measured too, not just the clang-frontend
-  # in-process-memo path (Codex review: the bare PyPI castxml package this
-  # runner would otherwise see is an out-of-policy build the script's own
-  # version gate rejects, silently narrowing every run to clang-only).
+  # in-process-memo path. The PyPI CastXML wheel is now a supported option;
+  # this job uses the pinned Superbuild to keep its bundled Clang and
+  # performance baseline reproducible across scheduled runs.
   header-graph-perf:
     name: Header-graph attach-cost (trend)
     needs: classify

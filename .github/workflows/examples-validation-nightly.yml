@@ -104,43 +104,17 @@ jobs:
           persist-credentials: false
       - name: Install cmake
         run: brew install cmake
-      - name: Set up pinned CastXML (macOS)
-        # Homebrew's castxml is unpinnable here: its stable formula moved to
-        # 0.8.0 is supported by castxml/policy.py, but Homebrew has no versioned
-        # formula. Install the exact conda-forge osx-arm64 build
-        # (castxml 0.8.0, build haf09237_0), via the verified micromamba
-        # bootstrap used by integration.yml.
-        shell: bash
-        env:
-          MICROMAMBA_VERSION: '2.9.0-0'
-          MICROMAMBA_OSX_ARM64_SHA256: 'ec2a072f028e1a7cf20f3e2e74d5a8127cf5a5f27636375b5359811565f4e5be'
-        run: |
-          set -euo pipefail
-          [ "$(uname -m)" = "arm64" ] || { echo "::error::expected an arm64 macOS runner"; exit 1; }
-          work="$(mktemp -d)"
-          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
-            --output "$work/micromamba" \
-            "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-osx-arm64"
-          echo "${MICROMAMBA_OSX_ARM64_SHA256}  $work/micromamba" | shasum -a 256 -c -
-          chmod +x "$work/micromamba"
-          env_prefix="$RUNNER_TEMP/castxml-env"
-          MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba-root" "$work/micromamba" create -y \
-            -p "$env_prefix" -c conda-forge "castxml=0.8.0=haf09237_0"
-          echo "$env_prefix/bin" >> "$GITHUB_PATH"
-          export PATH="$env_prefix/bin:$PATH"
-          # castxml prints its version banner on stderr, so capture both streams.
-          version_output="$(castxml --version 2>&1)"
-          case "$version_output" in
-            "castxml version 0.8.0"*) ;;
-            *) echo "::error::unexpected castxml version"; echo "$version_output"; exit 1 ;;
-          esac
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.14"
           cache: "pip"
       - run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,castxml]"
+          case "$(castxml --version 2>&1)" in
+            "castxml version 0.8.0"*) ;;
+            *) echo "::error::unexpected castxml version"; castxml --version 2>&1; exit 1 ;;
+          esac
       - name: Validate examples (platform-filtered to macos)
         env:
           ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"

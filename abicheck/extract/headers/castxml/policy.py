@@ -24,11 +24,9 @@ bundled Clang major version, never CastXML's own version. This module adds
 that gate: a supported range for CastXML itself plus a minimum bundled/linked
 Clang major, checked once before the L2 scan runs.
 
-The floor targets the legacy PyPI ``castxml`` distribution specifically
-(last released as 0.4.5 in September 2022, with no bundled-Clang metadata
-at all) —
-that is exactly what this gate is meant to catch and reject by default. The
-floor is *not* pinned to conda-forge's current ``castxml`` feedstock line: the
+The floor rejects the old PyPI ``castxml`` 0.4.5 distribution (no bundled-Clang
+metadata) while accepting the maintained official PyPI 0.8.0 wheel. The floor
+is *not* pinned to conda-forge's current ``castxml`` feedstock line: the
 CastXML Superbuild (github.com/CastXML/CastXMLSuperbuild, what
 ``action/install-castxml.sh`` installs and what most CI/CD consumers of this
 project actually run) tracks its own, much slower-moving internal version
@@ -104,8 +102,11 @@ class CastxmlVersionCheck:
             f"CastXML {version_desc}{where}.",
             f"abicheck supports CastXML >={MIN_CASTXML},<{MAX_CASTXML} for "
             "authoritative L2 scans.",
-            "The PyPI `castxml` distribution is not a supported default scanner setup.",
-            "Install the complete conda-forge environment or select an "
+            "This CastXML build is not a supported default scanner setup.",
+            "Install the supported wheel with `pip install 'abicheck[castxml]'`, "
+            "which pins the official PyPI release to 0.8.0; older PyPI releases "
+            "such as 0.4.5 remain unsupported. Or use the complete "
+            "conda-forge environment / select an "
             "explicitly managed supported CastXML/direct-Clang profile.",
         ]
         return "\n".join(lines)

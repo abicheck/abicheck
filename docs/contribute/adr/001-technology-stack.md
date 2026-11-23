@@ -75,8 +75,8 @@ Original plan (historical, now realized as above):
 
 - **conda-forge**: declare `castxml` as a run dependency, giving users a complete
   install with no manual system package setup.
-- **PyPI**: install Python dependencies only; `castxml` installed separately via
-  system packages, conda-forge, or an optional extra.
+- **PyPI**: base `pip install abicheck` remains Python-only; the explicit
+  `abicheck[castxml]` extra installs the official CastXML wheel.
 
 Note: An earlier version of this ADR incorrectly stated pyelftools is used by Ghidra.
 Ghidra is Java-based and uses its own ELF parser. The correct reference projects are

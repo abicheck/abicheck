@@ -39,10 +39,9 @@ All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with the `abic
 > with the system/conda packages below (the conda-forge package pulls it in
 > automatically). If you have no `castxml`, run **binary-only mode** by omitting the
 > header flags — abicheck falls back to DWARF/symbols analysis (weaker, but works).
-> **Don't run `pip install castxml`** to fill the gap: that installs the unmaintained
-> legacy PyPI distribution (last released 0.4.5 in 2018), which abicheck's version
-> gate rejects by default for an authoritative L2 scan — use one of the options below
-> (conda-forge, the pinned Superbuild, or your platform's package manager) instead.
+> For a pip-only setup, install the maintained CastXML wheel through the explicit
+> extra: `pip install 'abicheck[castxml]'`. This pins the executable to 0.8.0.
+> The base `pip install abicheck` remains lightweight and does not install a scanner.
 
 ### Option A: conda-forge (recommended)
 

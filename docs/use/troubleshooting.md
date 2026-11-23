@@ -151,13 +151,14 @@ be scanned **without** `--lang c` (castxml always parses in a C++-aware mode).
 An authoritative L2 scan runs a version gate (`castxml_policy.py`) when the
 request starts, before any binary or debug-info extraction: it rejects a resolved `castxml` build outside the
 supported range (currently `>=0.6.11,<0.9.0`, bundled/linked Clang `>=18`).
-This most commonly fires against the legacy PyPI `castxml` distribution
-(`pip install castxml`), which is **not** a supported default scanner setup —
-`pip install abicheck` deliberately never installs CastXML for you, and the
-PyPI `castxml` package's own release line predates this floor.
+This fires when the executable on `PATH` is older than 0.6.11, has a bundled
+Clang older than 18, or is otherwise outside the supported range. The current
+PyPI wheel is CastXML 0.8.0 and is supported; install it with
+`pip install 'abicheck[castxml]'`. Bare `pip install abicheck` deliberately
+remains scanner-free.
 
-Fix: install a supported CastXML from conda-forge (recommended) or a pinned
-Superbuild release, same as the two sections above:
+Fix: install a supported CastXML with the pip extra, from conda-forge
+(recommended), or from a pinned Superbuild release:
 
 ```bash
 conda install -c conda-forge castxml

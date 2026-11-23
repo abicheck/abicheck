@@ -199,7 +199,7 @@ def _require_supported_castxml(
 ) -> None:
     """Run the CastXML version gate at request time, not at header-parse time.
 
-    An out-of-policy castxml (notably the PyPI ``castxml`` wheel) used to be
+    An out-of-policy castxml (for example, the old PyPI 0.4.5 release) used to be
     rejected only once the header pass started, after the binary and debug-info
     extraction had already run. This calls the backend's own gate
     (``_resolve_gated_castxml_bin``) and decides with the dump's own
