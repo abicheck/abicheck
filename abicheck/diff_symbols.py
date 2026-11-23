@@ -54,7 +54,7 @@ from .compare.function_signature import (
     function_signature_changes,
     function_signature_index,
 )
-from .compare.header_overloads import default_views
+from .compare.header_overloads import default_views, is_header_pattern
 from .compare.naming_conventions import PREFIX_RENAME
 from .compare.parameter_facts import (
     ParameterView,
@@ -495,6 +495,8 @@ def _detect_newly_deleted_functions(
         ):
             continue
         f_old_any = old_all.get(mangled)
+        if f_old_any is not None and is_header_pattern(f_new) and is_header_pattern(f_old_any):
+            continue  # The scoped overload join handles header-only patterns.
         old_entity = old_index.entity_for(f_old_any) if f_old_any is not None else None
         if f_old_any is None:
             f_old_any = drift_old_by_new_key.get(mangled)
@@ -530,7 +532,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # data-model-dependent integer ABI-equivalence checks below.
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
-    # Once per comparison: see compare/template_instance_absence.py.
     template_absence = TemplateInstanceAbsence(new, old)
     old_map, _reconciled_new_functions = reconciled_function_surfaces(old, new)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
@@ -565,7 +566,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new, "clang_vtable"
     )
 
-    # Build a lookup of ALL functions in new snapshot (including hidden).
     new_all = new.function_map
 
     matched_by_name: set[str] = set()

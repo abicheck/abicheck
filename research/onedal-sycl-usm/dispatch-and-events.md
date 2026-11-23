@@ -156,3 +156,24 @@ arguments stopped compiling, and the seven-argument call became valid.
 The L2 checker identifies the lost five- and six-argument forms and returns
 `API_BREAK`. A host overload accepts four arguments, so argument count alone
 does not establish what happens to the four-argument queue call.
+
+## Explicitly deleting the queue overload
+
+The `delete_overload` variant replaces only the queue overload's body with
+`= delete;`. Its declaration, default arguments and host siblings remain in
+the header. With the oneDAL 2025.2.0 conda headers, icpx 2025.0.4 checked
+four expressions before and after this edit using C++17, `-fsycl`,
+`--offload-host-only` and `-DONEDAL_DATA_PARALLEL`.
+
+| Call to `homogen_table::wrap` | Original | Queue overload deleted |
+| --- | --- | --- |
+| Host pointer, rows, columns | Compiles | Compiles |
+| Queue, pointer, rows, columns | Compiles | Rejected |
+| Queue, pointer, rows, columns, events | Compiles | Rejected |
+| Queue, pointer, rows, columns, events, layout | Compiles | Rejected |
+
+The L2 dumps of `homogen.hpp` retain eight declarations named `wrap` on
+both sides. One declaration changes its deletion flag. The checker uses
+its scoped signature to attribute `func_deleted` to the queue overload.
+Comparing both headers against the same packaged `libonedal_dpc.so.3`
+returns `API_BREAK`. This verifies source callability on the host compiler.

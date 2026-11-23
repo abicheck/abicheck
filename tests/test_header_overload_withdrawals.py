@@ -135,3 +135,30 @@ def test_withdrawal_needs_same_include_relative_header(directory, removed):
     before.ast_compile_args = ("-I/old/include",)
     after.ast_compile_args = ("-I", "/new/include")
     assert bool(lost_header_overloads(before, after, [])) == removed
+
+
+@pytest.mark.parametrize("queue_first", [True, False])
+def test_explicit_deletion_is_scoped_to_the_queue_overload(queue_first):
+    host = pattern("int")
+    previous, current = (pattern("queue&", "T*") for _ in range(2))
+    current.is_deleted = True
+    old = snap(previous, host) if queue_first else snap(host, previous)
+    new = snap(current, host) if queue_first else snap(host, current)
+    result = compare(old, new)
+    [change] = [c for c in result.changes if c.kind == ChangeKind.FUNC_DELETED]
+    assert change.entity_id == previous.entity_id
+    assert result.verdict.value == "API_BREAK"
+    assert not any(c.kind == ChangeKind.FUNC_DELETED for c in compare(new, new).changes)
+
+
+@pytest.mark.parametrize("conflict_side", ["old", "new"])
+def test_conflicting_deletion_observations_do_not_prove_a_transition(conflict_side):
+    host = pattern("int")
+    previous, current, conflict = (pattern("queue&") for _ in range(3))
+    current.is_deleted = True
+    conflict.is_deleted = conflict_side == "old"
+    old, new = [host, previous], [host, current]
+    (old if conflict_side == "old" else new).append(conflict)
+    assert not any(
+        c.kind == ChangeKind.FUNC_DELETED for c in compare(snap(*old), snap(*new)).changes
+    )

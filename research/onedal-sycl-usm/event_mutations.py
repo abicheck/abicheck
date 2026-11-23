@@ -34,6 +34,8 @@ def main():
     removed = replace_once(
         dropped, "const std::vector<sycl::event>& dependencies = {},", ""
     )
+    signature, body = overload.split(") {", 1)
+    _, suffix = body.split("\n    }", 1)
     for lane, body in [
         ("baseline", overload),
         (
@@ -44,6 +46,7 @@ def main():
         ),
         ("drop_event", dropped),
         ("remove_parameter", removed),
+        ("delete_overload", signature + ") = delete;" + suffix),
         (
             "remove_default",
             replace_once(overload, "dependencies = {},", "dependencies,"),
@@ -71,22 +74,30 @@ def main():
             "-o",
             str(exe),
         ]
-        if lane in ("baseline", "remove_parameter", "remove_default"):
+        if lane in (
+            "baseline",
+            "remove_parameter",
+            "remove_default",
+            "delete_overload",
+        ):
             probe = CONSUMER.with_name("event_call_forms.cpp")
             subprocess.run(
                 [
                     *command[: command.index(str(CONSUMER))],
                     "-fsyntax-only",
-                    f"-DEXPECT_EVENTS={int(lane != 'remove_parameter')}",
-                    f"-DEXPECT_DEFAULT_EVENTS={int(lane != 'remove_default')}",
+                    f"-DEXPECT_EVENTS={int(lane not in ('remove_parameter', 'delete_overload'))}",
+                    f"-DEXPECT_DEFAULT_EVENTS={int(lane not in ('remove_default', 'delete_overload'))}",
                     str(probe),
                 ],
                 env=env,
                 check=True,
             )
         build = subprocess.run(command, env=env, capture_output=True, text=True)
-        if lane == "remove_parameter":
-            if build.returncode and "no matching function" in build.stderr:
+        if lane in ("remove_parameter", "delete_overload"):
+            diagnostic = (
+                "deleted" if lane == "delete_overload" else "no matching function"
+            )
+            if build.returncode and diagnostic in build.stderr:
                 print(lane, "explicit event argument rejected")
                 continue
             raise RuntimeError(

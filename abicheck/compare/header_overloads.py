@@ -11,8 +11,10 @@ from ..diff_helpers import make_change
 from ..model import AbiSnapshot, Function
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.registry import Verdict
 from ..model.export_entity_name import entity_name_components
 from ..model.identity import EntityId
+from ..model.include_search import include_roots
 from ..model.surface_facts import (
     has_observed_contract_evidence,
     is_export_confirmed_absent,
@@ -45,7 +47,7 @@ def _fixed_arity(fn: Function) -> bool:
     return fn.is_variadic is False and all("..." not in p.type for p in fn.params)
 
 
-def _header_pattern(fn: Function) -> bool:
+def is_header_pattern(fn: Function) -> bool:
     eid = fn.entity_id
     return (
         eid is not None
@@ -68,15 +70,19 @@ def align_header_overloads(
         key
         for key, lhs in old_map.items()
         if lhs.mangled == lhs.name
-        and _header_pattern(lhs)
+        and is_header_pattern(lhs)
         and (rhs := new_map.get(key)) is not None
-        and _header_pattern(rhs)
+        and is_header_pattern(rhs)
         and lhs.entity_id != rhs.entity_id
     }
     if not collisions:
         return old_map, new_map
     left, right = (
-        {f.entity_id: f for f in side if f.mangled in collisions and _header_pattern(f)}
+        {
+            f.entity_id: f
+            for f in side
+            if f.mangled in collisions and is_header_pattern(f)
+        }
         for side in reconciled_public_functions(old, new)
     )
     old_map, new_map = dict(old_map), dict(new_map)
@@ -100,7 +106,7 @@ def _default_patterns(
         if (
             eid is None
             or (wanted is not None and eid not in wanted)
-            or not _header_pattern(fn)
+            or not is_header_pattern(fn)
         ):
             continue
         other = by_id.setdefault(eid, fn)
@@ -133,7 +139,7 @@ def default_views(
     )
     for row in ordinary:
         _, prev, current, _, _ = row
-        if _header_pattern(prev) and _header_pattern(current):
+        if is_header_pattern(prev) and is_header_pattern(current):
             # Compare every placeholder (including the index representative)
             # through the ambiguity-checked exact-identity join below.
             continue
@@ -158,19 +164,11 @@ def default_views(
 
 
 def _include_roots(snapshot: AbiSnapshot) -> tuple[PurePath, ...]:
-    roots = []
-    args = iter(snapshot.ast_compile_args)
-    for arg in args:
-        if arg == "-I":
-            value = next(args, "")
-        elif arg.startswith("-I"):
-            value = arg[2:]
-        else:
-            continue
-        path = PurePath(value)
-        if path.is_absolute():
-            roots.append(path)
-    return tuple(roots)
+    return tuple(
+        path
+        for value in include_roots(snapshot.ast_compile_args)
+        if (path := PurePath(value)).is_absolute()
+    )
 
 
 def _header_key(header: str, roots: tuple[PurePath, ...]) -> tuple[str, str]:
@@ -179,6 +177,45 @@ def _header_key(header: str, roots: tuple[PurePath, ...]) -> tuple[str, str]:
         if path.is_relative_to(root):
             return (f"include[{index}]", str(path.relative_to(root)))
     return ("path", str(path))
+
+
+def _deleted_patterns(old: list[Function], new: list[Function]) -> list[Change]:
+    """Explicit deletion keeps the signature identity and removes callability."""
+    deleted = {
+        fn.entity_id: fn for fn in new if fn.is_deleted and is_header_pattern(fn)
+    }
+    if not deleted:
+        return []
+    # Do not infer a transition from conflicting redeclarations or an
+    # unavailable prior state. Every observation must support its side.
+    for fn in new:
+        if fn.is_deleted is not True:
+            deleted.pop(fn.entity_id, None)
+    for fn in old:
+        if fn.is_deleted is not False:
+            deleted.pop(fn.entity_id, None)
+    changes = []
+    for fn in old:
+        if fn.entity_id not in deleted or not is_header_pattern(fn):
+            continue
+        current = deleted.pop(fn.entity_id)
+        name = qualified_spelling(fn.entity_id)
+        if name:
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_DELETED,
+                    symbol=name,
+                    name=name,
+                    old_value="callable",
+                    new_value="deleted",
+                    entity_id=fn.entity_id,
+                    source_location=current.source_location,
+                    effective_verdict=Verdict.API_BREAK,
+                    modulation_rule="func_deleted.unexported_header",
+                    modulation_reason="Both snapshots confirm the header overload has no library export.",
+                )
+            )
+    return changes
 
 
 def _arities(fn: Function) -> range:
@@ -204,7 +241,7 @@ def lost_header_overloads(
     """
     if functions is None:
         functions = old.declarations.functions
-    leaves = {f.mangled for f in functions if _header_pattern(f)}
+    leaves = {f.mangled for f in functions if is_header_pattern(f)}
     if not leaves:
         return []
     left, right = reconciled_public_functions(old, new)
@@ -241,7 +278,7 @@ def lost_header_overloads(
             ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
         }
     }
-    changes = []
+    changes = _deleted_patterns(functions, new.declarations.functions)
     for name, lhs in sorted(before.items()):
         rhs = after.get(name, [])
         old_by_id = {f.entity_id: f for f in lhs}
@@ -258,7 +295,7 @@ def lost_header_overloads(
                     or eid in all_new
                     or fn.mangled in uncertain_leaves
                     or fn.source_header not in observed_headers
-                    or not _header_pattern(fn)
+                    or not is_header_pattern(fn)
                 ):
                     continue
                 changes.append(
@@ -280,8 +317,8 @@ def lost_header_overloads(
         if (
             previous.entity_id in reported
             or previous.is_deleted
-            or not _header_pattern(previous)
-            or not _header_pattern(current)
+            or not is_header_pattern(previous)
+            or not is_header_pattern(current)
             or previous.mangled in uncertain_leaves
             or not _fixed_arity(previous)
             or not all(_fixed_arity(f) for f in rhs)
