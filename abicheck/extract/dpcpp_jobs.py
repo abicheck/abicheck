@@ -172,6 +172,12 @@ def sycl_host_replay_jobs(
     if not {"-fsycl-host-only", "--offload-host-only"}.intersection(cmd):
         return None
     jobs = _driver_jobs(cmd)
+    if not jobs and "-fsycl-host-only" in cmd:
+        from ..errors import AstContextMissingError
+
+        raise AstContextMissingError(
+            "cannot establish a host compilation job for -fsycl-host-only"
+        )
     split = _split_device_host(jobs) if jobs is not None else None
     if split is None:
         return None

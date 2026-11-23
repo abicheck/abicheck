@@ -42,7 +42,7 @@
       "abicheck/extract/dependency_header_roots.py": "1eaf11025d92166b6c05dfbc73e52eb859225dc33200905fbf179f2fb61b789a",
       "abicheck/extract/detached_debug.py": "c20829397d3ac53e2e1dd3f4bc23a92098daadc566c745458aac94a7f6ce0c3a",
       "abicheck/extract/digest_memo.py": "babd25889fb4ac54b8defd27ea009fc2e125085c5692f5a4d864aec5491fbee9",
-      "abicheck/extract/dpcpp_jobs.py": "b20dc9643d1620f5b28a90f03055333339f219ce9aa5bc8512badf0eef890ad0",
+      "abicheck/extract/dpcpp_jobs.py": "87fe1b8ef8df6732e91160709e32d5ef11b03ced4fe08dc9fc8c045c20da293c",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_abi_fact.py": "b169fadd8bb32ee4e67f9c70d46e5392215f648fac55d0c782aeabe51bc58495",
       "abicheck/extract/dwarf_calling_conventions.py": "3944725995f3cb59ee04d7a6dddb67ce82fd8a10e976f244903885efd1b65f98",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "2485c51d216a3a8ec0c36c9344421085760ec3936717d04e07b6da933fe59ac2",
+    "fingerprint": "80fa25db80a6d6728bde6241a0b5f6a441d3fc30dd6c1555f9c0d00edce93508",
     "generation": 93,
-    "reason": "Include final DPC++ acquisition and SYCL metadata changes in unshipped generation 93"
+    "reason": "Require an observed host plan before running a legacy SYCL host-only request"
   },
   "resolver": {
     "files": {

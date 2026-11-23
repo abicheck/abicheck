@@ -226,19 +226,24 @@ def test_probe_rejects_a_device_plan_it_cannot_replay(probe):
 def test_old_icpx_replays_host_after_rejecting_new_driver_flag(monkeypatch, tmp_path):
     import abicheck.deadline as deadline
 
-    def driver(cmd, **kwargs):
-        if "-fsycl-host-only" in cmd:
-            return subprocess.CompletedProcess(
-                cmd, 1, "", "icpx: error: unknown argument: '-fsycl-host-only'"
-            )
-        assert "-fsycl" in cmd
-        return subprocess.CompletedProcess(cmd, 0, "", _DEVICE_JOB + "\n" + _HOST_JOB)
-
-    monkeypatch.setattr(deadline, "run_bounded", driver)
-    jobs = dumper_dpcpp_jobs.sycl_host_replay_jobs(
-        ["icpx", "-fsycl", "-fsycl-host-only", "-Xclang", "-ast-dump=json", "a.cpp"],
-        tmp_path,
+    args = ["-Xclang", "-ast-dump=json", "a.cpp"]
+    cmd = ["icpx", "-fsycl", "-fsycl-host-only", *args]
+    runner = (
+        StrictProcessRunner()
+        .expect(
+            argv=[*cmd, "-###"],
+            returns=proc(
+                returncode=1, stderr="icpx: error: unknown argument: '-fsycl-host-only'"
+            ),
+        )
+        .expect(
+            argv=["icpx", "-fsycl", *args, "-###"],
+            returns=proc(stderr=_DEVICE_JOB + "\n" + _HOST_JOB),
+        )
+        .install(monkeypatch, deadline, "run_bounded")
     )
+    jobs = dumper_dpcpp_jobs.sycl_host_replay_jobs(cmd, tmp_path)
+    runner.assert_exhausted()
     assert jobs is not None
     assert "-ast-dump=json" not in jobs[0] and "-fsycl-is-host" in jobs[1]
 
@@ -501,3 +506,14 @@ def test_replay_relocates_whatever_the_temp_dir_spelling_on_any_host(
     assert f"-fsycl-int-header={tmp_path}{sep}agg-header.h" in device
     assert f"{tmp_path}{sep}agg-footer.h" in host
     assert not any(temp_dir in t for t in [*device, *host])
+
+
+@pytest.mark.parametrize("jobs", [None, []])
+def test_unavailable_replay_plan_does_not_execute_host_flag(
+    monkeypatch, tmp_path, jobs
+):
+    from abicheck.errors import AstContextMissingError
+
+    monkeypatch.setattr(dumper_dpcpp_jobs, "_driver_jobs", lambda cmd: jobs)
+    with pytest.raises(AstContextMissingError, match="host compilation job"):
+        dumper_dpcpp_jobs.sycl_host_replay_jobs(["icpx", "-fsycl-host-only"], tmp_path)

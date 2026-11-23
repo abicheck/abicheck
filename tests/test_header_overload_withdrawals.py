@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Public header overloads for which clang records no distinct linker name."""
 
+from itertools import permutations
+
 import pytest
 
 from abicheck.checker import ChangeKind, compare
@@ -173,3 +175,23 @@ def test_arity_change_requires_observing_original_header(observed):
         pattern("queue&", "T*", "int", header="other.hpp"),
     )
     assert bool(lost_header_overloads(old, new, [])) is observed
+
+
+class TestOverloadMatchingProperties:
+    def test_order_and_duplicate_declarations_preserve_identity(self):
+        host, queue = pattern("int"), pattern("queue&")
+        for old in permutations([host, queue]):
+            for new in permutations([host, queue, pattern("queue&")]):
+                assert not lost_header_overloads(snap(*old), snap(*new), [])
+
+    def test_conflicting_defaults_never_establish_a_loss(self):
+        host = pattern("int")
+        previous, kept, missing = (pattern("queue&", "events") for _ in range(3))
+        previous.params[-1].default = kept.params[-1].default = "{}"
+        for old in permutations([host, previous]):
+            for new in permutations([host, kept, missing]):
+                before, after = snap(*old), snap(*new)
+                before.from_headers = after.from_headers = True
+                assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in {
+                    c.kind for c in compare(before, after).changes
+                }
