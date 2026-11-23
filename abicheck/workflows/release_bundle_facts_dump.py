@@ -146,6 +146,7 @@ def dump_release_bundle_facts(
         if request.library_manifest is not None:
             parsed = load_bundle_facts_library_overrides(
                 request.library_manifest,
+                release_dir=request.operand,
                 known_libraries=set(members),
                 selected_paths=members,
             )

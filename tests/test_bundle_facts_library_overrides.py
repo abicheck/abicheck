@@ -448,3 +448,21 @@ class TestValidateMatchedLibraryOverrides:
             per_library_compile=None,
             matched_keys=set(),
         )
+
+
+def test_one_manifest_binds_headers_to_each_release(tmp_path):
+    from abicheck.workflows.bundle_facts_library_overrides import (
+        load_bundle_facts_library_overrides,
+    )
+
+    manifest = tmp_path / "interfaces.yml"
+    manifest.write_text(
+        "schema: abicheck.release-interfaces/v1\nlibraries:\n"
+        "  libdal.so:\n    headers: [include/api.hpp]\n    includes: [include]\n"
+    )
+    for lane in ("old", "new"):
+        release = tmp_path / lane
+        release.mkdir()
+        overrides = load_bundle_facts_library_overrides(manifest, release_dir=release)
+        assert overrides.headers["libdal.so"] == [release / "include/api.hpp"]
+        assert overrides.includes["libdal.so"] == [release / "include"]

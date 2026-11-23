@@ -308,6 +308,7 @@ def _compare_stored_against_live(
                 )
                 overrides = load_bundle_facts_library_overrides(
                     Path(request.bundle_facts_library_manifest),
+                    release_dir=request.new_input,
                     known_libraries=set(new_library_paths),
                     selected_paths=new_library_paths,
                 )

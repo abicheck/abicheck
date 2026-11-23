@@ -925,6 +925,13 @@ library outside the bundle (a typo, or a library that was renamed/removed)
 is a hard error, not a silent no-op. Relative headers and include roots resolve beside each manifest. On
 `compare`, pass this option with a stored OLD baseline and a live NEW release.
 
+For one checked-in configuration shared across unpacked releases, put the
+same mapping under `libraries:` and set `schema: abicheck.release-interfaces/v1`
+at the top level. Pass the release root to both commands and the same
+manifest path to both. Relative headers, includes and sysroots then resolve
+against the current release operand. Raw compiler options retain their
+literal spelling. The original flat manifest remains relative to its file.
+
 ## Platform support
 
 Bundle analysis is **ELF/Linux-only**. Mach-O and

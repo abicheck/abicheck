@@ -92,34 +92,36 @@ known interface-specific declaration when validating a scan profile.
 
 ### Capture both interfaces in a release baseline
 
-Place `interfaces.yml` beside the SDK's `include/` directory. This example
+Keep one version-controlled `interfaces.yml` in the project. This example
 selects the table interface of two ELF libraries. Unlisted members inherit
 the scan's ordinary settings.
 
 ```yaml
-libonedal.so:
-  headers: [include/oneapi/dal/table/homogen.hpp]
-  includes: [include]
-  frontend: gcc
-  gcc_path: /usr/bin/g++-14
-  gcc_options: [-std=c++17]
-libonedal_dpc.so:
-  headers: [include/oneapi/dal/table/homogen.hpp]
-  includes: [include]
-  frontend: clang
-  gcc_path: /opt/intel/oneapi/compiler/latest/bin/icpx
-  gcc_options: [-std=c++17, -fsycl, --offload-new-driver, -DONEDAL_DATA_PARALLEL]
+schema: abicheck.release-interfaces/v1
+libraries:
+  libonedal.so:
+    headers: [include/oneapi/dal/table/homogen.hpp]
+    includes: [include]
+    frontend: gcc
+    gcc_path: /usr/bin/g++-14
+    gcc_options: [-std=c++17]
+  libonedal_dpc.so:
+    headers: [include/oneapi/dal/table/homogen.hpp]
+    includes: [include]
+    frontend: clang
+    gcc_path: /opt/intel/oneapi/compiler/latest/bin/icpx
+    gcc_options: [-std=c++17, -fsycl, --offload-new-driver, -DONEDAL_DATA_PARALLEL]
 ```
 
 ```sh
-abicheck dump "$OLD/lib" --bundle-facts-out baseline.json \
-  --bundle-facts-library-manifest "$OLD/interfaces.yml"
-abicheck compare baseline.json "$NEW/lib" -o json=report.json \
-  --bundle-facts-library-manifest "$NEW/interfaces.yml"
+abicheck dump "$OLD" --bundle-facts-out baseline.json \
+  --bundle-facts-library-manifest interfaces.yml
+abicheck compare baseline.json "$NEW" -o json=report.json \
+  --bundle-facts-library-manifest interfaces.yml
 ```
 
-Use the same relative layout in both SDKs so each manifest selects its own
-version's headers. A compile override replaces the member's whole compiler
+Pass each unpacked SDK root as the operand. Header, include and sysroot paths
+resolve against that SDK; compiler executables are selected on the scan host. A compile override replaces the member's whole compiler
 context. Include its standard, macros and other required switches. To check
 another supported client compiler for the same library, capture a separate
 baseline and compare under that profile.
@@ -129,3 +131,10 @@ On the 2025.9 conda parameter libraries, native GCC 14.2 captured
 precompiled SYCL header also captured `get_max_workgroup_size(sycl::queue&)`.
 Comparing the two unchanged libraries to this baseline returned `NO_CHANGE`
 for both members. The two-member bundle had unresolved provider dependencies.
+
+Removing the queue overload from the SYCL candidate header with both 2025.9
+binaries unchanged gave `NO_CHANGE` for the GCC CPU member and `API_BREAK`
+for the icpx SYCL member. A separate two-library CLI regression used a single
+release-relative manifest with different interface macros, one stored
+baseline, and two independent SDK trees. Editing only the candidate's gated
+declaration reproduced the same split.

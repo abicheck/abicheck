@@ -341,6 +341,7 @@ def parse_bundle_facts_library_overrides(
 def load_bundle_facts_library_overrides(
     manifest_path: Path,
     *,
+    release_dir: Path | None = None,
     known_libraries: set[str] | None = None,
     selected_paths: dict[str, Path] | None = None,
 ) -> BundleFactsLibraryOverrides:
@@ -405,11 +406,28 @@ def load_bundle_facts_library_overrides(
             f"--bundle-facts-library-manifest {manifest_path}: too deeply "
             "nested to parse"
         ) from exc
+    base_dir = manifest_path.resolve().parent
+    if isinstance(raw, dict) and isinstance(raw.get("schema"), str):
+        if raw["schema"] != "abicheck.release-interfaces/v1" or set(raw) != {
+            "schema",
+            "libraries",
+        }:
+            raise BundleFactsLibraryOverridesError(
+                "expected schema abicheck.release-interfaces/v1 and a libraries mapping"
+            )
+        if release_dir is None or not release_dir.is_dir():
+            raise BundleFactsLibraryOverridesError(
+                "abicheck.release-interfaces/v1 requires a live release directory"
+            )
+        if not isinstance(raw["libraries"], dict):
+            raise BundleFactsLibraryOverridesError("libraries must be a mapping")
+        base_dir = release_dir.resolve()
+        raw = raw["libraries"]
     return parse_bundle_facts_library_overrides(
         raw if raw is not None else {},
         known_libraries=known_libraries,
         selected_paths=selected_paths,
-        base_dir=manifest_path.resolve().parent,
+        base_dir=base_dir,
     )
 
 
