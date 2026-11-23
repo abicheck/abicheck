@@ -42,5 +42,5 @@ Run bash status_clear.sh OLD_PREFIX NEW_PREFIX to reproduce the additional produ
 
 The next product tests should mutate a specific oneDAL construction, copy, release or return obligation, compile the old client once, and exercise each broken/compatible pair. Register each independent observation against that declaration and operation. Extend the CPU inventory separately for dependent instantiations and configurations, and measure the SYCL surface with device-specific clients before making any whole-product claim.
 
-Run `bash ownership_campaign.sh OLD_PREFIX NEW_PREFIX` here to reproduce ownership-campaign.csv.
+Run `bash ownership_campaign.sh OLD_PREFIX NEW_PREFIX > ownership-campaign.csv` here to reproduce ownership-campaign.csv.
 The C1 copy mutant yields exit 11 and the assignment mutant yields 12. Exit 13 checks the survivor after scope exit. Each passing run also checks that the NumericTablePtr deleter is called zero times before the final owner resets and exactly once afterwards, with a successful row read in between. The deleter holds the backing table alive. This counts the ownership callback and adds no exported-symbol mutation credit for the inline smart pointer.
