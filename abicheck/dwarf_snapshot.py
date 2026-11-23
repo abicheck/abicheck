@@ -140,6 +140,8 @@ class DwarfDeclarations:
         default_factory=dict
     )
 
+    extraction_limitations: tuple[str, ...] = ()
+
 
 def extract_dwarf_declarations(
     elf_path: Path,
@@ -164,6 +166,7 @@ def extract_dwarf_declarations(
     builder = _DwarfSnapshotBuilder(elf_path, elf_meta)
     builder.extract(session=session)
     return DwarfDeclarations(
+        extraction_limitations=builder.missing_record_definitions(),
         functions=builder.functions,
         variables=builder.variables,
         types=builder.types,
@@ -321,6 +324,8 @@ class _DwarfSnapshotBuilder:
         self._die_key_to_qualified_name: dict[tuple[int, int], str] = {}
         # ADR-063 T9, see _dvc: qualified name -> disagreeing field subset.
         self._vtable_evidence_conflicts: dict[str, set[str]] = {}
+        self._declaration_only: dict[str, str] = {}
+        self._record_leaf_owner: dict[str, str | None] = {}
         # id(derived RecordType) -> ordered list of (base bare name, this
         # edge's own bit offset or None, (CU offset, base DIE offset) or
         # None), ONE ENTRY PER DW_TAG_inheritance CHILD -- not a dict keyed
@@ -426,6 +431,35 @@ class _DwarfSnapshotBuilder:
         # Third pass: filter types to only those reachable from
         # exported symbols (transitive closure)
         self._filter_types_by_reachability()
+
+    def missing_record_definitions(self) -> tuple[str, ...]:
+        """Report direct signature uses of forward declarations lacking a definition."""
+        unresolved = (
+            self._declaration_only.keys() - self._record_by_qualified_name.keys()
+        )
+        if not unresolved:
+            return ()
+        names = {name: name for name in unresolved}
+        # A short spelling can be matched only when it identifies one record.
+
+        for name, short in self._declaration_only.items():
+            if name in unresolved and self._record_leaf_owner.get(short) == name:
+                names.setdefault(short, name)
+
+        findings = set()
+        for func in self.functions:
+            for role, spelling in [
+                ("return", func.return_type),
+                *[(f"parameter {i}", arg.type) for i, arg in enumerate(func.params)],
+            ]:
+                bare = spelling.removeprefix("const ").rstrip(" &*")
+                record = names.get(self.typedefs.get(bare, bare))
+                if record:
+                    findings.add(
+                        f"{func.name} {role}: DWARF only declares {record}; "
+                        "record layout and virtual slots were not verified"
+                    )
+        return tuple(sorted(findings))
 
     def _process_cu(self, CU: Any) -> None:
         """Walk all DIEs in one Compilation Unit."""
@@ -819,6 +853,9 @@ class _DwarfSnapshotBuilder:
         bare name, the same borrowing *qualified* already does.
         """
         byte_size = _attr_int(die, "DW_AT_byte_size")
+        short = leaf_name or qualified
+        if self._record_leaf_owner.setdefault(short, qualified) != qualified:
+            self._record_leaf_owner[short] = None
         if byte_size == 0 and _attr_bool(die, "DW_AT_declaration"):
             # Forward declaration only -- but an inheritance edge in another
             # CU can (and does — this is the exact shape GCC emits for a
@@ -829,6 +866,7 @@ class _DwarfSnapshotBuilder:
             # that edge's lookup finds nothing (Codex review, reproduced
             # with two TUs sharing one header, one of which only
             # forward-references the base).
+            self._declaration_only[qualified] = short
             self._register_die_qualified_name(die, CU, qualified)
             return
 

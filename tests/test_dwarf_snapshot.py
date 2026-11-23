@@ -1786,3 +1786,26 @@ class TestDwarfExplicitFactEligibility:
         assert fn.is_explicit is False
         assert fn.is_explicit_fact.status == FactStatus.PRESENT
         assert fn.is_explicit_fact.value is False
+
+
+@pytest.mark.skipif(not _HAS_GPP, reason="g++ not available")
+@pytest.mark.parametrize("with_definition", [False, True])
+def test_signature_forward_decl_assurance(tmp_path, with_definition):
+    from abicheck.dwarf_snapshot import extract_dwarf_declarations
+    from abicheck.elf_metadata import parse_elf_metadata
+
+    api = tmp_path / "api.cpp"
+    api.write_text('struct Node; extern "C" void feed(Node&) {}')
+    sources = [api]
+    if with_definition:
+        impl = tmp_path / "impl.cpp"
+        impl.write_text("struct Node { int value; }; Node instance;")
+        sources.append(impl)
+    lib = tmp_path / "libvisitor.so"
+    subprocess.run([_GPP, "-shared", "-fPIC", "-g", *sources, "-o", lib], check=True)
+    coverage = extract_dwarf_declarations(
+        lib, parse_elf_metadata(lib)
+    ).extraction_limitations
+    assert any("feed parameter 0" in note and "Node" in note for note in coverage) == (
+        not with_definition
+    )

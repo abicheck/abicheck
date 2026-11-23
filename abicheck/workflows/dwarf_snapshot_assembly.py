@@ -62,7 +62,7 @@ def build_snapshot_from_dwarf(
     and ``elf_only_mode=False``.
     """
     decls = extract_dwarf_declarations(elf_path, elf_meta, session=session)
-    return new_snapshot(
+    snap = new_snapshot(
         library=elf_path.name,
         version=version,
         # The image this surface was read from -- the same identity the
@@ -83,3 +83,9 @@ def build_snapshot_from_dwarf(
         platform="elf",
         language_profile=language_profile,
     )
+    if decls.extraction_limitations:
+        snap.dump_provenance = {
+            **(snap.dump_provenance or {}),
+            "extraction_limitations": list(decls.extraction_limitations),
+        }
+    return snap

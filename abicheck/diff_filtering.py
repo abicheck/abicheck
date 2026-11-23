@@ -532,6 +532,23 @@ def _enrich_affected_symbols(
     # Assign to changes — include both demangled names (display) and
     # mangled names (appcompat matching, FIX-A Part 3).
     _assign_affected_symbols_to_changes(type_changes, type_to_funcs, type_to_mangled)
+    # Preserve the role for direct, exact by-value signature edges. Nested and
+    # indirect uses remain represented by the existing affected-symbol walk.
+    roles: dict[str, dict[str, list[str]]] = {}
+    for fn in old_pub.values():
+        for role, spelling in [
+            ("return", fn.return_type),
+            *[(f"argument {i}", param.type) for i, param in enumerate(fn.params)],
+        ]:
+            name = (
+                spelling.removeprefix("const ")
+                .removeprefix("struct ")
+                .removeprefix("class ")
+            )
+            if name in affected_types and fn.mangled in type_to_mangled.get(name, ()):
+                roles.setdefault(name, {}).setdefault(fn.mangled, []).append(role)
+    for change in type_changes:
+        change.direct_value_uses = roles.get(root_type_name(change))
 
 
 # Owner size/offset changes that the embedding attribution can annotate.

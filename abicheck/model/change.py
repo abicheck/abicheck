@@ -156,6 +156,7 @@ class Change:
     old_value: str | None = None
     new_value: str | None = None
     source_location: str | None = None  # "header.h:42" if available
+    direct_value_uses: dict[str, list[str]] | None = field(default=None, kw_only=True)
     affected_symbols: list[str] | None = None  # exported functions using this type
     caused_by_type: str | None = None  # root type that makes this change redundant
     caused_count: int = 0  # number of derived changes collapsed into this root
