@@ -308,6 +308,11 @@ from .compare_routing import _RELEASE_FORMATS
     "resolves one side at a time, each in its own process on Linux, for "
     "the lowest peak memory. Never changes findings or the exit code.",
 )
+@click.option(
+    "--release-consumer",
+    type=click.Path(path_type=Path),
+    help="Report loadability and symbol bindings of the same old ELF client in both directory roots (Markdown or JSON).",
+)
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -463,6 +468,17 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
     reject_dry_run_with_exports(bool(kwargs.get("dry_run")), kwargs["exports"])
     expand_export_kwargs(kwargs)
+    consumer = kwargs.pop("release_consumer", None)
+    if consumer is not None:
+        from ..release_consumer import release_consumer_binding
+
+        if kwargs.get("dry_run") or kwargs["fmt"] not in ("json", "markdown"):
+            raise click.UsageError(
+                "--release-consumer requires a live JSON or Markdown release comparison"
+            )
+        ctx.meta["release_consumer_binding"] = release_consumer_binding(
+            Path(kwargs["old_input"]), Path(kwargs["new_input"]), consumer
+        )
 
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.

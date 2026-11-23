@@ -137,8 +137,10 @@ def render_release_summary(
         )
     from .baseline_provenance import current_baseline_provenance_block
     from .delta_baseline import current_delta_baseline_block
+    from .release_consumer import current_consumer_binding
 
     evaluation = ReleaseEvaluation(
+        consumer_binding=current_consumer_binding(),
         worst_verdict=worst_verdict,
         old_dir=old_dir,
         new_dir=new_dir,

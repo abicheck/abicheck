@@ -253,6 +253,11 @@ def _write_release_summary_file(
     summary_data["disposition_audit"] = release_disposition_audit_block(
         library_results, matrix_result, severity_config, bundle_result
     )
+    from .release_consumer import current_consumer_binding
+
+    binding = current_consumer_binding()
+    if binding is not None:
+        summary_data["consumer_binding"] = binding
     summary_path = output_dir / "summary.json"
     writer = write_output if write_output is not None else _write_text
     writer(summary_path, json.dumps(summary_data, indent=2))
