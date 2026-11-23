@@ -118,7 +118,11 @@ source-break severity. Full CLI JSON rendering hit the memory limit after
 collecting 51,495 findings (51,489 exported_not_public when the full binary is
 paired with this single public header).
 
-## Remaining witnesses
+## Follow-up covering all 59 rows
+
+See [all-signatures.md](all-signatures.md) for the subsequent two-rank and ownership experiments and the per-signature results.
+
+## Remaining witnesses at the time of the initial experiment
 
 The buffer fixture uses the internal homogen_table_builder to obtain writable accessors. It passed on all three matched CPU configurations using shared USM. Build it like dispatch_consumer.cpp. Prioritize device allocations and writes across queue contexts. Next exercise
 multi-rank USM communicators and preview dispatch, multi-block partial updates,
