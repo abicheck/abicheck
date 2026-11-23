@@ -263,7 +263,9 @@ def capture_variants_cmd(
         spec = load_bundle_variants_config(
             config_path, config_overrides=config_overrides
         )
-        plan = plan_variant_capture(spec, inputs)
+        plan = plan_variant_capture(
+            spec, inputs, config_path=config_path, config_explicit=config is not None
+        )
         for skipped in plan.skipped:
             _warn_skipped(skipped)
         if dry_run:

@@ -271,7 +271,7 @@ def test_depth_binary_clears_headers_and_manifest_roots(
     )
     monkeypatch.setattr(
         mod,
-        "load_bundle_facts_library_overrides",
+        "resolve_release_interfaces",
         lambda *a, **k: SimpleNamespace(
             headers={"libx.so": [header_dir]}, includes={}, compile={"x": 1}
         ),
@@ -295,7 +295,7 @@ def test_a_manifest_naming_no_library_is_a_usage_error(
 
     monkeypatch.setattr(mod, "extract_if_package", _extract_plain)
     monkeypatch.setattr(mod, "known_libraries_for_new_side", lambda *a, **k: [])
-    monkeypatch.setattr(mod, "load_bundle_facts_library_overrides", _raise)
+    monkeypatch.setattr(mod, "resolve_release_interfaces", _raise)
     with pytest.raises(BundleFactsCompareError, match="unknown library") as exc:
         mod.execute_bundle_facts_compare(
             _request(tmp_path, bundle_facts_library_manifest=tmp_path / "m.yml")

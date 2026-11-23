@@ -75,7 +75,7 @@ _VALUE_FLAGS = {
 _BARE_FLAGS = {"--follow-deps", "--no-follow-deps", "--include-system-declarations"}
 #: Per-side evidence whose own content names paths this module cannot move
 #: into the base checkout: refused, never silently dropped.
-_REFUSED_FLAGS = {"--dump-manifest"}
+_REFUSED_FLAGS = {"--dump-manifest", "--bundle-facts-library-manifest"}
 #: ``--set`` keys that describe how a side is extracted. Report, gate,
 #: policy and consumer keys belong to the comparison, not to a dump.
 _SET_PREFIXES = ("compile.", "build.")

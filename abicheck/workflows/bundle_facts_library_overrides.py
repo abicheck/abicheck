@@ -26,32 +26,7 @@ single, uniform ``headers``/``includes``/``compile`` triple to every
 library. This module is the manifest half that closes that gap --
 ``compare_bundle_facts.dispatch()`` is the caller.
 
-**Not wired into ``.abicheck.yml`` discovery, and deliberately so** -- the
-identical reasoning the now-removed ``bundle_variants_config.py``'s own
-module docstring gave for its ``bundle_variants:`` block (ADR-065 S1
-deleted that module as dead code: its ``required:`` field never gained a
-production caller) applies here without
-change: ``BuildConfig`` (``abicheck/buildsource/inline.py``) has a fixed,
-declared-field schema, and a genuinely new top-level config block would need
-real schema/model work and loading/precedence plumbing a CLI-only manifest
-file avoids entirely. This module therefore takes an already-parsed raw
-``dict`` (whatever a caller's own YAML/JSON loader produced), not a
-``.abicheck.yml`` path.
-
-**Physically under ``abicheck/workflows/``, unlike the now-removed
-``bundle_variants_config.py``'s own flat-root placement (Codex review,
-verified against AGENTS.md's task-routing table).** Root AGENTS.md's "Task
-routing and dependency direction" section is explicit: "route new behavior to
-the target owner rather than extending a flat root prefix family" -- the
-pre-existing flat `bundle_*.py` siblings predate ADR-061 and were
-grandfathered into that family's `legacy_paths`/`architecture/debt.yaml`
-entries, not a precedent for where genuinely *new* code should land. This
-module coordinates a `compare`-shaped workflow's manifest input (`workflows`'s
-own routing-table row: "Coordinate dump, compare, scan, release, aggregate,
-project, or dependency behavior"), so it lives here from the start, with no
-`architecture/modules.yaml` allowlist edit needed at all -- physical location
-under `abicheck/workflows/` is what classifies it, exactly as ADR-061
-intends for new code.
+The project config and the explicit manifest share canonical member resolution.
 
 Validates eagerly and completely before returning anything, the same
 ``PolicyFile``/``BuildConfig`` convention this codebase applies throughout:
@@ -67,11 +42,20 @@ the uniform default with no signal anything was wrong.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from ..buildsource.run_plan_profile_fields import (
+    _compose_gcc_options,
+    release_header_profiles,
+)
 from ..compile_context import CompileContext
 from ..model.yaml_strict import load_strict_yaml
+
+if TYPE_CHECKING:
+    from ..buildsource.run_plan_profile_fields import ProfileCompileSpec
+    from .extraction import BuildConfig
 
 #: Recognized keys inside one library's own mapping. The compile-context
 #: fields mirror `CompileContext`'s own field names exactly (rather than the
@@ -153,6 +137,7 @@ def _resolve_str_list_as_paths(
 def parse_bundle_facts_library_overrides(
     raw: dict[str, object],
     *,
+    profile_contexts: Mapping[str, CompileContext] | None = None,
     known_libraries: set[str] | None = None,
     selected_paths: dict[str, Path] | None = None,
     base_dir: Path | None = None,
@@ -274,7 +259,9 @@ def parse_bundle_facts_library_overrides(
                 f"per-library override manifest.{name}: must be a mapping, "
                 f"got {type(entry).__name__}"
             )
-        if not entry:
+        if profile_contexts and name in profile_contexts:
+            compile_by_library[canonical_name] = profile_contexts[name]
+        elif not entry:
             # Codex review, fresh evidence: an empty entry (`libfoo.so: {}`)
             # is a syntactically valid mapping that adds this library to
             # none of headers/includes/compile_by_library below -- it is
@@ -341,6 +328,7 @@ def parse_bundle_facts_library_overrides(
 def load_bundle_facts_library_overrides(
     manifest_path: Path,
     *,
+    release_dir: Path | None = None,
     known_libraries: set[str] | None = None,
     selected_paths: dict[str, Path] | None = None,
 ) -> BundleFactsLibraryOverrides:
@@ -405,11 +393,117 @@ def load_bundle_facts_library_overrides(
             f"--bundle-facts-library-manifest {manifest_path}: too deeply "
             "nested to parse"
         ) from exc
+    base_dir = manifest_path.resolve().parent
+    if isinstance(raw, dict) and isinstance(raw.get("schema"), str):
+        if raw["schema"] != "abicheck.release-interfaces/v1" or set(raw) != {
+            "schema",
+            "libraries",
+        }:
+            raise BundleFactsLibraryOverridesError(
+                "expected schema abicheck.release-interfaces/v1 and a libraries mapping"
+            )
+        if release_dir is None or not release_dir.is_dir():
+            raise BundleFactsLibraryOverridesError(
+                "abicheck.release-interfaces/v1 requires a live release directory"
+            )
+        if not isinstance(raw["libraries"], dict):
+            raise BundleFactsLibraryOverridesError("libraries must be a mapping")
+        base_dir = release_dir.resolve()
+        raw = raw["libraries"]
     return parse_bundle_facts_library_overrides(
         raw if raw is not None else {},
         known_libraries=known_libraries,
         selected_paths=selected_paths,
-        base_dir=manifest_path.resolve().parent,
+        base_dir=base_dir,
+    )
+
+
+def header_profile_context(
+    name: str,
+    profiles: Mapping[str, ProfileCompileSpec | None],
+    bindings: Mapping[str, str],
+    *,
+    explicit: bool,
+    library: str,
+    base_compile: CompileContext | None = None,
+) -> CompileContext:
+    """Resolve a selected header profile with the operator's trusted bindings."""
+    if name not in profiles:
+        raise BundleFactsLibraryOverridesError(f"{library}: unknown profile {name!r}")
+    overlay = profiles[name]
+    base = base_compile or CompileContext()
+    if overlay is None:
+        return base
+    compiler = base.gcc_path
+    if overlay.binding:
+        if not explicit:
+            raise BundleFactsLibraryOverridesError(
+                f"{library}: compiler binding requires explicit --config"
+            )
+        compiler = bindings.get(overlay.binding)
+        if not compiler or not compiler.strip():
+            raise BundleFactsLibraryOverridesError(
+                f"{library}: unresolved release.bindings.{overlay.binding}"
+            )
+    return replace(
+        base,
+        gcc_path=compiler,
+        gcc_prefix=None if overlay.binding else base.gcc_prefix,
+        frontend=overlay.frontend or base.frontend,
+        gcc_option_tokens=base.gcc_option_tokens
+        + tuple(_compose_gcc_options(overlay).split()),
+    )
+
+
+def resolve_release_interfaces(
+    manifest: Path | None,
+    config: BuildConfig | None,
+    config_path: Path | None,
+    *,
+    explicit: bool,
+    release_dir: Path,
+    members: dict[str, Path],
+    base_compile: CompileContext | None,
+) -> BundleFactsLibraryOverrides:
+    if manifest is not None:
+        return load_bundle_facts_library_overrides(
+            manifest,
+            release_dir=release_dir,
+            known_libraries=set(members),
+            selected_paths=members,
+        )
+    if config is None or not config.release_libraries:
+        return BundleFactsLibraryOverrides()
+    if not release_dir.is_dir() or config_path is None:
+        raise BundleFactsLibraryOverridesError(
+            "release.libraries requires a live SDK directory and config"
+        )
+    try:
+        profiles = release_header_profiles(config_path)
+    except ValueError as exc:
+        raise BundleFactsLibraryOverridesError(str(exc)) from exc
+    contexts = {}
+    roots: dict[str, object] = {}
+
+    for library, spec in config.release_libraries.items():
+        roots[library] = {k: v for k, v in spec.items() if k != "profiles"}
+        if "profiles" not in spec:
+            continue
+        name = spec["profiles"][0]
+        contexts[library] = header_profile_context(
+            name,
+            profiles,
+            config.release_bindings,
+            explicit=explicit,
+            library=library,
+            base_compile=base_compile,
+        )
+    return parse_bundle_facts_library_overrides(
+        roots,
+        profile_contexts=contexts,
+        known_libraries=set(members),
+        selected_paths=members,
+        base_dir=release_dir.resolve(),
     )
 
 

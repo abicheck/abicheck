@@ -170,7 +170,17 @@ def is_abi_relevant_flag(arg: str) -> bool:
     list, plus the open target-machine family, which a closed list cannot
     enumerate.
     """
-    return arg.startswith(ABI_RELEVANT_FLAG_PREFIXES) or is_target_machine_flag(arg)
+    return (
+        arg
+        in {
+            "--offload-new-driver",
+            "--no-offload-new-driver",
+            "--offload-host-only",
+            "--offload-device-only",
+        }
+        or arg.startswith(ABI_RELEVANT_FLAG_PREFIXES)
+        or is_target_machine_flag(arg)
+    )
 
 
 #: ABI-relevant flags whose value is a *separate*, following argv token

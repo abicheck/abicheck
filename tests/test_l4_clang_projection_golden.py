@@ -106,10 +106,9 @@ def test_golden_header_pins_the_pre_change_producer() -> None:
     from abicheck.buildsource.source_extractors.clang import CLANG_EXTRACTOR_VERSION
 
     header, rows = golden_header_and_rows()
-    # The golden is the pre-change (0.13) side. The live producer moved on to
-    # 0.14 in plan b2; the golden stays 0.13 so the old side is still the old side.
+    # Keep the captured pre-change side pinned independently of the live producer.
     assert header["producer_version"] == "0.13"
-    assert CLANG_EXTRACTOR_VERSION == "0.14"
+    assert CLANG_EXTRACTOR_VERSION == "0.15"
     assert header["tu_count"] == len(rows) == 288
 
 

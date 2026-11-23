@@ -23,7 +23,11 @@ import sys
 from pathlib import Path
 
 from ..._compiler_options import clang_ast_dump_tail
-from ...extract.compiler_driver import is_intel_sycl_driver, needs_sycl_host_only
+from ...extract.compiler_driver import (
+    is_intel_sycl_driver,
+    needs_sycl_host_only,
+    sycl_host_selector,
+)
 from ..abi_flags import drop_code_loading_options
 from ..build_evidence import CompileUnit
 from ._argv import unredact_home
@@ -163,7 +167,7 @@ def _clang_context_args(
                 ".abicheck.yml to the real icx/icpx/dpcpp driver to extract it."
             )
     if needs_sycl_host_only(clang_bin, [*cmd, *extra]):
-        extra = [*extra, "-fsycl-host-only"]
+        extra = [*extra, sycl_host_selector(extra)]
     cmd += extra
     # Both the AST-dump and the macro (``-E -dD``) argv carry this list, and a
     # code-loading option runs a shared object in either, so the deny rule

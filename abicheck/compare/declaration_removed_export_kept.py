@@ -15,11 +15,12 @@ table proves nothing, so every removal keeps BREAKING.
 from __future__ import annotations
 
 from ..elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
-from ..model import AbiSnapshot
+from ..model import AbiSnapshot, Function
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
 from .edge_query import export_table_covered
+from .header_overloads import lost_header_overloads
 from .parameter_replacement import pair_parameter_replacements
 
 __all__ = ["finish_function_changes", "grade_declaration_removed_export_kept"]
@@ -49,10 +50,14 @@ def grade_declaration_removed_export_kept(
 
 
 def finish_function_changes(
-    changes: list[Change], old: AbiSnapshot, new: AbiSnapshot
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    functions: list[Function],
 ) -> list[Change]:
     """The functions detector's closing pass: pair provable parameter
     replacements, then grade removals whose export survives."""
+    changes.extend(lost_header_overloads(old, new, changes, functions))
     return grade_declaration_removed_export_kept(
         pair_parameter_replacements(changes, old, new), new
     )

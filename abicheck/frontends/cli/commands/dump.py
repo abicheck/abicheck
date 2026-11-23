@@ -192,10 +192,6 @@ def dump_cmd(
     sources: Path | None = None,
     build_config: Path | None = None,
     depth: str | None = None,
-    # --gcc-options was removed as a CLI flag (CLI audit PR 5/5); this
-    # defaulted-None parameter survives only for the internal composition below
-    # and is never populated from the CLI. ADR-074's -D/--define is NOT this: it
-    # is a typed macro list (`defines` above), folded by name in the resolver.
     gcc_options: str | None = None,
     config_overrides: dict[str, object] | None = None,
     bundle_facts_out: Path | None = None,
@@ -476,13 +472,13 @@ def dump_cmd(
     # linker-script "Note:" echo) rather than follow_linker_script,
     # matching dry-run's own "cheap, read-only resolution only" contract;
     # the real path below still calls follow_linker_script itself for
-    # that echo and the so_path reassignment (a no-op re-validation once
-    # this has already passed).
-    if bundle_facts_out is not None or variant is not None:  # dump_bundle_facts.py
+    # that echo and the so_path reassignment.
+    if bundle_facts_out or variant is not None:
         return run_dump_bundle_facts(
             so_path,
             bundle_facts_out,
             variant=variant,
+            config_explicit=_project.explicit,
             unapplied={"output": output, "dry_run": dry_run, "sources": sources}
             | {"dump_manifest_path": dump_manifest_path, "build_info": build_info}
             | {"debug_roots": debug_roots, "provenance": provenance}
