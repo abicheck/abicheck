@@ -6,10 +6,17 @@ from pathlib import Path
 import click
 
 from ...binder import SymbolBinding
-from ...stack_checker import check_stack
+from ...stack_checker import check_single_env
+from ...workflows.elf_dependency_resolver import DependencyGraph
 
 
-def release_consumer_binding(old: Path, new: Path, client: Path) -> dict[str, object]:
+def release_consumer_binding(
+    old: Path,
+    new: Path,
+    client: Path,
+    ld_library_path: str = "",
+    search_paths: list[Path] | None = None,
+) -> dict[str, object]:
     if (
         client.is_absolute()
         or ".." in client.parts
@@ -29,19 +36,33 @@ def release_consumer_binding(old: Path, new: Path, client: Path) -> dict[str, ob
                 raise click.UsageError(f"Consumer {client} must be ELF")
     if not cmp(*copies, shallow=False):
         raise click.UsageError("Both roots must contain the identical old consumer")
-    result = check_stack(client, old.resolve(), new.resolve())
+    baseline, result = [
+        check_single_env(
+            path,
+            search_paths=search_paths,
+            sysroot=root.resolve(),
+            ld_library_path=ld_library_path,
+        )
+        for path, root in zip(copies, (old, new))
+    ]
 
     def imports(
-        bindings: list[SymbolBinding], root: Path
+        bindings: list[SymbolBinding], root: Path, graph: DependencyGraph
     ) -> dict[tuple[str, str], dict[str, str | None]]:
         return {
-            (b.symbol, b.version): {"status": b.status.value, "provider": b.provider}
+            (b.symbol, b.version): {
+                "status": b.status.value,
+                "provider": b.provider,
+                "search_reason": graph.nodes[b.provider].resolution_reason
+                if b.provider is not None and b.provider in graph.nodes
+                else None,
+            }
             for b in bindings
             if b.consumer == str(root)
         }
 
-    before = imports(result.bindings_baseline, copies[0])
-    after = imports(result.bindings_candidate, copies[1])
+    before = imports(baseline.bindings_candidate, copies[0], baseline.candidate_graph)
+    after = imports(result.bindings_candidate, copies[1], result.candidate_graph)
     return {
         "client": str(client),
         "loadability": result.loadability.value,
