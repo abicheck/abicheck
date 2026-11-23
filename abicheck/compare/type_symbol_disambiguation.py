@@ -45,7 +45,7 @@ would from a given enclosing scope -- innermost scope outward.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
 from ..model import AbiSnapshot, Function
@@ -354,13 +354,13 @@ def direct_value_roles(
 
 
 def _assign_affected_symbols_to_changes(
+    root_type_name: Callable[[Change], str],
     roles: dict[str, dict[str, list[str]]],
     type_changes: list[Change],
     type_to_funcs: dict[str, set[str]],
     type_to_mangled: dict[str, set[str]],
 ) -> None:
     """Populate Change.affected_symbols from the type-to-function mappings."""
-    from .finding_redundancy import root_type_name
 
     for c in type_changes:
         type_name = root_type_name(c)

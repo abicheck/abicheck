@@ -152,22 +152,22 @@ def extract_dwarf_declarations(
 ) -> DwarfDeclarations:
     """Walk *elf_path*'s DWARF and return the extracted declarations.
 
-    The result is a :class:`DwarfDeclarations`. Assembling them into an
-    :class:`~abicheck.model.AbiSnapshot` is
-    :func:`abicheck.workflows.dwarf_snapshot_assembly.build_snapshot_from_dwarf`'s
-    job (design-hardening Phase 2: one snapshot factory, in ``workflows``);
-    a caller that only needs the types, like the header-layout backfill,
-    reads them here without building a snapshot at all.
-
-    *session*: an optional pre-opened
-    :class:`~abicheck.dwarf_unified.DwarfSession` whose ``DWARFInfo`` the
-    walk reuses instead of opening *elf_path* a second time. Output is
-    identical either way; the caller owns the session's lifetime.
+    Snapshot assembly belongs to workflows.dwarf_snapshot_assembly. Header
+    layout backfill reads the declarations directly. When supplied, the
+    caller-owned session shares the DWARFInfo and avoids reopening the ELF.
+    The caller retains ownership of the session and can reuse it for
+    subsequent debug analyses of this artifact.
     """
     builder = _DwarfSnapshotBuilder(elf_path, elf_meta)
     builder.extract(session=session)
     return DwarfDeclarations(
-        extraction_limitations=missing_record_definitions(builder),
+        extraction_limitations=missing_record_definitions(
+            builder._declaration_only,
+            builder._record_by_qualified_name.keys(),
+            builder._record_leaf_owner,
+            builder.typedefs,
+            builder.functions,
+        ),
         functions=builder.functions,
         variables=builder.variables,
         types=builder.types,

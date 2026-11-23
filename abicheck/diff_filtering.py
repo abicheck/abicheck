@@ -522,7 +522,7 @@ def _enrich_affected_symbols(
     # mangled names (appcompat matching, FIX-A Part 3).
     roles = direct_value_roles(names, affected_types, old_pub, type_to_mangled)
     _assign_affected_symbols_to_changes(
-        roles, type_changes, type_to_funcs, type_to_mangled
+        root_type_name, roles, type_changes, type_to_funcs, type_to_mangled
     )
 
 
