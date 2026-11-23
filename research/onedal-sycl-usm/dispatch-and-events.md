@@ -27,8 +27,10 @@ adapter, device image, private implementation or runtime behavior.
 | v1::homogen_table::wrap with queue | abiforge.run.onedal_sycl and dependency_consumer.cpp | Shape and visibility of producer data |
 | v1::row_accessor::pull and column_accessor::pull returning dal::array | abiforge.run.onedal_sycl | First element from the queue overload |
 | v1::csr_table::wrap and both v1::csr_accessor::pull queue overloads | csr_consumer.cpp | Full one-based matrix, then a zero-based one-row slice through caller-supplied arrays |
+| v1::row_accessor and column_accessor, queue push and buffer-taking pull | buffer_consumer.cpp | A row write followed by an overlapping column write produces the expected six matrix elements |
+| v2::chunked_array::flatten and get_data with queue | buffer_consumer.cpp | Check two unequal chunks in order and their two original USM addresses |
 
-These witnesses directly call 17 of the 59 inventory rows. Seven generated
+These witnesses directly call 23 of the 59 inventory rows. Seven generated
 bridge exports were withdrawn together. The checker attributed all seven to
 sycl_overload_set_removed, the unchanged control returned NO_CHANGE, the old
 queue consumer failed to load and its rebuild failed. The host sibling ran and
@@ -118,8 +120,7 @@ paired with this single public header).
 
 ## Remaining witnesses
 
-Prioritize caller-owned row/column buffers, push, CSR device allocations,
-and chunked arrays. Next exercise
+The buffer fixture uses the internal homogen_table_builder to obtain writable accessors. It passed on all three matched CPU configurations using shared USM. Build it like dispatch_consumer.cpp. Prioritize device allocations and writes across queue contexts. Next exercise
 multi-rank USM communicators and preview dispatch, multi-block partial updates,
 and real Level Zero execution. Report a direct declaration witness, an
 independent mutation and its checker verdict separately for each extension.

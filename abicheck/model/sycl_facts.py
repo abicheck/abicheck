@@ -37,6 +37,13 @@ class SyclPluginInfo:
     backend_type: str = ""  # "level_zero" | "opencl" | "cuda" | ...
     min_driver_version: str | None = None  # minimum backend driver version
 
+    @property
+    def pi_extension_entry_points(self) -> set[str]:
+        """PI extensions absent from inventories written before extractor 93."""
+        if self.interface_type != "pi":
+            return set()
+        return {name for name in self.entry_points if name.startswith("piext")}
+
 
 @dataclass
 class SyclMetadata:

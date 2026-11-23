@@ -136,9 +136,9 @@ def _diff_plugin_entrypoints(
         name = key[1]  # (interface_type, name)
         old_eps = set(old_plugin.entry_points)
         new_eps = set(new_plugin.entry_points)
-        if key[0] == "pi" and not comparable_extensions:
-            old_eps = {ep for ep in old_eps if not ep.startswith("piext")}
-            new_eps = {ep for ep in new_eps if not ep.startswith("piext")}
+        if not comparable_extensions:
+            old_eps -= old_plugin.pi_extension_entry_points
+            new_eps -= new_plugin.pi_extension_entry_points
         iface = new_plugin.interface_type.upper()  # "PI" or "UR"
 
         for ep in sorted(old_eps - new_eps):
@@ -273,10 +273,7 @@ def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for snap in (old, new)
     )
     if comparable_extensions or not any(
-        p.interface_type == "pi"
-        and any(ep.startswith("piext") for ep in p.entry_points)
-        for metadata in (o, n)
-        for p in metadata.plugins
+        p.pi_extension_entry_points for metadata in (o, n) for p in metadata.plugins
     ):
         changes.extend(_diff_pi_version(o, n))
     changes.extend(_diff_plugins(o, n))
