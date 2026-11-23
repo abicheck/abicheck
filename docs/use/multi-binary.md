@@ -905,22 +905,25 @@ root, include path, or compile context instead:
 ```yaml
 # manifest.yaml
 libonedal_dpc.so:
-  headers: [include/oneapi/dal/dpc]
+  headers: [include/oneapi/dal.hpp]
+  includes: [include]
+  frontend: clang
   gcc_path: icpx
   gcc_options: ["-fsycl", "-DONEDAL_DATA_PARALLEL"]
-  sysroot: /opt/intel/oneapi/sysroot
 ```
 
 ```bash
-abicheck compare release-1.0.bundlefacts.json release-3.0/ \
-    --bundle-facts-library-manifest manifest.yaml
+abicheck dump release-1.0/lib --bundle-facts-out release-1.0.bundlefacts.json \
+    --bundle-facts-library-manifest release-1.0/manifest.yaml
+abicheck compare release-1.0.bundlefacts.json release-3.0/lib \
+    --bundle-facts-library-manifest release-3.0/manifest.yaml
 ```
 
 A library not named in the manifest keeps the uniform `--header`/
 `--include`/compile-context fallback unchanged. A manifest entry naming a
 library outside the bundle (a typo, or a library that was renamed/removed)
-is a hard error, not a silent no-op. The flag is meaningless — and rejected
-— unless `OLD_INPUT` is a stored `BundleFacts` document.
+is a hard error, not a silent no-op. Relative headers and include roots resolve beside each manifest. On
+`compare`, pass this option with a stored OLD baseline and a live NEW release.
 
 ## Platform support
 

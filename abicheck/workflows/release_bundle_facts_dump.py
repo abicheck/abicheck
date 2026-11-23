@@ -43,7 +43,7 @@ Framework-free: no Click. A front end translates the typed
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,6 +69,7 @@ class ReleaseBundleFactsDumpRequest:
     exclude_headers: Sequence[str] = field(default_factory=tuple)
     #: A stored ``ProjectSnapshot`` package's variant, when it has several.
     variant: str | None = None
+    library_manifest: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ def dump_release_bundle_facts(
     errors unchanged.
     """
     from ..errors import ReleaseOperandContentError
+    from .bundle_facts_library_overrides import load_bundle_facts_library_overrides
     from .extraction import ast_acquisition_scope
     from .no_baseline_set import (
         cleanup_no_baseline_set_plan,
@@ -140,8 +142,29 @@ def dump_release_bundle_facts(
         degraded = {k: v for k, v in inherited.items() if k in members}
         key_of = {path: key for key, path in members.items()}
 
+        overrides = None
+        if request.library_manifest is not None:
+            parsed = load_bundle_facts_library_overrides(
+                request.library_manifest,
+                known_libraries=set(members),
+                selected_paths=members,
+            )
+            if request.depth != "binary" and (
+                parsed.headers or parsed.includes or parsed.compile
+            ):
+                overrides = parsed
+
         def _dump_member(path: Path) -> StrandedLibraryResolution:
-            resolved = dump_release_member(path, ctx, notice=notice)
+            member_ctx = ctx
+            if overrides is not None:
+                key = key_of[path]
+                member_ctx = replace(
+                    ctx,
+                    headers=overrides.headers.get(key, ctx.headers),
+                    includes=overrides.includes.get(key, ctx.includes),
+                    compile_context=overrides.compile.get(key, ctx.compile_context),
+                )
+            resolved = dump_release_member(path, member_ctx, notice=notice)
             if resolved.failure is not None:
                 degraded.setdefault(key_of[path], resolved.failure)
             return resolved
@@ -150,20 +173,26 @@ def dump_release_bundle_facts(
             # The release's public contract from its own headers: the one
             # acquisition the comparison makes, with this side on both of its
             # inputs (the identity keys them alike, so it parses once).
-            surface = reconcile_release_public_surface(
-                [],
-                expected_members=[path.name for path in members.values()],
-                old_headers=side.headers,
-                new_headers=side.headers,
-                old_includes=side.includes,
-                new_includes=side.includes,
-                lang=request.lang,
-                lang_explicit=request.lang_explicit,
-                exclude_headers=request.exclude_headers,
-                public_header_dirs=request.public_header_dirs,
-                compile_context=request.compile_context,
-                depth=request.depth,
-                include_dependencies=request.include_dependencies,
+            # Mixed captures use the recorded member surfaces, just as the live
+            # candidate does. A single uniform header pass would invent a contract.
+            surface = (
+                None
+                if overrides is not None
+                else reconcile_release_public_surface(
+                    [],
+                    expected_members=[path.name for path in members.values()],
+                    old_headers=side.headers,
+                    new_headers=side.headers,
+                    old_includes=side.includes,
+                    new_includes=side.includes,
+                    lang=request.lang,
+                    lang_explicit=request.lang_explicit,
+                    exclude_headers=request.exclude_headers,
+                    public_header_dirs=request.public_header_dirs,
+                    compile_context=request.compile_context,
+                    depth=request.depth,
+                    include_dependencies=request.include_dependencies,
+                )
             )
             write_bundle_facts_out(
                 request.output,
@@ -173,7 +202,7 @@ def dump_release_bundle_facts(
                 resolve_stranded_library=_dump_member,
                 inherited_degraded=inherited,
                 inventory_complete=not side.unclassified,
-                public_surface=surface.old_surface,
+                public_surface=surface.old_surface if surface is not None else None,
                 resolved_manifest=resolve_bundle_manifest(
                     None,
                     request.operand,

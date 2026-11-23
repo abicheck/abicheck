@@ -98,6 +98,7 @@ def run_dump_bundle_facts(
     bundle_facts_out: Path | None,
     *,
     variant: str | None = None,
+    library_manifest: Path | None = None,
     unapplied: Mapping[str, object],
     headers: tuple[Path, ...],
     includes: tuple[Path, ...],
@@ -122,11 +123,16 @@ def run_dump_bundle_facts(
         ReleaseOperandUsageError,
         SnapshotError,
     )
+    from ....workflows.bundle_facts_library_overrides import BundleFactsLibraryOverridesError
     from ....workflows.release_bundle_facts_dump import (
         ReleaseBundleFactsDumpRequest,
         dump_release_bundle_facts,
     )
 
+    if library_manifest is not None and bundle_facts_out is None:
+        raise click.UsageError(
+            "--bundle-facts-library-manifest requires --bundle-facts-out on dump."
+        )
     if bundle_facts_out is None:
         raise click.UsageError(
             "--variant selects the build variant a --bundle-facts-out capture "
@@ -156,11 +162,14 @@ def run_dump_bundle_facts(
         public_header_dirs=_config_public_header_dirs(config_path),
         exclude_headers=exclude_headers,
         variant=variant,
+        library_manifest=library_manifest,
     )
     try:
         result = dump_release_bundle_facts(
             request, notice=lambda text: click.echo(text, err=True)
         )
+    except BundleFactsLibraryOverridesError as exc:
+        raise click.UsageError(str(exc)) from exc
     except ReleaseOperandUsageError as exc:
         raise click.UsageError(_dump_variant_message(exc)) from exc
     except (

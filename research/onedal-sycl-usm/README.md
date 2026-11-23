@@ -89,3 +89,43 @@ parameters are `const Data*`, `const sycl::queue&`, and
 `const dal::array<Data>&`. Keep temporary outputs outside the PCH input
 directory. Check the stored `ast_producer` and `ast_toolchain` as well as a
 known interface-specific declaration when validating a scan profile.
+
+### Capture both interfaces in a release baseline
+
+Place `interfaces.yml` beside the SDK's `include/` directory. This example
+selects the table interface of two ELF libraries. Unlisted members inherit
+the scan's ordinary settings.
+
+```yaml
+libonedal.so:
+  headers: [include/oneapi/dal/table/homogen.hpp]
+  includes: [include]
+  frontend: gcc
+  gcc_path: /usr/bin/g++-14
+  gcc_options: [-std=c++17]
+libonedal_dpc.so:
+  headers: [include/oneapi/dal/table/homogen.hpp]
+  includes: [include]
+  frontend: clang
+  gcc_path: /opt/intel/oneapi/compiler/latest/bin/icpx
+  gcc_options: [-std=c++17, -fsycl, --offload-new-driver, -DONEDAL_DATA_PARALLEL]
+```
+
+```sh
+abicheck dump "$OLD/lib" --bundle-facts-out baseline.json \
+  --bundle-facts-library-manifest "$OLD/interfaces.yml"
+abicheck compare baseline.json "$NEW/lib" -o json=report.json \
+  --bundle-facts-library-manifest "$NEW/interfaces.yml"
+```
+
+Use the same relative layout in both SDKs so each manifest selects its own
+version's headers. A compile override replaces the member's whole compiler
+context. Include its standard, macros and other required switches. To check
+another supported client compiler for the same library, capture a separate
+baseline and compare under that profile.
+
+On the 2025.9 conda parameter libraries, native GCC 14.2 captured
+`get_max_number_of_threads()`. The icpx 2025.0.4 host pass with the
+precompiled SYCL header also captured `get_max_workgroup_size(sycl::queue&)`.
+Comparing the two unchanged libraries to this baseline returned `NO_CHANGE`
+for both members. The two-member bundle had unresolved provider dependencies.

@@ -6,3 +6,4 @@
 - Preserve SYCL plugin changes supported by a partial scan and report the missing inventory evidence. Account for older extractors when comparing UR adapter presence.
 - Report an existing public, unexported template overload marked `= delete` as a source break, including when another overload shares its placeholder linker name.
 - Preserve the chosen offload driver and host/device pass during SYCL source replay. Use the new driver's host selector when acquiring headers with icpx.
+- Accept the per-library compiler and header manifest when capturing a release baseline with `dump --bundle-facts-out`. Mixed CPU/SYCL releases can now apply the same interface configuration during capture and comparison.

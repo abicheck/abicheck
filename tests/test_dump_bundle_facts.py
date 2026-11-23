@@ -412,3 +412,21 @@ def test_an_unknown_variant_is_a_usage_error_naming_it(tmp_path: Path) -> None:
     assert result.exit_code == 64, result.output
     assert "no-such-variant" in result.output
     assert not out.exists()
+
+
+def test_dump_rejects_unknown_member_before_writing_output(tmp_path: Path) -> None:
+    old, _ = _release(tmp_path, "one-member")
+    manifest = tmp_path / "interfaces.json"
+    manifest.write_text('{"libmissing.so": {"frontend": "clang"}}')
+    baseline = tmp_path / "baseline.json"
+    result = _invoke(
+        "dump",
+        str(old),
+        "--bundle-facts-out",
+        str(baseline),
+        "--bundle-facts-library-manifest",
+        str(manifest),
+    )
+    assert result.exit_code != 0
+    assert "libmissing.so" in result.output and "known libraries" in result.output
+    assert not baseline.exists()

@@ -34,46 +34,14 @@ from pathlib import Path
 
 import click
 
-#: A YAML/JSON manifest of per-library header/include/compile-context
-#: overrides for a stored-bundle-facts OLD_INPUT compare (CLI cleanup phase
-#: two, PR I: OLD_INPUT is auto-classified, see
-#: ``workflows/bundle_compare_operand.py`` -- there is no longer a
-#: ``--old-bundle-facts`` flag to name here), parsed by
-#: :func:`abicheck.workflows.bundle_facts_library_overrides.parse_bundle_facts_library_overrides`.
-#: Meaningless unless OLD_INPUT classifies as a stored BundleFacts document
-#: -- rejected explicitly by
-#: :func:`reject_bundle_facts_manifest_without_old_bundle_facts` below,
-#: rather than silently ignored, since a live directory/package
-#: comparison's own per-library needs are unrelated to this
-#: stored-facts-specific gap.
-#:
-#: Phase 7d (one-comparison-product.md §4.1) originally classed this CONFIG
-#: ("cli-cleanup PR J, unchanged intent"), prerequisite G42 (named
-#: deployment environments and environment-aware provider resolution --
-#: docs/contribute/plans/g42-check-identity-environments-and-provider-
-#: resolution.md). Ruled explicitly here rather than left "pending": G42
-#: has not landed, and today's only per-library-header ``.abicheck.yml``
-#: surface is the unrelated ``bundle: {system_providers, cohorts}`` block
-#: (a system-provider allow-list and co-versioned-library cohort prefixes,
-#: not per-library header/include/compile-context overrides) -- there is
-#: no existing config home this flag's per-library manifest shape can move
-#: into without inventing new plumbing G42 is meant to design properly
-#: (the same "ad hoc config plumbing" this workstream's own instructions
-#: warn against, echoing ``--instantiation-manifest``'s sibling call
-#: above). Under D5's own guard 1 ("not one-for-one"), collapsing this into
-#: `.abicheck.yml` today would be exactly a one-for-one field rename with
-#: no real merge target, not the kind of migration D5 asks for. Stays a
-#: CLI flag naming a document -- the same class as `--policy`/`--suppress`,
-#: which stay CLI even though what they name is itself a stable project
-#: artifact -- pending G42, same treatment Phase 7b gave ``--lang`` before
-#: its own inference check landed.
+#: Explicit per-library contexts for release capture and stored-vs-live compare.
 bundle_facts_manifest_options = click.option(
     "--bundle-facts-library-manifest",
     "bundle_facts_library_manifest",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="When OLD_INPUT is a stored BundleFacts document (from a prior "
-    "--bundle-facts-out): a YAML/JSON manifest giving one or more "
+    help="For dump --bundle-facts-out or compare with a stored BundleFacts "
+    "baseline: a YAML/JSON manifest giving one or more "
     "libraries their own header root, include path, or compile context, "
     "instead of the uniform --header/--include/compile-context flags -- "
     "for a bundle whose libraries don't share one toolchain (e.g. a "
