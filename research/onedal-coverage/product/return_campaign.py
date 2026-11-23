@@ -19,8 +19,9 @@ SIGNATURES = {
         row["case"]: (
             row["symbol"],
             "NumericTablePtr",
-            f"const {row['result_type']} *self, {row['id_type']} id",
-            "self, id",
+            f"const {row['result_type']} *self, {row['id_type']} id"
+            + (", size_t index" if row["access"] == "indexed" else ""),
+            "self, id, index" if row["access"] == "indexed" else "self, id",
         )
         for row in GETTERS
     },
@@ -107,7 +108,7 @@ def run(old, new, output):
     flags.append(f"-I{output}")
     (output / "return_getters.inc").write_text(
         "".join(
-            f'CHECK_GETTER("{row["case"]}", {row["result_type"]}, {row["slot"]})\n'
+            f'CHECK_GETTER("{row["case"]}", {row["result_type"]}, {row["slot"]}, {"true" if row["access"] == "indexed" else "false"})\n'
             for row in GETTERS
         )
     )

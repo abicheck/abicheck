@@ -1,6 +1,7 @@
 #include "daal.h"
 #include <cstring>
 #include <iostream>
+#include <type_traits>
 
 using namespace daal;
 using namespace daal::algorithms;
@@ -15,15 +16,36 @@ struct CountRelease {
     }
 };
 
-template <typename Result, typename Slot>
+template <typename Result, bool indexed, typename Slot>
 static int table_contract(Slot slot) {
     NumericTablePtr retained;
     {
         SharedPtr<double> data(new double(17.25), CountRelease{});
         auto table = HomogenNumericTable<double>::create(data, 1, 1);
-        Result result;
-        result.set(slot, table);
-        retained = result.get(slot);
+        auto result = [&]() {
+            if constexpr (std::is_same_v<Result, linear_model::prediction::Result>)
+                return Result(static_cast<size_t>(slot) + 1);
+            else
+                return Result();
+        }();
+        if constexpr (std::is_same_v<Slot, optimization_solver::iterative_solver::OptionalDataId>) {
+            result.set(optimization_solver::iterative_solver::optionalResult,
+                       OptionalArgumentPtr(new OptionalArgument(static_cast<size_t>(slot) + 1)));
+        }
+        if constexpr (std::is_same_v<Result, stump::classification::training::Result>) {
+            // This result starts with only the model slot in both tested SDKs.
+            while (result.size() <= static_cast<size_t>(slot))
+                result << SerializationIfacePtr();
+        }
+        if constexpr (indexed) {
+            DataCollectionPtr collection(new DataCollection());
+            collection->push_back(table);
+            result.set(slot, collection);
+            retained = result.get(slot, 0);
+        } else {
+            result.set(slot, table);
+            retained = result.get(slot);
+        }
         if (!retained || retained.get() != table.get()) return 10;
     }
     std::cout << "after_owner=" << releases << '\n';
@@ -72,7 +94,7 @@ static int statistics_contract() {
 
 int main(int argc, char **argv) {
     if (argc != 2) return 64;
-#define CHECK_GETTER(name, type, slot) if (!std::strcmp(argv[1], name)) return table_contract<type>(slot);
+#define CHECK_GETTER(name, type, slot, indexed) if (!std::strcmp(argv[1], name)) return table_contract<type, indexed>(slot);
 #include "return_getters.inc"
 #undef CHECK_GETTER
     if (!std::strcmp(argv[1], "statistics")) return statistics_contract();
