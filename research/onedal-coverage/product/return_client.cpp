@@ -15,14 +15,15 @@ struct CountRelease {
     }
 };
 
-static int table_contract() {
+template <typename Result, typename Slot>
+static int table_contract(Slot slot) {
     NumericTablePtr retained;
     {
         SharedPtr<double> data(new double(17.25), CountRelease{});
         auto table = HomogenNumericTable<double>::create(data, 1, 1);
-        covariance::Result result;
-        result.set(covariance::covariance, table);
-        retained = result.get(covariance::covariance);
+        Result result;
+        result.set(slot, table);
+        retained = result.get(slot);
         if (!retained || retained.get() != table.get()) return 10;
     }
     std::cout << "after_owner=" << releases << '\n';
@@ -57,8 +58,24 @@ static int status_contract() {
     return valid.computeNoThrow().ok() ? 0 : 23;
 }
 
+static int statistics_contract() {
+    auto table = HomogenNumericTable<double>::create(3, 2, NumericTable::doAllocate);
+    if (!table) return 32;
+    auto status = table->NumericTable::allocateBasicStatistics();
+    if (!status.ok()) return 30;
+    for (auto id : {NumericTable::minimum, NumericTable::maximum, NumericTable::sum, NumericTable::sumSquares}) {
+        auto statistic = table->basicStatistics.get(id);
+        if (!statistic || statistic->getNumberOfRows() != 1 || statistic->getNumberOfColumns() != 3) return 31;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    if (argc == 2 && !std::strcmp(argv[1], "table")) return table_contract();
-    if (argc == 2 && !std::strcmp(argv[1], "status")) return status_contract();
+    if (argc != 2) return 64;
+#define CHECK_GETTER(name, type, slot) if (!std::strcmp(argv[1], name)) return table_contract<type>(slot);
+#include "return_getters.inc"
+#undef CHECK_GETTER
+    if (!std::strcmp(argv[1], "statistics")) return statistics_contract();
+    if (!std::strcmp(argv[1], "status")) return status_contract();
     return 64;
 }

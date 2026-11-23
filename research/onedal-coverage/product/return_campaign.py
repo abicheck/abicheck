@@ -9,26 +9,45 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-TABLE = "_ZNK4daal10algorithms10covariance10interface16Result3getENS1_8ResultIdE"
+with (HERE / "return-getters.csv").open() as stream:
+    GETTERS = list(csv.DictReader(stream))
 STATUS = "_ZN4daal10algorithms10interface113AlgorithmImplILNS_11ComputeModeE1EE14computeNoThrowEv"
 
-# Both adapters return the SDK's C++ type by value, including its ABI return slot.
+# The adapters return the SDK's C++ type by value, including its ABI return slot.
 SIGNATURES = {
-    "table": (
-        TABLE,
-        "NumericTablePtr",
-        "const covariance::Result *self, covariance::ResultId id",
-        "self, id",
+    **{
+        row["case"]: (
+            row["symbol"],
+            "NumericTablePtr",
+            f"const {row['result_type']} *self, {row['id_type']} id",
+            "self, id",
+        )
+        for row in GETTERS
+    },
+    "statistics": (
+        "_ZN4daal15data_management10interface112NumericTable23allocateBasicStatisticsEv",
+        "Status",
+        "NumericTable *self",
+        "self",
     ),
     "status": (STATUS, "Status", "AlgorithmImpl<batch> *self", "self"),
 }
+TABLE_EDITS = {
+    "forward": ("return result;", 0),
+    "borrow": ("return NumericTablePtr(NumericTablePtr(), result.get());", 11),
+    "extra_owner": (
+        "static NumericTablePtr extra; extra = result; return result;",
+        12,
+    ),
+}
 EDITS = {
-    "table": {
+    **{row["case"]: TABLE_EDITS for row in GETTERS},
+    "statistics": {
         "forward": ("return result;", 0),
-        "borrow": ("return NumericTablePtr(NumericTablePtr(), result.get());", 11),
-        "extra_owner": (
-            "static NumericTablePtr extra; extra = result; return result;",
-            12,
+        "reject_success": ("return Status(ErrorNullByteInjection);", 30),
+        "drop_sum": (
+            "self->basicStatistics.set(NumericTable::sum, NumericTablePtr()); return result;",
+            31,
         ),
     },
     "status": {
@@ -85,6 +104,13 @@ using namespace daal::data_management;
 def run(old, new, output):
     output.mkdir(parents=True, exist_ok=True)
     flags = ["-std=c++17", "-O1", f"-I{old}/include", f"-I{old}/include/dal"]
+    flags.append(f"-I{output}")
+    (output / "return_getters.inc").write_text(
+        "".join(
+            f'CHECK_GETTER("{row["case"]}", {row["result_type"]}, {row["slot"]})\n'
+            for row in GETTERS
+        )
+    )
     client = output / "client"
     subprocess.run(
         [

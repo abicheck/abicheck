@@ -9,7 +9,8 @@ rows=list(csv.DictReader((Path(sys.argv[1])/'obligations.csv').open()))
 with (Path(__file__).resolve().parent / 'return-witnesses.csv').open() as f:
     return_edits = {}
     for result in csv.DictReader(f):
-        if int(result['client_exit']) != 0:
+        # drop_sum tests a method postcondition with an unchanged successful return.
+        if int(result['client_exit']) != 0 and result['variant'] != 'drop_sum':
             return_edits.setdefault(result['symbol'], set()).add(result['variant'])
 counts=Counter()
 for row in rows:
