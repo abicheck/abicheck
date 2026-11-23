@@ -129,6 +129,7 @@ class ReleaseEvaluation:
     baseline_provenance: Mapping[str, object] | None = None
     #: Release schema 3.1: the caller-asserted ``delta_baseline`` block
     #: (``report/delta_baseline.py``); ``None`` when the run was given none.
+    consumer_binding: Mapping[str, object] | None = None
     delta_baseline: Mapping[str, object] | None = None
 
 
@@ -546,6 +547,8 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
             scope=terms.completeness,
         ),
     }
+    if ev.consumer_binding is not None:
+        summary["consumer_binding"] = ev.consumer_binding
     if ev.baseline_provenance is not None:
         # Schema 2.8: asserted by the caller (the root Action), not verified.
         summary["baseline_provenance"] = dict(ev.baseline_provenance)

@@ -338,4 +338,5 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       optional: present on a release's ``comparison_scope`` block, which the
 #:       release document embeds unchanged; a pre-3.2 consumer reads nothing
 #:       differently.
-RELEASE_SCHEMA_VERSION = "3.2"
+#: - ``3.3`` adds optional consumer_binding for a specified old ELF client.
+RELEASE_SCHEMA_VERSION = "3.3"
