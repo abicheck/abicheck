@@ -36,6 +36,13 @@ for row in rows:
     if kind == 'cxx_method' and row['symbol'] == '_ZN4daal8services10interface16Status5clearEv':
         row['independent_edit_witness'] = 'status-clear.csv'
         row['edit_family'] = 'no_op_clear'
+    status_edits = {
+        ('constructor_abi_variant', '_ZN4daal8services10interface16StatusC1ERKS2_'): 'discard_copy',
+        ('cxx_method', '_ZN4daal8services10interface16StatusaSERKS2_'): 'discard_assignment',
+    }
+    if (kind, row['symbol']) in status_edits:
+        row['independent_edit_witness'] = 'ownership-campaign.csv'
+        row['edit_family'] = status_edits[(kind, row['symbol'])]
 with gzip.open('ledger.csv.gz','wt') as f:
     w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
 mapped={r['symbol'] for r in rows if r['providers']}
