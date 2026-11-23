@@ -49,9 +49,9 @@ from dataclasses import dataclass, field
 
 from packaging.version import InvalidVersion, Version
 
-# Supported CastXML version range for an authoritative L2 scan: >=0.6.11,<0.8.0.
+# Supported CastXML version range for an authoritative L2 scan: >=0.6.11,<0.9.0.
 MIN_CASTXML = "0.6.11"
-MAX_CASTXML = "0.8.0"  # exclusive upper bound
+MAX_CASTXML = "0.9.0"  # exclusive upper bound
 # Minimum bundled/linked Clang major version a supported CastXML build must
 # carry (glibc sized-float types and the GCC 13+ __assume__ attribute need
 # this — see dumper_castxml_probe._RECOMMENDED_CLANG_MAJOR, which this
@@ -190,7 +190,7 @@ def evaluate_castxml_version(raw_output: str) -> CastxmlVersionCheck:
         # of the next line (0.8.0-rc1, 0.8.0.dev1) *below* final 0.8.0,
         # so it slipped through this gate entirely (neither below the
         # minimum nor at/above the maximum) and would have run as an
-        # unvalidated 0.8 build. The minimum-side check above is left
+        # unvalidated 0.9 build. The minimum-side check above is left
         # using the raw pre-release-aware comparison, since a prerelease
         # of the minimum itself (0.7.0-rc1) must still sort below it.
         elif Version(parsed.base_version) >= Version(MAX_CASTXML):

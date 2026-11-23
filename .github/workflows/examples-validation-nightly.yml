@@ -106,10 +106,9 @@ jobs:
         run: brew install cmake
       - name: Set up pinned CastXML (macOS)
         # Homebrew's castxml is unpinnable here: its stable formula moved to
-        # 0.8.0, which castxml/policy.py rejects (MAX_CASTXML is an exclusive
-        # 0.8.0 bound), and Homebrew keeps no versioned castxml formula. Install
-        # the exact conda-forge osx-arm64 build that pixi.lock already commits
-        # to (castxml 0.7.0, build hfc9ce51_0), via the verified micromamba
+        # 0.8.0 is supported by castxml/policy.py, but Homebrew has no versioned
+        # formula. Install the exact conda-forge osx-arm64 build
+        # (castxml 0.8.0, build haf09237_0), via the verified micromamba
         # bootstrap used by integration.yml.
         shell: bash
         env:
@@ -126,13 +125,13 @@ jobs:
           chmod +x "$work/micromamba"
           env_prefix="$RUNNER_TEMP/castxml-env"
           MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba-root" "$work/micromamba" create -y \
-            -p "$env_prefix" -c conda-forge "castxml=0.7.0=hfc9ce51_0"
+            -p "$env_prefix" -c conda-forge "castxml=0.8.0=haf09237_0"
           echo "$env_prefix/bin" >> "$GITHUB_PATH"
           export PATH="$env_prefix/bin:$PATH"
           # castxml prints its version banner on stderr, so capture both streams.
           version_output="$(castxml --version 2>&1)"
           case "$version_output" in
-            "castxml version 0.7.0"*) ;;
+            "castxml version 0.8.0"*) ;;
             *) echo "::error::unexpected castxml version"; echo "$version_output"; exit 1 ;;
           esac
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0

@@ -223,7 +223,7 @@ Run against abicheck 0.5.0, libabigail 2.4.0, and ABICC 2.3. The table is pinned
 **Full installation (recommended)**: conda-forge bundles abicheck with a castxml that passes abicheck's own version gate, so header analysis (L2) works out of the box.
 
 ```bash
-conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11,<0.8.0"
+conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11,<0.9.0"
 conda activate abicheck
 ```
 

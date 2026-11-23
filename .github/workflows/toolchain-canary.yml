@@ -259,7 +259,7 @@ jobs:
         run: brew install cmake
 
       - name: Set up pinned CastXML (macOS, baseline)
-        # The same conda-forge castxml 0.7.0 build integration.yml pins for
+        # The same conda-forge castxml 0.8.0 build integration.yml pins for
         # its macOS leg; see that file for why Homebrew's is not used.
         if: runner.os == 'macOS'
         shell: bash
@@ -277,7 +277,7 @@ jobs:
           chmod +x "$work/micromamba"
           env_prefix="$RUNNER_TEMP/castxml-env"
           MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba-root" "$work/micromamba" create -y \
-            -p "$env_prefix" -c conda-forge "castxml=0.7.0=hfc9ce51_0"
+            -p "$env_prefix" -c conda-forge "castxml=0.8.0=haf09237_0"
           echo "$env_prefix/bin" >> "$GITHUB_PATH"
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
