@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from _abicheck_subprocess import abicheck_command
 
-from abicheck.frontends.cli.release_consumer import release_consumer_binding
+from abicheck.workflows.release_consumer import release_consumer_binding
 from abiforge.run.provider_campaign import run
 
 
@@ -34,14 +34,19 @@ def test_release_consumer_matches_old_binary(tmp_path):
                 "compare",
                 str(tmp_path / "old"),
                 str(tmp_path / case),
-                "--release-consumer",
-                "client",
-                "--release-consumer",
-                "client2",
+                "--used-by",
+                str(tmp_path / "old/client"),
+                "--used-by",
+                str(tmp_path / "old/client2"),
+                "-o",
+                "markdown=" + str(tmp_path / "binding.md"),
                 "-o",
                 "json=" + str(output),
             )
         )
+        if case == "missing":
+            markdown = (tmp_path / "binding.md").read_text()
+            assert "Unresolved dependency" in markdown and "libowner.so" in markdown
         assert result.returncode == 4
         report = json.loads(output.read_text())
         assert report["verdict"] == "BREAKING"
@@ -74,7 +79,10 @@ def test_release_consumer_matches_old_binary(tmp_path):
             capture_output=True,
         )
         report = release_consumer_binding(
-            tmp_path / "old", image, Path("client"), ":".join("/" + d for d in order)
+            tmp_path / "old",
+            image,
+            tmp_path / "old/client",
+            ":".join("/" + d for d in order),
         )
         assert (actual.returncode == 0) == (expected == "pass")
         assert report["loadability"] == expected
@@ -82,22 +90,50 @@ def test_release_consumer_matches_old_binary(tmp_path):
         assert row["new"]["provider"] == str(image / order[0] / "libowner.so")
         assert row["new"]["search_reason"] == "ld_library_path"
 
+    # Keep the release inventory unambiguous. Only the configured directory
+    # can supply the V2-only owner to this V1 client.
+    for dirname in ("good", "lib"):
+        (image / dirname / "libowner.so").unlink()
+    config = tmp_path / "project.yml"
+    config.write_text("deps:\n  ld_library_path: /bad:/lib\n")
+    output = tmp_path / "configured.json"
+    result = subprocess.run(
+        abicheck_command(
+            "compare",
+            tmp_path / "old",
+            image,
+            "--used-by",
+            tmp_path / "old/client",
+            "--config",
+            config,
+            "-o",
+            "json=" + str(output),
+        )
+    )
+    assert result.returncode == 4
+    report = json.loads(output.read_text())["consumer_binding"]
+    row = next(row for row in report["imports"] if row["symbol"] == "value")
+    assert row["new"]["status"] == "version_mismatch"
+    assert row["new"]["provider"] == str(image / "bad/libowner.so")
+    assert row["new"]["search_reason"] == "ld_library_path"
+
 
 def test_release_consumer_rejects_invalid_client(tmp_path):
-    import click
+    from abicheck.errors import ReleaseOperandUsageError
 
     old, new = tmp_path / "old", tmp_path / "new"
     for root in (old, new):
         root.mkdir()
     for path in (tmp_path / "absolute", Path("../escape")):
-        with pytest.raises(click.UsageError, match="root-relative"):
+        with pytest.raises(ReleaseOperandUsageError, match="inside the old"):
             release_consumer_binding(old, new, path)
-    with pytest.raises(click.UsageError, match="must exist"):
-        release_consumer_binding(old, new, Path("client"))
-    (old / "client").write_bytes(b"text")
-    with pytest.raises(click.UsageError, match="must be ELF"):
-        release_consumer_binding(old, new, Path("client"))
+    with pytest.raises(ReleaseOperandUsageError, match="inside both"):
+        release_consumer_binding(old, new, old / "client")
+    for root in (old, new):
+        (root / "client").write_bytes(b"text")
+    with pytest.raises(ReleaseOperandUsageError, match="must be ELF"):
+        release_consumer_binding(old, new, old / "client")
     for root in (old, new):
         (root / "client").write_bytes(b"\x7fELF" + root.name.encode())
-    with pytest.raises(click.UsageError, match="identical old consumer"):
-        release_consumer_binding(old, new, Path("client"))
+    with pytest.raises(ReleaseOperandUsageError, match="identical old consumer"):
+        release_consumer_binding(old, new, old / "client")

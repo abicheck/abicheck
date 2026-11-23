@@ -367,8 +367,15 @@ def run_compare(
     release_pack_application = None
     release_depth: str | None = None
     if {old_kind, new_kind} & {"directory", "package"}:
-        release_depth = _reject_flags_unsupported_for_set_inputs(
+        release_depth, deployment_clients = _reject_flags_unsupported_for_set_inputs(
             ctx,
+            old_input=old_input,
+            new_input=new_input,
+            dry_run=dry_run,
+            binding_output=bool(
+                output_dir
+                or {fmt, *(f for f, _ in secondary_writes)} & {"markdown", "json"}
+            ),
             used_by_apps=used_by_apps,
             required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
@@ -382,16 +389,8 @@ def run_compare(
             reason="the per-library fan-out has no contract-overlay channel",
             notify=_echo_err,
         )
-        # Codex review, fresh evidence ("Validate release-only view
-        # restrictions before dry-run exit"): output.view leaf/root-cause is
-        # rejected for a directory/package operand inside
-        # _dispatch_release_compare, but that check never ran for
-        # --dry-run (emit_dry_run raises SystemExit before dispatch is ever
-        # reached) -- so a dry run reported "ok" (exit 0) for exactly the
-        # combination the identical non-dry-run invocation rejects (exit
-        # 64). Validated here too, ahead of the --dry-run emit below, the
-        # same way every other release-only flag conflict in this block
-        # already is.
+        # A dry run exits before dispatch. Check the same release-only view
+        # restrictions here so it cannot approve an invalid live invocation.
         from .frontends.cli.commands.compare_routing import (
             reject_release_incompatible_view_mode,
         )
@@ -665,6 +664,7 @@ def run_compare(
                 # dependency walk and debug roots (each once accepted here and
                 # silently ignored -- a false clean for every member).
                 exclude_headers=tuple(exclude_headers or ()),
+                deployment_clients=deployment_clients,
                 run_inputs=ReleaseMemberRunInputs(
                     follow_deps=bool(follow_deps),
                     dependency_search_paths=tuple(search_paths),

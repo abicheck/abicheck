@@ -423,6 +423,7 @@ def compare_release_cmd(
     # The dependency walk and debug roots, resolved by `compare` exactly as for
     # one pair and applied to every member. `None` is the scalar default.
     run_inputs: ReleaseMemberRunInputs | None = None,
+    deployment_clients: tuple[Path, ...] = (),
     # ADR-020b / ADR-068 D5: resolved once by the caller
     # (`cli_compare_helpers.run_compare`'s `resolved_cfg.deployment`, the
     # same place `collapse_versioned_symbols`/`public_header_dirs` above are
@@ -566,6 +567,7 @@ def compare_release_cmd(
             old_variant=old_variant,
             new_variant=new_variant,
             release_selection=release_selection,
+            deployment_clients=deployment_clients,
             pack_application=pack_application,
             severity_preset=severity_preset,
             severity_abi_breaking=severity_abi_breaking,
@@ -719,6 +721,7 @@ def _render_release_outcome(
         "require_complete_analysis": require_complete_analysis,
         "excluded_header_patterns": outcome.excluded_header_patterns,
         "public_surface": projection.public_surface,
+        "consumer_binding": outcome.consumer_binding,
     }
     for secondary_fmt, secondary_output in secondary_writes:
         # `-o` is repeatable: every artifact renders the same computed

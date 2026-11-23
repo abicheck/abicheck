@@ -83,6 +83,7 @@ def _write_release_summary_file(
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
     excluded_header_patterns: str = "",
+    consumer_binding: dict[str, object] | None = None,
     public_surface: ReleasePublicSurfaceTerms | None = None,
 ) -> None:
     """Write per-library summary JSON to output directory.
@@ -253,11 +254,9 @@ def _write_release_summary_file(
     summary_data["disposition_audit"] = release_disposition_audit_block(
         library_results, matrix_result, severity_config, bundle_result
     )
-    from .release_consumer import current_consumer_binding
 
-    binding = current_consumer_binding()
-    if binding is not None:
-        summary_data["consumer_binding"] = binding
+    if consumer_binding is not None:
+        summary_data["consumer_binding"] = consumer_binding
     summary_path = output_dir / "summary.json"
     writer = write_output if write_output is not None else _write_text
     writer(summary_path, json.dumps(summary_data, indent=2))
@@ -308,6 +307,7 @@ def _finalize_release_output(
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
     excluded_header_patterns: str = "",
+    consumer_binding: dict[str, object] | None = None,
     public_surface: ReleasePublicSurfaceTerms | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
@@ -356,6 +356,7 @@ def _finalize_release_output(
         require_complete_analysis=require_complete_analysis,
         excluded_header_patterns=excluded_header_patterns,
         public_surface=public_surface,
+        consumer_binding=consumer_binding,
     )
     _write_or_echo(output, text)
 
@@ -390,6 +391,7 @@ def _finalize_release_output(
             require_complete_analysis=require_complete_analysis,
             excluded_header_patterns=excluded_header_patterns,
             public_surface=public_surface,
+            consumer_binding=consumer_binding,
         )
 
     # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same

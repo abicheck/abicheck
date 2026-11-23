@@ -600,19 +600,6 @@
    "default": "<unset>"
   },
   {
-   "id": "compare --release-consumer",
-   "command": "compare",
-   "option": "--release-consumer",
-   "aliases": [],
-   "hidden": false,
-   "help_common": false,
-   "multiple": true,
-   "is_flag": false,
-   "type": "path",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
    "id": "compare --verbose",
    "command": "compare",
    "option": "--verbose",

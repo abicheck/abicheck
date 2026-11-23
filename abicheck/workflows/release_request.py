@@ -156,6 +156,7 @@ class ReleaseCompareRequest:
     severity_addition: str | None = None
     on_incomplete_scope: str = "warn"
     fail_on_removed_library: bool = False
+    deployment_clients: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)

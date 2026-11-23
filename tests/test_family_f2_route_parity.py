@@ -172,7 +172,6 @@ CLICK_ROUTING: dict[str, tuple[str, Any]] = {
         _UC,
         "CLI/API parity is test_compare_request_configuration_parity.py",
     ),
-    "release_consumer": (_RS, "CLI release report consumer binding"),
     "use_cases_manifest": (_RS, "use-case manifest; CLI-only project integration"),
     "performance_profile": (
         _UC,
@@ -377,7 +376,6 @@ DEFAULT_UNMAPPED: dict[str, str] = {
     "defines": "folded into InputSpec.compile (a context object)",
     "since": "git-ref operand sugar",
     "dry_run": "CLI-only planning mode",
-    "release_consumer": "CLI-only release report consumer binding",
     "use_cases_manifest": "CLI-only project integration",
     "verbose": "stderr only",
 }

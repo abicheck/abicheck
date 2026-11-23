@@ -249,6 +249,10 @@ def render_release_text(fmt: str, report: ReleaseReport, *, demangle: bool) -> s
     assert isinstance(additional, list)
     for binding in [binding, *additional] if binding else []:
         markdown += f"\n## Consumer binding\n\n{md_text(binding['client'], code=True)}: {md_text(binding['loadability'])}\n"
+        unresolved = binding["unresolved_dependencies"]
+        assert isinstance(unresolved, list)
+        for requester, soname in unresolved:
+            markdown += f"\nUnresolved dependency {md_text(soname, code=True)} requested by {md_text(requester, code=True)}.\n"
         markdown += "\n| Import | Previous provider | Candidate provider | Binding |\n|---|---|---|---|\n"
         imports = binding["imports"]
         assert isinstance(imports, list)

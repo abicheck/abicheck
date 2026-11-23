@@ -177,6 +177,7 @@ class ReleaseCompareOutcome:
     contract_coverage_failure_count: int
     env_matrix_source_sha256: str | None
     excluded_header_patterns: str
+    consumer_binding: dict[str, object] | None = None
     bundle_result: BundleDiffResult | None = None
     matrix_result: DiffResult | None = None
 
@@ -312,6 +313,15 @@ def execute_release_compare(
     o = options
     request = plan.request
     old_dir, new_dir = request.old_dir, request.new_dir
+    from .release_consumer import release_consumer_bindings
+
+    consumer_binding = release_consumer_bindings(
+        old_dir,
+        new_dir,
+        request.deployment_clients,
+        options.run_inputs.ld_library_path,
+        options.run_inputs.dependency_search_paths,
+    )
     scope_plan = plan.scope
     old_map, new_map = dict(scope_plan.old_map), dict(scope_plan.new_map)
     matched_keys = list(scope_plan.matched_keys)
@@ -665,6 +675,7 @@ def execute_release_compare(
             )
 
     return ReleaseCompareOutcome(
+        consumer_binding=consumer_binding,
         worst_verdict=worst_verdict,
         library_results=library_results,
         junit_pairs=junit_pairs,
