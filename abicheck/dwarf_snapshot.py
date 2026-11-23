@@ -78,6 +78,7 @@ from .extract.dwarf_scope import (
     record_scope_segment as _record_scope_segment,
     variable_entity_id as _dwarf_variable_entity_id,
 )
+from .extract.dwarf_signature_limits import missing_record_definitions
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decorators
 from .extract.dwarf_variable_alignment import dwarf_variable_layout_facts
@@ -166,7 +167,7 @@ def extract_dwarf_declarations(
     builder = _DwarfSnapshotBuilder(elf_path, elf_meta)
     builder.extract(session=session)
     return DwarfDeclarations(
-        extraction_limitations=builder.missing_record_definitions(),
+        extraction_limitations=missing_record_definitions(builder),
         functions=builder.functions,
         variables=builder.variables,
         types=builder.types,
@@ -431,47 +432,6 @@ class _DwarfSnapshotBuilder:
         # Third pass: filter types to only those reachable from
         # exported symbols (transitive closure)
         self._filter_types_by_reachability()
-
-    def missing_record_definitions(self) -> tuple[str, ...]:
-        """Report direct signature uses of forward declarations lacking a definition."""
-        unresolved = (
-            self._declaration_only.keys() - self._record_by_qualified_name.keys()
-        )
-        if not unresolved:
-            return ()
-        names = {name: name for name in unresolved if "::" in name}
-        # A short spelling can be matched only when it identifies one record.
-
-        for name, short in self._declaration_only.items():
-            if name in unresolved and self._record_leaf_owner.get(short) == name:
-                names.setdefault(short, name)
-
-        aliases: dict[str, str | None] = {}
-        for alias in self.typedefs:
-            leaf = alias.rsplit("::", 1)[-1]
-            aliases[leaf] = None if leaf in aliases else alias
-
-        findings = set()
-        for func in self.functions:
-            for role, spelling in [
-                ("return", func.return_type),
-                *[(f"parameter {i}", arg.type) for i, arg in enumerate(func.params)],
-            ]:
-                bare = _strip_type_decorators(spelling)
-                seen = set()
-                while bare not in seen:
-                    seen.add(bare)
-                    alias = bare if "::" in bare else aliases.get(bare)
-                    if alias is None or alias not in self.typedefs:
-                        break
-                    bare = _strip_type_decorators(self.typedefs[alias])
-                record = names.get(bare)
-                if record:
-                    findings.add(
-                        f"{func.name} {role}: DWARF only declares {record}; "
-                        "record layout and virtual slots were not verified"
-                    )
-        return tuple(sorted(findings))
 
     def _process_cu(self, CU: Any) -> None:
         """Walk all DIEs in one Compilation Unit."""
@@ -1534,10 +1494,8 @@ class _DwarfSnapshotBuilder:
         contains the directly referenced types. We transitively include
         types referenced by fields of those types.
         """
-        # Build type name → RecordType index
         type_map: dict[str, RecordType] = {t.name: t for t in self.types}
 
-        # Transitive closure: BFS from referenced types
         queue = collections.deque(self._referenced_type_names)
         reachable: set[str] = set(self._referenced_type_names)
 
@@ -1552,16 +1510,7 @@ class _DwarfSnapshotBuilder:
                 if base not in reachable:
                     reachable.add(base)
                     queue.append(base)
-            # Fact[T]-bridged reads (ADR-063 Phase 0): `bases_fact`/
-            # `virtual_bases_fact` and their legacy siblings are kept in
-            # lockstep by `RecordType.__post_init__`, so resolving through
-            # the sibling here is exactly value-preserving. Each `*_fact`
-            # field is declared `Fact[list[str]] | None` (only
-            # `__init__`-time callers may omit it); `__post_init__` always
-            # backfills a real `Fact`, so the leading `is not None` check
-            # never actually fails at runtime — it, and the trailing
-            # `.value is not None` (mirroring `bridge_legacy_and_fact`'s
-            # own resolution), exist to narrow the type for mypy.
+            # Follow only present base facts (ADR-063).
             bases_fact = rec.bases_fact
             rec_bases = (
                 bases_fact.value
