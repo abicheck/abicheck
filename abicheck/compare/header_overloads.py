@@ -111,31 +111,36 @@ def _default_patterns(
     return {eid: fn for eid, fn in by_id.items() if eid not in ambiguous}
 
 
-def additional_default_views(
+def default_views(
+    ordinary: Iterator[tuple[str, Function, Function, ParameterView, ParameterView]],
     old: AbiSnapshot,
     new: AbiSnapshot,
     old_map: dict[str, Function],
-    new_map: dict[str, Function],
 ) -> Iterator[tuple[str, Function, Function, ParameterView, ParameterView]]:
-    """Exact-identity pairs with defaults omitted by the one-row-per-symbol index."""
-    # Only a bare-key representative can hide an additional overload.
+    """Preserve ordinary function pairs and compare header patterns by exact identity."""
     if not any(key == fn.name for key, fn in old_map.items()):
+        yield from ordinary
         return
     candidates = {
         eid: fn
         for eid, fn in _default_patterns(old.declarations.functions).items()
         if any(p.default is not None for p in fn.params)
     }
-    if not candidates:
-        return
-    pairs = []
-    for eid, current in _default_patterns(
-        new.declarations.functions, set(candidates)
-    ).items():
-        previous = candidates[eid]
-        old_rep, new_rep = old_map.get(previous.mangled), new_map.get(current.mangled)
-        if old_rep and new_rep and old_rep.entity_id == new_rep.entity_id == eid:
+    matches = (
+        _default_patterns(new.declarations.functions, set(candidates))
+        if candidates
+        else {}
+    )
+    for row in ordinary:
+        _, prev, current, _, _ = row
+        if _header_pattern(prev) and _header_pattern(current):
+            # Compare every placeholder (including the index representative)
+            # through the ambiguity-checked exact-identity join below.
             continue
+        yield row
+    pairs = []
+    for eid, current in matches.items():
+        previous = candidates[eid]
         name = qualified_spelling(eid)
         if name:
             pairs.append((name, previous, current))
@@ -152,6 +157,38 @@ def additional_default_views(
             )
 
 
+def _include_roots(snapshot: AbiSnapshot) -> tuple[PurePath, ...]:
+    roots = []
+    args = iter(snapshot.ast_compile_args)
+    for arg in args:
+        if arg == "-I":
+            value = next(args, "")
+        elif arg.startswith("-I"):
+            value = arg[2:]
+        else:
+            continue
+        path = PurePath(value)
+        if path.is_absolute():
+            roots.append(path)
+    return tuple(roots)
+
+
+def _header_key(header: str, roots: tuple[PurePath, ...]) -> tuple[str, str]:
+    path = PurePath(header)
+    for index, root in enumerate(roots):
+        if path.is_relative_to(root):
+            return (f"include[{index}]", str(path.relative_to(root)))
+    return ("path", str(path))
+
+
+def _arities(fn: Function) -> range:
+    count = len(fn.params)
+    required = count
+    while required and fn.params[required - 1].default is not None:
+        required -= 1
+    return range(required, count + 1)
+
+
 def lost_header_overloads(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -162,8 +199,8 @@ def lost_header_overloads(
 
     For dependent functions clang may supply the same bare name for several
     declarations. The symbol index can retain only one. Compare *declared*
-    families by scoped identity and require a contraction past every observed
-    new candidate. A pack or unknown variadic status prevents this proof.
+    families by scoped identity and require a formerly accepted argument count
+    outside every observed new candidate's range. A pack or unknown variadic status prevents this proof.
     """
     if functions is None:
         functions = old.declarations.functions
@@ -174,8 +211,9 @@ def lost_header_overloads(
     before, after = _families(left, leaves), _families(right, leaves)
     # Require a common declaration in the same header as a witness that
     # both scans collected that header. SDK installation roots can differ.
+    old_roots, new_roots = _include_roots(old), _include_roots(new)
     right_headers = {
-        (f.entity_id, PurePath(f.source_header).name)
+        (f.entity_id, _header_key(f.source_header, new_roots))
         for f in right
         if f.entity_id and f.source_header and has_observed_contract_evidence(f)
     }
@@ -183,7 +221,7 @@ def lost_header_overloads(
         f.source_header
         for f in left
         if f.source_header
-        and (f.entity_id, PurePath(f.source_header).name) in right_headers
+        and (f.entity_id, _header_key(f.source_header, old_roots)) in right_headers
         and has_observed_contract_evidence(f)
     }
     all_new = {f.entity_id for f in new.declarations.functions if f.mangled in leaves}
@@ -249,16 +287,17 @@ def lost_header_overloads(
             or not all(_fixed_arity(f) for f in rhs)
         ):
             continue
-        maximum = max(len(f.params) for f in rhs)
-        if len(previous.params) <= maximum:
+        accepted = {n for fn in rhs for n in _arities(fn)}
+        lost = sorted(set(_arities(previous)) - accepted)
+        if not lost:
             continue
         changes.append(
             make_change(
                 ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
                 symbol=name,
                 description=(
-                    f"{name} previously declared an overload with {len(previous.params)} "
-                    f"arguments; the largest remaining overload declares {maximum}."
+                    f"{name} no longer declares an overload accepting these argument counts: "
+                    + ", ".join(map(str, lost))
                 ),
                 old_value=", ".join(p.type for p in previous.params),
                 new_value=", ".join(p.type for p in current.params),

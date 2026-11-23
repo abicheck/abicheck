@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Iterator, Mapping
-from itertools import chain
 from typing import Any
 
 from .compare import export_transition as _export_transition
@@ -55,7 +54,7 @@ from .compare.function_signature import (
     function_signature_changes,
     function_signature_index,
 )
-from .compare.header_overloads import additional_default_views
+from .compare.header_overloads import default_views
 from .compare.naming_conventions import PREFIX_RENAME
 from .compare.parameter_facts import (
     ParameterView,
@@ -843,9 +842,8 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     Only declarations with confirmed public contract and absent export evidence
     enter that additional join. The first-wins pair still follows the ordinary
-    path. For the other pairs each side projects the actual overload's default
+    path for ordinary functions. Each header pattern projects its own default
     arguments into the parameter view used by the same comparison below.
-
     A separate, narrower gate protects the VALUE-CHANGED comparison alone
     (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
     """
@@ -854,9 +852,11 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     old_map, new_map = reconciled_function_surfaces(old, new)
 
-    for mangled, f_old, f_new, v_old, v_new in chain(
+    for mangled, f_old, f_new, v_old, v_new in default_views(
         _parameter_view_pairs(old, new, old_map, new_map),
-        additional_default_views(old, new, old_map, new_map),
+        old,
+        new,
+        old_map,
     ):
         old_producer = fact_producer(
             old, func_fact_key(f_old.mangled, "param_defaults")

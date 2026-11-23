@@ -144,3 +144,15 @@ With the full 2025.2 library, the ordinary checker now reports
 and grades the pair `API_BREAK`. This comparison previously produced
 `NO_CHANGE` when the linker-name index retained a host sibling. The
 per-signature withdrawal results in all-signatures.md still apply.
+
+## Increasing the required argument count
+
+In a controlled oneDAL 2025.2 header edit, the queue overload of
+`homogen_table::wrap` required explicit dependencies, explicit layout and
+a new trailing `int` argument. The host overloads and `libonedal_dpc.so.3`
+were unchanged. icpx 2025.0.4 checked five call expressions against each
+header. The host call remained valid, the queue calls with four, five and six
+arguments stopped compiling, and the seven-argument call became valid.
+The L2 checker identifies the lost five- and six-argument forms and returns
+`API_BREAK`. A host overload accepts four arguments, so argument count alone
+does not establish what happens to the four-argument queue call.

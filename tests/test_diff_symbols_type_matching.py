@@ -471,12 +471,21 @@ class TestVirtualMethodOwnerResolutionAmbiguitySafe:
         (or an equivalent ambiguity-safe map), not a raw ``{t.name: t
         for t in ...}`` dict comprehension.
         """
-        import inspect
+        from unittest.mock import patch
 
         import abicheck.diff_symbols as diff_symbols_module
 
-        source = inspect.getsource(diff_symbols_module._diff_functions)
-        assert "build_type_map(old.declarations.types)" in source
-        assert "build_type_map(new.declarations.types)" in source
-        assert "{t.name: t for t in old.types}" not in source
-        assert "{t.name: t for t in new.types}" not in source
+        records = [
+            RecordType(name="Impl", qualified_name=f"{ns}::Impl", kind="class")
+            for ns in ("ns1", "ns2")
+        ]
+        old = _snap(types=records)
+        new = _snap(types=list(reversed(records)))
+        with patch.object(
+            diff_symbols_module, "build_type_map", wraps=build_type_map
+        ) as build:
+            diff_symbols_module._diff_functions(old, new)
+
+        inputs = [call.args[0] for call in build.call_args_list]
+        assert any(types is old.declarations.types for types in inputs)
+        assert any(types is new.declarations.types for types in inputs)

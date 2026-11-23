@@ -96,14 +96,42 @@ def test_removed_event_default_attributed_once(queue_first):
     assert report.verdict.value == "API_BREAK"
 
 
-def test_inconsistent_event_default_redeclarations_are_inconclusive():
+@pytest.mark.parametrize("queue_first", [False, True])
+def test_inconsistent_event_default_redeclarations_are_inconclusive(queue_first):
     host = pattern("int")
     old, new, redeclared = (pattern("queue&", "events") for _ in range(3))
     old.params[-1].default = redeclared.params[-1].default = "{}"
-    before = snap(host, old)
-    after = snap(host, new, redeclared)
+    before = snap(old, host) if queue_first else snap(host, old)
+    after = snap(new, redeclared, host) if queue_first else snap(host, new, redeclared)
     before.from_headers = after.from_headers = True
     assert not any(
         c.kind == ChangeKind.PARAM_DEFAULT_VALUE_REMOVED
         for c in compare(before, after).changes
     )
+
+
+@pytest.mark.parametrize("default_added", [False, True])
+def test_new_required_argument_excludes_old_arity(default_added):
+    host, prev, now = (
+        pattern("int"),
+        pattern("queue&", "T*"),
+        pattern("queue&", "T*", "int"),
+    )
+    if default_added:
+        now.params[-1].default = "0"
+    findings = lost_header_overloads(snap(host, prev), snap(host, now), [])
+    assert [c.kind for c in findings] == (
+        [] if default_added else [ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED]
+    )
+
+
+@pytest.mark.parametrize("directory,removed", [("feature", True), ("other", False)])
+def test_withdrawal_needs_same_include_relative_header(directory, removed):
+    before = snap(
+        pattern("int", header="/old/include/feature/api.hpp"),
+        pattern("queue&", header="/old/include/feature/api.hpp"),
+    )
+    after = snap(pattern("int", header=f"/new/include/{directory}/api.hpp"))
+    before.ast_compile_args = ("-I/old/include",)
+    after.ast_compile_args = ("-I", "/new/include")
+    assert bool(lost_header_overloads(before, after, [])) == removed

@@ -1046,3 +1046,42 @@ def test_stored_pre_extension_inventory(reverse):
     )
     changes = _diff_sycl(fresh, legacy) if reverse else _diff_sycl(legacy, fresh)
     assert [c.symbol for c in changes] == ["sycl::pi::level_zero::piDeviceGet"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_incomplete_inventory_preserves_directional_evidence(reverse):
+    from abicheck.compare.declined_comparisons import declined_scope
+
+    partial = _make_sycl(plugins=[_make_plugin(name="opencl")])
+    partial.plugin_scan_errors = ["unreadable cuda adapter"]
+    complete = _make_sycl(plugins=[_make_plugin(name="cuda")])
+    a, b = (complete, partial) if reverse else (partial, complete)
+    with declined_scope() as gaps:
+        findings = _diff_sycl(
+            AbiSnapshot("sycl", "1", sycl=a), AbiSnapshot("sycl", "2", sycl=b)
+        )
+    [finding] = findings
+    assert finding.symbol == "sycl::pi::opencl"
+    assert finding.kind == (
+        ChangeKind.SYCL_PLUGIN_ADDED if reverse else ChangeKind.SYCL_PLUGIN_REMOVED
+    )
+    assert [g.reason for g in gaps] == ["unreadable cuda adapter"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_legacy_inventory_cannot_observe_global_table_only_ur(reverse):
+    modern = AbiSnapshot(
+        "sycl",
+        "1",
+        sycl=_make_sycl(
+            plugins=[
+                _make_ur_plugin(entry_points=["urGetGlobalProcAddrTable"]),
+                _make_ur_plugin(
+                    name="opencl", entry_points=["urGetAdapterProcAddrTable"]
+                ),
+            ]
+        ),
+    )
+    legacy = AbiSnapshot("sycl", "2", sycl=_make_sycl(), fact_generations=(92, 4, 15))
+    findings = _diff_sycl(legacy, modern) if reverse else _diff_sycl(modern, legacy)
+    assert [f.symbol for f in findings] == ["sycl::ur::opencl"]

@@ -32,13 +32,14 @@ See ADR-020b for design rationale.
 
 from __future__ import annotations
 
+from .compare.declined_comparisons import record_declined
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
 from .model.availability import FactStatus
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .model.sycl_facts import SyclMetadata
+from .model.sycl_facts import SyclMetadata, SyclPluginInfo
 
 
 def _diff_implementation(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
@@ -75,7 +76,29 @@ def _diff_pi_version(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
     return changes
 
 
-def _diff_plugins(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
+def _absence_observable(
+    inventory: SyclMetadata, modern: bool, plugin: SyclPluginInfo
+) -> bool:
+    if inventory.plugin_inventory_status is FactStatus.FAILED:
+        return False
+    if modern or plugin.interface_type != "ur":
+        return True
+    if {"urAdapterGet", "urGetAdapterProcAddrTable"}.intersection(plugin.entry_points):
+        return True
+    record_declined(
+        f"sycl::ur::{plugin.name}",
+        "legacy extractor cannot establish absence of this UR adapter",
+    )
+    return False
+
+
+def _diff_plugins(
+    old: SyclMetadata,
+    new: SyclMetadata,
+    *,
+    old_modern: bool = True,
+    new_modern: bool = True,
+) -> list[Change]:
     """Detect added/removed backend plugins.
 
     Plugins are keyed by ``(interface_type, name)`` so that a PI and UR
@@ -88,6 +111,8 @@ def _diff_plugins(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
     for key in sorted(old_keys - new_keys):
         iface, name = key
         old_plugin = old.plugin_map[key]
+        if not _absence_observable(new, new_modern, old_plugin):
+            continue
         changes.append(
             make_change(
                 ChangeKind.SYCL_PLUGIN_REMOVED,
@@ -103,6 +128,8 @@ def _diff_plugins(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
     for key in sorted(new_keys - old_keys):
         iface, name = key
         new_plugin = new.plugin_map[key]
+        if not _absence_observable(old, old_modern, new_plugin):
+            continue
         changes.append(
             make_change(
                 ChangeKind.SYCL_PLUGIN_ADDED,
@@ -264,19 +291,27 @@ def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(_diff_implementation(o, n))
     changes.extend(_diff_plugin_search_paths(o, n))
     changes.extend(_diff_runtime_version(o, n))
-    if any(m.plugin_inventory_status is FactStatus.FAILED for m in (o, n)):
-        return changes
+    for side, inventory in (("old", o), ("new", n)):
+        if inventory.plugin_scan_errors:
+            record_declined(
+                f"sycl::{side}::plugin_inventory",
+                "; ".join(inventory.plugin_scan_errors),
+            )
     # Earlier stored ELF extractions dropped every piext symbol. Its absence
     # cannot prove a change, including in the version inferred from it.
-    comparable_extensions = all(
+    old_modern, new_modern = (
         snap.fact_generations is None or snap.fact_generations[0] >= 93
         for snap in (old, new)
     )
-    if comparable_extensions or not any(
-        p.pi_extension_entry_points for metadata in (o, n) for p in metadata.plugins
+    comparable_extensions = old_modern and new_modern
+    if not (o.plugin_scan_errors or n.plugin_scan_errors) and (
+        comparable_extensions
+        or not any(
+            p.pi_extension_entry_points for metadata in (o, n) for p in metadata.plugins
+        )
     ):
         changes.extend(_diff_pi_version(o, n))
-    changes.extend(_diff_plugins(o, n))
+    changes.extend(_diff_plugins(o, n, old_modern=old_modern, new_modern=new_modern))
     changes.extend(
         _diff_plugin_entrypoints(o, n, comparable_extensions=comparable_extensions)
     )
