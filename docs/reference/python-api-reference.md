@@ -239,6 +239,7 @@ A fully-specified directory/package release-comparison *resolution* request -- t
 | `severity_addition` | `str \| None` | `None` |
 | `on_incomplete_scope` | `str` | `'warn'` |
 | `fail_on_removed_library` | `bool` | `False` |
+| `deployment_clients` | `tuple[Path, ...]` | `()` |
 
 ## `ResolvedComparePair`
 
