@@ -495,7 +495,11 @@ def _detect_newly_deleted_functions(
         ):
             continue
         f_old_any = old_all.get(mangled)
-        if f_old_any is not None and is_header_pattern(f_new) and is_header_pattern(f_old_any):
+        if (
+            f_old_any is not None
+            and is_header_pattern(f_new)
+            and is_header_pattern(f_old_any)
+        ):
             continue  # The scoped overload join handles header-only patterns.
         old_entity = old_index.entity_for(f_old_any) if f_old_any is not None else None
         if f_old_any is None:

@@ -1,0 +1,63 @@
+{
+  "verdict": "BREAKING",
+  "summary": {
+    "breaking": 9,
+    "source_breaks": 0,
+    "risk_changes": 4,
+    "compatible_additions": 14,
+    "quality_issues": 1,
+    "informational": 1,
+    "total_changes": 29,
+    "binary_compatibility_pct": 96.6,
+    "affected_pct": 3.4,
+    "change_inventory": {
+      "compatibility_changes": 29,
+      "compatibility_breaking": 9,
+      "compatibility_source_breaks": 0,
+      "compatibility_risk": 4,
+      "compatibility_compatible": 16,
+      "hygiene_introduced": 0,
+      "hygiene_resolved": 0,
+      "hygiene_persistent": 0,
+      "hygiene_not_evaluated": 0
+    }
+  },
+  "counts": {
+    "func_removed_elf_only": 3,
+    "func_added": 10,
+    "var_removed_elf_only": 4,
+    "var_added": 4,
+    "visibility_leak": 1,
+    "soname_changed": 1,
+    "imported_symbol_added": 1,
+    "unnamed_type_in_public_abi": 2,
+    "internal_template_leaks_via_public_api": 2,
+    "public_surface_grew": 1
+  },
+  "selected": [
+    {
+      "kind": "soname_changed",
+      "symbol": "DT_SONAME",
+      "description": "SONAME changed: 'libonedal_thread.so.3' \u2192 'libonedal_thread.so.4'",
+      "old_value": "libonedal_thread.so.3",
+      "new_value": "libonedal_thread.so.4",
+      "review_evidence": null,
+      "severity": "risk",
+      "operation": "modified",
+      "entity": "binary",
+      "finding_id": "a3ef464f18944319",
+      "canonical_finding_id": "274873b74dafec39",
+      "recommended_action": "verify_deployment_compatibility",
+      "evidence_status": "contextual_risk",
+      "impact": "SONAME changed. Already-compiled consumers record the old SONAME in DT_NEEDED and can fail to load unless the old SONAME remains available. The exported ABI surface may still be compatible, but deployment action is required.",
+      "reachability_state": "unknown",
+      "contract_relevance": "NOT_APPLICABLE",
+      "contract_reason_code": "non_entity_finding",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "COMPATIBLE_WITH_RISK",
+      "gate_contribution": 0,
+      "contract_evidence_refs": []
+    }
+  ]
+}

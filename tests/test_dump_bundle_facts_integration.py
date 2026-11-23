@@ -243,7 +243,9 @@ def test_each_member_is_the_libraries_own_dump(
 
 
 @pytest.mark.parametrize("project_config", [False, True])
-def test_capture_and_compare_apply_member_contexts(tmp_path: Path, project_config: bool) -> None:
+def test_capture_and_compare_apply_member_contexts(
+    tmp_path: Path, project_config: bool
+) -> None:
     from abicheck.serialization import load_bundle_facts
 
     clang = shutil.which("clang++")

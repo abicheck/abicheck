@@ -43,7 +43,7 @@ from .project_profile_routing import (
     unroutable_os_message,
 )
 from .project_targets import (
-    ProfileCompileSpec,
+    ProfileCompileSpec as ProfileCompileSpec,
     ProjectTargetsConfig,
     load_project_targets_config,
 )

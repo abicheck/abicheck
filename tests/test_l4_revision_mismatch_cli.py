@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare`` across a stored 0.13 and a live 0.14 L4 clang surface (plan b2).
+"""``compare`` across a stored 0.13 and a live L4 clang surface (plan b2).
 
 Through the real CLI: the old side is a source-only snapshot dumped while the
 clang extractor still stamped ``producer_version`` ``"0.13"`` (the constant is
-patched for that dump only); the new side is dumped at the shipped ``"0.14"``
+patched for that dump only); the new side is dumped at the shipped producer
 stamp. Oracle, from ADR-063's amendment "L4 clang payload comparability":
 
 * A1: the pair is a payload-revision mismatch, so the pinned intersection is
@@ -120,7 +120,7 @@ def test_pre_change_surface_is_withheld_not_reported(
     v1 = _side(tmp_path, "v1")
     v2 = _side(tmp_path, "v2")
     old_json = tmp_path / "old_013.src.json"
-    new_json = tmp_path / "new_014.src.json"
+    new_json = tmp_path / "new_current.src.json"
     _dump(v1, old_json, stamp="0.13", monkeypatch=monkeypatch)
     _dump(v2, new_json, stamp=_SHIPPED_STAMP, monkeypatch=monkeypatch)
 
@@ -131,7 +131,7 @@ def test_pre_change_surface_is_withheld_not_reported(
     (finding,) = report["changes"]
     assert "payload revision mismatch" in finding["description"]
     assert "old producer_version='0.13'" in finding["description"]
-    assert "new producer_version='0.14'" in finding["description"]
+    assert f"new producer_version={_SHIPPED_STAMP!r}" in finding["description"]
     assert report["analysis_assurance"]["fact_set_comparability"] == "unknown"
 
 
@@ -142,7 +142,7 @@ def test_same_revision_pair_is_comparable_and_reports_nothing(
     v1 = _side(tmp_path, "v1")
     v2 = _side(tmp_path, "v2")
     old_json = tmp_path / "old_014.src.json"
-    new_json = tmp_path / "new_014.src.json"
+    new_json = tmp_path / "new_current.src.json"
     _dump(v1, old_json, stamp=_SHIPPED_STAMP, monkeypatch=monkeypatch)
     _dump(v2, new_json, stamp=_SHIPPED_STAMP, monkeypatch=monkeypatch)
 

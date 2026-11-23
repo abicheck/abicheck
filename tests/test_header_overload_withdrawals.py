@@ -160,9 +160,9 @@ def test_conflicting_deletion_observations_do_not_prove_a_transition(conflict_si
     old, new = [host, previous], [host, current]
     (old if conflict_side == "old" else new).append(conflict)
     assert not any(
-        c.kind == ChangeKind.FUNC_DELETED for c in compare(snap(*old), snap(*new)).changes
+        c.kind == ChangeKind.FUNC_DELETED
+        for c in compare(snap(*old), snap(*new)).changes
     )
-
 
 
 @pytest.mark.parametrize("observed", [False, True])

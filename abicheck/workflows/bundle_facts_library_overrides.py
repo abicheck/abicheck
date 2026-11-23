@@ -491,8 +491,12 @@ def resolve_release_interfaces(
             continue
         name = spec["profiles"][0]
         contexts[library] = header_profile_context(
-            name, profiles, config.release_bindings, explicit=explicit,
-            library=library, base_compile=base_compile,
+            name,
+            profiles,
+            config.release_bindings,
+            explicit=explicit,
+            library=library,
+            base_compile=base_compile,
         )
     return parse_bundle_facts_library_overrides(
         roots,

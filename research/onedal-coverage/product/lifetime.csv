@@ -1,0 +1,11 @@
+case,surviving_value,deleter_calls,lane,verdict
+old,17,1,elf,NO_CHANGE
+old,17,1,headers,NO_CHANGE
+compatible,17,1,elf,NO_CHANGE
+compatible,17,1,headers,NO_CHANGE
+early_release,-1,1,elf,UNCONFIRMED
+early_release,-1,1,headers,NO_CHANGE
+missing_release,17,0,elf,UNCONFIRMED
+missing_release,17,0,headers,NO_CHANGE
+double_release,17,2,elf,UNCONFIRMED
+double_release,17,2,headers,NO_CHANGE

@@ -1,0 +1,32 @@
+{
+  "candidate_rows": 16528,
+  "kinds": {
+    "enum_decl": 454,
+    "class_decl": 512,
+    "constructor": 1496,
+    "constructor_abi_variant": 1738,
+    "by_value_arg0": 23,
+    "cxx_method": 3000,
+    "by_value_return": 2441,
+    "virtual_slot": 1817,
+    "destructor": 633,
+    "destructor_abi_variant": 1368,
+    "function_template": 522,
+    "struct_decl": 214,
+    "by_value_arg1": 8,
+    "field_decl": 549,
+    "class_template": 553,
+    "function_decl": 88,
+    "by_value_arg3": 5,
+    "by_value_arg5": 3,
+    "by_value_arg2": 1,
+    "by_value_arg4": 3,
+    "by_value_arg7": 1,
+    "by_value_arg6": 1,
+    "cxx_base_specifier": 1098
+  },
+  "provider_matched_names": 3343,
+  "matched_names_imported": 83,
+  "rows_with_edit_witness": 15,
+  "by_value_return_provider_names": 1118
+}

@@ -44,9 +44,7 @@ Public interface (everything else in this module is private):
 
 Callers import these names from here; no other module re-exports them.
 
-Dependency note: :func:`_driver_host_only_is_single_pass` consults the
-single-pass probe in :mod:`abicheck.extract.dpcpp_jobs` lazily, at call time,
-so importing this module never pulls the replay planner in.
+The SYCL selector and replay planner share the driver job vocabulary.
 """
 
 from __future__ import annotations
@@ -57,6 +55,7 @@ from pathlib import Path
 
 from .._compiler_options import split_gcc_options
 from ..errors import AstContextMissingError, SnapshotError
+from .dpcpp_jobs import sycl_host_selector
 
 #: Environment variables the compiler reads extra include directories from.
 #: They are searched after the ``-I``/``-isystem`` roots, so they change a
@@ -254,16 +253,6 @@ def _driver_host_only_is_single_pass(clang_bin: str, tokens: tuple[str, ...]) ->
     from .dpcpp_jobs import executable_revision, host_only_request_usable
 
     return host_only_request_usable(clang_bin, executable_revision(clang_bin), tokens)
-
-
-def sycl_host_selector(tokens: list[str] | tuple[str, ...]) -> str:
-    """Use the host selector supported by the configured offload driver."""
-    for token in reversed(tokens):
-        if token == "--offload-new-driver":
-            return "--offload-host-only"
-        if token == "--no-offload-new-driver":
-            break
-    return "-fsycl-host-only"
 
 
 def needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:

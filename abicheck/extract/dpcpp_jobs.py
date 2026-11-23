@@ -32,7 +32,22 @@ from pathlib import Path
 
 from ..model.execution_cache import memoized
 
-__all__ = ["executable_revision", "host_only_request_usable", "sycl_host_replay_jobs"]
+__all__ = [
+    "executable_revision",
+    "host_only_request_usable",
+    "sycl_host_replay_jobs",
+    "sycl_host_selector",
+]
+
+
+def sycl_host_selector(tokens: list[str] | tuple[str, ...]) -> str:
+    """Use the host selector supported by the configured offload driver."""
+    for token in reversed(tokens):
+        if token == "--offload-new-driver":
+            return "--offload-host-only"
+        if token == "--no-offload-new-driver":
+            break
+    return "-fsycl-host-only"
 
 
 def executable_revision(clang_bin: str) -> str:
@@ -65,7 +80,6 @@ def _host_only_single_pass(
     clang_bin: str, identity: str, tokens: tuple[str, ...]
 ) -> bool:
     del identity  # keys the memo on the executable's content
-    from .compiler_driver import sycl_host_selector
 
     cmd = [clang_bin, *tokens, "-fsycl", sycl_host_selector(tokens)]
     cmd += ["-fsyntax-only", "-x", "c++", "-"]

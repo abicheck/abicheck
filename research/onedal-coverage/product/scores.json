@@ -1,0 +1,16 @@
+{
+  "elf": {
+    "break_abstained": 4,
+    "control_accepted": 4,
+    "break_detected": 2,
+    "control_abstained": 2
+  },
+  "headers": {
+    "break_detected": 8,
+    "control_accepted": 9
+  },
+  "single_provider_vs_package_oracle": {
+    "control_false_alarm": 1,
+    "break_detected": 1
+  }
+}

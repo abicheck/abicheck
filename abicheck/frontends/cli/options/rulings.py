@@ -450,13 +450,9 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "path key.",
         blocker="G29/ADR-057 attribution surface (`use_cases:` block)",
     ),
-    "--bundle-facts-library-manifest": _deferred(
-        "Ruled in Phase 7d and re-affirmed: its per-library header/include/"
-        "compile-context override shape has no existing .abicheck.yml home "
-        "-- `bundle: {system_providers, cohorts}` is an unrelated concept "
-        "-- and inventing one now would be exactly the ad hoc plumbing "
-        "guard 2 rules out.",
-        blocker="G42 (named deployment environments and provider resolution)",
+    "--bundle-facts-library-manifest": _keep(
+        "Explicit per-run manifest operand overriding release.libraries for "
+        "a stored baseline comparison or release capture."
     ),
 }
 
@@ -467,6 +463,9 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
 #: points at ``compare``'s rather than restating it, and the two must move
 #: together.
 DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
+    "--bundle-facts-library-manifest": COMPARE_OPTION_RULINGS[
+        "--bundle-facts-library-manifest"
+    ],
     "--variant": _keep(
         "Same ruling as `compare --variant` (ADR-062 A1.7), for the one "
         "operand a `--bundle-facts-out` capture reads: which VariantRef of a "

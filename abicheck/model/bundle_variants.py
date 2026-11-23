@@ -79,7 +79,13 @@ DECLARED_COORDINATE_KEYS = ("target_triple", "compiler_family")
 
 #: Every key a variant entry may carry.
 VARIANT_SPEC_KEYS = frozenset(
-    {"target_triple", "compiler_family", "feature_toggles", "required", "header_profile"}
+    {
+        "target_triple",
+        "compiler_family",
+        "feature_toggles",
+        "required",
+        "header_profile",
+    }
 )
 
 # A variant name becomes a literal filename (`refs/variants/<name>.json`), so
