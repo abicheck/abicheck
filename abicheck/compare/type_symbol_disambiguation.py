@@ -283,7 +283,7 @@ def attribute_scoped_types(
     type_to_funcs: dict[str, set[str]],
     type_to_mangled: dict[str, set[str]],
     type_embeds: dict[str, set[str]],
-) -> None:
+) -> AmbiguousTypeNames:
     """Attribute the affected types :func:`disambiguate_type_symbols`
     labelled with a qualified spelling, by scope rather than by substring.
 
@@ -297,7 +297,7 @@ def attribute_scoped_types(
     names = ambiguous_type_spellings(old, new)
     scoped = {k for k in affected_types if k in names.by_entity.values()}
     if not scoped:
-        return
+        return names
     for func in old_pub.values():
         scope = function_scope(func.name, func.mangled)
         refs = [func.return_type, *(p.type for p in func.params)]
@@ -314,3 +314,4 @@ def attribute_scoped_types(
         for fld in t.fields:
             for key in scoped_type_mentions(fld.type, scope, names) & scoped:
                 type_embeds.setdefault(key, set()).add(parent)
+    return names

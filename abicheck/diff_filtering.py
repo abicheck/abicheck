@@ -507,9 +507,13 @@ def _enrich_affected_symbols(
 
     # Also check if types are embedded in struct fields used by functions (Container has a Leaf field → functions taking Container* are affected).
     type_embeds = _build_type_embed_index(affected_types, old, matcher)
-    from .compare.type_symbol_disambiguation import attribute_scoped_types
+    from .compare.type_symbol_disambiguation import (
+        attribute_scoped_types,
+        function_scope,
+        resolve_in_scope,
+    )
 
-    attribute_scoped_types(
+    names = attribute_scoped_types(
         affected_types, old, new, old_pub, type_to_funcs, type_to_mangled, type_embeds
     )
 
@@ -545,6 +549,16 @@ def _enrich_affected_symbols(
                 .removeprefix("struct ")
                 .removeprefix("class ")
             )
+            if names and name.rsplit("::", 1)[-1] in names.spellings:
+                name = (
+                    resolve_in_scope(
+                        name.removeprefix("::"),
+                        function_scope(fn.name, fn.mangled),
+                        names,
+                        absolute=name.startswith("::"),
+                    )
+                    or name
+                )
             if name in affected_types and fn.mangled in type_to_mangled.get(name, ()):
                 roles.setdefault(name, {}).setdefault(fn.mangled, []).append(role)
     for change in type_changes:

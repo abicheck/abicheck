@@ -154,7 +154,7 @@ def run(old, new, output):
                 f"json={report}",
             ]
             completed = subprocess.run(command, capture_output=True, text=True)
-            if not report.is_file():
+            if completed.returncode not in (0, 1, 2, 4) or not report.is_file():
                 raise RuntimeError((command, completed.returncode, completed.stderr))
             data = json.loads(report.read_text())
             kinds = sorted({c["kind"] for c in data["changes"]})
@@ -164,6 +164,7 @@ def run(old, new, output):
                     name,
                     "adapter_elf",
                     variants[name][1],
+                    completed.returncode,
                     data["verdict"],
                     " ".join(kinds),
                 )
@@ -212,7 +213,15 @@ def run(old, new, output):
     with (output / "return-scans.csv").open("w", newline="") as stream:
         writer = csv.writer(stream, lineterminator="\n")
         writer.writerow(
-            ["family", "variant", "lane", "client_exit", "checker", "findings"]
+            [
+                "family",
+                "variant",
+                "lane",
+                "client_exit",
+                "compare_exit",
+                "checker",
+                "findings",
+            ]
         )
         writer.writerows(scan_rows)
 

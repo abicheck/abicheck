@@ -439,12 +439,17 @@ class _DwarfSnapshotBuilder:
         )
         if not unresolved:
             return ()
-        names = {name: name for name in unresolved}
+        names = {name: name for name in unresolved if "::" in name}
         # A short spelling can be matched only when it identifies one record.
 
         for name, short in self._declaration_only.items():
             if name in unresolved and self._record_leaf_owner.get(short) == name:
                 names.setdefault(short, name)
+
+        aliases: dict[str, str | None] = {}
+        for alias in self.typedefs:
+            leaf = alias.rsplit("::", 1)[-1]
+            aliases[leaf] = None if leaf in aliases else alias
 
         findings = set()
         for func in self.functions:
@@ -452,8 +457,15 @@ class _DwarfSnapshotBuilder:
                 ("return", func.return_type),
                 *[(f"parameter {i}", arg.type) for i, arg in enumerate(func.params)],
             ]:
-                bare = spelling.removeprefix("const ").rstrip(" &*")
-                record = names.get(self.typedefs.get(bare, bare))
+                bare = _strip_type_decorators(spelling)
+                seen = set()
+                while bare not in seen:
+                    seen.add(bare)
+                    alias = bare if "::" in bare else aliases.get(bare)
+                    if alias is None or alias not in self.typedefs:
+                        break
+                    bare = _strip_type_decorators(self.typedefs[alias])
+                record = names.get(bare)
                 if record:
                     findings.add(
                         f"{func.name} {role}: DWARF only declares {record}; "
