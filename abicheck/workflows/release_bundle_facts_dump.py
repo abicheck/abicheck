@@ -144,7 +144,7 @@ def dump_release_bundle_facts(
         key_of = {path: key for key, path in members.items()}
 
         overrides = None
-        if request.config_path is not None:
+        if request.depth != "binary" and request.config_path is not None:
             parsed = resolve_release_interfaces(
                 None,
                 load_build_config(request.config_path),
@@ -154,9 +154,7 @@ def dump_release_bundle_facts(
                 members=members,
                 base_compile=request.compile_context,
             )
-            if request.depth != "binary" and (
-                parsed.headers or parsed.includes or parsed.compile
-            ):
+            if parsed.headers or parsed.includes or parsed.compile:
                 overrides = parsed
 
         def _dump_member(path: Path) -> StrandedLibraryResolution:

@@ -292,6 +292,7 @@ def lost_header_overloads(
                     eid is None
                     or eid not in removed
                     or eid in reported
+                    or fn.is_deleted
                     or eid in all_new
                     or fn.mangled in uncertain_leaves
                     or fn.source_header not in observed_headers
@@ -322,10 +323,18 @@ def lost_header_overloads(
             or not is_header_pattern(current)
             or previous.mangled in uncertain_leaves
             or not _fixed_arity(previous)
-            or not all(_fixed_arity(f) for f in rhs)
+            or not all(_fixed_arity(f) for f in rhs if not f.is_deleted)
         ):
             continue
-        accepted = {n for fn in rhs for n in _arities(fn)}
+        # Conflicting observations of one old declaration cannot prove which
+        # call forms the consumer saw. Ignore their traversal order.
+        if any(
+            fn.is_deleted or not _fixed_arity(fn) or _arities(fn) != _arities(previous)
+            for fn in lhs
+            if fn.entity_id == previous.entity_id
+        ):
+            continue
+        accepted = {n for fn in rhs if not fn.is_deleted for n in _arities(fn)}
         lost = sorted(set(_arities(previous)) - accepted)
         if not lost:
             continue

@@ -303,7 +303,7 @@ def _compare_stored_against_live(
             per_library_includes: dict[str, list[Path]] | None = None
             per_library_compile: dict[str, Any] | None = None
             if request.bundle_facts_library_manifest is not None or (
-                cfg and cfg.release_libraries
+                request.depth != "binary" and cfg and cfg.release_libraries
             ):
                 new_library_paths = known_libraries_for_new_side(
                     lib_dir,

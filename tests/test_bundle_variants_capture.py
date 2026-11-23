@@ -805,3 +805,36 @@ def test_same_elf_has_distinct_consumer_profiles(tmp_path: Path) -> None:
         )
         functions = facts.per_library_snapshots["libapi.so"].declarations.functions
         assert {fn.name for fn in functions} & {"host_api", "queue_api"} == {expected}
+
+
+@pytest.mark.parametrize("required", [True, False])
+def test_snapshot_cannot_supply_variant_header_profile(tmp_path, required):
+    cfg = _config(tmp_path)
+    cfg.write_text(
+        cfg.read_text().replace(
+            "required: false",
+            f"required: {str(required).lower()}\n    header_profile: cpu",
+        )
+        + "profiles: {cpu: {compile: {frontend: clang}}}\n"
+    )
+    inputs = _write_inputs(tmp_path / "inputs", ["foo"])
+    pkg = tmp_path / "pkg"
+    code, out = _run(
+        "project",
+        "capture-variants",
+        "--config",
+        str(cfg),
+        "--variant",
+        f"x86={inputs}",
+        "--variant",
+        f"arm={inputs}",
+        "--package",
+        str(pkg),
+    )
+    assert "header_profile requires live libraries" in out
+    if required:
+        assert code != 0
+        assert not pkg.exists()
+    else:
+        assert code == 0, out
+        assert read_manifest_summary(pkg).variant_ids == ("x86",)

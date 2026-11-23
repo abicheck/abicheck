@@ -195,3 +195,31 @@ class TestOverloadMatchingProperties:
                 assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in {
                     c.kind for c in compare(before, after).changes
                 }
+
+
+def test_old_arity_conflict_is_inconclusive_in_both_orders():
+    host = pattern("int", "int", "int")
+    required, defaulted = (pattern("queue&", "events") for _ in range(2))
+    defaulted.params[-1].default = "{}"
+    new = snap(host, pattern("queue&", "int"))
+    for declarations in permutations([required, defaulted]):
+        assert not lost_header_overloads(snap(host, *declarations), new, [])
+
+
+def test_withdrawing_already_deleted_overload():
+    host, deleted = pattern("int"), pattern("queue&")
+    deleted.is_deleted = True
+    assert not lost_header_overloads(snap(host, deleted), snap(host), [])
+
+
+def test_deleted_replacement_cannot_accept_old_arity():
+    host, old, new = (
+        pattern("int"),
+        pattern("queue&", "T*"),
+        pattern("queue&", "T*", "int"),
+    )
+    new.params[-1].default = "0"
+    new.is_deleted = True
+    [finding] = lost_header_overloads(snap(host, old), snap(host, new), [])
+    assert finding.kind == ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED
+    assert finding.entity_id == old.entity_id

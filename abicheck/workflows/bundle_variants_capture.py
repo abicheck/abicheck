@@ -259,6 +259,11 @@ def plan_variant_capture(
                 libraries = _discover(given.path)
             except (AbicheckError, ValueError, OSError) as exc:
                 reason = f"no capturable input under {given.path}: {exc}"
+        if reason is None and given is not None and spec.header_profile is not None:
+            if not given.headers or any(
+                _is_snapshot_file(p) for p in libraries.values()
+            ):
+                reason = "header_profile requires live libraries and --variant-header"
         if reason is None and given is not None:
             if spec.header_profile is not None:
                 from .bundle_facts_library_overrides import header_profile_context
@@ -274,12 +279,6 @@ def plan_variant_capture(
                     )
                 except ValueError as exc:
                     raise VariantCaptureError(str(exc)) from exc
-                if not given.headers or any(
-                    _is_snapshot_file(p) for p in libraries.values()
-                ):
-                    raise VariantCaptureError(
-                        f"{spec.name}: header_profile requires live libraries and --variant-header"
-                    )
                 given = dataclasses.replace(given, compile=context)
             planned.append(PlannedVariant(spec, given, libraries))
         elif spec.required:
