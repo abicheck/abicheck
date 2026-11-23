@@ -925,7 +925,48 @@ library outside the bundle (a typo, or a library that was renamed/removed)
 is a hard error, not a silent no-op. Relative headers and include roots resolve beside each manifest. On
 `compare`, pass this option with a stored OLD baseline and a live NEW release.
 
-For one checked-in configuration shared across unpacked releases, put the
+### One project config and one release baseline
+
+For an unpacked SDK, describe each library's header interface in
+`.abicheck.yml`. A library can select one named profile. Its nonempty
+`consumer_compile` (otherwise its `compile`) overlays the common compile
+context. When a profile selects a compiler executable via a binding, pass
+the config explicitly to authorize its use.
+
+```yaml
+profiles:
+  cpu:
+    compile: {frontend: gcc, binding: gcc14, standard: c++17}
+  dpc:
+    compile:
+      frontend: clang
+      binding: intel
+      standard: c++17
+      abi_macros: {ONEDAL_DATA_PARALLEL: "1"}
+      args: [-fsycl]
+release:
+  bindings: {gcc14: g++-14, intel: icpx}
+  libraries:
+    libonedal_parameters.so:
+      profiles: [cpu]
+      headers: [include/oneapi/dal/algo/covariance/parameters/cpu/compute_parameters.hpp]
+      includes: [include]
+    libonedal_parameters_dpc.so:
+      profiles: [dpc]
+      headers: [include/oneapi/dal/algo/covariance/parameters/gpu/compute_parameters.hpp]
+      includes: [include]
+```
+
+```bash
+abicheck dump sdk-old --config .abicheck.yml --bundle-facts-out baseline.json
+abicheck compare baseline.json sdk-new --config .abicheck.yml
+```
+
+Relative headers and includes resolve under the SDK being scanned.
+An explicit `--bundle-facts-library-manifest` replaces the complete
+`release.libraries` mapping for that invocation.
+
+For a standalone manifest shared across unpacked releases, put the
 same mapping under `libraries:` and set `schema: abicheck.release-interfaces/v1`
 at the top level. Pass the release root to both commands and the same
 manifest path to both. Relative headers, includes and sysroots then resolve

@@ -99,6 +99,7 @@ def run_dump_bundle_facts(
     *,
     variant: str | None = None,
     library_manifest: Path | None = None,
+    config_explicit: bool = False,
     unapplied: Mapping[str, object],
     headers: tuple[Path, ...],
     includes: tuple[Path, ...],
@@ -123,7 +124,9 @@ def run_dump_bundle_facts(
         ReleaseOperandUsageError,
         SnapshotError,
     )
-    from ....workflows.bundle_facts_library_overrides import BundleFactsLibraryOverridesError
+    from ....workflows.bundle_facts_library_overrides import (
+        BundleFactsLibraryOverridesError,
+    )
     from ....workflows.release_bundle_facts_dump import (
         ReleaseBundleFactsDumpRequest,
         dump_release_bundle_facts,
@@ -163,6 +166,8 @@ def run_dump_bundle_facts(
         exclude_headers=exclude_headers,
         variant=variant,
         library_manifest=library_manifest,
+        config_path=config_path,
+        config_explicit=config_explicit,
     )
     try:
         result = dump_release_bundle_facts(

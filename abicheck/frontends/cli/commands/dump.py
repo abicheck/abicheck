@@ -475,14 +475,14 @@ def dump_cmd(
     # linker-script "Note:" echo) rather than follow_linker_script,
     # matching dry-run's own "cheap, read-only resolution only" contract;
     # the real path below still calls follow_linker_script itself for
-    # that echo and the so_path reassignment (a no-op re-validation once
-    # this has already passed).
+    # that echo and the so_path reassignment.
     if bundle_facts_out or variant is not None or bundle_facts_library_manifest:
         return run_dump_bundle_facts(
             so_path,
             bundle_facts_out,
             variant=variant,
             library_manifest=bundle_facts_library_manifest,
+            config_explicit=_project.explicit,
             unapplied={"output": output, "dry_run": dry_run, "sources": sources}
             | {"dump_manifest_path": dump_manifest_path, "build_info": build_info}
             | {"debug_roots": debug_roots, "provenance": provenance}

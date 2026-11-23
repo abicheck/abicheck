@@ -35,13 +35,29 @@ this profile's own RunPlanCheck fields" cluster.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 from .project_profile_routing import (
     DEFAULT_PROFILE_RUNNER_LABEL,
     runner_label_for_os,
     unroutable_os_message,
 )
-from .project_targets import ProfileCompileSpec, ProjectTargetsConfig
+from .project_targets import (
+    ProfileCompileSpec,
+    ProjectTargetsConfig,
+    load_project_targets_config,
+)
+
+
+def release_header_profiles(path: Path) -> dict[str, ProfileCompileSpec | None]:
+    """Select the header compiler overlay for each profile in a release scan."""
+    profiles = load_project_targets_config(path).profiles
+    return {
+        name: profile.consumer_compile
+        if profile.consumer_compile and not profile.consumer_compile.is_empty
+        else profile.compile
+        for name, profile in profiles.items()
+    }
 
 
 def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:

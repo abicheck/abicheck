@@ -242,7 +242,8 @@ def test_each_member_is_the_libraries_own_dump(
         assert _strip(member) == _strip(load_snapshot(alone)), key
 
 
-def test_capture_and_compare_apply_member_contexts(tmp_path: Path) -> None:
+@pytest.mark.parametrize("project_config", [False, True])
+def test_capture_and_compare_apply_member_contexts(tmp_path: Path, project_config: bool) -> None:
     from abicheck.serialization import load_bundle_facts
 
     clang = shutil.which("clang++")
@@ -269,6 +270,33 @@ def test_capture_and_compare_apply_member_contexts(tmp_path: Path) -> None:
     )
     baseline = tmp_path / "base.json"
     flags = ["--bundle-facts-library-manifest", str(manifest)]
+    if project_config:
+        config = tmp_path / ".abicheck.yml"
+        config.write_text(
+            json.dumps(
+                {
+                    "profiles": {
+                        lib: {
+                            "compile": {
+                                "frontend": "clang",
+                                "binding": "llvm",
+                                "abi_macros": {"PROFILE": str(profile)},
+                            }
+                        }
+                        for lib, profile in [("a", 1), ("b", 2)]
+                    },
+                    "release": {
+                        "bindings": {"llvm": clang},
+                        "libraries": {
+                            f"lib{lib}.so": {"headers": ["api.hpp"], "profiles": [lib]}
+                            for lib in ("a", "b")
+                        },
+                    },
+                }
+            )
+        )
+        (libs / "api.hpp").write_bytes((tmp_path / "api.hpp").read_bytes())
+        flags = ["--config", str(config)]
     captured = _invoke("dump", str(libs), "--bundle-facts-out", str(baseline), *flags)
     assert captured.exit_code == 0, captured.output
     facts = load_bundle_facts(baseline)
@@ -278,10 +306,14 @@ def test_capture_and_compare_apply_member_contexts(tmp_path: Path) -> None:
         ("libb.so", {"queue_only"}),
         ("libc.so", set()),
     ]:
-        found = {f.name for f in facts.per_library_snapshots[key].declarations.functions}
+        found = {
+            f.name for f in facts.per_library_snapshots[key].declarations.functions
+        }
         assert found & {"cpu_only", "queue_only"} == expected
     report = tmp_path / "report.json"
-    compared = _invoke("compare", str(baseline), str(libs), *flags, "-o", f"json={report}")
+    compared = _invoke(
+        "compare", str(baseline), str(libs), *flags, "-o", f"json={report}"
+    )
     assert compared.exit_code == 0, compared.output
     result = json.loads(report.read_text())
     assert len(result["libraries"]) == 3

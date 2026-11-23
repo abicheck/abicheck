@@ -70,6 +70,8 @@ class ReleaseBundleFactsDumpRequest:
     #: A stored ``ProjectSnapshot`` package's variant, when it has several.
     variant: str | None = None
     library_manifest: Path | None = None
+    config_path: Path | None = None
+    config_explicit: bool = False
 
 
 @dataclass(frozen=True)
@@ -94,8 +96,8 @@ def dump_release_bundle_facts(
     errors unchanged.
     """
     from ..errors import ReleaseOperandContentError
-    from .bundle_facts_library_overrides import load_bundle_facts_library_overrides
-    from .extraction import ast_acquisition_scope
+    from .bundle_facts_library_overrides import resolve_release_interfaces
+    from .extraction import ast_acquisition_scope, load_build_config
     from .no_baseline_set import (
         cleanup_no_baseline_set_plan,
         resolve_no_baseline_set_plan,
@@ -143,12 +145,15 @@ def dump_release_bundle_facts(
         key_of = {path: key for key, path in members.items()}
 
         overrides = None
-        if request.library_manifest is not None:
-            parsed = load_bundle_facts_library_overrides(
+        if request.library_manifest is not None or request.config_path is not None:
+            parsed = resolve_release_interfaces(
                 request.library_manifest,
+                load_build_config(request.config_path),
+                request.config_path,
+                explicit=request.config_explicit,
                 release_dir=request.operand,
-                known_libraries=set(members),
-                selected_paths=members,
+                members=members,
+                base_compile=request.compile_context,
             )
             if request.depth != "binary" and (
                 parsed.headers or parsed.includes or parsed.compile
