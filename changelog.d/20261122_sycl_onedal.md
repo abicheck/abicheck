@@ -9,3 +9,4 @@
 
 - An optional abiforge campaign exercises host and queue consumers against the oneDAL SDK and checks grouped overload removals with the public CLI.
 - Capture and compare one mixed-toolchain SDK baseline using profiles and per-library header roots in the main project config.
+- Capture multiple consumer views of one shared object in one variant package by selecting a named header profile for each variant.

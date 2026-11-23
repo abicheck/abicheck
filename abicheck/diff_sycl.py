@@ -164,6 +164,11 @@ def _diff_plugin_entrypoints(
         old_eps = set(old_plugin.entry_points)
         new_eps = set(new_plugin.entry_points)
         if not comparable_extensions:
+            if key[0] == "pi":
+                record_declined(
+                    f"sycl::pi::{name}::extensions",
+                    "extractor generations before 93 omit PI extension entry points",
+                )
             old_eps -= old_plugin.pi_extension_entry_points
             new_eps -= new_plugin.pi_extension_entry_points
         iface = new_plugin.interface_type.upper()  # "PI" or "UR"
@@ -304,13 +309,16 @@ def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for snap in (old, new)
     )
     comparable_extensions = old_modern and new_modern
-    if not (o.plugin_scan_errors or n.plugin_scan_errors) and (
-        comparable_extensions
-        or not any(
-            p.pi_extension_entry_points for metadata in (o, n) for p in metadata.plugins
-        )
-    ):
+    version_limited = not comparable_extensions and any(
+        p.pi_extension_entry_points for metadata in (o, n) for p in metadata.plugins
+    )
+    if not (version_limited or o.plugin_scan_errors or n.plugin_scan_errors):
         changes.extend(_diff_pi_version(o, n))
+    elif version_limited:
+        record_declined(
+            "sycl::pi::version",
+            "extractor generations before 93 omit PI extensions used to infer the version",
+        )
     changes.extend(_diff_plugins(o, n, old_modern=old_modern, new_modern=new_modern))
     changes.extend(
         _diff_plugin_entrypoints(o, n, comparable_extensions=comparable_extensions)

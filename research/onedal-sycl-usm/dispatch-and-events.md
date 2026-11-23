@@ -177,3 +177,23 @@ both sides. One declaration changes its deletion flag. The checker uses
 its scoped signature to attribute `func_deleted` to the queue overload.
 Comparing both headers against the same packaged `libonedal_dpc.so.3`
 returns `API_BREAK`. This verifies source callability on the host compiler.
+
+### Two header compilers on the same oneDAL shared object
+
+With the 2025.9.0 SDK, both captures used the same
+`libonedal_parameters_dpc.so.3` binary and scanned
+`oneapi/dal/detail/parameters/system_parameters.hpp`. The candidate header
+removed `system_parameters::get_max_workgroup_size(sycl::queue&) const`.
+Each release was captured into one ProjectSnapshot package. Its two
+variants referenced the GCC 14.2 and Intel DPC++ 2025.0.4 header profiles.
+The Intel scan used the SYCL host context and a precompiled SYCL header.
+
+| Selected consumer | Unchanged control, member verdict | Modified header, member verdict | Source breaks |
+|---|---|---|---:|
+| GCC, CPU headers | NO_CHANGE | NO_CHANGE | 0 |
+| icpx, ONEDAL_DATA_PARALLEL | NO_CHANGE | API_BREAK | 1 |
+
+The whole-release control returned COMPATIBLE_WITH_RISK for both profiles.
+For example, the CPU control reported 74 exports outside the single
+scanned header. These counts describe the deliberately narrow header scope.
+See the [capture and comparison commands](../../docs/use/multi-binary.md#capturing-two-consumer-profiles-of-one-shared-library).

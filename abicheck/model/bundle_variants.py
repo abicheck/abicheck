@@ -79,7 +79,7 @@ DECLARED_COORDINATE_KEYS = ("target_triple", "compiler_family")
 
 #: Every key a variant entry may carry.
 VARIANT_SPEC_KEYS = frozenset(
-    {"target_triple", "compiler_family", "feature_toggles", "required"}
+    {"target_triple", "compiler_family", "feature_toggles", "required", "header_profile"}
 )
 
 # A variant name becomes a literal filename (`refs/variants/<name>.json`), so
@@ -115,6 +115,7 @@ class BundleVariantSpec:
     compiler_family: str
     feature_toggles: Mapping[str, str] = field(default_factory=dict)
     required: bool = True
+    header_profile: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -129,6 +130,7 @@ class BundleVariantSpec:
             "target_triple": self.target_triple,
             "compiler_family": self.compiler_family,
             **self.feature_toggles,
+            **({"header_profile": self.header_profile} if self.header_profile else {}),
         }
 
 
@@ -198,6 +200,11 @@ def _entry_findings(name: str, entry: object) -> list[str]:
                 f"{where}.{key} must be a non-empty string, got "
                 f"{type(entry[key]).__name__}: {entry[key]!r}"
             )
+    if "header_profile" in entry and (
+        not isinstance(entry["header_profile"], str)
+        or not entry["header_profile"].strip()
+    ):
+        findings.append(f"{where}.header_profile must be a non-empty profile name")
     if "required" in entry and not isinstance(entry["required"], bool):
         findings.append(
             f"{where}.required must be a boolean, got "
@@ -216,7 +223,9 @@ def _entry_findings(name: str, entry: object) -> list[str]:
             findings.append(
                 f"{where}.feature_toggles: key must be a non-empty string, got {key!r}"
             )
-        elif key in DECLARED_COORDINATE_KEYS:
+        elif key in DECLARED_COORDINATE_KEYS or (
+            key == "header_profile" and key in entry
+        ):
             findings.append(
                 f"{where}.feature_toggles.{key} collides with the fixed "
                 f"'{key}' coordinate"
@@ -276,6 +285,7 @@ def parse_bundle_variants(raw: Any) -> BundleVariantsConfig:
                     key: str(_toggle_value(value)) for key, value in toggles.items()
                 },
                 required=entry.get("required", True),
+                header_profile=entry.get("header_profile"),
             )
         )
     return BundleVariantsConfig(variants=tuple(variants))

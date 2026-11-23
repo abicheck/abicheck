@@ -1046,3 +1046,39 @@ result = compare_bundle_from_facts(old_facts, new, per_library_results)
   `case91_bundle_intra_signature_drift` — extern-C signature drift,
   `case92_bundle_provider_changed` — provider migration,
   `case93_bundle_manifest_drift` — manifest drift
+
+### Capturing two consumer profiles of one shared library
+
+Use a multi-variant ProjectSnapshot package when two supported header
+compilers consume the **same binary**. Keep the `profiles` and
+`release.bindings` from the oneDAL example above. Add these entries to
+the same project config. `compiler_family` describes the binary producer.
+`header_profile` selects the compiler, flags and macros for the header scan.
+
+```yaml
+bundle_variants:
+  host:
+    target_triple: x86_64-linux-gnu
+    compiler_family: intel
+    header_profile: cpu
+  sycl:
+    target_triple: x86_64-linux-gnu
+    compiler_family: intel
+    header_profile: dpc
+```
+
+```bash
+for side in old new; do
+    sdk="sdk-$side"
+    so="$sdk/lib/libonedal_parameters_dpc.so.3"
+    hdr="$sdk/include/oneapi/dal/detail/parameters/system_parameters.hpp"
+    abicheck project capture-variants --config .abicheck.yml --package "$side.package" \
+        --variant "host=$so" --variant "sycl=$so" \
+        --variant-header "host=$hdr" --variant-header "sycl=$hdr" \
+        --variant-include "host=$sdk/include" --variant-include "sycl=$sdk/include"
+done
+abicheck compare old.package new.package --variant old=host --variant new=host
+abicheck compare old.package new.package --variant old=sycl --variant new=sycl
+```
+
+Each package contains both views. Each compare evaluates the selected pair.

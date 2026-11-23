@@ -1044,7 +1044,12 @@ def test_stored_pre_extension_inventory(reverse):
             ],
         ),
     )
-    changes = _diff_sycl(fresh, legacy) if reverse else _diff_sycl(legacy, fresh)
+    from abicheck.compare.declined_comparisons import declined_scope
+
+    with declined_scope() as gaps:
+        changes = _diff_sycl(fresh, legacy) if reverse else _diff_sycl(legacy, fresh)
+    assert {g.entity for g in gaps} == {"sycl::pi::version", "sycl::pi::level_zero::extensions"}
+    assert all("93" in g.reason for g in gaps)
     assert [c.symbol for c in changes] == ["sycl::pi::level_zero::piDeviceGet"]
 
 

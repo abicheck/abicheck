@@ -162,3 +162,14 @@ def test_conflicting_deletion_observations_do_not_prove_a_transition(conflict_si
     assert not any(
         c.kind == ChangeKind.FUNC_DELETED for c in compare(snap(*old), snap(*new)).changes
     )
+
+
+
+@pytest.mark.parametrize("observed", [False, True])
+def test_arity_change_requires_observing_original_header(observed):
+    old = snap(pattern("int"), pattern("queue&", "T*"))
+    new = snap(
+        pattern("int", header="table.hpp" if observed else "other.hpp"),
+        pattern("queue&", "T*", "int", header="other.hpp"),
+    )
+    assert bool(lost_header_overloads(old, new, [])) is observed

@@ -316,6 +316,7 @@ def lost_header_overloads(
         current = new_by_id[next(iter(added))]
         if (
             previous.entity_id in reported
+            or previous.source_header not in observed_headers
             or previous.is_deleted
             or not is_header_pattern(previous)
             or not is_header_pattern(current)

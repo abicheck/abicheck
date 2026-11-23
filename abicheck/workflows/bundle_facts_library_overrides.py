@@ -54,6 +54,7 @@ from ..compile_context import CompileContext
 from ..model.yaml_strict import load_strict_yaml
 
 if TYPE_CHECKING:
+    from ..buildsource.run_plan_profile_fields import ProfileCompileSpec
     from .extraction import BuildConfig
 
 #: Recognized keys inside one library's own mapping. The compile-context
@@ -417,6 +418,43 @@ def load_bundle_facts_library_overrides(
     )
 
 
+def header_profile_context(
+    name: str,
+    profiles: Mapping[str, ProfileCompileSpec | None],
+    bindings: Mapping[str, str],
+    *,
+    explicit: bool,
+    library: str,
+    base_compile: CompileContext | None = None,
+) -> CompileContext:
+    """Resolve a selected header profile with the operator's trusted bindings."""
+    if name not in profiles:
+        raise BundleFactsLibraryOverridesError(f"{library}: unknown profile {name!r}")
+    overlay = profiles[name]
+    base = base_compile or CompileContext()
+    if overlay is None:
+        return base
+    compiler = base.gcc_path
+    if overlay.binding:
+        if not explicit:
+            raise BundleFactsLibraryOverridesError(
+                f"{library}: compiler binding requires explicit --config"
+            )
+        compiler = bindings.get(overlay.binding)
+        if not compiler or not compiler.strip():
+            raise BundleFactsLibraryOverridesError(
+                f"{library}: unresolved release.bindings.{overlay.binding}"
+            )
+    return replace(
+        base,
+        gcc_path=compiler,
+        gcc_prefix=None if overlay.binding else base.gcc_prefix,
+        frontend=overlay.frontend or base.frontend,
+        gcc_option_tokens=base.gcc_option_tokens
+        + tuple(_compose_gcc_options(overlay).split()),
+    )
+
+
 def resolve_release_interfaces(
     manifest: Path | None,
     config: BuildConfig | None,
@@ -452,33 +490,9 @@ def resolve_release_interfaces(
         if "profiles" not in spec:
             continue
         name = spec["profiles"][0]
-        if name not in profiles:
-            raise BundleFactsLibraryOverridesError(
-                f"{library}: unknown profile {name!r}"
-            )
-        overlay = profiles[name]
-        base = base_compile or CompileContext()
-        if overlay is None:
-            contexts[library] = base
-            continue
-        compiler = base.gcc_path
-        if overlay.binding:
-            if not explicit:
-                raise BundleFactsLibraryOverridesError(
-                    f"{library}: compiler binding requires explicit --config"
-                )
-            compiler = config.release_bindings.get(overlay.binding)
-            if not compiler or not compiler.strip():
-                raise BundleFactsLibraryOverridesError(
-                    f"{library}: unresolved release.bindings.{overlay.binding}"
-                )
-        contexts[library] = replace(
-            base,
-            gcc_path=compiler,
-            gcc_prefix=None if overlay.binding else base.gcc_prefix,
-            frontend=overlay.frontend or base.frontend,
-            gcc_option_tokens=base.gcc_option_tokens
-            + tuple(_compose_gcc_options(overlay).split()),
+        contexts[library] = header_profile_context(
+            name, profiles, config.release_bindings, explicit=explicit,
+            library=library, base_compile=base_compile,
         )
     return parse_bundle_facts_library_overrides(
         roots,
