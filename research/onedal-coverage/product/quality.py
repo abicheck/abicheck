@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 
 def quality():
     groups = defaultdict(Counter)
-    for file in ("contracts.csv", "visitor.csv", "lifetime.csv"):
+    for file in ("contracts.csv", "visitor.csv", "lifetime.csv", "return-scans.csv"):
         with (ROOT / file).open() as stream:
             for row in csv.DictReader(stream):
                 family = row.get("family", Path(file).stem)

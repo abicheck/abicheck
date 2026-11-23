@@ -1,0 +1,7 @@
+family,variant,lane,client_exit,checker,findings
+table,forward,adapter_elf,0,NO_CHANGE,
+table,borrow,adapter_elf,11,UNCONFIRMED,imported_symbol_added needed_added runtime_floor_raised symbol_version_required_added
+table,extra_owner,adapter_elf,12,UNCONFIRMED,imported_symbol_added needed_added runtime_floor_raised symbol_version_required_added
+status,forward,adapter_elf,0,NO_CHANGE,
+status,swallow_error,adapter_elf,20,UNCONFIRMED,imported_symbol_added needed_added runtime_floor_raised symbol_version_required_added
+status,reject_success,adapter_elf,23,UNCONFIRMED,imported_symbol_added needed_added runtime_floor_raised symbol_version_required_added

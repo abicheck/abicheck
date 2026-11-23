@@ -43,3 +43,14 @@ Run bash status_clear.sh OLD_PREFIX NEW_PREFIX to reproduce the additional produ
 The next product tests should mutate a specific oneDAL construction, copy, release or return obligation, compile the old client once, and exercise each broken/compatible pair. Register each independent observation against that declaration and operation. Extend the CPU inventory separately for dependent instantiations and configurations, and measure the SYCL surface with device-specific clients before making any whole-product claim.
 
 Run `python quality.py` for per-family counts from the client experiments and a ranked list of remaining by-value return targets. Counts are per observed variant and scan lane. The lifetime oracle checks the surviving value and deleter count. Treat a risk on a passing control as a review item. The ranking prefers a return spelling already imported by a client, then the number of distinct unwitnessed symbols with an identified provider. Each new mutation still needs an independent client observation.
+
+## By-value returns checked against the installed CPU packages
+
+From the repository root, run
+`python research/onedal-coverage/product/return_campaign.py OLD_PREFIX NEW_PREFIX OUTPUT`
+with Linux x86-64 Conda installations of oneDAL, GCC and abicheck. The recorded run used GCC 14.2 and oneDAL 2025.9.0 and 2025.11.0. The generator compiles one old executable, checks its undefined symbols and builds ELF adapters for exactly two C++ signatures. Each adapter calls the package implementation. The positive control forwards its return unchanged. The old executable runs once per package, operation and variant. See `return-witnesses.csv` for observed process exits.
+
+- For covariance `Result::get(ResultId) const`, the client stores a one-cell table with a counting data deleter, retrieves it, drops the result and original owners, reads 17.25 through the surviving pointer, and releases it. Borrowing the table released its data too early (exit 11 before dereference). Holding an extra owner delayed release past reset (exit 12). The two controls observed zero releases after dropping the original owners and exactly one after reset.
+- For batch `AlgorithmImpl::computeNoThrow()`, the client checks an invalid input, a surviving copy of its error status, and valid input. Swallowing the error gave exit 20. Replacing a successful return with an error gave exit 23.
+
+`return-scans.csv` compares each stripped adapter against the corresponding forwarding adapter once, independently of the two package runs. The client exit in each scan row is the checked expectation reproduced on both packages. Dependency and runtime-floor changes seen in an adapter do not identify the ownership or error-propagation contract. These are injected edits. Coverage is credited only to the two specific by-value return rows. The other return sites with the same type still need their own witnesses.

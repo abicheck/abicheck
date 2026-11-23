@@ -6,6 +6,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 rows=list(csv.DictReader((Path(sys.argv[1])/'obligations.csv').open()))
+with (Path(__file__).resolve().parent / 'return-witnesses.csv').open() as f:
+    return_edits = {}
+    for result in csv.DictReader(f):
+        if int(result['client_exit']) != 0:
+            return_edits.setdefault(result['symbol'], set()).add(result['variant'])
 counts=Counter()
 for row in rows:
     kind=row['kind']
@@ -24,6 +29,9 @@ for row in rows:
         witness='visitor.csv'
     row['independent_edit_witness']=witness
     row['edit_family']=('virtual_reorder' if kind=='virtual_slot' else 'struct_swap_fields') if witness else ''
+    if kind == 'by_value_return' and row['symbol'] in return_edits:
+        row['independent_edit_witness'] = 'return-witnesses.csv'
+        row['edit_family'] = '|'.join(sorted(return_edits[row['symbol']]))
     if kind == 'cxx_method' and row['symbol'] == '_ZN4daal8services10interface16Status5clearEv':
         row['independent_edit_witness'] = 'status-clear.csv'
         row['edit_family'] = 'no_op_clear'
