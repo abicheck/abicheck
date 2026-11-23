@@ -44,6 +44,10 @@ def main():
         ),
         ("drop_event", dropped),
         ("remove_parameter", removed),
+        (
+            "remove_default",
+            replace_once(overload, "dependencies = {},", "dependencies,"),
+        ),
     ]:
         root = (args.out / lane).resolve()
         header = root / HEADER
@@ -67,13 +71,14 @@ def main():
             "-o",
             str(exe),
         ]
-        if lane in ("baseline", "remove_parameter"):
+        if lane in ("baseline", "remove_parameter", "remove_default"):
             probe = CONSUMER.with_name("event_call_forms.cpp")
             subprocess.run(
                 [
                     *command[: command.index(str(CONSUMER))],
                     "-fsyntax-only",
-                    "-DEXPECT_EVENTS=" + ("1" if lane == "baseline" else "0"),
+                    f"-DEXPECT_EVENTS={int(lane != 'remove_parameter')}",
+                    f"-DEXPECT_DEFAULT_EVENTS={int(lane != 'remove_default')}",
                     str(probe),
                 ],
                 env=env,

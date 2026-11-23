@@ -20,6 +20,9 @@ using ptr = const float*;
 using size = std::int64_t;
 using queue = sycl::queue&;
 static_assert(callable<ptr, size, size>);
-static_assert(callable<queue, ptr, size, size>);
+#ifndef EXPECT_DEFAULT_EVENTS
+#define EXPECT_DEFAULT_EVENTS 1
+#endif
+static_assert(callable<queue, ptr, size, size> == EXPECT_DEFAULT_EVENTS);
 static_assert(callable<queue, ptr, size, size, events> == EXPECT_EVENTS);
 static_assert(callable<queue, ptr, size, size, events, dal::data_layout> == EXPECT_EVENTS);

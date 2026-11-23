@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Iterator, Mapping
+from itertools import chain
 from typing import Any
 
 from .compare import export_transition as _export_transition
@@ -54,6 +55,7 @@ from .compare.function_signature import (
     function_signature_changes,
     function_signature_index,
 )
+from .compare.header_overloads import additional_default_views
 from .compare.naming_conventions import PREFIX_RENAME
 from .compare.parameter_facts import (
     ParameterView,
@@ -549,7 +551,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
     # old surface's scope-qualified owner classes, and per-class virtual
     # signatures (to skip inherited overrides). See ``virtual_method_addition``.
-    old_types = build_type_map(old.declarations.types)
+    old_decls = old.declarations
+    old_types = build_type_map(old_decls.types)
     new_types = build_type_map(new.declarations.types)
     old_owner_classes = {
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
@@ -654,7 +657,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
     )
 
-    return finish_function_changes(changes, old, new)
+    return finish_function_changes(changes, old, new, old_decls.functions)
 
 
 def _converting_ctors_by_class(
@@ -832,21 +835,16 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     every defaulted parameter as ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless
     both sides are header-aware.
 
-    Additionally gated per-function-pair, whenever either side has a known
-    header-AST producer (castxml, clang, or a hybrid merge — G28 Phase 3):
-    the two backends' default VALUE representations are not cross-comparable
-    (castxml keeps the real source expression; clang's is a placeholder/
-    fingerprint for anything non-trivial), even between two pure
-    single-backend snapshots. Requiring the SAME producer on both sides (not
-    "castxml on both sides", which would wrongly suppress a same-producer
-    clang-vs-clang pair) avoids a false CHANGED/REMOVED from a
-    representation mismatch while still catching a real change.
+    Compare defaults only when the two known per-function AST producers agree.
+    CastXML preserves the expression, while clang may record a structural
+    fingerprint. Unknown producer metadata remains comparable for legacy inputs.
+    Match surviving overloads by declaration identity when a placeholder linker
+    name represents several header declarations.
 
-    The per-pair skip only fires when BOTH producers are POSITIVELY known
-    and DIFFER, never merely because one side's producer is unknown: an
-    unset ``ast_producer`` (a hand-built test snapshot, or a legacy
-    pre-provenance baseline) must not be silently dropped as a mismatch
-    just because it lacks metadata it never had a chance to record.
+    Only declarations with confirmed public contract and absent export evidence
+    enter that additional join. The first-wins pair still follows the ordinary
+    path. For the other pairs each side projects the actual overload's default
+    arguments into the parameter view used by the same comparison below.
 
     A separate, narrower gate protects the VALUE-CHANGED comparison alone
     (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
@@ -856,14 +854,16 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     old_map, new_map = reconciled_function_surfaces(old, new)
 
-    def _param_defaults_producer(snap: AbiSnapshot, f: Function) -> str | None:
-        return fact_producer(snap, func_fact_key(f.mangled, "param_defaults"))
-
-    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
-        old, new, old_map, new_map
+    for mangled, f_old, f_new, v_old, v_new in chain(
+        _parameter_view_pairs(old, new, old_map, new_map),
+        additional_default_views(old, new, old_map, new_map),
     ):
-        old_producer = _param_defaults_producer(old, f_old)
-        new_producer = _param_defaults_producer(new, f_new)
+        old_producer = fact_producer(
+            old, func_fact_key(f_old.mangled, "param_defaults")
+        )
+        new_producer = fact_producer(
+            new, func_fact_key(f_new.mangled, "param_defaults")
+        )
         if (
             old_producer is not None
             and new_producer is not None

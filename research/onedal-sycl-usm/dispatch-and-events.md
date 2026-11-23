@@ -128,3 +128,19 @@ The buffer fixture uses the internal homogen_table_builder to obtain writable ac
 multi-rank USM communicators and preview dispatch, multi-block partial updates,
 and real Level Zero execution. Report a direct declaration witness, an
 independent mutation and its checker verdict separately for each extension.
+
+## Removing only the default event list
+
+The `remove_default` variant in event_mutations.py changes the queue overload's
+`dependencies = {}` to `dependencies`. Its parameter types, implementation,
+layout default and library binary are identical. The four-argument queue call
+now fails overload resolution. The host call and both explicit-event calls
+continue to compile. icpx 2025.0.4 checked all four forms before and after
+the edit on the 2025.2, 2025.9 and 2025.11 headers. On the 2025.2 OpenCL CPU,
+the consumer passing its producer event read 42 with both headers.
+
+With the full 2025.2 library, the ordinary checker now reports
+`param_default_value_removed` for `oneapi::dal::v1::homogen_table::wrap`
+and grades the pair `API_BREAK`. This comparison previously produced
+`NO_CHANGE` when the linker-name index retained a host sibling. The
+per-signature withdrawal results in all-signatures.md still apply.

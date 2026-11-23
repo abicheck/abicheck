@@ -78,3 +78,32 @@ def test_mangled_sibling_with_sufficient_arity_prevents_contraction():
     sibling.entity_id = entity_id_for_function((), "", mangled_name=sibling.mangled)
     prev, now = pattern("queue&", "T*", "events"), pattern("queue&", "T*")
     assert not lost_header_overloads(snap(sibling, prev), snap(sibling, now), [])
+
+
+@pytest.mark.parametrize("queue_first", [True, False])
+def test_removed_event_default_attributed_once(queue_first):
+    host = pattern("int")
+    queue_old, queue_new = (pattern("queue&", "events") for _ in range(2))
+    queue_old.params[-1].default = "{}"
+    old = snap(*([queue_old, host] if queue_first else [host, queue_old]))
+    new = snap(*([queue_new, host] if queue_first else [host, queue_new]))
+    old.from_headers = new.from_headers = True
+    report = compare(old, new)
+    [finding] = [
+        c for c in report.changes if c.kind == ChangeKind.PARAM_DEFAULT_VALUE_REMOVED
+    ]
+    assert finding.entity_id == queue_old.entity_id
+    assert report.verdict.value == "API_BREAK"
+
+
+def test_inconsistent_event_default_redeclarations_are_inconclusive():
+    host = pattern("int")
+    old, new, redeclared = (pattern("queue&", "events") for _ in range(3))
+    old.params[-1].default = redeclared.params[-1].default = "{}"
+    before = snap(host, old)
+    after = snap(host, new, redeclared)
+    before.from_headers = after.from_headers = True
+    assert not any(
+        c.kind == ChangeKind.PARAM_DEFAULT_VALUE_REMOVED
+        for c in compare(before, after).changes
+    )
