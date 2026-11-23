@@ -913,8 +913,6 @@ libonedal_dpc.so:
 ```
 
 ```bash
-abicheck dump release-1.0/lib --bundle-facts-out release-1.0.bundlefacts.json \
-    --bundle-facts-library-manifest release-1.0/manifest.yaml
 abicheck compare release-1.0.bundlefacts.json release-3.0/lib \
     --bundle-facts-library-manifest release-3.0/manifest.yaml
 ```
@@ -963,13 +961,12 @@ abicheck compare baseline.json sdk-new --config .abicheck.yml
 ```
 
 Relative headers and includes resolve under the SDK being scanned.
-An explicit `--bundle-facts-library-manifest` replaces the complete
+On `compare`, an explicit `--bundle-facts-library-manifest` replaces the complete
 `release.libraries` mapping for that invocation.
 
 For a standalone manifest shared across unpacked releases, put the
 same mapping under `libraries:` and set `schema: abicheck.release-interfaces/v1`
-at the top level. Pass the release root to both commands and the same
-manifest path to both. Relative headers, includes and sysroots then resolve
+at the top level. Pass the new release root as the live operand of `compare`. Relative headers, includes and sysroots then resolve
 against the current release operand. Raw compiler options retain their
 literal spelling. The original flat manifest remains relative to its file.
 

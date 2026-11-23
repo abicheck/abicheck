@@ -92,32 +92,36 @@ known interface-specific declaration when validating a scan profile.
 
 ### Capture both interfaces in a release baseline
 
-Keep one version-controlled `interfaces.yml` in the project. This example
-selects the table interface of two ELF libraries. Unlisted members inherit
-the scan's ordinary settings.
+Keep the two compiler profiles and their library assignments in one
+version-controlled `.abicheck.yml`.
 
 ```yaml
-schema: abicheck.release-interfaces/v1
-libraries:
-  libonedal.so:
-    headers: [include/oneapi/dal/table/homogen.hpp]
-    includes: [include]
-    frontend: gcc
-    gcc_path: /usr/bin/g++-14
-    gcc_options: [-std=c++17]
-  libonedal_dpc.so:
-    headers: [include/oneapi/dal/table/homogen.hpp]
-    includes: [include]
-    frontend: clang
-    gcc_path: /opt/intel/oneapi/compiler/latest/bin/icpx
-    gcc_options: [-std=c++17, -fsycl, --offload-new-driver, -DONEDAL_DATA_PARALLEL]
+profiles:
+  cpu:
+    compile: {frontend: gcc, binding: gcc14, standard: c++17}
+  sycl:
+    compile:
+      frontend: clang
+      binding: dpc
+      standard: c++17
+      args: [-fsycl, --offload-new-driver]
+      abi_macros: {ONEDAL_DATA_PARALLEL: "1"}
+release:
+  bindings: {gcc14: /usr/bin/g++-14, dpc: /opt/intel/oneapi/compiler/latest/bin/icpx}
+  libraries:
+    libonedal.so:
+      profiles: [cpu]
+      headers: [include/oneapi/dal/table/homogen.hpp]
+      includes: [include]
+    libonedal_dpc.so:
+      profiles: [sycl]
+      headers: [include/oneapi/dal/table/homogen.hpp]
+      includes: [include]
 ```
 
 ```sh
-abicheck dump "$OLD" --bundle-facts-out baseline.json \
-  --bundle-facts-library-manifest interfaces.yml
-abicheck compare baseline.json "$NEW" -o json=report.json \
-  --bundle-facts-library-manifest interfaces.yml
+abicheck dump "$OLD" --config .abicheck.yml --bundle-facts-out baseline.json
+abicheck compare baseline.json "$NEW" --config .abicheck.yml -o json=report.json
 ```
 
 Pass each unpacked SDK root as the operand. Header, include and sysroot paths

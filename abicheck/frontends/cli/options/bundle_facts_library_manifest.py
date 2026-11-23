@@ -34,14 +34,14 @@ from pathlib import Path
 
 import click
 
-#: Explicit per-library contexts for release capture and stored-vs-live compare.
+#: Explicit per-library contexts for stored-vs-live compare.
 bundle_facts_manifest_options = click.option(
     "--bundle-facts-library-manifest",
     "bundle_facts_library_manifest",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="For dump --bundle-facts-out or compare with a stored BundleFacts "
-    "baseline: a YAML/JSON manifest giving one or more "
+    help="When OLD_INPUT is a stored BundleFacts document (from a prior "
+    "--bundle-facts-out): a YAML/JSON manifest giving one or more "
     "libraries their own header root, include path, or compile context, "
     "instead of the uniform --header/--include/compile-context flags -- "
     "for a bundle whose libraries don't share one toolchain (e.g. a "

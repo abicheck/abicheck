@@ -69,7 +69,6 @@ from ....cli import main
 from ....workflows.dump.project_config import DUMP_APPLIED_PATHS
 from ....workflows.provenance import stamp_provenance
 from ..dump_manifest_input import load_dump_manifest_or_reject
-from ..options.bundle_facts_library_manifest import bundle_facts_manifest_options
 from ..options.config_set import config_set_option_for
 from ..options.dump_provenance import dump_provenance_option, parse_provenance_tokens
 from ..options.label import dump_label_option
@@ -171,7 +170,6 @@ from .dump_bundle_facts import dump_bundle_facts_out_option, run_dump_bundle_fac
 @dump_provenance_option
 @build_source_dump_options  # --build-info / --sources (embed inline)
 @dump_bundle_facts_out_option
-@bundle_facts_manifest_options
 def dump_cmd(
     so_path: Path | None,
     headers: tuple[Path, ...],
@@ -197,7 +195,6 @@ def dump_cmd(
     gcc_options: str | None = None,
     config_overrides: dict[str, object] | None = None,
     bundle_facts_out: Path | None = None,
-    bundle_facts_library_manifest: Path | None = None,
     variant: str | None = None,
 ) -> None:
     """Dump ABI snapshot of a shared library to JSON.
@@ -476,12 +473,11 @@ def dump_cmd(
     # matching dry-run's own "cheap, read-only resolution only" contract;
     # the real path below still calls follow_linker_script itself for
     # that echo and the so_path reassignment.
-    if bundle_facts_out or variant is not None or bundle_facts_library_manifest:
+    if bundle_facts_out or variant is not None:
         return run_dump_bundle_facts(
             so_path,
             bundle_facts_out,
             variant=variant,
-            library_manifest=bundle_facts_library_manifest,
             config_explicit=_project.explicit,
             unapplied={"output": output, "dry_run": dry_run, "sources": sources}
             | {"dump_manifest_path": dump_manifest_path, "build_info": build_info}

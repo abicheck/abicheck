@@ -98,7 +98,6 @@ def run_dump_bundle_facts(
     bundle_facts_out: Path | None,
     *,
     variant: str | None = None,
-    library_manifest: Path | None = None,
     config_explicit: bool = False,
     unapplied: Mapping[str, object],
     headers: tuple[Path, ...],
@@ -132,10 +131,6 @@ def run_dump_bundle_facts(
         dump_release_bundle_facts,
     )
 
-    if library_manifest is not None and bundle_facts_out is None:
-        raise click.UsageError(
-            "--bundle-facts-library-manifest requires --bundle-facts-out on dump."
-        )
     if bundle_facts_out is None:
         raise click.UsageError(
             "--variant selects the build variant a --bundle-facts-out capture "
@@ -165,7 +160,6 @@ def run_dump_bundle_facts(
         public_header_dirs=_config_public_header_dirs(config_path),
         exclude_headers=exclude_headers,
         variant=variant,
-        library_manifest=library_manifest,
         config_path=config_path,
         config_explicit=config_explicit,
     )

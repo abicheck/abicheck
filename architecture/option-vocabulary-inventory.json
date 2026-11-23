@@ -1108,19 +1108,6 @@
    "default": "<unset>"
   },
   {
-   "id": "dump --bundle-facts-library-manifest",
-   "command": "dump",
-   "option": "--bundle-facts-library-manifest",
-   "aliases": [],
-   "hidden": false,
-   "help_common": false,
-   "multiple": false,
-   "is_flag": false,
-   "type": "file",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
    "id": "project capture-variants --variant",
    "command": "project capture-variants",
    "option": "--variant",

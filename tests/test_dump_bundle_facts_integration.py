@@ -242,10 +242,7 @@ def test_each_member_is_the_libraries_own_dump(
         assert _strip(member) == _strip(load_snapshot(alone)), key
 
 
-@pytest.mark.parametrize("project_config", [False, True])
-def test_capture_and_compare_apply_member_contexts(
-    tmp_path: Path, project_config: bool
-) -> None:
+def test_capture_and_compare_apply_member_contexts(tmp_path: Path) -> None:
     from abicheck.serialization import load_bundle_facts
 
     clang = shutil.which("clang++")
@@ -256,49 +253,33 @@ def test_capture_and_compare_apply_member_contexts(
         "#if PROFILE == 1\nextern int cpu_only();\n"
         "#elif PROFILE == 2\nextern int queue_only();\n#else\n#error missing profile\n#endif\n"
     )
-    manifest = tmp_path / "members.json"
-    manifest.write_text(
+    baseline = tmp_path / "base.json"
+    config = tmp_path / ".abicheck.yml"
+    config.write_text(
         json.dumps(
             {
-                f"lib{lib}.so": {
-                    "headers": ["api.hpp"],
-                    "frontend": "clang",
-                    "gcc_path": clang,
-                    "gcc_options": [f"-DPROFILE={profile}"],
-                }
-                for lib, profile in [("a", 1), ("b", 2)]
+                "profiles": {
+                    lib: {
+                        "compile": {
+                            "frontend": "clang",
+                            "binding": "llvm",
+                            "abi_macros": {"PROFILE": str(profile)},
+                        }
+                    }
+                    for lib, profile in [("a", 1), ("b", 2)]
+                },
+                "release": {
+                    "bindings": {"llvm": clang},
+                    "libraries": {
+                        f"lib{lib}.so": {"headers": ["api.hpp"], "profiles": [lib]}
+                        for lib in ("a", "b")
+                    },
+                },
             }
         )
     )
-    baseline = tmp_path / "base.json"
-    flags = ["--bundle-facts-library-manifest", str(manifest)]
-    if project_config:
-        config = tmp_path / ".abicheck.yml"
-        config.write_text(
-            json.dumps(
-                {
-                    "profiles": {
-                        lib: {
-                            "compile": {
-                                "frontend": "clang",
-                                "binding": "llvm",
-                                "abi_macros": {"PROFILE": str(profile)},
-                            }
-                        }
-                        for lib, profile in [("a", 1), ("b", 2)]
-                    },
-                    "release": {
-                        "bindings": {"llvm": clang},
-                        "libraries": {
-                            f"lib{lib}.so": {"headers": ["api.hpp"], "profiles": [lib]}
-                            for lib in ("a", "b")
-                        },
-                    },
-                }
-            )
-        )
-        (libs / "api.hpp").write_bytes((tmp_path / "api.hpp").read_bytes())
-        flags = ["--config", str(config)]
+    (libs / "api.hpp").write_bytes((tmp_path / "api.hpp").read_bytes())
+    flags = ["--config", str(config)]
     captured = _invoke("dump", str(libs), "--bundle-facts-out", str(baseline), *flags)
     assert captured.exit_code == 0, captured.output
     facts = load_bundle_facts(baseline)

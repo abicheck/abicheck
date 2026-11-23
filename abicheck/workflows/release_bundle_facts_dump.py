@@ -69,7 +69,6 @@ class ReleaseBundleFactsDumpRequest:
     exclude_headers: Sequence[str] = field(default_factory=tuple)
     #: A stored ``ProjectSnapshot`` package's variant, when it has several.
     variant: str | None = None
-    library_manifest: Path | None = None
     config_path: Path | None = None
     config_explicit: bool = False
 
@@ -145,9 +144,9 @@ def dump_release_bundle_facts(
         key_of = {path: key for key, path in members.items()}
 
         overrides = None
-        if request.library_manifest is not None or request.config_path is not None:
+        if request.config_path is not None:
             parsed = resolve_release_interfaces(
-                request.library_manifest,
+                None,
                 load_build_config(request.config_path),
                 request.config_path,
                 explicit=request.config_explicit,
