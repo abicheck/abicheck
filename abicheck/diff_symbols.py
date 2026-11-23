@@ -841,13 +841,9 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     Compare defaults only when the two known per-function AST producers agree.
     CastXML preserves the expression, while clang may record a structural
     fingerprint. Unknown producer metadata remains comparable for legacy inputs.
-    Match surviving overloads by declaration identity when a placeholder linker
-    name represents several header declarations.
-
-    Only declarations with confirmed public contract and absent export evidence
-    enter that additional join. The first-wins pair still follows the ordinary
-    path for ordinary functions. Each header pattern projects its own default
-    arguments into the parameter view used by the same comparison below.
+    For confirmed public, unexported patterns sharing a placeholder linker name,
+    default_views pairs declarations by identity and projects their own defaults.
+    Ordinary functions retain the first-wins pairing.
     A separate, narrower gate protects the VALUE-CHANGED comparison alone
     (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
     """
