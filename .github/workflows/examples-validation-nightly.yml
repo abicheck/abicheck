@@ -96,7 +96,7 @@ jobs:
 
   macos-arm64:
     name: Examples (macOS arm64, Apple Clang)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
