@@ -117,6 +117,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--since",
         "--sources",
         "--suppress",
+        "--release-consumer",
         "--use-cases",
         # ADR-091: the per-side version label.
         "--label",

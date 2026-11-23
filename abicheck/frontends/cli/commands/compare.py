@@ -469,28 +469,6 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
     reject_dry_run_with_exports(bool(kwargs.get("dry_run")), kwargs["exports"])
     expand_export_kwargs(kwargs)
-    consumer = kwargs.pop("release_consumer", None)
-    if consumer:
-        from ..release_consumer import release_consumer_binding
-
-        if kwargs.get("dry_run") or kwargs["fmt"] not in ("json", "markdown"):
-            raise click.UsageError(
-                "--release-consumer requires a live JSON or Markdown release comparison"
-            )
-        bindings = [
-            release_consumer_binding(
-                Path(kwargs["old_input"]),
-                Path(kwargs["new_input"]),
-                client,
-                kwargs.get("ld_library_path") or "",
-                list(kwargs.get("search_paths") or ()),
-            )
-            for client in dict.fromkeys(consumer)
-        ]
-        ctx.meta["release_consumer_binding"] = bindings[0]
-        if len(bindings) > 1:
-            bindings[0]["additional_consumers"] = bindings[1:]
-
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.
     normalize_sided_options(kwargs)
@@ -517,6 +495,28 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
     if maybe_dispatch_no_baseline_compare(ctx, kwargs):
         return
+
+    consumer = kwargs.pop("release_consumer", None)
+    if consumer:
+        from ..release_consumer import release_consumer_binding
+
+        if kwargs.get("dry_run") or kwargs["fmt"] not in ("json", "markdown"):
+            raise click.UsageError(
+                "--release-consumer requires a live JSON or Markdown release comparison"
+            )
+        bindings = [
+            release_consumer_binding(
+                Path(kwargs["old_input"]),
+                Path(kwargs["new_input"]),
+                client,
+                kwargs.get("ld_library_path") or "",
+                list(kwargs.get("search_paths") or ()),
+            )
+            for client in dict.fromkeys(consumer)
+        ]
+        ctx.meta["release_consumer_binding"] = bindings[0]
+        if len(bindings) > 1:
+            bindings[0]["additional_consumers"] = bindings[1:]
 
     # After the --no-baseline dispatch, which rejects the flag (no second
     # operand to share or differ in extractor generation with).

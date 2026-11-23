@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Model an unchanged ELF consumer in two deployment roots for release reports."""
 
 from filecmp import cmp
@@ -34,7 +36,7 @@ def release_consumer_binding(
         with path.open("rb") as stream:
             if stream.read(4) != b"\x7fELF":
                 raise click.UsageError(f"Consumer {client} must be ELF")
-    if not cmp(*copies, shallow=False):
+    if not cmp(copies[0], copies[1], shallow=False):
         raise click.UsageError("Both roots must contain the identical old consumer")
     baseline, result = [
         check_single_env(

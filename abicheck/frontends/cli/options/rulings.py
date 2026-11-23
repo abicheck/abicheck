@@ -282,6 +282,9 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "hiding it would understate the surface instead of documenting it."
     ),
     # ── Consumer contracts ───────────────────────────────────────────────
+    "--release-consumer": _keep(
+        "Per-run operand identifying an unchanged executable in both deployment roots."
+    ),
     "--used-by": _keep(
         "ADR-043: folds the removed `appcompat` command into compare -- "
         "scopes the comparison to one or more applications' actual imports. "

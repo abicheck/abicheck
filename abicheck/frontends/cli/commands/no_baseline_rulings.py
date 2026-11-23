@@ -225,6 +225,10 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "consumer scoping answers 'does this change break a consumer', which "
         "needs two versions to compare",
     ),
+    "release_consumer": (
+        "--release-consumer",
+        "consumer binding compares two deployment roots",
+    ),
     "use_cases_manifest": (
         "--use-cases",
         "use-case attribution maps a comparison's findings to declared use "

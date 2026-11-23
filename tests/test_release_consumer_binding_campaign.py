@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _abicheck_subprocess import abicheck_command
 
 from abicheck.frontends.cli.release_consumer import release_consumer_binding
 from abiforge.run.provider_campaign import run
@@ -29,10 +30,7 @@ def test_release_consumer_matches_old_binary(tmp_path):
     ]:
         output = tmp_path / case / "release.json"
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck.cli",
+            abicheck_command(
                 "compare",
                 str(tmp_path / "old"),
                 str(tmp_path / case),
@@ -42,7 +40,7 @@ def test_release_consumer_matches_old_binary(tmp_path):
                 "client2",
                 "-o",
                 "json=" + str(output),
-            ]
+            )
         )
         assert result.returncode == 4
         report = json.loads(output.read_text())

@@ -993,6 +993,11 @@ concepts:
       - CompareRequest.contract
       - run_compare(contract)
     exceptions: []
+  - concept: release_consumer
+    tier: core
+    renames: []
+    cli:
+      - compare --release-consumer
   - concept: used_by
     tier: core
     renames: []

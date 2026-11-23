@@ -247,7 +247,7 @@ def render_release_text(fmt: str, report: ReleaseReport, *, demangle: bool) -> s
     binding = report.evaluation.consumer_binding
     additional = binding.get("additional_consumers", []) if binding else []
     assert isinstance(additional, list)
-    for binding in ([binding, *additional] if binding else []):
+    for binding in [binding, *additional] if binding else []:
         markdown += f"\n## Consumer binding\n\n{md_text(binding['client'], code=True)}: {md_text(binding['loadability'])}\n"
         markdown += "\n| Import | Previous provider | Candidate provider | Binding |\n|---|---|---|---|\n"
         imports = binding["imports"]
