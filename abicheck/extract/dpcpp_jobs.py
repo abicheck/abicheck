@@ -65,7 +65,9 @@ def _host_only_single_pass(
     clang_bin: str, identity: str, tokens: tuple[str, ...]
 ) -> bool:
     del identity  # keys the memo on the executable's content
-    cmd = [clang_bin, *tokens, "-fsycl", "-fsycl-host-only"]
+    from .compiler_driver import sycl_host_selector
+
+    cmd = [clang_bin, *tokens, "-fsycl", sycl_host_selector(tokens)]
     cmd += ["-fsyntax-only", "-x", "c++", "-"]
     jobs = _driver_jobs(cmd)
     if jobs is None:
@@ -153,7 +155,7 @@ def sycl_host_replay_jobs(
     still runs a device pass: one host document instead of a ~2x stream the
     multi-document selector would scan, and the streaming AST path applies.
     """
-    if "-fsycl-host-only" not in cmd:
+    if not {"-fsycl-host-only", "--offload-host-only"}.intersection(cmd):
         return None
     jobs = _driver_jobs(cmd)
     split = _split_device_host(jobs) if jobs is not None else None

@@ -315,8 +315,8 @@ Phase 0 — see that plan for the design this superseded.
 
 ### `compile.frontend` / `consumer_compile.frontend` — per-profile AST frontend (G34 Phase B)
 
-Either overlay may set `frontend:` to one of the same four values the
-global `--ast-frontend` flag accepts (`auto`/`castxml`/`clang`/`hybrid`),
+Either overlay may set `frontend:` to a header AST frontend
+(`auto`/`castxml`/`clang`/`hybrid`/`gcc`),
 overriding the global default for that profile's cell only:
 
 ```yaml

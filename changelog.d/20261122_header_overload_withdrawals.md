@@ -5,3 +5,4 @@
 - Detect lost argument counts when a header overload gains required parameters. Verify the declaring header across SDK roots and skip conflicting default-argument redeclarations.
 - Preserve SYCL plugin changes supported by a partial scan and report the missing inventory evidence. Account for older extractors when comparing UR adapter presence.
 - Report an existing public, unexported template overload marked `= delete` as a source break, including when another overload shares its placeholder linker name.
+- Preserve the chosen offload driver and host/device pass during SYCL source replay. Use the new driver's host selector when acquiring headers with icpx.

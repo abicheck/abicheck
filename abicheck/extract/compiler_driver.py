@@ -77,6 +77,7 @@ __all__ = [
     "resolve_clang_bin",
     "resolve_dpcpp_acquisition",
     "resolve_source_frontend_clang_bin",
+    "sycl_host_selector",
 ]
 
 
@@ -242,7 +243,7 @@ def resolve_dpcpp_acquisition(
     direct_host = (
         multi
         and frontend_context == "host"
-        and "-fsycl-device-only" not in tokens
+        and not {"-fsycl-device-only", "--offload-device-only"}.intersection(tokens)
         and _driver_host_only_is_single_pass(clang_bin, tuple(tokens))
     )
     return multi and not direct_host, direct_host
@@ -253,6 +254,16 @@ def _driver_host_only_is_single_pass(clang_bin: str, tokens: tuple[str, ...]) ->
     from .dpcpp_jobs import executable_revision, host_only_request_usable
 
     return host_only_request_usable(clang_bin, executable_revision(clang_bin), tokens)
+
+
+def sycl_host_selector(tokens: list[str] | tuple[str, ...]) -> str:
+    """Use the host selector supported by the configured offload driver."""
+    for token in reversed(tokens):
+        if token == "--offload-new-driver":
+            return "--offload-host-only"
+        if token == "--no-offload-new-driver":
+            break
+    return "-fsycl-host-only"
 
 
 def needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
@@ -298,7 +309,12 @@ def needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     """
     if not is_intel_sycl_driver(cc_bin):
         return False
-    if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
+    if {
+        "-fsycl-host-only",
+        "-fsycl-device-only",
+        "--offload-host-only",
+        "--offload-device-only",
+    }.intersection(tokens):
         return False
     sycl_enabled = _dpcpp_defaults_sycl_on(cc_bin)
     for tok in tokens:
