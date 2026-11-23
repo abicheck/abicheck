@@ -99,7 +99,7 @@ cannot establish ordering in general.
 
 A separate minimal L2 comparison kept a host sibling and shortened a queue
 function template by one defaulted event-list argument. The checker emitted
-overload_set_rerouted and classified the pair COMPATIBLE_WITH_RISK. This leaves
+overload_set_rerouted and classified the pair COMPATIBLE_WITH_RISK. This exposed
 a source-classification gap when a formerly supported call no longer compiles.
 The ordinary dual-pass scan of the full header exhausted memory (exit 137).
 A second host-only L2 experiment precompiled just sycl/sycl.hpp with icpx
@@ -120,7 +120,7 @@ paired with this single public header).
 
 ## Follow-up covering all 59 rows
 
-See [all-signatures.md](all-signatures.md) for the subsequent two-rank and ownership experiments and the per-signature results.
+See [all-signatures.md](all-signatures.md) for the subsequent two-rank and ownership experiments, checker fix, per-signature withdrawal results, and updated API_BREAK verdict for the event-parameter edit.
 
 ## Remaining witnesses at the time of the initial experiment
 

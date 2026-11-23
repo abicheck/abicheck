@@ -20,6 +20,7 @@ from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
 from .edge_query import export_table_covered
+from .header_overloads import lost_header_overloads
 from .parameter_replacement import pair_parameter_replacements
 
 __all__ = ["finish_function_changes", "grade_declaration_removed_export_kept"]
@@ -53,6 +54,7 @@ def finish_function_changes(
 ) -> list[Change]:
     """The functions detector's closing pass: pair provable parameter
     replacements, then grade removals whose export survives."""
+    changes.extend(lost_header_overloads(old, new, changes))
     return grade_declaration_removed_export_kept(
         pair_parameter_replacements(changes, old, new), new
     )

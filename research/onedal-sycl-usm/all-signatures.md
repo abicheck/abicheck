@@ -43,11 +43,39 @@ To reproduce the compiler failure, rebuild ownership_consumer with
 build spmd_dispatch with -DONEDAL_PROBE_SPMD_PARTIAL_TRAIN. If a future provider
 links it, run that binary with the operation partial_train.
 
-## Compatibility coverage
+## Checker coverage for declaration withdrawals
 
-The 59 outcomes classify availability and executable behavior. They do not
-measure 59 independent abicheck detections. The generated bridge withdrawal
-has exact checks for seven symbols. Source-break severity for an explicit
-event argument remains an observed checker gap. GPU execution of the five
-preview algorithms, other template instantiations and per-signature break
-and compatibility-preserving mutations remain separate validation work.
+The stock checker matched all 59 inventory entries to individual withdrawal findings on
+Linux x86-64 with oneDAL 2025.2.0, icpx 2025.0.4 and the unchanged
+`libonedal_dpc.so.3`. [checker-withdrawals.tsv](checker-withdrawals.tsv) records
+each declaration and three Boolean results.
+
+| Comparison | Unit of verification | Result |
+| --- | --- | ---: |
+| Disable the SYCL header surface, keeping the same binary and compiler profile | Exact old declaration identity in the full comparison | 59/59 identified |
+| Remove one declaration identity from its defining header's L2 function list | Exact old declaration identity in an independent comparison | 59/59 identified |
+| Compare identical L2 function lists | Withdrawal of the selected identity | 0/59 false removals |
+
+To reproduce the bulk mutation, copy the SDK's `include/oneapi/dal` tree into
+a private include root and place it first on the include path. Use the host
+PCH and compile options in [dispatch-and-events.md](dispatch-and-events.md).
+Dump the original library with one `-H` for each distinct header in the first
+column of inventory.tsv, resolved under the private `include/oneapi/dal`.
+Prepend `#undef ONEDAL_DATA_PARALLEL` to each of those 16 copied headers and
+repeat the same dump command with a different output filename. Both dumps must
+use the same include root, compiler, options and binary. From a checkout with
+abicheck installed, run:
+
+    python research/onedal-sycl-usm/checker_withdrawals.py old.json new.json > actual.tsv
+    diff -u research/onedal-sycl-usm/checker-withdrawals.tsv actual.tsv
+
+The isolated comparisons edit the declaration model, without rebuilding oneDAL.
+They validate checker attribution separately from extraction. For the distinct
+event-parameter edit, comparing the full library with original and modified
+`homogen.hpp` now yields `API_BREAK` for
+`oneapi::dal::v1::homogen_table::wrap` (six arguments before, five at most
+after). The unchanged binary and host overload remain available.
+
+These results measure source declarations. The runtime outcomes above, event
+ordering, concrete template instantiations, and device/backend availability
+require separate evidence.
