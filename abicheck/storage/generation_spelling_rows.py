@@ -14,11 +14,8 @@
 # limitations under the License.
 """The audited per-generation spelling rows (ADR-062 D2).
 
-One :class:`GenerationSpellingChange` row per extractor generation in
-:data:`SPELLING_MIGRATIONS`. ``scripts/generation_corpus_gate.py`` reads this
-file's literal by AST, so the table stays a dict literal and every reason a
-literal string; the row record and placeholder rule are in
-:mod:`.generation_spelling_types`.
+The corpus gate reads this dict literal by AST and validates each reason.
+The frozen corpus tests every generation against the current spellings.
 """
 
 from __future__ import annotations
@@ -30,9 +27,6 @@ from .generation_spelling_types import GenerationSpellingChange
 __all__ = ["SPELLING_MIGRATIONS"]
 
 
-#: Each reason records the extractor change and any spelling rewrites.
-#: The frozen corpus checks all generations against the current spellings.
-#: The generation-corpus gate rejects missing or placeholder reasons.
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
         "85d745b9a (#1538): first stamped generation; the baseline every "
