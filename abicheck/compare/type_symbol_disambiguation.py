@@ -45,10 +45,11 @@ would from a given enclosing scope -- innermost scope outward.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
 from ..model import AbiSnapshot, Function
+from ..model.change import Change
 from ..model.identity import (
     EntityId,
 )
@@ -283,7 +284,7 @@ def attribute_scoped_types(
     type_to_funcs: dict[str, set[str]],
     type_to_mangled: dict[str, set[str]],
     type_embeds: dict[str, set[str]],
-) -> None:
+) -> AmbiguousTypeNames:
     """Attribute the affected types :func:`disambiguate_type_symbols`
     labelled with a qualified spelling, by scope rather than by substring.
 
@@ -297,7 +298,7 @@ def attribute_scoped_types(
     names = ambiguous_type_spellings(old, new)
     scoped = {k for k in affected_types if k in names.by_entity.values()}
     if not scoped:
-        return
+        return names
     for func in old_pub.values():
         scope = function_scope(func.name, func.mangled)
         refs = [func.return_type, *(p.type for p in func.params)]
@@ -314,3 +315,58 @@ def attribute_scoped_types(
         for fld in t.fields:
             for key in scoped_type_mentions(fld.type, scope, names) & scoped:
                 type_embeds.setdefault(key, set()).add(parent)
+    return names
+
+
+def direct_value_roles(
+    names: AmbiguousTypeNames,
+    affected_types: set[str],
+    old_pub: Mapping[str, Function],
+    type_to_mangled: dict[str, set[str]],
+) -> dict[str, dict[str, list[str]]]:
+    # Preserve the role for direct, exact by-value signature edges. Nested and
+    # indirect uses remain represented by the existing affected-symbol walk.
+    roles: dict[str, dict[str, list[str]]] = {}
+    for fn in old_pub.values():
+        for role, spelling in [
+            ("return", fn.return_type),
+            *[(f"argument {i}", param.type) for i, param in enumerate(fn.params)],
+        ]:
+            words = spelling.split()
+            while words and words[0] in {"const", "struct", "class"}:
+                words.pop(0)
+            name = " ".join(words)
+            prefix, separator, suffix = name.partition("::")
+            absolute = bool(separator) and not prefix
+            if names and name.rsplit("::", 1)[-1] in names.spellings:
+                name = (
+                    resolve_in_scope(
+                        suffix if absolute else name,
+                        function_scope(fn.name, fn.mangled),
+                        names,
+                        absolute=absolute,
+                    )
+                    or name
+                )
+            if name in affected_types and fn.mangled in type_to_mangled.get(name, ()):
+                roles.setdefault(name, {}).setdefault(fn.mangled, []).append(role)
+    return roles
+
+
+def _assign_affected_symbols_to_changes(
+    root_type_name: Callable[[Change], str],
+    roles: dict[str, dict[str, list[str]]],
+    type_changes: list[Change],
+    type_to_funcs: dict[str, set[str]],
+    type_to_mangled: dict[str, set[str]],
+) -> None:
+    """Populate Change.affected_symbols from the type-to-function mappings."""
+
+    for c in type_changes:
+        type_name = root_type_name(c)
+        c.direct_value_uses = roles.get(type_name)
+        funcs = type_to_funcs.get(type_name, set())
+        mangled_funcs = type_to_mangled.get(type_name, set())
+        if funcs:
+            # Store both demangled and mangled names for cross-format matching
+            c.affected_symbols = sorted(funcs | mangled_funcs)

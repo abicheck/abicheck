@@ -457,3 +457,17 @@ def test_a_symbol_pattern_rule_matches_the_qualified_label() -> None:
     assert [
         c.symbol for c in result.changes if c.kind.value == "type_size_changed"
     ] == ["lib::m0::Ctx"]
+
+
+def test_relative_return_role_uses_function_namespace():
+    old = _snapshot("1", ["m0", "m1"], set(), unique=False)
+    new = _snapshot("2", ["m0", "m1"], {"m0"}, unique=False)
+    for snap in (old, new):
+        for func in snap.declarations.functions:
+            func.return_type = "Ctx"
+    finding = next(
+        c for c in compare(old, new).changes if c.kind.value == "type_size_changed"
+    )
+    assert finding.direct_value_uses == {
+        old.declarations.functions[0].mangled: ["return"]
+    }

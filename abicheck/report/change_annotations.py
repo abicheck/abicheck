@@ -70,6 +70,8 @@ def change_annotation_fields(c: Any) -> dict[str, Any]:
     affected = getattr(c, "affected_symbols", None)
     if affected:
         out["affected_symbols"] = affected
+    if getattr(c, "direct_value_uses", None):
+        out["direct_value_uses"] = c.direct_value_uses
     # Redundancy annotation
     caused_by = getattr(c, "caused_by_type", None)
     if caused_by:

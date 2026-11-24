@@ -4085,6 +4085,15 @@
         "source_location": {
           "type": "string"
         },
+        "direct_value_uses": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
         "affected_symbols": {
           "type": "array",
           "items": {

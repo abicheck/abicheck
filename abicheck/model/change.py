@@ -509,6 +509,7 @@ class Change:
     removed_instantiations: tuple[RemovedInstantiation, ...] | None = field(
         default=None, kw_only=True, compare=False
     )
+    direct_value_uses: dict[str, list[str]] | None = field(default=None, kw_only=True)
 
 
 @dataclass

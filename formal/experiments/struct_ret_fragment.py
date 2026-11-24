@@ -132,6 +132,7 @@ def write_sources(out: Path, cases: list[tuple[str, str]]) -> None:
         "#include <stdlib.h>",
         "#include <unistd.h>",
         "#include <sys/wait.h>",
+        "#include <sys/prctl.h>",
         '#include "old.h"',
         # A harness failure (fork/waitpid) is not an observation: exit 2.
         "static int run_case(void (*c)(void)){ fflush(stdout); pid_t pid = fork();"
@@ -141,7 +142,12 @@ def write_sources(out: Path, cases: list[tuple[str, str]]) -> None:
         " do { w = waitpid(pid, &st, 0); } while (w < 0 && errno == EINTR);"
         ' if (w != pid) { perror("waitpid"); exit(2); }'
         " return WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : 1; }",
+    ]
+    # Hundreds of children can legitimately fault on incompatible calls. Set
+    # this once before forking so Linux skips even piped core-dump handlers.
+    main_body = [
         "int main(void){",
+        'if (prctl(PR_SET_DUMPABLE, 0L) != 0) { perror("prctl"); return 2; }',
     ]
     callers: list[str] = []
     for i, (old, new) in enumerate(cases):
@@ -160,9 +166,10 @@ def write_sources(out: Path, cases: list[tuple[str, str]]) -> None:
             f" struct R{i} r = f{i}();"
             f' printf("R {i} {" ".join(fmt)}\\n", {", ".join(vals)}); }}'
         )
-        main.append(f'printf("A {i} %d\\n", run_case(c{i}));')
+        main_body.append(f'printf("A {i} %d\\n", run_case(c{i}));')
+    main.extend(callers)
+    main.extend(main_body)
     main.append("return 0;}")
-    main[-2 - len(cases) : -2 - len(cases)] = callers
     for name, text in (
         ("old.h", old_h),
         ("new.h", new_h),

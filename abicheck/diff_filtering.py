@@ -461,21 +461,6 @@ def _build_type_embed_index(
     return type_embeds
 
 
-def _assign_affected_symbols_to_changes(
-    type_changes: list[Change],
-    type_to_funcs: dict[str, set[str]],
-    type_to_mangled: dict[str, set[str]],
-) -> None:
-    """Populate Change.affected_symbols from the type-to-function mappings."""
-    for c in type_changes:
-        type_name = root_type_name(c)
-        funcs = type_to_funcs.get(type_name, set())
-        mangled_funcs = type_to_mangled.get(type_name, set())
-        if funcs:
-            # Store both demangled and mangled names for cross-format matching
-            c.affected_symbols = sorted(funcs | mangled_funcs)
-
-
 def _enrich_affected_symbols(
     changes: list[Change],
     old: AbiSnapshot,
@@ -507,9 +492,13 @@ def _enrich_affected_symbols(
 
     # Also check if types are embedded in struct fields used by functions (Container has a Leaf field → functions taking Container* are affected).
     type_embeds = _build_type_embed_index(affected_types, old, matcher)
-    from .compare.type_symbol_disambiguation import attribute_scoped_types
+    from .compare.type_symbol_disambiguation import (
+        _assign_affected_symbols_to_changes,
+        attribute_scoped_types,
+        direct_value_roles,
+    )
 
-    attribute_scoped_types(
+    names = attribute_scoped_types(
         affected_types, old, new, old_pub, type_to_funcs, type_to_mangled, type_embeds
     )
 
@@ -531,7 +520,10 @@ def _enrich_affected_symbols(
 
     # Assign to changes — include both demangled names (display) and
     # mangled names (appcompat matching, FIX-A Part 3).
-    _assign_affected_symbols_to_changes(type_changes, type_to_funcs, type_to_mangled)
+    roles = direct_value_roles(names, affected_types, old_pub, type_to_mangled)
+    _assign_affected_symbols_to_changes(
+        root_type_name, roles, type_changes, type_to_funcs, type_to_mangled
+    )
 
 
 # Owner size/offset changes that the embedding attribution can annotate.

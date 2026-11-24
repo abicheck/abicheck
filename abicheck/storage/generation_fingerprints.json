@@ -8,7 +8,7 @@
       "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "c4226cd079a92be31cc3400453b03e696a25b6e4f754457bfdd471cff1cf9675",
+      "abicheck/dwarf_snapshot.py": "2c6b3932165efa71392ee68d3d516e467e9ca4125d0e21e328dbb2a033377b78",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "4cef17c9d4ed06c753e792e3b9d448b2412dd76d505bf3607902f0f5ee869fc8",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
@@ -53,6 +53,7 @@
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
+      "abicheck/extract/dwarf_signature_limits.py": "429fde3a9c478b63fcec161e48bd168d4a86e61316792101f56e93e4ada15600",
       "abicheck/extract/dwarf_standard_layout.py": "233bf5002e0ec8b8155d1b5822371fbcb04e0d1bc8b4032147c11cc5c0443283",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
       "abicheck/extract/dwarf_type_alignment.py": "26897230d2b88662cd61e3e64180f6ca57a6ff361baebe33e61b046ebee68951",
@@ -249,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "80fa25db80a6d6728bde6241a0b5f6a441d3fc30dd6c1555f9c0d00edce93508",
-    "generation": 93,
-    "reason": "Require an observed host plan before running a legacy SYCL host-only request"
+    "fingerprint": "fea1d9abe001cb5008c6c24db129cafa34b77f286945f667735c913add51802c",
+    "generation": 94,
+    "reason": "Record limits for incomplete public DWARF signature types"
   },
   "resolver": {
     "files": {
