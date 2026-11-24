@@ -58,7 +58,8 @@ from .clang_header_argv import HeaderCompileContext, render_clang_header_argv
 #: Bumped to 5 when system include dirs entered the key by spelling only and
 #: an entry became valid only beside its dependency manifest
 #: (`extract.cache_dep_manifest`): an older entry has no manifest.
-_CLANG_CACHE_SCHEMA_VERSION = 5
+#: Version 6 selects the host pass using the configured SYCL offload driver.
+_CLANG_CACHE_SCHEMA_VERSION = 6
 
 #: Salts every castxml header-parse cache key. Bumped to 2 when castxml's
 #: emulated compiler started receiving the run's standard/sysroot/target

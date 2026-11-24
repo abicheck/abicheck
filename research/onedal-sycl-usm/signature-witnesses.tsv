@@ -1,0 +1,60 @@
+header	qualified_name	signature	result	witness
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, T *, std::int64_t, Deleter &&, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, const T *, std::int64_t, ConstDeleter &&, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, const std::shared_ptr<T> &, std::int64_t, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, const std::shared_ptr<const T> &, std::int64_t, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::empty	array<T> (const sycl::queue &, std::int64_t, const sycl::usm::alloc &)	runtime-pass	abiforge.run.onedal_sycl
+array.hpp	oneapi::dal::v2::array::full	array<T> (sycl::queue &, std::int64_t, K &&, const sycl::usm::alloc &)	runtime-pass	abiforge.run.onedal_sycl
+array.hpp	oneapi::dal::v2::array::get_queue	std::optional<sycl::queue> () const	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::need_mutable_data	array<T> &(sycl::queue &, const sycl::usm::alloc &)	instantiation-failed	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::reset	void (const sycl::queue &, T *, std::int64_t, Deleter &&, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::reset	void (const sycl::queue &, const T *, std::int64_t, ConstDeleter &&, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::reset	void (const sycl::queue &, std::int64_t, const sycl::usm::alloc &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::wrap	array<T> (Y *, std::int64_t, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+array.hpp	oneapi::dal::v2::array::wrap	array<T> (const sycl::queue &, Y *, std::int64_t, const std::vector<sycl::event> &)	runtime-pass	abiforge.run.onedal_sycl
+array.hpp	oneapi::dal::v2::array::zeros	array<T> (sycl::queue &, std::int64_t, const sycl::usm::alloc &)	runtime-pass	abiforge.run.onedal_sycl
+chunked_array.hpp	oneapi::dal::v2::chunked_array::flatten	array<T> (const detail::data_parallel_policy &, const std::vector<sycl::event> &) const	runtime-pass	ownership_consumer.cpp
+chunked_array.hpp	oneapi::dal::v2::chunked_array::flatten	array<T> (sycl::queue &, sycl::usm::alloc, const std::vector<sycl::event> &) const	runtime-pass	buffer_consumer.cpp
+chunked_array.hpp	oneapi::dal::v2::chunked_array::get_data	array<const T *> (const detail::data_parallel_policy &, const std::vector<sycl::event> &) const	runtime-pass	ownership_consumer.cpp
+chunked_array.hpp	oneapi::dal::v2::chunked_array::get_data	array<const T *> (sycl::queue &, sycl::usm::alloc, const std::vector<sycl::event> &) const	runtime-pass	buffer_consumer.cpp
+compute.hpp	oneapi::dal::preview::compute	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)	cpu-unimplemented	spmd_dispatch.cpp
+compute.hpp	oneapi::dal::v1::compute	auto (sycl::queue &, Args &&...)	runtime-pass	dispatch_consumer.cpp
+finalize_compute.hpp	oneapi::dal::preview::finalize_compute	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)	cpu-unimplemented	spmd_dispatch.cpp
+finalize_compute.hpp	oneapi::dal::v1::finalize_compute	auto (sycl::queue &, Args &&...)	runtime-pass	dispatch_consumer.cpp
+finalize_train.hpp	oneapi::dal::preview::finalize_train	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)	cpu-unimplemented	spmd_dispatch.cpp
+finalize_train.hpp	oneapi::dal::v1::finalize_train	auto (sycl::queue &, Args &&...)	runtime-pass	dispatch_consumer.cpp
+infer.hpp	oneapi::dal::preview::infer	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)	cpu-unimplemented	spmd_dispatch.cpp
+infer.hpp	oneapi::dal::v1::infer	auto (sycl::queue &, Args &&...)	runtime-pass	dispatch_consumer.cpp
+partial_compute.hpp	oneapi::dal::v1::partial_compute	auto (sycl::queue &, Args &&...)	runtime-pass	dispatch_consumer.cpp
+partial_train.hpp	oneapi::dal::preview::partial_train	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)	link-failed	spmd_dispatch.cpp
+partial_train.hpp	oneapi::dal::v1::partial_train	auto (sycl::queue &, Args &&...)	runtime-pass	dispatch_consumer.cpp
+read.hpp	oneapi::dal::v1::read	auto (sycl::queue &, Args &&...)	runtime-pass	ownership_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::make_communicator	communicator<device_memory_access::usm> (sycl::queue &)	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allgatherv	request (sycl::queue &, const D *, std::int64_t, D *, const std::int64_t *, const std::int64_t *, const std::vector<sycl::event> &) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allgatherv	request (sycl::queue &, const byte_t *, std::int64_t, byte_t *, const std::int64_t *, const std::int64_t *, const data_type &, const std::vector<sycl::event> &) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allreduce	request (sycl::queue &, const D *, D *, std::int64_t, const reduce_op &, const std::vector<sycl::event> &) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allreduce	request (sycl::queue &, const byte_t *, byte_t *, std::int64_t, const data_type &, const reduce_op &, const std::vector<sycl::event> &) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::bcast	request (sycl::queue &, D *, std::int64_t, const std::vector<sycl::event> &, std::int64_t) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::bcast	request (sycl::queue &, byte_t *, std::int64_t, const data_type &, const std::vector<sycl::event> &, std::int64_t) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::get_queue	sycl::queue () const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::sendrecv_replace	request (sycl::queue &, D *, std::int64_t, std::int64_t, std::int64_t, const std::vector<sycl::event> &) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::sendrecv_replace	request (sycl::queue &, byte_t *, std::int64_t, const data_type &, std::int64_t, std::int64_t, const std::vector<sycl::event> &) const	runtime-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::allgatherv	request_iface *(sycl::queue &, const byte_t *, std::int64_t, byte_t *, const std::int64_t *, const std::int64_t *, const data_type &, const std::vector<sycl::event> &)	virtual-dispatch-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::allreduce	request_iface *(sycl::queue &, const byte_t *, byte_t *, std::int64_t, const data_type &, const reduce_op &, const std::vector<sycl::event> &)	virtual-dispatch-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::bcast	request_iface *(sycl::queue &, byte_t *, std::int64_t, const data_type &, const std::vector<sycl::event> &, std::int64_t)	virtual-dispatch-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::get_queue	sycl::queue ()	virtual-dispatch-pass	spmd_consumer.cpp
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::sendrecv_replace	request_iface *(sycl::queue &, byte_t *, std::int64_t, const data_type &, std::int64_t, std::int64_t, const std::vector<sycl::event> &)	virtual-dispatch-pass	spmd_consumer.cpp
+table/column_accessor.hpp	oneapi::dal::v1::column_accessor::pull	T *(sycl::queue &, dal::array<data_t> &, std::int64_t, const range &, const sycl::usm::alloc &) const	runtime-pass	buffer_consumer.cpp
+table/column_accessor.hpp	oneapi::dal::v1::column_accessor::pull	dal::array<data_t> (sycl::queue &, std::int64_t, const range &, const sycl::usm::alloc &) const	runtime-pass	abiforge.run.onedal_sycl
+table/column_accessor.hpp	oneapi::dal::v1::column_accessor::push	void (sycl::queue &, const dal::array<data_t> &, std::int64_t, const range &)	runtime-pass	buffer_consumer.cpp
+table/csr.hpp	oneapi::dal::v1::csr_table::csr_table	void (sycl::queue &, const Data *, const std::int64_t *, const std::int64_t *, std::int64_t, std::int64_t, ConstDataDeleter &&, ConstColumnIndicesDeleter &&, ConstRowOffsetsDeleter &&, sparse_indexing, const std::vector<sycl::event> &)	runtime-pass	ownership_consumer.cpp
+table/csr.hpp	oneapi::dal::v1::csr_table::wrap	csr_table (sycl::queue &, const Data *, const std::int64_t *, const std::int64_t *, std::int64_t, std::int64_t, sparse_indexing, const std::vector<sycl::event> &)	runtime-pass	csr_consumer.cpp
+table/csr_accessor.hpp	oneapi::dal::v1::csr_accessor::pull	std::tuple<T *, I *, I *> (sycl::queue &, array_d &, array_i &, array_i &, const range &, const sparse_indexing, const sycl::usm::alloc &) const	runtime-pass	csr_consumer.cpp
+table/csr_accessor.hpp	oneapi::dal::v1::csr_accessor::pull	std::tuple<array_d, array_i, array_i> (sycl::queue &, const range &, const sparse_indexing, const sycl::usm::alloc &) const	runtime-pass	csr_consumer.cpp
+table/homogen.hpp	oneapi::dal::v1::homogen_table::homogen_table	void (const sycl::queue &, const Data *, std::int64_t, std::int64_t, ConstDeleter &&, const std::vector<sycl::event> &, data_layout)	runtime-pass	ownership_consumer.cpp
+table/homogen.hpp	oneapi::dal::v1::homogen_table::wrap	homogen_table (const sycl::queue &, const Data *, std::int64_t, std::int64_t, const std::vector<sycl::event> &, data_layout)	runtime-pass	dependency_consumer.cpp
+table/row_accessor.hpp	oneapi::dal::v1::row_accessor::pull	T *(sycl::queue &, dal::array<data_t> &, const range &, const sycl::usm::alloc &) const	runtime-pass	buffer_consumer.cpp
+table/row_accessor.hpp	oneapi::dal::v1::row_accessor::pull	dal::array<data_t> (sycl::queue &, const range &, const sycl::usm::alloc &) const	runtime-pass	abiforge.run.onedal_sycl
+table/row_accessor.hpp	oneapi::dal::v1::row_accessor::push	void (sycl::queue &, const dal::array<data_t> &, const range &)	runtime-pass	buffer_consumer.cpp
+train.hpp	oneapi::dal::preview::train	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)	cpu-unimplemented	spmd_dispatch.cpp
+train.hpp	oneapi::dal::v1::train	auto (sycl::queue &, Args &&...)	runtime-pass	dispatch_consumer.cpp

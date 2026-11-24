@@ -94,6 +94,7 @@ def render_release_summary(
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
     excluded_header_patterns: str = "",
+    consumer_binding: dict[str, object] | None = None,
     public_surface: ReleasePublicSurfaceTerms | None = None,
 ) -> str:
     """Render the release report as *fmt* (``json``/``markdown``/``junit``/
@@ -139,6 +140,7 @@ def render_release_summary(
     from .delta_baseline import current_delta_baseline_block
 
     evaluation = ReleaseEvaluation(
+        consumer_binding=consumer_binding,
         worst_verdict=worst_verdict,
         old_dir=old_dir,
         new_dir=new_dir,

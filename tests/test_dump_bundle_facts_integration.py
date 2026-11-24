@@ -57,7 +57,6 @@ def _evidence(doc: dict) -> dict:
 
 
 pytestmark = [
-    pytest.mark.integration,
     pytest.mark.skipif(
         sys.platform != "linux",
         reason="GNU ld -soname and ELF members; bundle facts are ELF/Linux-only "
@@ -125,6 +124,7 @@ def _invoke(*args: str):
 
 
 @pytest.mark.parametrize("with_headers", [False, True], ids=["binary", "headers"])
+@pytest.mark.integration
 def test_dump_matches_compare_and_round_trips(
     tmp_path: Path, with_headers: bool
 ) -> None:
@@ -179,6 +179,7 @@ def test_dump_matches_compare_and_round_trips(
     }
 
 
+@pytest.mark.integration
 def test_the_label_names_every_member(tmp_path: Path) -> None:
     old_libs, _inc = _build(tmp_path / "old", 0)
     dumped = tmp_path / "dumped.json"
@@ -193,6 +194,7 @@ def test_the_label_names_every_member(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("with_headers", [False, True], ids=["binary", "headers"])
+@pytest.mark.integration
 def test_each_member_is_the_libraries_own_dump(
     tmp_path: Path, with_headers: bool
 ) -> None:
@@ -238,3 +240,65 @@ def test_each_member_is_the_libraries_own_dump(
         )
         assert single.exit_code == 0, single.output
         assert _strip(member) == _strip(load_snapshot(alone)), key
+
+
+def test_capture_and_compare_apply_member_contexts(tmp_path: Path) -> None:
+    from abicheck.serialization import load_bundle_facts
+
+    clang = shutil.which("clang++")
+    if clang is None:
+        pytest.skip("requires clang++ for both header contexts")
+    libs, _ = _build(tmp_path, 1)
+    (tmp_path / "api.hpp").write_text(
+        "#if PROFILE == 1\nextern int cpu_only();\n"
+        "#elif PROFILE == 2\nextern int queue_only();\n#else\n#error missing profile\n#endif\n"
+    )
+    baseline = tmp_path / "base.json"
+    config = tmp_path / ".abicheck.yml"
+    config.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    lib: {
+                        "compile": {
+                            "frontend": "clang",
+                            "binding": "llvm",
+                            "abi_macros": {"PROFILE": str(profile)},
+                        }
+                    }
+                    for lib, profile in [("a", 1), ("b", 2)]
+                },
+                "release": {
+                    "bindings": {"llvm": clang},
+                    "libraries": {
+                        f"lib{lib}.so": {"headers": ["api.hpp"], "profiles": [lib]}
+                        for lib in ("a", "b")
+                    },
+                },
+            }
+        )
+    )
+    (libs / "api.hpp").write_bytes((tmp_path / "api.hpp").read_bytes())
+    flags = ["--config", str(config)]
+    captured = _invoke("dump", str(libs), "--bundle-facts-out", str(baseline), *flags)
+    assert captured.exit_code == 0, captured.output
+    facts = load_bundle_facts(baseline)
+    assert not facts.degraded_members
+    for key, expected in [
+        ("liba.so", {"cpu_only"}),
+        ("libb.so", {"queue_only"}),
+        ("libc.so", set()),
+    ]:
+        found = {
+            f.name for f in facts.per_library_snapshots[key].declarations.functions
+        }
+        assert found & {"cpu_only", "queue_only"} == expected
+    report = tmp_path / "report.json"
+    compared = _invoke(
+        "compare", str(baseline), str(libs), *flags, "-o", f"json={report}"
+    )
+    assert compared.exit_code == 0, compared.output
+    result = json.loads(report.read_text())
+    assert len(result["libraries"]) == 3
+    assert {member["verdict"] for member in result["libraries"]} == {"NO_CHANGE"}
+    assert not result["extraction_failures"]

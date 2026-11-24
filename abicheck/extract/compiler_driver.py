@@ -44,9 +44,7 @@ Public interface (everything else in this module is private):
 
 Callers import these names from here; no other module re-exports them.
 
-Dependency note: :func:`_driver_host_only_is_single_pass` consults the
-single-pass probe in :mod:`abicheck.extract.dpcpp_jobs` lazily, at call time,
-so importing this module never pulls the replay planner in.
+The SYCL selector and replay planner share the driver job vocabulary.
 """
 
 from __future__ import annotations
@@ -57,6 +55,7 @@ from pathlib import Path
 
 from .._compiler_options import split_gcc_options
 from ..errors import AstContextMissingError, SnapshotError
+from .dpcpp_jobs import sycl_host_selector
 
 #: Environment variables the compiler reads extra include directories from.
 #: They are searched after the ``-I``/``-isystem`` roots, so they change a
@@ -77,6 +76,7 @@ __all__ = [
     "resolve_clang_bin",
     "resolve_dpcpp_acquisition",
     "resolve_source_frontend_clang_bin",
+    "sycl_host_selector",
 ]
 
 
@@ -242,7 +242,7 @@ def resolve_dpcpp_acquisition(
     direct_host = (
         multi
         and frontend_context == "host"
-        and "-fsycl-device-only" not in tokens
+        and not {"-fsycl-device-only", "--offload-device-only"}.intersection(tokens)
         and _driver_host_only_is_single_pass(clang_bin, tuple(tokens))
     )
     return multi and not direct_host, direct_host
@@ -298,7 +298,12 @@ def needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     """
     if not is_intel_sycl_driver(cc_bin):
         return False
-    if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
+    if {
+        "-fsycl-host-only",
+        "-fsycl-device-only",
+        "--offload-host-only",
+        "--offload-device-only",
+    }.intersection(tokens):
         return False
     sycl_enabled = _dpcpp_defaults_sycl_on(cc_bin)
     for tok in tokens:

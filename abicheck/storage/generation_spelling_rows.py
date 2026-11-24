@@ -14,11 +14,8 @@
 # limitations under the License.
 """The audited per-generation spelling rows (ADR-062 D2).
 
-One :class:`GenerationSpellingChange` row per extractor generation in
-:data:`SPELLING_MIGRATIONS`. ``scripts/generation_corpus_gate.py`` reads this
-file's literal by AST, so the table stays a dict literal and every reason a
-literal string; the row record and placeholder rule are in
-:mod:`.generation_spelling_types`.
+The corpus gate reads this dict literal by AST and validates each reason.
+The frozen corpus tests every generation against the current spellings.
 """
 
 from __future__ import annotations
@@ -30,15 +27,6 @@ from .generation_spelling_types import GenerationSpellingChange
 __all__ = ["SPELLING_MIGRATIONS"]
 
 
-#: Every row's reason cites the commit that introduced the generation and what
-#: an audit of that commit's extractor diff found. Rows without rewrites were
-#: audited by reading the diff over the fingerprinted extractor scope
-#: (``generation_fingerprints.json``) and confirmed empirically: the frozen
-#: corpus under ``tests/fixtures/generations/``, dumped at each generation's
-#: last main commit, spells every entity like a fresh dump once these
-#: rewrites are applied (``tests/test_generation_corpus.py``).
-#: ``scripts/check_ai_readiness.py``'s ``generation-corpus`` check refuses a
-#: row whose reason is empty or a bare "no change" placeholder.
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
         "85d745b9a (#1538): first stamped generation; the baseline every "
@@ -796,5 +784,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     ),
     92: GenerationSpellingChange(
         "Inferred -H roots: an interior -H dir is no longer searched; no rewrite applies."
+    ),
+    93: GenerationSpellingChange(
+        "PI plugin ELF extraction now includes piext exports in the entry point list "
+        "and inferred interface version. Replay older DPC++ host AST jobs. No spelling rewrite."
+    ),
+    94: GenerationSpellingChange(
+        "DWARF signature completeness: declaration-only records add extraction limitations. "
+        "Stored type and symbol spellings are unchanged."
     ),
 }

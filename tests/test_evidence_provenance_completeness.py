@@ -160,7 +160,8 @@ class TestFieldDefaultsToNone:
         assert by_name["review_evidence"].kw_only is True
         assert by_name["cross_source_providers"].kw_only is True
         assert by_name["removed_instantiations"].kw_only is True
-        assert all_names[-1] == "removed_instantiations", (
+        assert by_name["direct_value_uses"].kw_only
+        assert all_names[-2:] == ["removed_instantiations", "direct_value_uses"], (
             "removed_instantiations must be the last-declared field on Change"
         )
         assert (

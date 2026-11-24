@@ -105,6 +105,8 @@ def _builder() -> _DwarfSnapshotBuilder:
     builder._seen_type_names = set()
     builder._logged_type_dups = set()
     builder._record_by_qualified_name = {}
+    builder._declaration_only = {}
+    builder._record_leaf_owner = {}
     builder._record_die_index = {}
     builder._die_key_to_qualified_name = {}
     builder._base_edges_by_record = {}

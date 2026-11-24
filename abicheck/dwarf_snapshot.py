@@ -78,6 +78,7 @@ from .extract.dwarf_scope import (
     record_scope_segment as _record_scope_segment,
     variable_entity_id as _dwarf_variable_entity_id,
 )
+from .extract.dwarf_signature_limits import missing_record_definitions
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decorators
 from .extract.dwarf_variable_alignment import dwarf_variable_layout_facts
@@ -140,6 +141,8 @@ class DwarfDeclarations:
         default_factory=dict
     )
 
+    extraction_limitations: tuple[str, ...] = ()
+
 
 def extract_dwarf_declarations(
     elf_path: Path,
@@ -149,21 +152,22 @@ def extract_dwarf_declarations(
 ) -> DwarfDeclarations:
     """Walk *elf_path*'s DWARF and return the extracted declarations.
 
-    The result is a :class:`DwarfDeclarations`. Assembling them into an
-    :class:`~abicheck.model.AbiSnapshot` is
-    :func:`abicheck.workflows.dwarf_snapshot_assembly.build_snapshot_from_dwarf`'s
-    job (design-hardening Phase 2: one snapshot factory, in ``workflows``);
-    a caller that only needs the types, like the header-layout backfill,
-    reads them here without building a snapshot at all.
-
-    *session*: an optional pre-opened
-    :class:`~abicheck.dwarf_unified.DwarfSession` whose ``DWARFInfo`` the
-    walk reuses instead of opening *elf_path* a second time. Output is
-    identical either way; the caller owns the session's lifetime.
+    Snapshot assembly belongs to workflows.dwarf_snapshot_assembly. Header
+    layout backfill reads the declarations directly. When supplied, the
+    caller-owned session shares the DWARFInfo and avoids reopening the ELF.
+    The caller retains ownership of the session and can reuse it for
+    subsequent debug analyses of this artifact.
     """
     builder = _DwarfSnapshotBuilder(elf_path, elf_meta)
     builder.extract(session=session)
     return DwarfDeclarations(
+        extraction_limitations=missing_record_definitions(
+            builder._declaration_only,
+            builder._record_by_qualified_name.keys(),
+            builder._record_leaf_owner,
+            builder.typedefs,
+            builder.functions,
+        ),
         functions=builder.functions,
         variables=builder.variables,
         types=builder.types,
@@ -321,6 +325,8 @@ class _DwarfSnapshotBuilder:
         self._die_key_to_qualified_name: dict[tuple[int, int], str] = {}
         # ADR-063 T9, see _dvc: qualified name -> disagreeing field subset.
         self._vtable_evidence_conflicts: dict[str, set[str]] = {}
+        self._declaration_only: dict[str, str] = {}
+        self._record_leaf_owner: dict[str, str | None] = {}
         # id(derived RecordType) -> ordered list of (base bare name, this
         # edge's own bit offset or None, (CU offset, base DIE offset) or
         # None), ONE ENTRY PER DW_TAG_inheritance CHILD -- not a dict keyed
@@ -819,6 +825,9 @@ class _DwarfSnapshotBuilder:
         bare name, the same borrowing *qualified* already does.
         """
         byte_size = _attr_int(die, "DW_AT_byte_size")
+        short = leaf_name or qualified
+        if self._record_leaf_owner.setdefault(short, qualified) != qualified:
+            self._record_leaf_owner[short] = None
         if byte_size == 0 and _attr_bool(die, "DW_AT_declaration"):
             # Forward declaration only -- but an inheritance edge in another
             # CU can (and does — this is the exact shape GCC emits for a
@@ -829,6 +838,7 @@ class _DwarfSnapshotBuilder:
             # that edge's lookup finds nothing (Codex review, reproduced
             # with two TUs sharing one header, one of which only
             # forward-references the base).
+            self._declaration_only[qualified] = short
             self._register_die_qualified_name(die, CU, qualified)
             return
 
@@ -1484,10 +1494,8 @@ class _DwarfSnapshotBuilder:
         contains the directly referenced types. We transitively include
         types referenced by fields of those types.
         """
-        # Build type name → RecordType index
         type_map: dict[str, RecordType] = {t.name: t for t in self.types}
 
-        # Transitive closure: BFS from referenced types
         queue = collections.deque(self._referenced_type_names)
         reachable: set[str] = set(self._referenced_type_names)
 
@@ -1502,16 +1510,7 @@ class _DwarfSnapshotBuilder:
                 if base not in reachable:
                     reachable.add(base)
                     queue.append(base)
-            # Fact[T]-bridged reads (ADR-063 Phase 0): `bases_fact`/
-            # `virtual_bases_fact` and their legacy siblings are kept in
-            # lockstep by `RecordType.__post_init__`, so resolving through
-            # the sibling here is exactly value-preserving. Each `*_fact`
-            # field is declared `Fact[list[str]] | None` (only
-            # `__init__`-time callers may omit it); `__post_init__` always
-            # backfills a real `Fact`, so the leading `is not None` check
-            # never actually fails at runtime — it, and the trailing
-            # `.value is not None` (mirroring `bridge_legacy_and_fact`'s
-            # own resolution), exist to narrow the type for mypy.
+            # Follow only present base facts (ADR-063).
             bases_fact = rec.bases_fact
             rec_bases = (
                 bases_fact.value

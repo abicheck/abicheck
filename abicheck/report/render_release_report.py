@@ -243,7 +243,33 @@ def render_release_text(fmt: str, report: ReleaseReport, *, demangle: bool) -> s
         return render_release_review(json.loads(render_release_json(report)))
     if fmt == "json":
         return render_release_json(report)
-    return render_release_markdown_report(report, demangle=demangle)
+    markdown = render_release_markdown_report(report, demangle=demangle)
+    binding = report.evaluation.consumer_binding
+    additional = binding.get("additional_consumers", []) if binding else []
+    assert isinstance(additional, list)
+    for binding in [binding, *additional] if binding else []:
+        markdown += f"\n## Consumer binding\n\n{md_text(binding['client'], code=True)}: {md_text(binding['loadability'])}\n"
+        unresolved = binding["unresolved_dependencies"]
+        assert isinstance(unresolved, list)
+        for requester, soname in unresolved:
+            markdown += f"\nUnresolved dependency {md_text(soname, code=True)} requested by {md_text(requester, code=True)}.\n"
+        markdown += "\n| Import | Previous provider | Candidate provider | Binding |\n|---|---|---|---|\n"
+        imports = binding["imports"]
+        assert isinstance(imports, list)
+        for row in imports:
+            name = row["symbol"] + ("@" + row["version"] if row["version"] else "")
+            old = row["old"] or {}
+            new = row["new"] or {}
+            cells = (
+                name,
+                old.get("provider") or "—",
+                new.get("provider") or "—",
+                new.get("status") or "unknown",
+            )
+            markdown += (
+                "| " + " | ".join(md_text(cell, table=True) for cell in cells) + " |\n"
+            )
+    return markdown
 
 
 def render_stored_release_json(

@@ -21,7 +21,7 @@ from ..._compiler_options import (
     split_gcc_options,
 )
 from ...header_utils import drop_include_tokens_duplicating_paths
-from ..compiler_driver import needs_sycl_host_only
+from ..compiler_driver import needs_sycl_host_only, sycl_host_selector
 
 
 @dataclass(frozen=True)
@@ -112,10 +112,11 @@ def render_clang_header_argv(
     if context.dpcpp_host_context:
         if "-fsycl" not in cmd:
             cmd.append("-fsycl")
-        if "-fsycl-host-only" not in cmd:
-            cmd.append("-fsycl-host-only")
+        selector = sycl_host_selector(cmd)
+        if selector not in cmd:
+            cmd.append(selector)
     elif not context.dpcpp_multi_context and needs_sycl_host_only(context.cc_bin, cmd):
-        cmd.append("-fsycl-host-only")
+        cmd.append(sycl_host_selector(cmd))
     # Auto-probed host system dirs go *after* the user's pass-through flags, so a
     # user-supplied -isystem (cross/hermetic SDK) keeps higher priority (Codex review).
     for sysinc in context.system_includes:

@@ -54,6 +54,7 @@ from .compare.function_signature import (
     function_signature_changes,
     function_signature_index,
 )
+from .compare.header_overloads import default_views, is_header_pattern
 from .compare.naming_conventions import PREFIX_RENAME
 from .compare.parameter_facts import (
     ParameterView,
@@ -494,6 +495,12 @@ def _detect_newly_deleted_functions(
         ):
             continue
         f_old_any = old_all.get(mangled)
+        if (
+            f_old_any is not None
+            and is_header_pattern(f_new)
+            and is_header_pattern(f_old_any)
+        ):
+            continue  # The scoped overload join handles header-only patterns.
         old_entity = old_index.entity_for(f_old_any) if f_old_any is not None else None
         if f_old_any is None:
             f_old_any = drift_old_by_new_key.get(mangled)
@@ -529,7 +536,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # data-model-dependent integer ABI-equivalence checks below.
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
-    # Once per comparison: see compare/template_instance_absence.py.
     template_absence = TemplateInstanceAbsence(new, old)
     old_map, _reconciled_new_functions = reconciled_function_surfaces(old, new)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
@@ -549,7 +555,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
     # old surface's scope-qualified owner classes, and per-class virtual
     # signatures (to skip inherited overrides). See ``virtual_method_addition``.
-    old_types = build_type_map(old.declarations.types)
+    old_decls = old.declarations
+    old_types = build_type_map(old_decls.types)
     new_types = build_type_map(new.declarations.types)
     old_owner_classes = {
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
@@ -563,7 +570,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new, "clang_vtable"
     )
 
-    # Build a lookup of ALL functions in new snapshot (including hidden).
     new_all = new.function_map
 
     matched_by_name: set[str] = set()
@@ -654,7 +660,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
     )
 
-    return finish_function_changes(changes, old, new)
+    return finish_function_changes(changes, old, new, old_decls.functions)
 
 
 def _converting_ctors_by_class(
@@ -832,22 +838,12 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     every defaulted parameter as ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless
     both sides are header-aware.
 
-    Additionally gated per-function-pair, whenever either side has a known
-    header-AST producer (castxml, clang, or a hybrid merge — G28 Phase 3):
-    the two backends' default VALUE representations are not cross-comparable
-    (castxml keeps the real source expression; clang's is a placeholder/
-    fingerprint for anything non-trivial), even between two pure
-    single-backend snapshots. Requiring the SAME producer on both sides (not
-    "castxml on both sides", which would wrongly suppress a same-producer
-    clang-vs-clang pair) avoids a false CHANGED/REMOVED from a
-    representation mismatch while still catching a real change.
-
-    The per-pair skip only fires when BOTH producers are POSITIVELY known
-    and DIFFER, never merely because one side's producer is unknown: an
-    unset ``ast_producer`` (a hand-built test snapshot, or a legacy
-    pre-provenance baseline) must not be silently dropped as a mismatch
-    just because it lacks metadata it never had a chance to record.
-
+    Compare defaults only when the two known per-function AST producers agree.
+    CastXML preserves the expression, while clang may record a structural
+    fingerprint. Unknown producer metadata remains comparable for legacy inputs.
+    For confirmed public, unexported patterns sharing a placeholder linker name,
+    default_views pairs declarations by identity and projects their own defaults.
+    Ordinary functions retain the first-wins pairing.
     A separate, narrower gate protects the VALUE-CHANGED comparison alone
     (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
     """
@@ -856,14 +852,18 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     old_map, new_map = reconciled_function_surfaces(old, new)
 
-    def _param_defaults_producer(snap: AbiSnapshot, f: Function) -> str | None:
-        return fact_producer(snap, func_fact_key(f.mangled, "param_defaults"))
-
-    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
-        old, new, old_map, new_map
+    for mangled, f_old, f_new, v_old, v_new in default_views(
+        _parameter_view_pairs(old, new, old_map, new_map),
+        old,
+        new,
+        old_map,
     ):
-        old_producer = _param_defaults_producer(old, f_old)
-        new_producer = _param_defaults_producer(new, f_new)
+        old_producer = fact_producer(
+            old, func_fact_key(f_old.mangled, "param_defaults")
+        )
+        new_producer = fact_producer(
+            new, func_fact_key(f_new.mangled, "param_defaults")
+        )
         if (
             old_producer is not None
             and new_producer is not None

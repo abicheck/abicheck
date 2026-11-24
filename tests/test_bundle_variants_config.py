@@ -214,3 +214,20 @@ def test_abicheck_yml_ingestion_is_strict_about_bundle_variants() -> None:
         )
     with pytest.raises(ValueError, match="unknown .abicheck.yml key 'bundle_variant'"):
         BuildConfig.from_dict({"bundle_variant": _base()})
+
+
+def test_header_profile_is_a_declared_coordinate():
+    spec = {
+        "target_triple": "x86_64-linux-gnu",
+        "compiler_family": "gcc",
+        "header_profile": "host",
+    }
+    assert (
+        parse_bundle_variants({"x": spec}).variants[0].declared()["header_profile"]
+        == "host"
+    )
+    for extra in (
+        {"header_profile": []},
+        {"feature_toggles": {"header_profile": "sycl"}},
+    ):
+        assert bundle_variants_findings({"x": {**spec, **extra}})

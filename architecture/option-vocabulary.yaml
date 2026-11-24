@@ -771,6 +771,16 @@ concepts:
     exceptions:
       - {id: CompareRequest.env_matrix, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
       - {id: run_compare(env_matrix), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
+  - concept: release.bindings
+    tier: config
+    renames: []
+    config:
+      - release.bindings
+  - concept: release.libraries
+    tier: config
+    renames: []
+    config:
+      - release.libraries
   - concept: release.dso_only
     tier: config
     renames: []

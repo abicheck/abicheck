@@ -24,12 +24,15 @@ def run(
     *,
     headers: tuple[list[Path], list[Path]] | None,
     includes: tuple[Path, Path] | None = None,
+    config: Path | None = None,
     timeout: float = 300.0,
     stem: str = "abicheck",
 ) -> ToolRun:
     tr = ToolRun(mode="abicheck")
     rep = out / f"{stem}.json"
     argv = [*ABICHECK, "compare", str(old_so), str(new_so)]
+    if config is not None:
+        argv += ["--config", str(config)]
     if headers is not None:
         for side, hs in (("old", headers[0]), ("new", headers[1])):
             argv += [a for h in hs for a in ("--header", f"{side}={h}")]

@@ -1697,6 +1697,16 @@
    "default": "None"
   },
   {
+   "id": "release.bindings",
+   "kind": "dict_str",
+   "default": "{}"
+  },
+  {
+   "id": "release.libraries",
+   "kind": "custom",
+   "default": "{}"
+  },
+  {
    "id": "release.dso_only",
    "kind": "bool",
    "default": "None"

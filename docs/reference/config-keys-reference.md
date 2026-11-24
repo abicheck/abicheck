@@ -109,8 +109,10 @@ The last column gives the same option on the other surfaces, read from `architec
 
 | Sub-key | Type | Same option on other surfaces |
 |---|---|---|
+| `bindings` | mapping[str, str] | --set: `--set release.bindings=VALUE` |
 | `dso_only` | bool | --set: `--set release.dso_only=VALUE` |
 | `include_private_dso` | bool | --set: `--set release.include_private_dso=VALUE` |
+| `libraries` | mapping[library, {profiles, headers, includes}] | --set: `--set release.libraries=VALUE` |
 | `support_promise` | str | --set: `--set release.support_promise=VALUE` |
 
 ### `report:`

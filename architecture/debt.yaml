@@ -454,7 +454,7 @@
     },
     {
       "path": "abicheck/diff_filtering.py",
-      "baseline_lines": 981,
+      "baseline_lines": 973,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -575,7 +575,7 @@
     },
     {
       "path": "abicheck/dwarf_snapshot.py",
-      "baseline_lines": 1673,
+      "baseline_lines": 1672,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -608,7 +608,7 @@
     },
     {
       "path": "abicheck/frontends/cli/commands/dump.py",
-      "baseline_lines": 867,
+      "baseline_lines": 863,
       "target": "frontends (already home; the header-only branch's own body already delegates to frontends/cli/dump_execute.py -- only the dispatch/is_header_only_evidence check stays here)",
       "rule": "no_growth",
       "disposition": "migrate",

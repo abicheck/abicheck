@@ -35,8 +35,8 @@ Supports two plugin interface generations:
   ``urGetPlatformProcAddrTable``, ``urGetDeviceProcAddrTable``, ...) —
   individual per-verb symbols are no longer exported at all in that shape,
   so the loader resolves real entry points indirectly through these
-  tables. ``urGetAdapterProcAddrTable`` plays the current generation's
-  validity-marker role that ``urAdapterGet`` plays for the older one.
+  tables. The 2025.0.4 OpenCL and Level Zero adapters expose the global
+  table getter (``urGetGlobalProcAddrTable``) in place of the adapter getter.
 
 Both interfaces use the same detection approach: glob for plugin libraries,
 parse ``.dynsym`` via pyelftools, match symbol patterns.  No SYCL compiler
@@ -69,20 +69,18 @@ log = logging.getLogger(__name__)
 # PI (Plugin Interface): DPC++ legacy — piCamelCase symbols, libpi_*.so
 # UR (Unified Runtime):  DPC++ current — urCamelCase symbols, libur_adapter_*.so
 # ---------------------------------------------------------------------------
-_PI_SYMBOL_RE = re.compile(r"^pi[A-Z]\w+$")
+_PI_SYMBOL_RE = re.compile(r"^pi(?:ext)?[A-Z]\w+$")
 _UR_SYMBOL_RE = re.compile(r"^ur[A-Z]\w+$")
 
 # Library name → (plugin_name, interface_type)
 _PI_PLUGIN_NAME_RE = re.compile(r"^libpi_(\w+)\.so")
 _UR_PLUGIN_NAME_RE = re.compile(r"^libur_adapter_(\w+)\.so")
 
-# The validity-marker entry point for each of the two UR export shapes
-# (module docstring): the older per-verb-symbol generation, and the current
-# function-pointer-table-getter generation. A UR plugin is valid if EITHER
-# is present -- accepting only one would silently reject the other real,
-# currently-shipping generation as "not a valid UR adapter".
+# The loader-facing root exports seen in direct and table-based adapters.
 _UR_LEGACY_ENTRYPOINT = "urAdapterGet"
-_UR_TABLE_ENTRYPOINT = "urGetAdapterProcAddrTable"
+_UR_ROOT_EXPORTS = frozenset(
+    {_UR_LEGACY_ENTRYPOINT, "urGetAdapterProcAddrTable", "urGetGlobalProcAddrTable"}
+)
 
 # Backend type detection from plugin library name.
 _BACKEND_MAP: dict[str, str] = {
@@ -108,7 +106,9 @@ _BACKEND_MAP: dict[str, str] = {
 _HIDDEN_VISIBILITIES = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
 
 
-def _extract_plugin_symbols(so_path: Path, symbol_re: re.Pattern[str]) -> list[str]:
+def _extract_plugin_symbols(
+    so_path: Path, symbol_re: re.Pattern[str], errors: list[str] | None = None
+) -> list[str]:
     """Extract exported symbols matching *symbol_re* from a plugin ``.so``.
 
     Uses ``.dynsym`` only (not ``.symtab``) to match ``elf_metadata.py``
@@ -127,8 +127,7 @@ def _extract_plugin_symbols(so_path: Path, symbol_re: re.Pattern[str]) -> list[s
             # TOCTOU protection: verify fd is a regular file after open.
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
-                log.warning("_extract_plugin_symbols: not a regular file: %s", so_path)
-                return []
+                raise ValueError("not a regular file")
             elf = ELFFile(f)
             for section in elf.iter_sections():
                 if not isinstance(section, SymbolTableSection):
@@ -156,6 +155,8 @@ def _extract_plugin_symbols(so_path: Path, symbol_re: re.Pattern[str]) -> list[s
                         symbols.append(name)
     except (ELFError, OSError, ValueError) as exc:
         log.warning("Failed to extract symbols from %s: %s", so_path, exc)
+        if errors is not None:
+            errors.append(f"{so_path}: {exc}")
     return sorted(symbols)
 
 
@@ -222,7 +223,9 @@ def _detect_ur_version_from_symbols(symbols: list[str]) -> str:
     return ""
 
 
-def parse_sycl_plugin(so_path: Path) -> SyclPluginInfo | None:
+def parse_sycl_plugin(
+    so_path: Path, errors: list[str] | None = None
+) -> SyclPluginInfo | None:
     """Parse a single SYCL plugin .so (PI or UR) and extract metadata.
 
     Tries PI pattern first (``libpi_*.so``), then UR (``libur_adapter_*.so``).
@@ -233,7 +236,7 @@ def parse_sycl_plugin(so_path: Path) -> SyclPluginInfo | None:
     pi_match = _PI_PLUGIN_NAME_RE.match(so_path.name)
     if pi_match:
         plugin_name = pi_match.group(1)
-        entry_points = _extract_plugin_symbols(so_path, _PI_SYMBOL_RE)
+        entry_points = _extract_plugin_symbols(so_path, _PI_SYMBOL_RE, errors)
         if "piPluginInit" not in entry_points:
             log.warning(
                 "Plugin %s missing piPluginInit — not a valid PI plugin", so_path
@@ -252,17 +255,9 @@ def parse_sycl_plugin(so_path: Path) -> SyclPluginInfo | None:
     ur_match = _UR_PLUGIN_NAME_RE.match(so_path.name)
     if ur_match:
         plugin_name = ur_match.group(1)
-        entry_points = _extract_plugin_symbols(so_path, _UR_SYMBOL_RE)
-        if (
-            _UR_LEGACY_ENTRYPOINT not in entry_points
-            and _UR_TABLE_ENTRYPOINT not in entry_points
-        ):
-            log.warning(
-                "Plugin %s missing both %s and %s — not a valid UR adapter",
-                so_path,
-                _UR_LEGACY_ENTRYPOINT,
-                _UR_TABLE_ENTRYPOINT,
-            )
+        entry_points = _extract_plugin_symbols(so_path, _UR_SYMBOL_RE, errors)
+        if _UR_ROOT_EXPORTS.isdisjoint(entry_points):
+            log.warning("Plugin %s missing UR adapter root entry point", so_path)
             return None
         return SyclPluginInfo(
             name=plugin_name,
@@ -286,6 +281,7 @@ def _is_plugin_candidate(filename: str) -> bool:
 
 def discover_sycl_plugins(
     search_paths: list[Path],
+    errors: list[str] | None = None,
 ) -> list[SyclPluginInfo]:
     """Discover and parse all SYCL plugins (PI and UR) in the given paths.
 
@@ -296,18 +292,28 @@ def discover_sycl_plugins(
     seen: set[str] = set()
 
     for search_dir in search_paths:
-        if not search_dir.is_dir():
-            log.debug("SYCL plugin search path does not exist: %s", search_dir)
+        try:
+            entries = sorted(search_dir.iterdir())
+        except (FileNotFoundError, NotADirectoryError):
             continue
-        for entry in sorted(search_dir.iterdir()):
-            if not entry.is_file():
-                continue
+        except OSError as exc:
+            if errors is not None:
+                errors.append(f"{search_dir}: {exc}")
+            continue
+        for entry in entries:
             if entry.name in seen:
                 continue
             if not _is_plugin_candidate(entry.name):
                 continue
+            try:
+                if not stat.S_ISREG(entry.stat().st_mode):
+                    continue
+            except OSError as exc:
+                if errors is not None:
+                    errors.append(f"{entry}: {exc}")
+                continue
             seen.add(entry.name)
-            plugin = parse_sycl_plugin(entry)
+            plugin = parse_sycl_plugin(entry, errors)
             if plugin is not None:
                 plugins.append(plugin)
 
@@ -369,7 +375,8 @@ def parse_sycl_metadata(lib_dir: Path) -> SyclMetadata | None:
         search_paths.append(sycl_subdir)
     search_paths.extend(_default_plugin_search_paths())
 
-    plugins = discover_sycl_plugins(search_paths)
+    errors: list[str] = []
+    plugins = discover_sycl_plugins(search_paths, errors)
 
     # Detect the dominant interface version from plugin versions.
     # Use tuple comparison to avoid lexicographic ordering issues
@@ -388,4 +395,5 @@ def parse_sycl_metadata(lib_dir: Path) -> SyclMetadata | None:
         pi_version=runtime_pi_version,
         plugins=plugins,
         plugin_search_paths=[str(p) for p in search_paths],
+        plugin_scan_errors=errors,
     )

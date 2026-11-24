@@ -40,7 +40,7 @@ from ..policy.scope_completeness import ScopeDecision
 from .bundle_facts_library_overrides import (
     BundleFactsLibraryOverridesError,
     known_libraries_for_new_side,
-    load_bundle_facts_library_overrides,
+    resolve_release_interfaces,
 )
 from .bundle_facts_stored_request import (
     BundleFactsCompareError,
@@ -128,6 +128,7 @@ def execute_bundle_facts_compare(
     else:
         result = _compare_stored_against_live(
             request,
+            cfg=cfg,
             policy_file=policy_file,
             suppression=suppression,
             system_providers=bundle_system_providers,
@@ -244,6 +245,7 @@ def _compare_stored_pair(
 def _compare_stored_against_live(
     request: BundleFactsCompareRequest,
     *,
+    cfg: Any = None,
     policy_file: Any,
     suppression: Any,
     system_providers: list[Any],
@@ -300,16 +302,22 @@ def _compare_stored_against_live(
             per_library_headers: dict[str, list[Path]] | None = None
             per_library_includes: dict[str, list[Path]] | None = None
             per_library_compile: dict[str, Any] | None = None
-            if request.bundle_facts_library_manifest is not None:
+            if request.bundle_facts_library_manifest is not None or (
+                request.depth != "binary" and cfg and cfg.release_libraries
+            ):
                 new_library_paths = known_libraries_for_new_side(
                     lib_dir,
                     include_private_dso=include_private_dso,
                     packaged=new_packaged,
                 )
-                overrides = load_bundle_facts_library_overrides(
-                    Path(request.bundle_facts_library_manifest),
-                    known_libraries=set(new_library_paths),
-                    selected_paths=new_library_paths,
+                overrides = resolve_release_interfaces(
+                    request.bundle_facts_library_manifest,
+                    cfg,
+                    request.config_path,
+                    explicit=request.config_explicit,
+                    release_dir=request.new_input,
+                    members=new_library_paths,
+                    base_compile=request.compile_context,
                 )
                 per_library_headers = overrides.headers
                 per_library_includes = overrides.includes

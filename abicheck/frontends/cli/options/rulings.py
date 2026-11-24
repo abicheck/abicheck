@@ -450,13 +450,9 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "path key.",
         blocker="G29/ADR-057 attribution surface (`use_cases:` block)",
     ),
-    "--bundle-facts-library-manifest": _deferred(
-        "Ruled in Phase 7d and re-affirmed: its per-library header/include/"
-        "compile-context override shape has no existing .abicheck.yml home "
-        "-- `bundle: {system_providers, cohorts}` is an unrelated concept "
-        "-- and inventing one now would be exactly the ad hoc plumbing "
-        "guard 2 rules out.",
-        blocker="G42 (named deployment environments and provider resolution)",
+    "--bundle-facts-library-manifest": _keep(
+        "Explicit per-run manifest operand overriding release.libraries for "
+        "a stored baseline comparison."
     ),
 }
 

@@ -93,6 +93,7 @@ from ...model import AbiSnapshot, EnumType, Function, RecordType, ScopeOrigin, V
 from ...model.declaration_headers import declaring_header_set
 from ...model.elf_facts import SymbolBinding
 from ...model.export_index import build_raw_export_index, linked_export_names
+from ...model.include_search import include_roots
 from ...model.surface_facts import in_public_surface
 from ...model.synthetic_key import synthetic_ctor_owner
 from ...model.vocabulary import NON_PUBLIC_ORIGINS
@@ -111,8 +112,6 @@ __all__ = [
     "itanium_top_namespace",
 ]
 
-#: Longest first, so ``-isystem`` is not read as ``-i`` + ``system``.
-_INCLUDE_FLAGS = ("-idirafter", "-isystem", "-iquote", "-I")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _LENGTH = re.compile(r"\d+")
 
@@ -179,27 +178,6 @@ def dependency_internals(snap: AbiSnapshot) -> DependencyInternals:
     decls = snap.declarations
     records: list[RecordType | EnumType] = [*decls.types, *decls.enums]
     return replace(internals, record_names=frozenset(r.name for r in records))
-
-
-def include_roots(compile_args: Sequence[str]) -> tuple[str, ...]:
-    """The include-search directories *compile_args* name, normalized, in
-    order, de-duplicated: ``-I dir``, ``-Idir``, and the ``-isystem``/
-    ``-iquote``/``-idirafter`` forms."""
-    roots: list[str] = []
-    index = 0
-    while index < len(compile_args):
-        arg = compile_args[index]
-        for flag in _INCLUDE_FLAGS:
-            if arg == flag:
-                if index + 1 < len(compile_args):
-                    roots.append(compile_args[index + 1])
-                index += 1
-                break
-            if arg.startswith(flag):
-                roots.append(arg[len(flag) :])
-                break
-        index += 1
-    return tuple(dict.fromkeys(_normalized(r) for r in roots if r))
 
 
 def itanium_top_namespace(mangled: str) -> str | None:

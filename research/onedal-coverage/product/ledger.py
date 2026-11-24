@@ -6,6 +6,12 @@ import sys
 from collections import Counter
 from pathlib import Path
 rows=list(csv.DictReader((Path(sys.argv[1])/'obligations.csv').open()))
+with (Path(__file__).resolve().parent / 'return-witnesses.csv').open() as f:
+    return_edits = {}
+    for result in csv.DictReader(f):
+        # drop_sum tests a method postcondition with an unchanged successful return.
+        if int(result['client_exit']) != 0 and result['variant'] != 'drop_sum':
+            return_edits.setdefault(result['symbol'], set()).add(result['variant'])
 counts=Counter()
 for row in rows:
     kind=row['kind']
@@ -24,9 +30,19 @@ for row in rows:
         witness='visitor.csv'
     row['independent_edit_witness']=witness
     row['edit_family']=('virtual_reorder' if kind=='virtual_slot' else 'struct_swap_fields') if witness else ''
+    if kind == 'by_value_return' and row['symbol'] in return_edits:
+        row['independent_edit_witness'] = 'return-witnesses.csv'
+        row['edit_family'] = '|'.join(sorted(return_edits[row['symbol']]))
     if kind == 'cxx_method' and row['symbol'] == '_ZN4daal8services10interface16Status5clearEv':
         row['independent_edit_witness'] = 'status-clear.csv'
         row['edit_family'] = 'no_op_clear'
+    status_edits = {
+        ('constructor_abi_variant', '_ZN4daal8services10interface16StatusC1ERKS2_'): 'discard_copy',
+        ('cxx_method', '_ZN4daal8services10interface16StatusaSERKS2_'): 'discard_assignment',
+    }
+    if (kind, row['symbol']) in status_edits:
+        row['independent_edit_witness'] = 'ownership-campaign.csv'
+        row['edit_family'] = status_edits[(kind, row['symbol'])]
 with gzip.open('ledger.csv.gz','wt') as f:
     w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
 mapped={r['symbol'] for r in rows if r['providers']}

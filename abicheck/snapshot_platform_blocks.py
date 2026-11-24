@@ -378,6 +378,7 @@ def sycl_from_dict(d: dict[str, Any]) -> Any:
         pi_version=d.get("pi_version", ""),
         plugins=plugins,
         plugin_search_paths=d.get("plugin_search_paths", []),
+        plugin_scan_errors=d.get("plugin_scan_errors", []),
     )
 
 

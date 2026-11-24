@@ -76,7 +76,7 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
     ScopeBucket(
         "sycl",
         False,
-        "SYCL runtime/plugin metadata; the corpus builds plain C/C++",
+        "The plain edit corpus builds C/C++; see the separate sycl_plugins and onedal_sycl campaign receipts",
         ("sycl_",),
     ),
     ScopeBucket(

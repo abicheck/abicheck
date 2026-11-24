@@ -750,3 +750,91 @@ def test_cli_compare_of_a_package_from_stored_snapshots_reports_their_drift(
     assert code == 0, out
     text = report.read_text(encoding="utf-8")
     assert (versioning.GENERATION_DRIFT_NOTICE_MARKER in text) == (offset != 0)
+
+
+@pytest.mark.integration
+def test_same_elf_has_distinct_consumer_profiles(tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+    import sys
+
+    clang = shutil.which("clang++")
+    if not sys.platform.startswith("linux") or not clang:
+        pytest.skip("requires clang++ and ELF")
+    binary = tmp_path / "libapi.so"
+    source = tmp_path / "impl.cpp"
+    source.write_text('extern "C" int provider() { return 0; }')
+    subprocess.run(
+        [clang, "-shared", "-fPIC", str(source), "-o", str(binary)], check=True
+    )
+    header = tmp_path / "api.hpp"
+    header.write_text("#if DEVICE\nint queue_api();\n#else\nint host_api();\n#endif\n")
+    config = tmp_path / ".abicheck.yml"
+    config.write_text(
+        "release: {bindings: {llvm: clang++}}\n"
+        "profiles:\n"
+        "  cpu: {compile: {frontend: clang, binding: llvm}}\n"
+        "  dpc: {consumer_compile: {frontend: clang, binding: llvm, args: [-DDEVICE=1]}}\n"
+        "bundle_variants:\n"
+        "  host: {target_triple: x86_64-linux-gnu, compiler_family: clang, header_profile: cpu}\n"
+        "  queue: {target_triple: x86_64-linux-gnu, compiler_family: clang, header_profile: dpc}\n"
+    )
+    package = tmp_path / "pkg"
+    code, out = _run(
+        "project",
+        "capture-variants",
+        "--config",
+        str(config),
+        "--package",
+        str(package),
+        "--variant",
+        f"host={binary}",
+        "--variant",
+        f"queue={binary}",
+        "--variant-header",
+        f"host={header}",
+        "--variant-header",
+        f"queue={header}",
+    )
+    assert code == 0, out
+    for variant, expected in [("host", "host_api"), ("queue", "queue_api")]:
+        facts = read_bundle_facts_package(
+            read_project_manifest(package),
+            store=DirectoryObjectStore(package),
+            variant_id=variant,
+        )
+        functions = facts.per_library_snapshots["libapi.so"].declarations.functions
+        assert {fn.name for fn in functions} & {"host_api", "queue_api"} == {expected}
+
+
+@pytest.mark.parametrize("required", [True, False])
+def test_snapshot_cannot_supply_variant_header_profile(tmp_path, required):
+    cfg = _config(tmp_path)
+    cfg.write_text(
+        cfg.read_text().replace(
+            "required: false",
+            f"required: {str(required).lower()}\n    header_profile: cpu",
+        )
+        + "profiles: {cpu: {compile: {frontend: clang}}}\n"
+    )
+    inputs = _write_inputs(tmp_path / "inputs", ["foo"])
+    pkg = tmp_path / "pkg"
+    code, out = _run(
+        "project",
+        "capture-variants",
+        "--config",
+        str(cfg),
+        "--variant",
+        f"x86={inputs}",
+        "--variant",
+        f"arm={inputs}",
+        "--package",
+        str(pkg),
+    )
+    assert "header_profile requires live libraries" in out
+    if required:
+        assert code != 0
+        assert not pkg.exists()
+    else:
+        assert code == 0, out
+        assert read_manifest_summary(pkg).variant_ids == ("x86",)

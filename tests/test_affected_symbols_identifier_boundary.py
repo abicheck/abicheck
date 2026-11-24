@@ -118,3 +118,25 @@ def test_ancestor_attribution_uses_the_same_boundary() -> None:
     _enrich_affected_symbols([change], snap)
     assert "use_s1" in change.affected_symbols
     assert "use_s10" not in change.affected_symbols
+
+
+def test_direct_value_roles_exclude_sibling_and_pointer():
+    from abicheck.diff_filtering import _enrich_affected_symbols
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+
+    snap = AbiSnapshot(library="test", version="1")
+    produce = _fn("produce", "int")
+    produce.return_type = "Range"
+    snap.declarations.functions = [
+        produce,
+        _fn("arg", "Range"),
+        _fn("ref", "Range &"),
+        _fn("other", "Range2"),
+    ]
+    change = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Range", description="")
+    _enrich_affected_symbols([change], snap)
+    assert change.direct_value_uses == {
+        "use_produce": ["return"],
+        "use_arg": ["argument 0"],
+    }
