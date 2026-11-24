@@ -249,13 +249,17 @@ def _render_compare_report(
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context,
     *,
+    old_input: Path,
+    new_input: Path,
+    dry_run: bool,
+    binding_output: bool,
     used_by_apps: tuple[ConsumerAppInput, ...],
     required_symbols: tuple[str, ...],
     diagnostic_comparison: bool,
     include_labels: dict[Path, str] | None,
     use_cases_manifest: Path | None = None,
     pdb_path: Path | None = None,
-) -> str | None:
+) -> tuple[str | None, tuple[Path, ...]]:
     """Reject the single-pair-only flags on a directory/package compare.
 
     The per-library fan-out (``compare-release`` backend) consumes the
@@ -275,12 +279,27 @@ def _reject_flags_unsupported_for_set_inputs(
     shortfall is ADR-064's exit-7 axis, per member (see
     :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`).
     """
+    from ...errors import ReleaseOperandUsageError
+    from ...workflows.release_consumer import consumer_copies
+
+    deployment_clients = tuple(app for app in used_by_apps if isinstance(app, Path))
+    if deployment_clients:
+        if not binding_output:
+            raise click.UsageError(
+                "--used-by on release directories needs JSON or Markdown output"
+            )
+        if dry_run:
+            for app in deployment_clients:
+                try:
+                    consumer_copies(old_input, new_input, app)
+                except ReleaseOperandUsageError as exc:
+                    raise click.UsageError(str(exc)) from exc
     _reject_set_input_flags(
-        used_by_apps=used_by_apps,
+        used_by_apps=tuple(app for app in used_by_apps if not isinstance(app, Path)),
         required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
         include_labels=include_labels,
         pdb_path=pdb_path,
     )
-    return _reject_evidence_flags_for_set_inputs(ctx)
+    return _reject_evidence_flags_for_set_inputs(ctx), deployment_clients

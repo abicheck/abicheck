@@ -190,7 +190,7 @@ def test_dpcpp_job_lines_split_identically_on_both_hosts(
         ["cc", "-DMSG=hello world", "-c", "a.c"],
         ["cl", r"/IC:\x y", "/c", "b.c"],
     ]
-    fake = SimpleNamespace(stderr=stderr)
+    fake = SimpleNamespace(stderr=stderr, returncode=0)
     results: dict[str, Any] = {}
     for name in HOSTS:
         monkeypatch.setattr(os, "name", name)

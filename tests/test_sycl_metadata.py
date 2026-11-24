@@ -73,10 +73,18 @@ def _write_elf(tmp_path: Path, name: str) -> Path:
 class TestExtractPluginSymbols:
     def test_collects_matching_symbols(self, tmp_path: Path) -> None:
         so = _write_elf(tmp_path, "libpi_cuda.so")
-        syms = [_make_sym("piPluginInit"), _make_sym("piDevicesGet")]
+        syms = [
+            _make_sym(n)
+            for n in (
+                "piPluginInit",
+                "piDevicesGet",
+                "piextUSMHostAlloc",
+                "piextension",
+            )
+        ]
         with _patch_elf([_make_dynsym(syms)]):
             result = _extract_plugin_symbols(so, _PI_SYMBOL_RE)
-        assert result == ["piDevicesGet", "piPluginInit"]  # sorted
+        assert result == ["piDevicesGet", "piPluginInit", "piextUSMHostAlloc"]
 
     def test_non_regular_file_returns_empty(self) -> None:
         # /dev/null is a char device — TOCTOU guard rejects it.
@@ -125,6 +133,17 @@ class TestExtractPluginSymbols:
         so = _write_elf(tmp_path, "libpi_cuda.so")
         with _patch_elf([_make_dynsym([_make_sym("not_a_pi_symbol")])]):
             assert _extract_plugin_symbols(so, _PI_SYMBOL_RE) == []
+
+    def test_denied_plugin_read_marks_inventory_failed(self, tmp_path: Path) -> None:
+        from abicheck.model.availability import FactStatus
+
+        (tmp_path / "libsycl.so").touch()
+        _write_elf(tmp_path, "libpi_cuda.so")
+        with patch("builtins.open", side_effect=PermissionError("permission denied")):
+            metadata = parse_sycl_metadata(tmp_path)
+        assert metadata is not None
+        assert metadata.plugin_inventory_status is FactStatus.FAILED
+        assert "permission denied" in metadata.plugin_scan_errors[0]
 
     def test_parse_error_returns_empty(self, tmp_path: Path) -> None:
         from elftools.common.exceptions import ELFError
@@ -245,14 +264,19 @@ class TestParseSyclPlugin:
         ):
             assert parse_sycl_plugin(so) is None
 
-    def test_ur_plugin_table_generation_recognized(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "root", ["urGetAdapterProcAddrTable", "urGetGlobalProcAddrTable"]
+    )
+    def test_ur_plugin_table_generation_recognized(
+        self, tmp_path: Path, root: str
+    ) -> None:
         """The current UR export shape (verified against a real Intel
         oneAPI 2026.1 install, G30 pilot validation) exports only
         urGet<Category>ProcAddrTable getters -- no legacy urAdapterGet at
         all. Must be recognized as a valid plugin, not silently rejected."""
         so = _write_elf(tmp_path, "libur_adapter_level_zero.so")
         table_symbols = [
-            "urGetAdapterProcAddrTable",
+            root,
             "urGetPlatformProcAddrTable",
             "urGetDeviceProcAddrTable",
             "urGetContextProcAddrTable",

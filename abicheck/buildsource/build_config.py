@@ -62,6 +62,7 @@ from .build_config_schema import (
     bundle_variants_block_findings,
     deployment_findings,
     parse_debug_info_entry,
+    release_library_findings,
 )
 from .build_config_scope import (
     dependencies_findings,
@@ -368,6 +369,14 @@ KEY_TABLE = KeyTable(
         KeySpec(
             "gate.fail_on_removed_library", Kind.BOOL, "gate_fail_on_removed_library"
         ),
+        KeySpec("release.bindings", Kind.DICT_STR, "release_bindings", {}),
+        KeySpec(
+            "release.libraries",
+            Kind.CUSTOM,
+            "release_libraries",
+            {},
+            validate=release_library_findings,
+        ),
         KeySpec("release.dso_only", Kind.BOOL, "release_dso_only"),
         KeySpec(
             "release.include_private_dso", Kind.BOOL, "release_include_private_dso"
@@ -619,6 +628,8 @@ class BuildConfig:
     #: off the CLI, same shape as ``bundle:`` above (no surviving override).
     #: The former ``compare --dso-only`` / ``--include-private-dso``.
     #: ``None`` = unset (both default to the removed flags' own ``False``).
+    release_libraries: dict[str, dict[str, Any]] = field(default_factory=dict)
+    release_bindings: dict[str, str] = field(default_factory=dict)
     release_dso_only: bool | None = None
     release_include_private_dso: bool | None = None
     #: ``release.support_promise`` -- Phase 7: the former

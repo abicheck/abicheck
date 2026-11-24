@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .availability import FactStatus
+
 
 @dataclass
 class SyclPluginInfo:
@@ -35,6 +37,13 @@ class SyclPluginInfo:
     backend_type: str = ""  # "level_zero" | "opencl" | "cuda" | ...
     min_driver_version: str | None = None  # minimum backend driver version
 
+    @property
+    def pi_extension_entry_points(self) -> set[str]:
+        """PI extensions absent from inventories written before extractor 93."""
+        if self.interface_type != "pi":
+            return set()
+        return {name for name in self.entry_points if name.startswith("piext")}
+
 
 @dataclass
 class SyclMetadata:
@@ -45,6 +54,13 @@ class SyclMetadata:
     pi_version: str = ""  # PI interface version of the runtime
     plugins: list[SyclPluginInfo] = field(default_factory=list)
     plugin_search_paths: list[str] = field(default_factory=list)
+
+    # Persist the reason a scan could not establish the full plugin inventory.
+    plugin_scan_errors: list[str] = field(default_factory=list)
+
+    @property
+    def plugin_inventory_status(self) -> FactStatus:
+        return FactStatus.FAILED if self.plugin_scan_errors else FactStatus.PRESENT
 
     @property
     def plugin_map(self) -> dict[tuple[str, str], SyclPluginInfo]:

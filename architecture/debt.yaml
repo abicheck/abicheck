@@ -608,7 +608,7 @@
     },
     {
       "path": "abicheck/frontends/cli/commands/dump.py",
-      "baseline_lines": 867,
+      "baseline_lines": 863,
       "target": "frontends (already home; the header-only branch's own body already delegates to frontends/cli/dump_execute.py -- only the dispatch/is_header_only_evidence check stays here)",
       "rule": "no_growth",
       "disposition": "migrate",

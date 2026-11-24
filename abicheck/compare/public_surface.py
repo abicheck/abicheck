@@ -51,6 +51,7 @@ from ..name_classification import is_local_rtti_symbol
 from . import export_transition as _export_transition
 from .edge_query import ObservedExportTable, observed_export_table
 from .finding_identity import SymbolIdentityIndex
+from .header_overloads import align_header_overloads
 from .implicit_member_surface import (
     drop_orphan_implicit_members,
     is_unexported_implicit_member,
@@ -240,6 +241,7 @@ def reconciled_function_surfaces(
     )
     # Implicit members of a record only one side declares are entailed by
     # that record's TYPE_ADDED/TYPE_REMOVED, not API findings (#1713).
+    result = align_header_overloads(*result, old, new)
     result = drop_orphan_implicit_members(*result, old, new)
     return store_reconciliation(old, new, RECONCILED_FUNCTIONS, result)
 

@@ -30,9 +30,9 @@ from .generation_spelling_types import GenerationSpellingChange
 __all__ = ["SPELLING_MIGRATIONS"]
 
 
-#: Each row documents the extractor audit and any spelling rewrite. The frozen
-#: corpus tests compare historical snapshots against a fresh dump after migration.
-#: The generation-corpus gate rejects empty reasons and placeholders.
+#: Each reason records the extractor change and any spelling rewrites.
+#: The frozen corpus checks all generations against the current spellings.
+#: The generation-corpus gate rejects missing or placeholder reasons.
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
         "85d745b9a (#1538): first stamped generation; the baseline every "
@@ -792,6 +792,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "Inferred -H roots: an interior -H dir is no longer searched; no rewrite applies."
     ),
     93: GenerationSpellingChange(
+        "PI plugin ELF extraction now includes piext exports in the entry point list "
+        "and inferred interface version. Replay older DPC++ host AST jobs. No spelling rewrite."
+    ),
+    94: GenerationSpellingChange(
         "DWARF signature completeness: declaration-only records add extraction limitations. "
         "Stored type and symbol spellings are unchanged."
     ),

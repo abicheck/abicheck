@@ -412,3 +412,39 @@ def test_an_unknown_variant_is_a_usage_error_naming_it(tmp_path: Path) -> None:
     assert result.exit_code == 64, result.output
     assert "no-such-variant" in result.output
     assert not out.exists()
+
+
+def test_dump_rejects_unknown_member_before_writing_output(tmp_path: Path) -> None:
+    old, _ = _release(tmp_path, "one-member")
+    config = tmp_path / ".abicheck.yml"
+    config.write_text(
+        '{"release":{"libraries":{"libmissing.so": {"includes": ["."]}}}}'
+    )
+    baseline = tmp_path / "baseline.json"
+    result = _invoke(
+        "dump",
+        str(old),
+        "--bundle-facts-out",
+        str(baseline),
+        "--config",
+        str(config),
+    )
+    assert result.exit_code != 0
+    assert "libmissing.so" in result.output and "known libraries" in result.output
+    assert not baseline.exists()
+
+
+def test_binary_capture_with_autodiscovered_header_binding(tmp_path, monkeypatch):
+    old, new = _release(tmp_path, "unchanged")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".abicheck.yml").write_text(
+        "profiles: {cpu: {compile: {frontend: clang, binding: llvm}}}\n"
+        "release: {bindings: {llvm: clang++}, libraries: {liba: {profiles: [cpu]}}}\n"
+    )
+    baseline = tmp_path / "baseline.json"
+    dumped = _invoke(
+        "dump", str(old), "--depth", "binary", "--bundle-facts-out", str(baseline)
+    )
+    assert dumped.exit_code == 0, dumped.output
+    compared = _invoke("compare", str(baseline), str(new), "--depth", "binary")
+    assert compared.exit_code == 0, compared.output

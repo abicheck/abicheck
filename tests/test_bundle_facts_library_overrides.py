@@ -448,3 +448,60 @@ class TestValidateMatchedLibraryOverrides:
             per_library_compile=None,
             matched_keys=set(),
         )
+
+
+def test_one_manifest_binds_headers_to_each_release(tmp_path):
+    from abicheck.workflows.bundle_facts_library_overrides import (
+        load_bundle_facts_library_overrides,
+    )
+
+    manifest = tmp_path / "interfaces.yml"
+    manifest.write_text(
+        "schema: abicheck.release-interfaces/v1\nlibraries:\n"
+        "  libdal.so:\n    headers: [include/api.hpp]\n    includes: [include]\n"
+    )
+    for lane in ("old", "new"):
+        release = tmp_path / lane
+        release.mkdir()
+        overrides = load_bundle_facts_library_overrides(manifest, release_dir=release)
+        assert overrides.headers["libdal.so"] == [release / "include/api.hpp"]
+        assert overrides.includes["libdal.so"] == [release / "include"]
+
+
+def test_main_config_compiler_binding_requires_explicit_config(tmp_path: Path) -> None:
+    from abicheck.buildsource.build_config import load_build_config
+    from abicheck.workflows.bundle_facts_library_overrides import (
+        resolve_release_interfaces,
+    )
+
+    config = tmp_path / ".abicheck.yml"
+    config.write_text(
+        "profiles: {cpu: {compile: {binding: gcc14, frontend: gcc}}}\n"
+        "release:\n  bindings: {gcc14: g++-14}\n"
+        "  libraries: {libcpu.so: {profiles: [cpu]}}\n"
+    )
+    parsed = load_build_config(config)
+    members = {"libcpu.so": tmp_path / "libcpu.so"}
+    with pytest.raises(BundleFactsLibraryOverridesError, match="explicit --config"):
+        resolve_release_interfaces(
+            None,
+            parsed,
+            config,
+            explicit=False,
+            release_dir=tmp_path,
+            members=members,
+            base_compile=None,
+        )
+    resolved = resolve_release_interfaces(
+        None,
+        parsed,
+        config,
+        explicit=True,
+        release_dir=tmp_path,
+        members=members,
+        base_compile=None,
+    )
+    assert resolved.compile["libcpu.so"].gcc_path == "g++-14"
+    assert parsed.to_dict()["release"]["libraries"]["libcpu.so"] == {
+        "profiles": ["cpu"]
+    }

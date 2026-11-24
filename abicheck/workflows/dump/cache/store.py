@@ -135,6 +135,13 @@ def _read_entry(key: str, binary_path: Path, subdir: str = "") -> AbiSnapshot | 
             continue
         if snap is None:  # header-derived entry without its attribution
             continue
+        # PI/UR plugins can be installed or replaced without touching the
+        # scanned ELF. Refresh this external inventory on either cache tier.
+        if snap.elf is not None or snap.platform == "elf" or snap.sycl is not None:
+            from ....extract.metadata_attach import try_attach_sycl_metadata
+
+            snap.sycl = None
+            try_attach_sycl_metadata(snap, binary_path)
         cache_dep_manifest.note(
             cache_dep_manifest.recall(str(manifest_entry), manifest_entry)
         )

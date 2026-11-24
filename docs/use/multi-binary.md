@@ -905,22 +905,70 @@ root, include path, or compile context instead:
 ```yaml
 # manifest.yaml
 libonedal_dpc.so:
-  headers: [include/oneapi/dal/dpc]
+  headers: [include/oneapi/dal.hpp]
+  includes: [include]
+  frontend: clang
   gcc_path: icpx
   gcc_options: ["-fsycl", "-DONEDAL_DATA_PARALLEL"]
-  sysroot: /opt/intel/oneapi/sysroot
 ```
 
 ```bash
-abicheck compare release-1.0.bundlefacts.json release-3.0/ \
-    --bundle-facts-library-manifest manifest.yaml
+abicheck compare release-1.0.bundlefacts.json release-3.0/lib \
+    --bundle-facts-library-manifest release-3.0/manifest.yaml
 ```
 
 A library not named in the manifest keeps the uniform `--header`/
 `--include`/compile-context fallback unchanged. A manifest entry naming a
 library outside the bundle (a typo, or a library that was renamed/removed)
-is a hard error, not a silent no-op. The flag is meaningless — and rejected
-— unless `OLD_INPUT` is a stored `BundleFacts` document.
+is a hard error, not a silent no-op. Relative headers and include roots resolve beside each manifest. On
+`compare`, pass this option with a stored OLD baseline and a live NEW release.
+
+### One project config and one release baseline
+
+For an unpacked SDK, describe each library's header interface in
+`.abicheck.yml`. A library can select one named profile. Its nonempty
+`consumer_compile` (otherwise its `compile`) overlays the common compile
+context. When a profile selects a compiler executable via a binding, pass
+the config explicitly to authorize its use.
+
+```yaml
+profiles:
+  cpu:
+    compile: {frontend: gcc, binding: gcc14, standard: c++17}
+  dpc:
+    compile:
+      frontend: clang
+      binding: intel
+      standard: c++17
+      abi_macros: {ONEDAL_DATA_PARALLEL: "1"}
+      args: [-fsycl]
+release:
+  bindings: {gcc14: g++-14, intel: icpx}
+  libraries:
+    libonedal_parameters.so:
+      profiles: [cpu]
+      headers: [include/oneapi/dal/algo/covariance/parameters/cpu/compute_parameters.hpp]
+      includes: [include]
+    libonedal_parameters_dpc.so:
+      profiles: [dpc]
+      headers: [include/oneapi/dal/algo/covariance/parameters/gpu/compute_parameters.hpp]
+      includes: [include]
+```
+
+```bash
+abicheck dump sdk-old --config .abicheck.yml --bundle-facts-out baseline.json
+abicheck compare baseline.json sdk-new --config .abicheck.yml
+```
+
+Relative headers and includes resolve under the SDK being scanned.
+On `compare`, an explicit `--bundle-facts-library-manifest` replaces the complete
+`release.libraries` mapping for that invocation.
+
+For a standalone manifest shared across unpacked releases, put the
+same mapping under `libraries:` and set `schema: abicheck.release-interfaces/v1`
+at the top level. Pass the new release root as the live operand of `compare`. Relative headers, includes and sysroots then resolve
+against the current release operand. Raw compiler options retain their
+literal spelling. The original flat manifest remains relative to its file.
 
 ## Platform support
 
@@ -995,3 +1043,39 @@ result = compare_bundle_from_facts(old_facts, new, per_library_results)
   `case91_bundle_intra_signature_drift` — extern-C signature drift,
   `case92_bundle_provider_changed` — provider migration,
   `case93_bundle_manifest_drift` — manifest drift
+
+### Capturing two consumer profiles of one shared library
+
+Use a multi-variant ProjectSnapshot package when two supported header
+compilers consume the **same binary**. Keep the `profiles` and
+`release.bindings` from the oneDAL example above. Add these entries to
+the same project config. `compiler_family` describes the binary producer.
+`header_profile` selects the compiler, flags and macros for the header scan.
+
+```yaml
+bundle_variants:
+  host:
+    target_triple: x86_64-linux-gnu
+    compiler_family: intel
+    header_profile: cpu
+  sycl:
+    target_triple: x86_64-linux-gnu
+    compiler_family: intel
+    header_profile: dpc
+```
+
+```bash
+for side in old new; do
+    sdk="sdk-$side"
+    so="$sdk/lib/libonedal_parameters_dpc.so.3"
+    hdr="$sdk/include/oneapi/dal/detail/parameters/system_parameters.hpp"
+    abicheck project capture-variants --config .abicheck.yml --package "$side.package" \
+        --variant "host=$so" --variant "sycl=$so" \
+        --variant-header "host=$hdr" --variant-header "sycl=$hdr" \
+        --variant-include "host=$sdk/include" --variant-include "sycl=$sdk/include"
+done
+abicheck compare old.package new.package --variant old=host --variant new=host
+abicheck compare old.package new.package --variant old=sycl --variant new=sycl
+```
+
+Each package contains both views. Each compare evaluates the selected pair.

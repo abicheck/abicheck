@@ -465,18 +465,42 @@ class TestVirtualMethodOwnerResolutionAmbiguitySafe:
             )
             assert resolved is ns2, f"failed for insertion order {ordering}"
 
-    def test_diff_functions_builds_type_map_not_naive_dict(self):
-        """Regression guard on the actual production call site: ``_diff_functions``
-        must build ``old_types``/``new_types`` via ``diff_helpers.build_type_map``
-        (or an equivalent ambiguity-safe map), not a raw ``{t.name: t
-        for t in ...}`` dict comprehension.
-        """
-        import inspect
+    def test_virtual_slot_addition_uses_the_qualified_owner(self):
+        from abicheck.diff_symbols import _diff_functions
 
-        import abicheck.diff_symbols as diff_symbols_module
+        # ns1 inherits the existing resize slot. ns2 has no bases, so adding
+        # ns2::Impl::resize introduces a slot even when ns1 is listed last.
+        base = RecordType(name="Base", kind="class", bases=[], virtual_bases=[])
+        owners = [
+            RecordType(
+                name="Impl",
+                qualified_name=f"{ns}::Impl",
+                kind="class",
+                bases=bases,
+                virtual_bases=[],
+            )
+            for ns, bases in [("ns1", ["Base"]), ("ns2", [])]
+        ]
 
-        source = inspect.getsource(diff_symbols_module._diff_functions)
-        assert "build_type_map(old.declarations.types)" in source
-        assert "build_type_map(new.declarations.types)" in source
-        assert "{t.name: t for t in old.types}" not in source
-        assert "{t.name: t for t in new.types}" not in source
+        def method(owner, name, virtual):
+            return Function(
+                name=f"{owner}::{name}",
+                mangled=f"{owner}::{name}",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+                is_virtual=virtual,
+            )
+
+        existing = [
+            method("Base", "resize", True),
+            method("ns1::Impl", "seen", False),
+            method("ns2::Impl", "seen", False),
+        ]
+        for ordering in (owners, owners[::-1]):
+            old = _snap(functions=existing, types=[base, *ordering])
+            added = [method(ns + "::Impl", "resize", True) for ns in ("ns1", "ns2")]
+            new = _snap(functions=existing + added, types=[base, *ordering])
+            changes = _diff_functions(old, new)
+            assert {
+                c.symbol for c in changes if c.kind == ChangeKind.VIRTUAL_METHOD_ADDED
+            } == {"ns2::Impl::resize"}

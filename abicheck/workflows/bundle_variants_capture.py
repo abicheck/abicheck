@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..compile_context import CompileContext
 from ..errors import AbicheckError
 from ..model import AbiSnapshot
 from ..model.bundle_variants import (
@@ -103,6 +104,7 @@ class VariantCaptureInput:
     path: Path
     headers: tuple[Path, ...] = ()
     includes: tuple[Path, ...] = ()
+    compile: CompileContext | None = None
 
 
 @dataclass(frozen=True)
@@ -153,10 +155,8 @@ class VariantCaptureResult:
         }
 
 
-#: The ``--set`` keys ``capture-variants`` applies (ADR-091 D4). Its only
-#: config read is the ``bundle_variants:`` block; each variant's dump runs
-#: through ``run_dump_request`` with no project config, so no other key reaches
-#: it. ``--set`` on any other key is refused by the CLI, not dropped.
+#: Variant selection accepts inline overrides. Referenced compiler profiles
+#: and executable bindings come from the selected project config.
 CAPTURE_APPLIED_PATHS: frozenset[str] = frozenset({BUNDLE_VARIANTS_KEY})
 
 
@@ -206,7 +206,11 @@ def _discover(path: Path) -> dict[str, Path]:
 
 
 def plan_variant_capture(
-    config: BundleVariantsConfig, inputs: Sequence[VariantCaptureInput]
+    config: BundleVariantsConfig,
+    inputs: Sequence[VariantCaptureInput],
+    *,
+    config_path: Path | None = None,
+    config_explicit: bool = False,
 ) -> VariantCapturePlan:
     """Resolve *inputs* against *config* without extracting anything.
 
@@ -227,6 +231,19 @@ def plan_variant_capture(
             errors.append(f"--variant {item.name}: given more than once")
         else:
             by_name[item.name] = item
+    profiles = {}
+    bindings = {}
+    if any(spec.header_profile and spec.name in by_name for spec in config.variants):
+        from ..buildsource.run_plan_profile_fields import release_header_profiles
+        from .extraction import load_build_config
+
+        if config_path is None:
+            raise VariantCaptureError("header_profile requires a project config")
+        try:
+            profiles = release_header_profiles(config_path)
+            bindings = load_build_config(config_path).release_bindings
+        except ValueError as exc:
+            raise VariantCaptureError(str(exc)) from exc
     planned: list[PlannedVariant] = []
     skipped: list[SkippedVariant] = []
     for spec in config.variants:
@@ -242,7 +259,27 @@ def plan_variant_capture(
                 libraries = _discover(given.path)
             except (AbicheckError, ValueError, OSError) as exc:
                 reason = f"no capturable input under {given.path}: {exc}"
+        if reason is None and given is not None and spec.header_profile is not None:
+            if not given.headers or any(
+                _is_snapshot_file(p) for p in libraries.values()
+            ):
+                reason = "header_profile requires live libraries and --variant-header"
         if reason is None and given is not None:
+            if spec.header_profile is not None:
+                from .bundle_facts_library_overrides import header_profile_context
+
+                try:
+                    context = header_profile_context(
+                        spec.header_profile,
+                        profiles,
+                        bindings,
+                        library=spec.name,
+                        explicit=config_explicit,
+                        base_compile=given.compile,
+                    )
+                except ValueError as exc:
+                    raise VariantCaptureError(str(exc)) from exc
+                given = dataclasses.replace(given, compile=context)
             planned.append(PlannedVariant(spec, given, libraries))
         elif spec.required:
             errors.append(f"required variant {spec.name!r}: {reason}")
@@ -303,7 +340,12 @@ def _default_dump(path: Path, item: VariantCaptureInput) -> AbiSnapshot:
 
     return run_dump_request(
         DumpRequest(
-            input=InputSpec(path=path, headers=item.headers, includes=item.includes)
+            input=InputSpec(
+                path=path,
+                headers=item.headers,
+                includes=item.includes,
+                compile=item.compile,
+            )
         )
     )
 

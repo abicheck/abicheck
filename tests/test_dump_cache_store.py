@@ -222,3 +222,18 @@ def test_eviction_is_a_no_op_under_the_cap(
 def test_eviction_tolerates_a_missing_cache_directory(cache_dir: Path) -> None:
     assert not cache_dir.exists()
     store._evict_if_needed()  # glob on a missing directory: nothing to evict
+
+
+def test_cached_elf_observes_install_and_removal_of_sycl_runtime(cache_dir, tmp_path):
+    binary = tmp_path / "libconsumer.so"
+    snap = _snap()
+    snap.platform = "elf"
+    key = "s" * 32
+    store._store_key(snap, key, binary)
+    marker = tmp_path / "libsycl.so"
+    marker.touch()
+    hit = store._lookup_key(key, binary)
+    assert hit.sycl.implementation == "dpcpp"
+    store._store_key(hit, key, binary)
+    marker.unlink()
+    assert store._lookup_key(key, binary).sycl is None

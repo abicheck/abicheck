@@ -45,6 +45,7 @@ from ..model.bundle_variants import bundle_variants_findings
 #: ``EnvironmentMatrix``'s nested shape, ``bundle_variants:`` (ADR-062 A1.6)
 #: is a name -> spec mapping (``model.bundle_variants``).
 STRUCTURED_SUBKEY_TYPES: dict[str, dict[str, str]] = {
+    "release": {"libraries": "mapping[library, {profiles, headers, includes}]"},
     "scope": {
         "dependencies": "list[{name: str, header_roots: list[str]}]",
         "dependency_evidence": "str ('full')",
@@ -181,6 +182,29 @@ def _plain(value: Any) -> Any:
     if isinstance(value, dict):
         return dict(value)
     return value
+
+
+def release_library_findings(value: object) -> list[str]:
+    if not isinstance(value, dict):
+        return ["release.libraries must be a mapping"]
+    errors = []
+    for key, spec in value.items():
+        where = f"release.libraries.{key}"
+        if not isinstance(key, str) or not key or not isinstance(spec, dict):
+            errors.append(f"{where} must map a library name to its settings")
+            continue
+        for field, items in spec.items():
+            if field not in ("profiles", "headers", "includes"):
+                errors.append(f"{where}: unknown key {field!r}")
+            elif not isinstance(items, list) or not all(
+                isinstance(item, str) and item.strip() for item in items
+            ):
+                errors.append(f"{where}.{field} must be a list of non-empty strings")
+            elif field == "profiles" and len(items) != 1:
+                errors.append(
+                    f"{where}.profiles requires exactly one profile per library"
+                )
+    return errors
 
 
 def deployment_findings(value: object) -> list[str]:

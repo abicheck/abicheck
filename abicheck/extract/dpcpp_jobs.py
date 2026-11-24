@@ -32,7 +32,22 @@ from pathlib import Path
 
 from ..model.execution_cache import memoized
 
-__all__ = ["executable_revision", "host_only_request_usable", "sycl_host_replay_jobs"]
+__all__ = [
+    "executable_revision",
+    "host_only_request_usable",
+    "sycl_host_replay_jobs",
+    "sycl_host_selector",
+]
+
+
+def sycl_host_selector(tokens: list[str] | tuple[str, ...]) -> str:
+    """Use the host selector supported by the configured offload driver."""
+    for token in reversed(tokens):
+        if token == "--offload-new-driver":
+            return "--offload-host-only"
+        if token == "--no-offload-new-driver":
+            break
+    return "-fsycl-host-only"
 
 
 def executable_revision(clang_bin: str) -> str:
@@ -65,13 +80,15 @@ def _host_only_single_pass(
     clang_bin: str, identity: str, tokens: tuple[str, ...]
 ) -> bool:
     del identity  # keys the memo on the executable's content
-    cmd = [clang_bin, *tokens, "-fsycl", "-fsycl-host-only"]
+
+    cmd = [clang_bin, *tokens, "-fsycl", sycl_host_selector(tokens)]
     cmd += ["-fsyntax-only", "-x", "c++", "-"]
     jobs = _driver_jobs(cmd)
     if jobs is None:
         return True  # cannot ask: keep the documented host-only behaviour
-    return _split_device_host(jobs) is not None or not any(
-        "-fsycl-is-device" in job for job in jobs
+    return bool(jobs) and (
+        _split_device_host(jobs) is not None
+        or not any("-fsycl-is-device" in job for job in jobs)
     )
 
 
@@ -93,6 +110,18 @@ def _driver_jobs(cmd: list[str]) -> list[list[str]] | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
+    if proc.returncode:
+        # Intel 2025.0 rejects the newer spelling. Its ordinary SYCL plan
+        # still has the same two jobs. Only use that plan when we can replay
+        # it explicitly: the caller cannot run the rejected driver command.
+        if (
+            "-fsycl-host-only" in cmd
+            and "unknown argument: '-fsycl-host-only'" in proc.stderr
+        ):
+            ordinary = _driver_jobs([arg for arg in cmd if arg != "-fsycl-host-only"])
+            if ordinary is not None and _split_device_host(ordinary) is not None:
+                return ordinary
+        return []
     return [
         split_command_line(line)
         for line in proc.stderr.splitlines()
@@ -140,9 +169,15 @@ def sycl_host_replay_jobs(
     still runs a device pass: one host document instead of a ~2x stream the
     multi-document selector would scan, and the streaming AST path applies.
     """
-    if "-fsycl-host-only" not in cmd:
+    if not {"-fsycl-host-only", "--offload-host-only"}.intersection(cmd):
         return None
     jobs = _driver_jobs(cmd)
+    if not jobs and "-fsycl-host-only" in cmd:
+        from ..errors import AstContextMissingError
+
+        raise AstContextMissingError(
+            "cannot establish a host compilation job for -fsycl-host-only"
+        )
     split = _split_device_host(jobs) if jobs is not None else None
     if split is None:
         return None
