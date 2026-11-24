@@ -143,10 +143,7 @@ jobs:
           cache: 'pip'
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: Install CastXML wheel (macOS/Windows)
-        if: runner.os != 'Linux'
-        run: python -m pip install -e ".[castxml]"
-      - name: Verify CastXML wheel (macOS/Windows)
+      - name: Verify default CastXML dependency (macOS/Windows)
         if: runner.os != 'Linux'
         shell: bash
         run: |

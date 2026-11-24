@@ -3,12 +3,13 @@
 
 from __future__ import annotations
 
-import re
 import tarfile
 import tomllib
 import zipfile
 from email import message_from_bytes
 from pathlib import Path
+
+from packaging.requirements import InvalidRequirement, Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
@@ -54,20 +55,23 @@ def main() -> int:
     for field, expected in checks.items():
         if metadata.get(field) != expected:
             fail(f"wheel {field} is {metadata.get(field)!r}, expected {expected!r}")
-    # Keep the base install scanner-free. The official CastXML wheel is only
-    # pulled by the explicit `[castxml]` extra; this lets pip users opt into L2
-    # without making every lightweight/core install download a native binary.
+    # The official CastXML wheel is part of the standard install so pip users
+    # get the L2 scanner by default. Keep its executable release pinned.
     requires_dist = metadata.get_all("Requires-Dist", [])
     castxml_requires = [r for r in requires_dist if "castxml" in r.lower()]
-    unexpected_castxml = [
-        r
-        for r in castxml_requires
-        if not re.search(r";\s*extra\s*==\s*['\"]castxml['\"]", r, re.I)
-    ]
-    if unexpected_castxml:
+    try:
+        parsed_castxml = [Requirement(requirement) for requirement in castxml_requires]
+    except InvalidRequirement as exc:
+        fail(f"wheel has invalid CastXML Requires-Dist metadata: {exc}")
+    if (
+        len(parsed_castxml) != 1
+        or parsed_castxml[0].name.lower() != "castxml"
+        or str(parsed_castxml[0].specifier) != "==0.8.0"
+        or parsed_castxml[0].marker is not None
+    ):
         fail(
-            "wheel Requires-Dist must keep castxml behind the explicit "
-            f"[castxml] extra: {unexpected_castxml!r}"
+            "wheel Requires-Dist must include exactly the pinned default "
+            f"CastXML 0.8.0 dependency: {castxml_requires!r}"
         )
     project_urls: dict[str, str] = {}
     for value in metadata.get_all("Project-URL", []):

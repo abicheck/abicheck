@@ -19,8 +19,9 @@ conda activate abicheck
 
 No extra manual dependency installation is required when using the conda-forge package.
 
-**Lightweight/core installation** — the PyPI package is pure Python with no native
-scanner dependency:
+**PyPI installation** — the standard package install includes the official
+CastXML 0.8.0 wheel, so the scanner is ready for L2 header analysis on supported
+platforms. A C/C++ compiler is still required to parse headers:
 
 ```bash
 pip install abicheck
@@ -33,15 +34,10 @@ pip install abicheck
 
 All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with the `abicheck` install.
 
-> **Important:** `pip install abicheck` does **not** install `castxml`. Any command
-> that takes headers (`--header` / `-H`) needs `castxml` on
-> your `PATH` — without it those commands fail with `castxml not found`. Install it
-> with the system/conda packages below (the conda-forge package pulls it in
-> automatically). If you have no `castxml`, run **binary-only mode** by omitting the
-> header flags — abicheck falls back to DWARF/symbols analysis (weaker, but works).
-> For a pip-only setup, install the maintained CastXML wheel through the explicit
-> extra: `pip install 'abicheck[castxml]'`. This pins the executable to 0.8.0.
-> The base `pip install abicheck` remains lightweight and does not install a scanner.
+> **Important:** `pip install abicheck` includes the maintained CastXML 0.8.0
+> wheel. Any command that takes headers (`--header` / `-H`) also needs a working
+> C/C++ compiler. Conda-forge remains useful when you want CastXML and a matching
+> compiler toolchain managed together.
 
 ### Option A: conda-forge (recommended)
 

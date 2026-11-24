@@ -49,7 +49,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 - **Additions count.** A compatible release still lists every new function, variable, and enumerator, with a version-bump recommendation, so surface growth is reviewed rather than assumed.
 - **436 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
 - **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
-- **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), and a typed [Python API](#python-api). Pure Python, Linux/Windows/macOS.
+- **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), and a typed [Python API](#python-api). Python-first, with CastXML installed by default, on Linux/Windows/macOS.
 
 ## What a report looks like
 
@@ -229,16 +229,15 @@ conda activate abicheck
 
 Pin castxml as shown: the feedstock's own floor is looser than abicheck's gate, which also requires castxml's bundled Clang to be recent. The exact supported bounds live in the [environment reference](https://abicheck.github.io/abicheck/reference/environment/).
 
-**Lightweight/core installation**: the base PyPI package is pure Python; the
-optional `castxml` extra installs the official CastXML 0.8.0 wheel for L2.
+**PyPI installation**: the standard package install includes the official
+CastXML 0.8.0 wheel, so L2 header analysis has its scanner ready on supported
+platforms. A C/C++ compiler is still needed to parse headers.
 
 ```bash
 pip install abicheck
-# Full pip-based header scanning, with CastXML bundled for your platform:
-pip install 'abicheck[castxml]'
 ```
 
-This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2), install the `castxml` extra or provide a supported CastXML on `PATH`; alternatively, use clang plus `ABICHECK_AST_FRONTEND=clang` (or `.abicheck.yml`'s `compile.frontend: clang` on `dump`/`compare`). Bare `pip install abicheck` stays lightweight and does not install a scanner.
+This gives you binary-only (L0), debug-info (L1), and header (L2) analysis, snapshot comparison, and every report format. If you manage CastXML yourself, provide a supported executable on `PATH`; alternatively, use clang plus `ABICHECK_AST_FRONTEND=clang` (or `.abicheck.yml`'s `compile.frontend: clang` on `dump`/`compare`).
 
 Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 

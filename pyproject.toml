@@ -45,6 +45,9 @@ dependencies = [
     # extra (conda-forge `.conda` archive extraction); that usage still
     # applies but no longer needs its own extra now that it's core.
     "zstandard>=0.21",
+    # Official PyPI wheel bundles the native CastXML executable so header-AST
+    # (L2) analysis works after a standard pip install on supported platforms.
+    "castxml==0.8.0",
 ]
 
 [project.scripts]
@@ -116,13 +119,6 @@ dist = [
     "build",
     "twine",
 ]
-# Optional native scanner for pip users who want header-AST analysis without
-# conda/system package management. Pin the executable release deliberately;
-# its bundled Clang version is checked independently by castxml_policy.py.
-castxml = [
-    "castxml==0.8.0",
-]
-
 [tool.mypy]
 python_version = "3.11"
 strict = true

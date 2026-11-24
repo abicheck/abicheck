@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Packaging/installation-docs contract: pip is lightweight by default, the
-explicit ``castxml`` extra installs the maintained official wheel, and
-conda-forge remains the recommended full-scanner installation. Also checks pyproject.toml's core dependency list
+"""Packaging/installation-docs contract: pip installs the maintained official
+CastXML wheel by default, and conda-forge remains the recommended full-toolchain
+installation. Also checks pyproject.toml's core dependency list
 directly, as a fast belt-and-suspenders companion to the built-wheel check
 in scripts/check_distribution_metadata.py (which needs `build`/`twine`
 installed and dist/ populated, so it can't run in the default fast lane).
@@ -33,35 +33,35 @@ def _read(relpath: str) -> str:
     return (ROOT / relpath).read_text(encoding="utf-8")
 
 
-def test_pyproject_core_dependencies_have_no_castxml() -> None:
+def test_pyproject_default_dependencies_pin_castxml() -> None:
     with (ROOT / "pyproject.toml").open("rb") as f:
         project = tomllib.load(f)["project"]
     core_deps = [d.lower() for d in project["dependencies"]]
-    assert not any("castxml" in d for d in core_deps), core_deps
+    assert "castxml==0.8.0" in core_deps
 
 
-def test_castxml_is_an_explicit_pinned_optional_extra() -> None:
+def test_castxml_is_not_an_optional_extra() -> None:
     with (ROOT / "pyproject.toml").open("rb") as f:
         project = tomllib.load(f)["project"]
     extras = project.get("optional-dependencies", {})
-    assert "castxml==0.8.0" in extras["castxml"]
     for extra_name, deps in extras.items():
-        if extra_name != "castxml":
-            assert not any("castxml" in d.lower() for d in deps), (extra_name, deps)
+        assert not any("castxml" in d.lower() for d in deps), (extra_name, deps)
 
 
-def test_readme_documents_the_supported_castxml_extra() -> None:
+def test_readme_documents_default_castxml_install() -> None:
     text = _read("README.md")
-    assert "pip install 'abicheck[castxml]'" in text
+    assert "pip install abicheck" in text
+    assert "includes the official" in text
 
 
-def test_install_page_documents_the_supported_castxml_extra() -> None:
-    assert "abicheck[castxml]" in _read("docs/start/install.md")
+def test_install_page_documents_default_castxml_install() -> None:
+    assert "pip install abicheck" in _read("docs/start/install.md")
+    assert "includes the maintained CastXML 0.8.0" in _read("docs/start/install.md")
 
 
-def test_readme_presents_conda_forge_before_pip_lightweight_install() -> None:
+def test_readme_presents_conda_forge_before_pip_install() -> None:
     """The Installation section must lead with the conda-forge full-scanner
-    install and frame pip as the lightweight/core alternative -- not the
+    install and frame pip as the simpler PyPI alternative -- not the
     other way around (regression: README used to list bare `pip install
     abicheck` first, with conda-forge as an afterthought `# or` line)."""
     text = _read("README.md")
@@ -71,12 +71,12 @@ def test_readme_presents_conda_forge_before_pip_lightweight_install() -> None:
     assert pip_idx != -1, "README is missing the pip install command"
     assert conda_idx < pip_idx, (
         "README must present the conda-forge full installation before the "
-        "pip lightweight/core installation"
+        "PyPI installation"
     )
-    assert "lightweight" in text.lower() or "core" in text.lower()
+    assert "CastXML 0.8.0" in text
 
 
-def test_install_page_presents_conda_forge_before_pip_lightweight_install() -> None:
+def test_install_page_presents_conda_forge_before_pip_install() -> None:
     """Install content lives on docs/start/install.md, not getting-started.md
     -- getting-started.md was trimmed to a thin hub linking to install.md,
     first-check.md, and first-report.md (docs/AGENTS.md's "Layout" section)."""
@@ -87,5 +87,5 @@ def test_install_page_presents_conda_forge_before_pip_lightweight_install() -> N
     assert pip_idx != -1, "install.md is missing the pip install command"
     assert conda_idx < pip_idx, (
         "install.md must present the conda-forge full installation "
-        "before the pip lightweight/core installation"
+        "before the PyPI installation"
     )

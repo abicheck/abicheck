@@ -153,12 +153,12 @@ request starts, before any binary or debug-info extraction: it rejects a resolve
 supported range (currently `>=0.6.11,<0.9.0`, bundled/linked Clang `>=18`).
 This fires when the executable on `PATH` is older than 0.6.11, has a bundled
 Clang older than 18, or is otherwise outside the supported range. The current
-PyPI wheel is CastXML 0.8.0 and is supported; install it with
-`pip install 'abicheck[castxml]'`. Bare `pip install abicheck` deliberately
-remains scanner-free.
+PyPI wheel is CastXML 0.8.0 and is supported; a standard `pip install abicheck`
+installs it. If a stale system binary takes precedence on `PATH`, put the
+environment's CastXML executable first or remove the stale installation.
 
-Fix: install a supported CastXML with the pip extra, from conda-forge
-(recommended), or from a pinned Superbuild release:
+Fix: reinstall/update abicheck with pip, or install a supported CastXML from
+conda-forge (recommended with its compiler toolchain) or a pinned Superbuild:
 
 ```bash
 conda install -c conda-forge castxml
