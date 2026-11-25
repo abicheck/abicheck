@@ -173,3 +173,47 @@ def test_original_sdk_status_impact_matches_ledger_on_both_frontends():
             "affected_exports": 0,
             "ledger_exports": 0,
         }
+
+
+def test_frozen_host_and_sycl_table_layout_receipt():
+    receipt = json.loads((PRODUCT / "table-layout.json").read_text())
+    assert receipt["selector"] == "opencl:cpu"
+    assert sorted(
+        (r["mode"], r["package"], r["provider"], r["exit"]) for r in receipt["clients"]
+    ) == sorted(
+        (mode, package, provider, code)
+        for mode in ("host", "sycl")
+        for package in ("dal-2025.9.0", "dal-2025.11.0")
+        for provider, code in (("old", 0), ("extend", 0), ("swap", 42))
+    )
+    assert receipt["checker"] == {
+        "extend": {"members": [], "verdict": "COMPATIBLE", "exit": 0},
+        "old": {"members": [], "verdict": "NO_CHANGE", "exit": 0},
+        "swap": {
+            "members": ["data_layout::column_major", "data_layout::row_major"],
+            "verdict": "BREAKING",
+            "exit": 4,
+        },
+    }
+
+
+def test_frozen_cross_queue_client_observes_producer_write():
+    rows = json.loads((PRODUCT / "device-release-matrix.json").read_text())
+    deps = [r for r in rows if r["client"] == "dependency"]
+    assert sorted((r["package"], r["exit"], r.get("stdout")) for r in deps) == [
+        ("dal-2025.11.0", 0, "42"),
+        ("dal-2025.9.0", 0, "42"),
+        ("dal-2026.2.0", 127, None),
+    ]
+    assert all(r["matches"] for r in deps)
+
+
+def test_two_rank_sycl_communicator_release_receipt():
+    matrix = json.loads((PRODUCT / "device-release-matrix.json").read_text())
+    rows = {row["package"]: row for row in matrix if row["client"] == "spmd"}
+    assert set(rows) == {"dal-2025.9.0", "dal-2025.11.0", "dal-2026.2.0"}
+    for package in ("dal-2025.9.0", "dal-2025.11.0"):
+        assert rows[package]["exit"] == 0
+        assert "libonedal_dpc.so.3" in rows[package]["providers"]
+    assert rows["dal-2026.2.0"]["exit"] == 127
+    assert rows["dal-2026.2.0"]["missing_soname"] == "libonedal_dpc.so.3"

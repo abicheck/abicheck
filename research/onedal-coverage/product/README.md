@@ -165,6 +165,7 @@ CPU ICD configured.
 
 ```sh
 python -m abiforge.run.onedal_sycl out/queue --prefix "$OLD" --compiler "$ICPX"
+python -m abiforge.run.onedal_table_layout "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/table-layout"
 python -m abiforge.run.onedal_device_release "$OLD" "$NEW" "$ICPX" out/device
 ```
 
@@ -201,7 +202,8 @@ old executable can load.
 | `return-lowering.csv`, `shared-return-types.csv` | Clang IR for 225 remaining SDK return declarations and 52 concrete SharedPtr types exercised across a compiled return boundary with deleter counters. These type-level probes represent 185 exports. |
 | `option-returns.csv`, `release-clients.json` | Frozen clients import the 38 option getters and verify mask values on both minor releases. Additional real clients exercise heterogen table and exception returns, two collection getters with ownership mutants, virtual destruction and the exported string limit. |
 | `variant-loss.json` | Six individual export withdrawals compared against six independent ELF relocations and an unchanged fixture. |
-| `device-release-matrix.json` | Four old device clients on the OpenCL CPU and the standalone major-release loader control. GPU replay accepts `--selector level_zero:gpu` or `--selector opencl:gpu`. |
+| `table-layout.json` | Frozen host and SYCL clients read a converted row slice from a column-major table on both minor releases. A separate fixture DSO compiled against reordered SDK enum members supplies the layout value. Both clients observe the corresponding row-major sequence. Appending an enumerator preserves the original observations. |
+| `device-release-matrix.json` | Frozen clients on the OpenCL CPU, including a cross-queue host-task dependency, and a standalone major-release loader control. The optional two-rank Open MPI run checks typed and byte-buffer collectives through the SYCL communicator. GPU replay accepts `--selector level_zero:gpu` or `--selector opencl:gpu`. |
 
 The minor release adds exported vtables for optimization_solver BatchIface and kmeans init BatchBase in libonedal_core. Both tables are 88 bytes in 2025.11. Their observed relocations at offsets 32 and 40 target checkComputeParams and checkResult respectively. All previously observed cells retain their targets.
 
@@ -225,5 +227,6 @@ python -m abiforge.run.onedal_shared_return_types "$OLD" "$MINOR" "$OUT/shared"
 python -m abiforge.run.onedal_option_returns "$OLD" "$MINOR" "$MAJOR" "$OUT/options"
 python -m abiforge.run.onedal_release_clients "$OLD" "$MINOR" "$MAJOR" "$OUT/clients"
 python -m abiforge.run.onedal_variant_loss "$OLD" "$OUT/variants"
-python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR"
+python -m abiforge.run.onedal_table_layout "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/table-layout"
+python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR" --mpi
 ```
