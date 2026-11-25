@@ -1,0 +1,34 @@
+[
+  {
+    "symbol": "_ZN6oneapi3dal7backend10primitives12set_csr_dataIdEEN4sycl3_V15eventERNS5_5queueERNS2_20sparse_matrix_handleEllNS0_2v115sparse_indexingEPKT_PKlSH_RKSt6vectorIS6_SaIS6_EE",
+    "exits": {
+      "dal-2025.9.0": 0,
+      "dal-2025.11.0": 127
+    },
+    "detected_removal": true
+  },
+  {
+    "symbol": "_ZN6oneapi3dal7backend10primitives12set_csr_dataIdEEN4sycl3_V15eventERNS5_5queueERNS2_20sparse_matrix_handleEllNS0_2v115sparse_indexingERKNS0_2v25arrayIT_EERKNSE_IlEESL_RKSt6vectorIS6_SaIS6_EE",
+    "exits": {
+      "dal-2025.9.0": 0,
+      "dal-2025.11.0": 127
+    },
+    "detected_removal": true
+  },
+  {
+    "symbol": "_ZN6oneapi3dal7backend10primitives12set_csr_dataIfEEN4sycl3_V15eventERNS5_5queueERNS2_20sparse_matrix_handleEllNS0_2v115sparse_indexingEPKT_PKlSH_RKSt6vectorIS6_SaIS6_EE",
+    "exits": {
+      "dal-2025.9.0": 0,
+      "dal-2025.11.0": 127
+    },
+    "detected_removal": true
+  },
+  {
+    "symbol": "_ZN6oneapi3dal7backend10primitives12set_csr_dataIfEEN4sycl3_V15eventERNS5_5queueERNS2_20sparse_matrix_handleEllNS0_2v115sparse_indexingERKNS0_2v25arrayIT_EERKNSE_IlEESL_RKSt6vectorIS6_SaIS6_EE",
+    "exits": {
+      "dal-2025.9.0": 0,
+      "dal-2025.11.0": 127
+    },
+    "detected_removal": true
+  }
+]

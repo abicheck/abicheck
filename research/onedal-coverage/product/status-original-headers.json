@@ -2,13 +2,15 @@
   "clang": {
     "old-mutant": {
       "verdict": "BREAKING",
-      "affected_exports": 909,
-      "ledger_exports": 795
+      "affected_exports": 947,
+      "ledger_exports": 795,
+      "symbols_sha256": "505371ea3ce09ea8f7345686287ff9a66117bf959bee72a1d4868b078c26054f"
     },
     "mutant-old": {
       "verdict": "BREAKING",
-      "affected_exports": 909,
-      "ledger_exports": 795
+      "affected_exports": 947,
+      "ledger_exports": 795,
+      "symbols_sha256": "505371ea3ce09ea8f7345686287ff9a66117bf959bee72a1d4868b078c26054f"
     },
     "old-old": {
       "verdict": "NO_CHANGE",
@@ -20,12 +22,14 @@
     "old-mutant": {
       "verdict": "BREAKING",
       "affected_exports": 947,
-      "ledger_exports": 795
+      "ledger_exports": 795,
+      "symbols_sha256": "505371ea3ce09ea8f7345686287ff9a66117bf959bee72a1d4868b078c26054f"
     },
     "mutant-old": {
       "verdict": "BREAKING",
       "affected_exports": 947,
-      "ledger_exports": 795
+      "ledger_exports": 795,
+      "symbols_sha256": "505371ea3ce09ea8f7345686287ff9a66117bf959bee72a1d4868b078c26054f"
     },
     "old-old": {
       "verdict": "NO_CHANGE",

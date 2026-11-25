@@ -165,6 +165,8 @@ def test_original_sdk_status_impact_matches_ledger_on_both_frontends():
     }
     receipts = json.loads((PRODUCT / "status-original-headers.json").read_text())
     assert set(receipts) == {"clang", "castxml"}
+    assert receipts["clang"] == receipts["castxml"]
+    assert len(receipts["clang"]["old-mutant"]["symbols_sha256"]) == 64
     for runs in receipts.values():
         assert runs["old-mutant"] == runs["mutant-old"]
         assert runs["old-mutant"]["verdict"] == "BREAKING"
@@ -252,3 +254,60 @@ def test_frozen_sparse_indexing_value_and_storage_changes(frontend):
             },
         },
     }
+
+
+def test_export_surface_joins_use_provider_and_preserve_shared_names():
+    surface = json.loads((PRODUCT / "export-surface.json").read_text())
+    providers = surface["providers"]
+    assert len(providers) == 6
+    witnesses = surface["witnessed_lower_bound"]
+    assert (
+        witnesses["status_l2"]
+        == json.loads((PRODUCT / "status-original-headers.json").read_text())["clang"][
+            "old-mutant"
+        ]["affected_exports"]
+    )
+    assert (
+        witnesses["status_l2"]
+        <= witnesses["distinct_names"]
+        <= witnesses["provider_pairs"]
+    )
+    assert surface["unique_names"] < sum(p["exports"] for p in providers.values())
+    assert surface["unique_sdk_matches"] <= sum(p["sdk"] for p in providers.values())
+    for row in providers.values():
+        assert (
+            row["ledger_edit"]
+            <= row["sdk"]
+            <= row["sdk_name_any_provider"]
+            <= row["exports"]
+        )
+        assert len(set(row["imports_outside_sdk"])) <= row["client_import"]
+    dpc = providers["libonedal_dpc.so.3"]
+    assert (
+        dpc["client_import"] and len(dpc["imports_outside_sdk"]) == dpc["client_import"]
+    )
+    scan = surface["sdk_inventory"]
+    assert scan["provider_pairs"]["libonedal_dpc.so.3"] > dpc["sdk"]
+    assert (
+        0
+        < len(scan["client_imports_outside_sdk"]["libonedal_dpc.so.3"])
+        < dpc["client_import"]
+    )
+    major = surface["releases"]["dal-2026.2.0"]
+    assert 0 < major["sdk_inventory"]["unique_names"] <= major["unique_names"]
+    minor = surface["releases"]["dal-2025.11.0"]["provider_changes"]
+    withdrawn = json.loads((PRODUCT / "minor-dpc-withdrawals.json").read_text())
+    assert minor["libonedal_dpc.so.3"]["removed"] == len(withdrawn) == 4
+    assert len({r["symbol"] for r in withdrawn}) == len(withdrawn)
+    for row in withdrawn:
+        assert row["detected_removal"] and "set_csr_data" in row["symbol"]
+        assert row["exits"] == {"dal-2025.9.0": 0, "dal-2025.11.0": 127}
+
+
+def test_status_member_specializations_have_independent_call_witnesses():
+    receipt = json.loads((PRODUCT / "status-member-templates.json").read_text())
+    assert receipt["old"] == "sret" and receipt["mutant"] == "register"
+    names = set(receipt["symbols"])
+    assert len(names) == 38
+    assert sum("HomogenNumericTable" in name for name in names) == 36
+    assert sum("8allocateIfE" in name for name in names) == 2

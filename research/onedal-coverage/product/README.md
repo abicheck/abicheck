@@ -156,6 +156,84 @@ KX k.h, unixODBC 2.3.11 and libclang 19. This inventory covers the selected
 Linux CPU preprocessing configuration. Each supported macro configuration,
 target ABI and template instantiation needs its own evidence.
 
+### ELF export coverage and next targets
+
+The three Linux x86-64 packages each ship six oneDAL DSOs. In 2025.9 they
+define 22,428 (SONAME, dynamic name) pairs and 18,619 distinct names. The two
+SDK ledgers match 3,517 pairs (15.7%) and 3,516 distinct names (18.9%).
+These denominators include backend internals, template instantiations, RTTI
+and vtables. Inlined operations, record layouts, calling conventions and
+kernel execution each need their own witnesses. A matched name alone measures
+symbol identity. Combining these ledgers with the fresh all-provider scan yields
+3,517 distinct names and 3,667 provider/name pairs (16.4%). The legacy ledger also records independent edit witnesses
+for 197 provider/name pairs. Later campaigns record additional mutation
+evidence separately. Joining the exact 947 L2 Status names, the 197 ledger
+edit witnesses and four real minor-release withdrawals gives **1,144 distinct
+exports with at least one named change witness** after deduplication. This is
+a lower bound of 6.1% of names, or 5.1% of provider/name pairs. Each witness
+covers a particular change. This bound excludes probes without an exact
+symbol join.
+
+| 2025.9 provider | Defined names | SDK ledger pairs | Fresh host SDK scan, all providers | Imports matched in 12 frozen clients |
+| --- | ---: | ---: | ---: | ---: |
+| Host | 3,670 | 148 | 148 | 57 |
+| Core | 13,352 | 3,367 | 3,367 | 30 |
+| DPC | 4,872 | 0 | 149 | 59 |
+| Parameters (host) | 99 | 2 | 1 | 0 |
+| Parameters (DPC) | 152 | 0 | 1 | 0 |
+| Thread | 283 | 0 | 0 | 0 |
+
+Import counts join undefined client symbols to matching exports in directly
+needed DSOs. They measure candidate bindings and can include unused call paths.
+The DPC library exports 148 names also recorded against the host provider.
+The report keeps provider identities separate. All 3,516 distinct baseline SDK
+names survive in 2025.11. Its own SDK scan matched 3,521 of 18,626 distinct
+names. In 2026.2, 2,178 survive by spelling in a package
+with new SONAMEs. A fresh host-header scan of 2026.2 matched 2,188 of its 12,082 distinct names
+(18.1%) and 2,345 of 15,742 provider/name pairs. The installed-header scans
+parsed 535 of 541 roots for 2025.9 and 426 of 432 for 2026.2. Both skipped six
+CPU parameter headers requiring the source-tree backend dispatcher. [Machine-readable counts and missing client imports](export-surface.json)
+
+The next targets in priority order are:
+
+1. The new scan binds 11 of the 59 DPC imports. Resolve the remaining 48 and add isolated mutations for
+   CSR initialization, queue/policy construction and row/column accessor
+   dispatch. Fifteen of the 59 imports are error-message helpers. Prioritize the queue and data-bearing calls, for which a frozen client can directly check the result. Four backend
+   `set_csr_data` overloads disappeared between the two minor releases. Four
+   independent frozen relocations load on 2025.9 and fail on 2025.11, and the
+   ELF comparator identifies the same four losses. [Loader witnesses](minor-dpc-withdrawals.json)
+2. Bind the 11 host imports and four core imports outside the provider ledger.
+   Include the covariance RTTI/vtable and the PCA transform vtable. Preserve
+   the matching provider and check a compatible control per mutation.
+3. Complete the six 2026.2 CPU parameter headers with the matching source-tree
+   dispatcher, then parse the SDK in SYCL mode. The parameters and thread providers need consumer evidence
+   before assigning a runtime-coverage percentage.
+4. Replay device and collective tests on a physical Level Zero GPU. OpenCL
+   CPU observations cover a different device backend.
+
+Reproduce the ELF survey with the prefixes, optional SDK include directories
+and frozen executables used by the campaigns below. The first-pass inventory
+parses the installed SDK in host C++ mode and joins its names to every DSO,
+including both DPC providers.
+
+```sh
+for sdk in "$OLD" "$MINOR" "$MAJOR"; do
+  python research/onedal-coverage/product/inventory.py "$sdk" "$OUT/inventory-$(basename "$sdk")" \
+    --extended --legacy-umbrella --all-providers --include "$ARROW_INCLUDE" \
+    --include "$KDB_INCLUDE" --include "$ODBC_INCLUDE" --include "$ODBC_PLATFORM_INCLUDE"
+done
+python -m abiforge.run.onedal_export_surface "$OLD" --candidate "$MINOR" --candidate "$MAJOR" \
+  --baseline-inventory "$OUT/inventory-$(basename "$OLD")" \
+  --candidate-inventory "$MINOR" "$OUT/inventory-$(basename "$MINOR")" \
+  --candidate-inventory "$MAJOR" "$OUT/inventory-$(basename "$MAJOR")" \
+  --client "$OUT/clients/release_client" --client "$OUT/options/client" \
+  --client "$OUT/table-layout/host" --client "$OUT/table-layout/sycl" \
+  --client "$OUT/sparse-indexing-clang/host" --client "$OUT/sparse-indexing-clang/sycl" \
+  --client "$OUT/device/event" --client "$OUT/device/buffer" --client "$OUT/device/csr" \
+  --client "$OUT/device/ownership" --client "$OUT/device/dependency" --client "$OUT/device/spmd" \
+  --status-report "$OUT/original-castxml/old-mutant.json" --out "$OUT/export-surface.json"
+```
+
 ### Device release replay
 
 DPC++ 2025.2.0 and Intel OpenCL CPU on a Xeon Platinum 8573C ran the seven
@@ -196,7 +274,7 @@ old executable can load.
 | --- | --- |
 | `release-matrix.csv.gz` | 3,521 declaration/provider obligations checked against the dynamic exports of each released image. |
 | `status-impact.csv.gz` | Each SDK Status return's provider and virtual/nonvirtual declaration, joined to the L2 affected-symbol lists from both mutation directions and the unchanged control. The public CLI consumes a return-slot projection of the SDK ledger and the real core DSO. The three executable clients separately exercise actual method signatures. |
-| `status-original-headers.json` | Original SDK headers and stripped core ELF. Both frontends cover all 795 ledger exports in both directions. Clang attributes 909 exports in total and CastXML 947, including additional template instantiations. |
+| `status-original-headers.json` | Original SDK headers and stripped core ELF. Both frontends cover all 795 ledger exports in both directions. Explicit SDK instantiation declarations materialize the 38 exported member specializations that Clang previously omitted. A separate compiler witness checks all 38 actual calls for the hidden return pointer transition, using access-control relaxation to exercise internal member templates. Both frontends attribute the same 947 names. |
 | `virtual-slots.csv.gz`, `header-slots.csv` | Relocation targets in exported ELF vtables and byte offsets from the table symbol. Three unmatched methods have separate SDK pointer-to-member measurements relative to the vtable address point. Empty ELF cells convey lack of a unique observed relocation. |
 | `serialization-slots.json` | Frozen calls to both serialization methods through a secondary base in a derived fixture. Inserting a method before the first dispatch changes the two client exits from 21/22 to 23/21. The checker also detects reordering and removal. |
 | `return-lowering.csv`, `shared-return-types.csv` | Clang IR for 225 remaining SDK return declarations and 52 concrete SharedPtr types exercised across a compiled return boundary with deleter counters. These type-level probes represent 185 exports. |
@@ -218,6 +296,8 @@ runtime.
 python -m abiforge.run.onedal_release_matrix "$OLD" "$MINOR" "$MAJOR" "$OUT/matrix.csv"
 python -m abiforge.run.onedal_virtual_slots "$OLD" "$MINOR" "$MAJOR" "$OUT/slots.csv"
 python -m abiforge.run.onedal_status_return "$OLD" "$OUT/status"
+python -m abiforge.run.onedal_status_member_templates "$OLD" "$MINOR" "$OUT/status" "$OUT/member-templates"
+python -m abiforge.run.onedal_minor_withdrawals "$OLD" "$MINOR" "$OUT/minor-withdrawals"
 python -m abiforge.run.onedal_status_exports "$OLD" "$OUT/status" "$OUT/impact"
 for backend in clang castxml; do
   python -m abiforge.run.onedal_status_exports "$OLD" "$OUT/status" "$OUT/original-$backend" --original-headers --backend "$backend"

@@ -796,4 +796,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     95: GenerationSpellingChange(
         "C++ record parameters gain a header-derived call-triviality fact. Older parameters retain unknown passing semantics. No spelling rewrite."
     ),
+    96: GenerationSpellingChange(
+        "Clang records resolved identities for by-value nested fields and namespace using "
+        "declarations. The written type and symbol spellings are preserved. Older snapshots "
+        "need fresh header extraction to acquire the identities."
+    ),
 }

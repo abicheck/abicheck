@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import shutil
@@ -13,7 +14,14 @@ from pathlib import Path
 from abicheck.serialization import load_snapshot
 
 from .onedal_exports import symbols
-from .onedal_release_matrix import obligations
+from .onedal_release_matrix import PRODUCT, obligations
+
+
+def sdk_member_declarations(names):
+    # The Itanium names of these function template specializations encode their
+    # return and parameter types. The SDK compiler type-checks every declaration.
+    declarations = subprocess.check_output(["c++filt", *names], text=True).splitlines()
+    return "".join(f"extern template {declaration};\n" for declaration in declarations)
 
 
 def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
@@ -24,6 +32,11 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
             if r["kind"] == "by_value_return" and r["detail"] == "services::Status"
         }
     )
+    members = []
+    if original_headers:
+        members = json.loads((PRODUCT / "status-member-templates.json").read_text())[
+            "symbols"
+        ]
     binary = prefix / "lib/libonedal_core.so.3"
     env = {**os.environ, "ABICHECK_AST_FRONTEND": backend}
     cli = [sys.executable, "-m", "abicheck"]
@@ -48,7 +61,9 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
                 }
             )
             api.write_text(
-                '#include "daal.h"\n' + "".join(f'#include "{h}"\n' for h in headers)
+                '#include "daal.h"\n'
+                + "".join(f'#include "{h}"\n' for h in headers)
+                + sdk_member_declarations(members)
             )
             includes = [include / "dal", include]
         else:
@@ -74,6 +89,11 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
             check=True,
             env=env,
         )
+    verify_snapshots(binary, out, expected, original_headers, members)
+
+
+def verify_snapshots(binary, out, expected, original_headers, members):
+    cli = [sys.executable, "-m", "abicheck"]
     expected_by_side = {}
     for name in ("old", "mutant"):
         expected_by_side[name] = set(expected)
@@ -84,12 +104,17 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
                 f.mangled
                 for f in snapshot.declarations.functions
                 if f.mangled in exports
-                and f.return_by_value_fact
+                and f.return_by_value_fact is not None
                 and f.return_by_value_fact.value is True
-                and f.return_type_identities_fact
+                and f.return_type_identities_fact is not None
+                and f.return_type_identities_fact.is_present
                 and "daal::services::interface1::Status"
                 in (f.return_type_identities_fact.value or ())
             }
+            if set(members) - declared:
+                raise ValueError(
+                    f"{name}: missing compiler-witnessed member specializations"
+                )
             if not expected_by_side[name] <= declared:
                 raise ValueError(f"{name}: missing ledger Status declarations")
             expected_by_side[name] = declared
@@ -107,7 +132,6 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
                 "-o",
                 f"json={path}",
             ],
-            env=env,
         )
         report = json.loads(path.read_text())
         changes = [
@@ -138,6 +162,10 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
             receipt[f"{left}-{right}"]["ledger_exports"] = len(
                 observed[left, right].intersection(expected)
             )
+            if left != right:
+                receipt[f"{left}-{right}"]["symbols_sha256"] = hashlib.sha256(
+                    "\n".join(sorted(observed[left, right])).encode()
+                ).hexdigest()
     write_status_rows(out, observed)
     (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
 
