@@ -7,15 +7,24 @@ from ..diff_helpers import make_change
 from ..model.call_interface import SYSV_AMD64
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.declarations import Function
 from ..model.snapshot import AbiSnapshot
 from .call_axis_shadow import abi_of
 from .export_names import default_export_names
 
 
-def value_parameter_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    if abi_of(old) != SYSV_AMD64 or abi_of(new) != SYSV_AMD64:
+def value_parameter_changes(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_functions: dict[str, Function],
+    new_functions: dict[str, Function],
+) -> list[Change]:
+    if not any(
+        p.trivial_for_calls_fact is not None
+        for f in old_functions.values()
+        for p in f.params
+    ):
         return []
-    old_functions, new_functions = old.function_map, new.function_map
     changes = []
     for symbol in sorted(
         (default_export_names(old) or set()) & (default_export_names(new) or set())
@@ -49,6 +58,8 @@ def value_parameter_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             before.append(f"p{i}:" + ("trivial" if x.value else "nontrivial"))
             after.append(f"p{i}:" + ("trivial" if y.value else "nontrivial"))
         if before:
+            if abi_of(old) != SYSV_AMD64 or abi_of(new) != SYSV_AMD64:
+                return []
             # The DWARF detector owns a function when both sides carry its
             # fingerprint. It also handles any simultaneous return transition.
             if (

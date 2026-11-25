@@ -330,6 +330,10 @@ class SchemaBump:
 
 #: ``version -> SchemaBump`` for every bump after the baseline.
 SCHEMA_BUMP_REASONS: dict[int, SchemaBump] = {
+    71: SchemaBump(
+        kind="wire",
+        why_not_extension="Parameter call triviality is decoded inside each declarations-section parameter. Older readers drop the field and cannot evaluate transitions.",
+    ),
     70: SchemaBump(
         kind="wire",
         why_not_extension=(

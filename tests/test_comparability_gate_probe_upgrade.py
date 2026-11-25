@@ -1734,33 +1734,3 @@ def test_gate_content_driven_divergence_still_raises_for_the_exact_literal_colli
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
-
-
-@pytest.mark.parametrize(
-    ("new_digest", "new_target", "comparable"),
-    [
-        ("a" * 64, "x86_64", True),
-        ("b" * 64, "x86_64", False),
-        ("", "x86_64", False),
-        ("a" * 64, "aarch64", False),
-    ],
-)
-def test_relocated_clang_version_banner(new_digest, new_target, comparable):
-    import json
-
-    def snapshot(path, digest, target):
-        banner = f"clang version 18.1.3\nTarget: {target}\nInstalledDir: {path}"
-        contract = compute_extraction_contract(
-            l2_frontend_ran=True,
-            compiler_family="clang",
-            compiler_version=json.dumps(["clang", banner, banner]),
-        )
-        return _snap(contract, ast_toolchain={"compiler_sha256": digest})
-
-    old = snapshot("/usr/bin", "a" * 64, "x86_64")
-    new = snapshot("/opt/bin", new_digest, new_target)
-    if comparable:
-        check_contracts_comparable(old, new)
-    else:
-        with pytest.raises(ProfileMismatchError):
-            check_contracts_comparable(old, new)

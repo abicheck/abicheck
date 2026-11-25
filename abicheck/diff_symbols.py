@@ -560,7 +560,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_owner_classes = {
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
     }
-    old_virtual_sigs = old_virtual_signatures(old.function_map.values())
+    old_all = old.function_map
+    old_virtual_sigs = old_virtual_signatures(old_all.values())
     # Mirrors diff_types.py's own identical computation for the same pair of
     # snapshots -- see virtual_method_addition's own docstring for why it
     # needs this to decide whether TYPE_VTABLE_CHANGED would decline for a
@@ -634,8 +635,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
 
-    changes.extend(value_parameter_changes(old, new))
-    old_all = old.function_map
+    changes.extend(value_parameter_changes(old, new, old_all, new_all))
     changes.extend(_detect_newly_deleted_functions(old_all, new_all, old, new))
 
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions

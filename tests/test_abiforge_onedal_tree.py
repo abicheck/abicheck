@@ -9,7 +9,7 @@ from abiforge.run.onedal_tree import cases, run
 
 
 @pytest.mark.parametrize(
-    ("task", "count"), [("regression", 13), ("classification", 17)]
+    ("task", "count"), [("regression", 16), ("classification", 20)]
 )
 def test_tree_domain(task, count):
     domain = list(cases(task))
@@ -23,5 +23,5 @@ def test_tree_domain(task, count):
 def test_real_product_visitors(tmp_path, monkeypatch):
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
     results = run(tmp_path, Path(os.environ["ABIFORGE_ONEDAL_SOURCE"]))
-    assert len(results) == 30
+    assert len(results) == 36
     assert [r for r in results if not r["matches"]] == []

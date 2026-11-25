@@ -12,6 +12,14 @@
     },
     {
       "task": "regression",
+      "case": "base_level_impurity_nNodeSampleCount_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
       "case": "base_level_nNodeSampleCount_impurity",
       "client_exit": 1,
       "verdict": "BREAKING",
@@ -21,7 +29,7 @@
     {
       "task": "regression",
       "case": "base_impurity_level_nNodeSampleCount",
-      "client_exit": 1,
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -29,7 +37,7 @@
     {
       "task": "regression",
       "case": "base_impurity_nNodeSampleCount_level",
-      "client_exit": 1,
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -37,7 +45,7 @@
     {
       "task": "regression",
       "case": "base_nNodeSampleCount_level_impurity",
-      "client_exit": 1,
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -45,7 +53,15 @@
     {
       "task": "regression",
       "case": "base_nNodeSampleCount_impurity_level",
-      "client_exit": 1,
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "split_featureIndex_featureValue_coverValue_extra",
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -86,6 +102,14 @@
       "task": "regression",
       "case": "split_coverValue_featureValue_featureIndex",
       "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "leaf_response_coverValue_extra",
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -116,6 +140,14 @@
     },
     {
       "task": "classification",
+      "case": "base_level_impurity_nNodeSampleCount_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
       "case": "base_level_nNodeSampleCount_impurity",
       "client_exit": 1,
       "verdict": "BREAKING",
@@ -125,7 +157,7 @@
     {
       "task": "classification",
       "case": "base_impurity_level_nNodeSampleCount",
-      "client_exit": 1,
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -133,7 +165,7 @@
     {
       "task": "classification",
       "case": "base_impurity_nNodeSampleCount_level",
-      "client_exit": 1,
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -141,7 +173,7 @@
     {
       "task": "classification",
       "case": "base_nNodeSampleCount_level_impurity",
-      "client_exit": 1,
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -149,7 +181,15 @@
     {
       "task": "classification",
       "case": "base_nNodeSampleCount_impurity_level",
-      "client_exit": 1,
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "split_featureIndex_featureValue_coverValue_extra",
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -190,6 +230,14 @@
       "task": "classification",
       "case": "split_coverValue_featureValue_featureIndex",
       "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "leaf_label_prob_cover_extra",
+      "client_exit": 2,
       "verdict": "BREAKING",
       "checker_exit": 4,
       "matches": true
@@ -247,7 +295,7 @@
     "2025.9.0 to 2025.11.0": {
       "libonedal.so.3": {
         "candidate": "libonedal.so.3",
-        "identities": 137,
+        "identities": 148,
         "absent": 0,
         "missing_baseline": [],
         "missed": [],
@@ -257,7 +305,7 @@
       },
       "libonedal_core.so.3": {
         "candidate": "libonedal_core.so.3",
-        "identities": 3206,
+        "identities": 3367,
         "absent": 0,
         "missing_baseline": [],
         "missed": [],
@@ -267,7 +315,7 @@
       },
       "libonedal_parameters.so.3": {
         "candidate": "libonedal_parameters.so.3",
-        "identities": 1,
+        "identities": 2,
         "absent": 0,
         "missing_baseline": [],
         "missed": [],
@@ -289,7 +337,7 @@
     "2025.9.0 to 2026.2.0": {
       "libonedal.so.3": {
         "candidate": "libonedal.so.4",
-        "identities": 137,
+        "identities": 148,
         "absent": 1,
         "missing_baseline": [],
         "missed": [],
@@ -299,8 +347,8 @@
       },
       "libonedal_core.so.3": {
         "candidate": "libonedal_core.so.4",
-        "identities": 3206,
-        "absent": 1275,
+        "identities": 3367,
+        "absent": 1337,
         "missing_baseline": [],
         "missed": [],
         "false_positives": [],
@@ -309,7 +357,7 @@
       },
       "libonedal_parameters.so.3": {
         "candidate": "libonedal_parameters.so.4",
-        "identities": 1,
+        "identities": 2,
         "absent": 1,
         "missing_baseline": [],
         "missed": [],

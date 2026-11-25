@@ -550,7 +550,7 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
         )
     return {
         "trivial_for_calls_fact": decode_fact(
-            p["trivial_for_calls_fact"], schema_version
+            p.get("trivial_for_calls_fact"), schema_version
         )
         if p.get("trivial_for_calls_fact") is not None
         else None,

@@ -36,6 +36,8 @@ def cases(task: str):
         ("leaf", _LEAVES[task]),
         ("slots", _SLOTS),
     ):
+        if group != "slots":
+            yield group, members, (*members, "extra")
         for order in itertools.permutations(members):
             if order != members:
                 yield group, members, order
@@ -56,6 +58,9 @@ def reorder(header: str, members: tuple[str, ...], order: tuple[str, ...]) -> st
                 f"expected one declaration for {member}, found {len(matches)}"
             )
         positions.append(matches[0])
+    if order[-1:] == ("extra",):
+        lines.insert(positions[-1] + 1, "    size_t extra;\n")
+        return "".join(lines)
     originals = dict(zip(members, (lines[i] for i in positions), strict=True))
     for pos, member in zip(positions, order, strict=True):
         lines[pos] = originals[member]
@@ -71,6 +76,8 @@ namespace tree = daal::algorithms::tree_utils;
 using Visitor = tree::{task}::TreeNodeVisitor;
 using Split = tree::SplitNodeDescriptor;
 using Leaf = tree::{task}::LeafNodeDescriptor;
+const Split* split_array();
+const Leaf* leaf_array();
 bool feed(Visitor&, const double*, const double*);
 """
     values = ("11.25", "13.25") if task == "regression" else ("11", "prob", "cover")
@@ -87,6 +94,8 @@ bool feed(Visitor&, const double*, const double*);
         return " && ".join(f"x.{k} == {v}" for k, v in fields.items())
 
     provider = f"""#include "api.hpp"
+const Split* split_array() {{ static Split x[2]{{}}; x[1].level = 37; return x; }}
+const Leaf* leaf_array() {{ static Leaf x[2]{{}}; x[1].level = 53; return x; }}
 bool feed(Visitor& v, const double* prob, const double* cover) {{
     Split s{{}}; Leaf l{{}};
     {assign("s", split)}
@@ -103,6 +112,7 @@ struct Client : Visitor {{
 }};
 int main() {{
     double a = 1, b = 2; Client c; c.prob = &a; c.cover = &b;
+    if (split_array()[1].level != 37 || leaf_array()[1].level != 53) return 2;
     return feed(c, &a, &b) && c.calls == 2 ? 0 : 1;
 }}
 """
@@ -118,6 +128,19 @@ def exact_changes(report, group, members, order):
         return False
     if not order:
         return not report["changes"]
+    if order[-1:] == ("extra",):
+        owner = {
+            "base": "NodeDescriptor",
+            "split": "SplitNodeDescriptor",
+            "leaf": "LeafNodeDescriptor",
+        }[group]
+        bits = 64 * (len(members) + (0 if group == "base" else len(_BASE)))
+        return any(
+            c["kind"] == "type_size_changed"
+            and c["symbol"] == owner
+            and (c["old_value"], c["new_value"]) == (str(bits), str(bits + 64))
+            for c in report["changes"]
+        )
     if group == "slots":
         actual = [
             (c["symbol"], c["old_value"], c["new_value"])
@@ -216,7 +239,18 @@ def run(out: Path, source: Path) -> list[dict]:
             )
             report = abicheck_cli.parse(report_path.read_text())
             broken = bool(order)
-            expected = ("BREAKING", 4, 1) if broken else ("NO_CHANGE", 0, 0)
+            expected = (
+                (
+                    "BREAKING",
+                    4,
+                    2
+                    if order[-1:] == ("extra",)
+                    or (group == "base" and order[0] != "level")
+                    else 1,
+                )
+                if broken
+                else ("NO_CHANGE", 0, 0)
+            )
             observed = (report["verdict"], result.steps[-1].exit, rc)
             rows.append(
                 dict(

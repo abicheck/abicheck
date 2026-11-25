@@ -23,12 +23,19 @@ static int table_contract(Slot slot) {
         SharedPtr<double> data(new double(17.25), CountRelease{});
         auto table = HomogenNumericTable<double>::create(data, 1, 1);
         auto result = [&]() {
-            if constexpr (std::is_same_v<Result, linear_model::prediction::Result>)
+            if constexpr (std::is_same_v<Result, adaboost::Model> || std::is_same_v<Result, brownboost::Model>) {
+                struct ModelFixture : Result { void put(const NumericTablePtr& p) { this->_alpha = p; } };
+                return ModelFixture();
+            } else if constexpr (std::is_same_v<Result, implicit_als::training::init::PartialResultBase> ||
+                          std::is_same_v<Result, linear_model::prediction::Result> ||
+                          std::is_same_v<Result, linear_model::prediction::Input> ||
+                          std::is_same_v<Result, linear_model::training::Input> ||
+                          std::is_same_v<Result, regression::prediction::Input>)
                 return Result(static_cast<size_t>(slot) + 1);
             else
                 return Result();
         }();
-        if constexpr (std::is_same_v<Slot, optimization_solver::iterative_solver::OptionalDataId>) {
+        if constexpr (std::is_same_v<Result, optimization_solver::iterative_solver::Result> && std::is_same_v<Slot, optimization_solver::iterative_solver::OptionalDataId>) {
             result.set(optimization_solver::iterative_solver::optionalResult,
                        OptionalArgumentPtr(new OptionalArgument(static_cast<size_t>(slot) + 1)));
         }
@@ -37,7 +44,39 @@ static int table_contract(Slot slot) {
             while (result.size() <= static_cast<size_t>(slot))
                 result << SerializationIfacePtr();
         }
-        if constexpr (indexed) {
+        if constexpr (std::is_same_v<Slot, optimization_solver::iterative_solver::OptionalDataId> &&
+                      std::is_same_v<Result, optimization_solver::iterative_solver::Input>) {
+            result.set(optimization_solver::iterative_solver::optionalArgument,
+                       OptionalArgumentPtr(new OptionalArgument(static_cast<size_t>(slot) + 1)));
+        }
+        if constexpr (std::is_same_v<Slot, optimization_solver::mse::OptionalDataId>) {
+            while (result.size() <= optimization_solver::mse::optionalArgument)
+                result << SerializationIfacePtr();
+            result.set(optimization_solver::mse::optionalArgument,
+                       OptionalArgumentPtr(new OptionalArgument(static_cast<size_t>(slot) + 1)));
+        }
+        if constexpr (std::is_same_v<Result, adaboost::Model> || std::is_same_v<Result, brownboost::Model>) {
+            result.put(table);
+            retained = result.getAlpha();
+        } else if constexpr (std::is_same_v<Slot, implicit_als::training::Step3LocalCollectionInputId>) {
+            KeyValueDataCollectionPtr collection(new KeyValueDataCollection());
+            (*collection)[0] = table;
+            result.set(slot, collection);
+            retained = result.getOutBlockIndices(0);
+        } else if constexpr (std::is_same_v<Slot, pca::transform::TransformDataInputId>) {
+            result.set(slot, KeyValueDataCollectionPtr(new KeyValueDataCollection()));
+            result.set(slot, pca::transform::mean, table);
+            retained = result.get(slot, pca::transform::mean);
+        } else if constexpr (std::is_same_v<Slot, kmeans::init::DistributedStep3MasterPlusPlusPartialResultId>) {
+            result.add(slot, 0, table);
+            retained = result.get(slot, 0);
+        } else if constexpr (std::is_same_v<Slot, implicit_als::training::init::PartialResultCollectionId> ||
+                             std::is_same_v<Slot, implicit_als::training::init::PartialResultBaseId>) {
+            KeyValueDataCollectionPtr collection(new KeyValueDataCollection());
+            (*collection)[0] = table;
+            result.set(slot, collection);
+            retained = result.get(slot, 0);
+        } else if constexpr (indexed) {
             DataCollectionPtr collection(new DataCollection());
             collection->push_back(table);
             result.set(slot, collection);

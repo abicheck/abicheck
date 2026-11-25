@@ -37,11 +37,13 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             "struct S { int x;"
             + (" S& operator=(const S&);" if changed else "")
             + " };\n"
-            'extern "C" { int val(int, R); int ptr(R*); int ref(R&); int attr(T); int assign(S); }\n'
+            "template<class U> struct Box { U item; }; using BoxR = Box<R>;\n"
+            "static_assert(sizeof(BoxR) == sizeof(R));\n"
+            'extern "C" { int templ(int, BoxR); int val(int, R); int ptr(R*); int ref(R&); int attr(T); int assign(S); }\n'
         )
         src = root / "api.cpp"
         src.write_text(
-            '#include "api.hpp"\nint val(int i,R r){return i+r.x;} int ptr(R* r){return r->x;} '
+            '#include "api.hpp"\nint templ(int i,BoxR b){return i+b.item.x;} int val(int i,R r){return i+r.x;} int ptr(R* r){return r->x;} '
             "int ref(R& r){return r.x;} int attr(T t){return t.x;} int assign(S s){return s.x;}\n"
         )
         lib = root / "libapi.so"
@@ -67,4 +69,4 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             for c in changes
             if c["kind"] == "value_abi_trait_changed"
         ]
-        assert rows == [("val", before, after)]
+        assert sorted(rows) == [("templ", before, after), ("val", before, after)]

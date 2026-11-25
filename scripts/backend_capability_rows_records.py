@@ -685,6 +685,13 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Param",
+        "trivial_for_calls_fact",
+        _PARTIAL,
+        _PARTIAL,
+        note="Both frontends require an identifiable by-value record and affirmative Clang special-member evidence. Missing evidence leaves the parameter unclassified.",
+    ),
+    FactRow(
+        "Param",
         "type_identities_fact",
         _FULL,
         _PARTIAL,

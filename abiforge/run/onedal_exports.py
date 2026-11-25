@@ -38,9 +38,11 @@ def binary(directory, evidence):
     return path
 
 
-def score(old_dir, new_dir, reports, ledger):
-    with gzip.open(ledger, "rt") as handle:
-        rows = list(csv.DictReader(handle))
+def score(old_dir, new_dir, reports, ledger, additional_ledgers=()):
+    rows = []
+    for path in (ledger, *additional_ledgers):
+        with gzip.open(path, "rt") as handle:
+            rows.extend(csv.DictReader(handle))
     expected = {}
     for row in rows:
         if row["symbol"]:
@@ -76,9 +78,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("old", "new", "ledger"):
         parser.add_argument(name, type=Path)
+    parser.add_argument("--additional-ledger", action="append", default=[], type=Path)
     parser.add_argument("reports", nargs="+", type=Path)
     args = parser.parse_args()
-    results = score(args.old, args.new, args.reports, args.ledger)
+    results = score(
+        args.old, args.new, args.reports, args.ledger, args.additional_ledger
+    )
     print(json.dumps(results, indent=2))
     return int(
         any(

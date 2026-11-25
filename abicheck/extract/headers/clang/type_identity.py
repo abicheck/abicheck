@@ -10,6 +10,7 @@ from typing import Any
 from ....model import Fact
 from .ast_inner import ast_inner
 from .context import _Decl
+from .templates import _specialization_spelling
 
 _CV = re.compile(r"\b(?:const|volatile|restrict|struct|class|union|enum)\b")
 #: Marks a name that matches two declarations at one depth (never confirmed).
@@ -23,7 +24,7 @@ _BUILTIN_WORDS = frozenset(
 )  # fmt: skip
 
 
-def _unwrap_type(spelling: str) -> str:
+def _unwrap_type(spelling: str, *, strip_indirection: bool = True) -> str:
     # Only outer declarator wrappers are transparent. Template arguments
     # (including their pointers and cv qualifiers) belong to the identity.
     parts = []
@@ -40,7 +41,10 @@ def _unwrap_type(spelling: str) -> str:
             if depth == 0:
                 parts.append(spelling[start : i + 1])
                 start = i + 1
-    parts.append(_CV.sub("", re.sub(r"[&*]|\[[^\]]*\]", "", spelling[start:])))
+    suffix = spelling[start:]
+    if strip_indirection:
+        suffix = re.sub(r"[&*]|\[[^\]]*\]", "", suffix)
+    parts.append(_CV.sub("", suffix))
     return " ".join("".join(parts).split())
 
 
@@ -61,6 +65,20 @@ def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
             name = child.get("name")
             if kind == "LinkageSpecDecl":
                 walk(child, scope)
+            if kind == "ClassTemplateDecl":
+                # Visit its concrete instantiations only. The primary pattern
+                # has no single call convention for every possible argument.
+                for specialization in ast_inner(child):
+                    if (
+                        isinstance(specialization, dict)
+                        and specialization.get("kind")
+                        == "ClassTemplateSpecializationDecl"
+                    ):
+                        walk({"inner": [specialization]}, scope)
+                continue
+            if kind == "ClassTemplateSpecializationDecl" and name:
+                name = _specialization_spelling(child, name, None)
+                kind = "CXXRecordDecl"
             if not name or kind not in ("NamespaceDecl", "CXXRecordDecl"):
                 continue
             path = (*scope, name)
@@ -69,7 +87,7 @@ def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
                 if not child.get("completeDefinition") or not isinstance(data, dict):
                     continue
                 key = "::".join(path)
-                trait = data.get("canPassInRegisters", False)
+                trait = data.get("canPassInRegisters")
                 # Require affirmative special-member evidence on the indirect
                 # side: an AST producer omitting the flag alone proves nothing.
                 if trait is not True and not any(
@@ -109,7 +127,7 @@ class TypeIdentityIndex:
             for e in aliases
             if e.node.get("name")
         }
-        self.known = self.names | self.aliases.keys()
+        self.known = self.names | self.aliases.keys() | self.call_traits.keys()
         self.record_names = {
             "::".join((*e.scope, e.node["name"])) for e in records if e.node.get("name")
         }
@@ -226,7 +244,11 @@ class TypeIdentityIndex:
     def _by_value(
         self, spelling: str, scope: tuple[str, ...], seen: frozenset[str]
     ) -> bool | None:
-        text = " ".join(_CV.sub(" ", spelling).split())
+        text = (
+            _unwrap_type(spelling, strip_indirection=False)
+            if "<" in spelling
+            else " ".join(_CV.sub(" ", spelling).split())
+        )
         if not text or "(" in text:
             return None
         if text.endswith(("*", "&")):
@@ -244,7 +266,7 @@ class TypeIdentityIndex:
                 tuple(found.split("::")[:-1]),
                 seen | {text},
             )
-        if found in self.record_names:
+        if found in self.record_names or found in self.call_traits:
             return True
         if found in self.enum_names:
             return False
