@@ -17,6 +17,7 @@ def test_tree_domain(task, count):
     assert sum(not order for _, _, order in domain) == 1
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     "ABIFORGE_ONEDAL_SOURCE" not in os.environ, reason="requires oneDAL checkout"
 )

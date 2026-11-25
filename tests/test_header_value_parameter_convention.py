@@ -37,7 +37,7 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             "struct S { int x;"
             + (" S& operator=(const S&);" if changed else "")
             + " };\n"
-            "template<class U> struct Box { U item; }; using BoxR = Box<R>;\n"
+            "template<class U, class Tag=int> struct Box { U item; }; using BoxR = Box<R>;\n"
             "namespace api { struct Result { int x;"
             + (" ~Result();" if changed else "")
             + " }; } namespace abi = api; abi::Result make_result();\n"
@@ -78,6 +78,12 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
         c.symbol
         for c in value_parameter_changes(old, new, old.function_map, new.function_map)
     }
+    old.declarations.debug_advanced.calling_conventions["val"] = "normal"
+    new.declarations.debug_advanced.calling_conventions["val"] = "LLVM_Win64"
+    assert "val" in {
+        c.symbol
+        for c in value_parameter_changes(old, new, old.function_map, new.function_map)
+    }
     report = tmp_path / "report.json"
     for operands, before, after in (
         (snapshots, "p1:trivial", "p1:nontrivial"),
@@ -103,3 +109,39 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             else ("memory (sret)", "regs(INTEGER)")
         ]
         assert sorted(rows) == [("templ", before, after), ("val", before, after)]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform != "linux" or platform.machine() != "x86_64",
+    reason="Itanium ELF constructor variants",
+)
+def test_castxml_constructor_only_record_argument(tmp_path, monkeypatch):
+    if not shutil.which("castxml") or not shutil.which("g++"):
+        pytest.skip("requires castxml and g++")
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
+    runner = CliRunner()
+    snapshots = []
+    for side, member in (("old", ""), ("new", "~V();")):
+        d = tmp_path / side
+        d.mkdir()
+        header = d / "api.hpp"
+        header.write_text("struct V { int x; " + member + " }; struct S { S(V); };")
+        src = d / "api.cpp"
+        src.write_text('#include "api.hpp"\nS::S(V) {}')
+        lib = d / "libapi.so"
+        subprocess.run(["g++", "-shared", "-fPIC", "-s", src, "-o", lib], check=True)
+        snap = d / "api.json"
+        result = runner.invoke(
+            main, ["dump", str(lib), "-H", str(header), "-o", str(snap)]
+        )
+        assert result.exit_code == 0, result.output
+        snapshots.append(str(snap))
+    report = tmp_path / "report.json"
+    result = runner.invoke(main, ["compare", *snapshots, "-o", f"json={report}"])
+    changes = json.loads(report.read_text())["changes"]
+    assert {c["symbol"] for c in changes if c["kind"] == "value_abi_trait_changed"} == {
+        "_ZN1SC1E1V",
+        "_ZN1SC2E1V",
+    }
+    assert result.exit_code == 4

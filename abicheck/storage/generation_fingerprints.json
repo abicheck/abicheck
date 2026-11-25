@@ -122,7 +122,7 @@
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "eb0d6119475ceff657e89702641a66d20baf28e8fef130f73c4238a42482bf47",
-      "abicheck/extract/headers/castxml/return_by_value.py": "482bf4c11d6485c4d6a578805d7b947d3c7cbf4647846f84a43b596e76184d2a",
+      "abicheck/extract/headers/castxml/return_by_value.py": "0eba8eac6e2005dc1735d98a01b1dbcbebf7d48da6aae804b55890f2bbdf512a",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
@@ -171,7 +171,7 @@
       "abicheck/extract/headers/clang/template_default_spelling.py": "dd2f4d32ff440849edc6547afeacd9945502860e4536d158bde3109306908434",
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
-      "abicheck/extract/headers/clang/type_identity.py": "89f07e74f77f519b6e04762a8e7eeb02bf8282304dd397d9cf1e18ed13a4231d",
+      "abicheck/extract/headers/clang/type_identity.py": "0a185cce66698ee2c3553a92637ba53e1229468ae0a89f2dfd6d0c815a104380",
       "abicheck/extract/headers/clang/typedefs.py": "112486b3fd0a842f45c154334587639f23e9455adc125b93aa90b6dd47804202",
       "abicheck/extract/headers/clang/var_alignment.py": "f313f0f9c2941929fa649c7944c182adbbe6522743cf5a1972e477c2a7cd8d71",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
@@ -250,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "c7969ca0c819d79587350f65cb7378bad5f673cd7e9ccf5c6bddfd5d2967fb7b",
+    "fingerprint": "0fbd95ceb0157b9a49132eaeac6733d4a27bb68bc3e563b47908b3ef77010962",
     "generation": 95,
-    "reason": "Capture record call triviality for L2 ABI comparison with the supported CastXML toolchains."
+    "reason": "Classify parameter and result call traits, including defaulted specializations and exported constructors."
   },
   "resolver": {
     "files": {

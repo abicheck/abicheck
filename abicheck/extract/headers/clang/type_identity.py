@@ -10,7 +10,12 @@ from typing import Any
 from ....model import Fact
 from .ast_inner import ast_inner
 from .context import _Decl
-from .templates import _specialization_spelling
+from .templates import (
+    _specialization_spelling,
+    _template_param_defaults,
+    _template_param_kinds,
+    _template_param_names,
+)
 
 _CV = re.compile(r"\b(?:const|volatile|restrict|struct|class|union|enum)\b")
 #: Marks a name that matches two declarations at one depth (never confirmed).
@@ -71,7 +76,11 @@ def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
     traits: dict[str, bool] = {}
     ambiguous: set[str] = set()
 
-    def walk(node: dict[str, Any], scope: tuple[str, ...]) -> None:
+    def walk(
+        node: dict[str, Any],
+        scope: tuple[str, ...],
+        template: dict[str, Any] | None = None,
+    ) -> None:
         for child in ast_inner(node):
             if not isinstance(child, dict):
                 continue
@@ -88,10 +97,25 @@ def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
                         and specialization.get("kind")
                         == "ClassTemplateSpecializationDecl"
                     ):
-                        walk({"inner": [specialization]}, scope)
+                        walk({"inner": [specialization]}, scope, child)
                 continue
             if kind == "ClassTemplateSpecializationDecl" and name:
-                name = _specialization_spelling(child, name, None)
+                full = _specialization_spelling(child, name, None)
+                if template and full:
+                    short = _specialization_spelling(
+                        child,
+                        name,
+                        _template_param_kinds(template),
+                        _template_param_defaults(template),
+                        _template_param_names(template),
+                    )
+                    trait = record_call_trait(child)
+                    if short and short != full and trait is not None:
+                        key = "::".join((*scope, short))
+                        if key in traits:
+                            ambiguous.add(key)
+                        traits[key] = trait
+                name = full
                 kind = "CXXRecordDecl"
             if not name or kind not in ("NamespaceDecl", "CXXRecordDecl"):
                 continue

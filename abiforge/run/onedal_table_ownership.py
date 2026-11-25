@@ -101,6 +101,10 @@ NumericTablePtr adapter{i}({params}) {{
 
 
 def run(old, new, out):
+    if old.name == new.name:
+        raise ValueError(
+            "release prefixes need distinct package names for the ownership receipt"
+        )
     out.mkdir(parents=True, exist_ok=True)
     rows = []
     for name in ("return-getters.csv", "table-accessors.csv"):

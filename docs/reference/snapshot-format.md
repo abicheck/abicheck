@@ -39,7 +39,7 @@ named sections.
   "schema_version": 71,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
-    "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
+    "declarations": {"section_kind": "declarations", "section_schema_version": 5, "payload": {"...": "..."}},
     "types":        {"section_kind": "types",        "section_schema_version": 1, "payload": {"...": "..."}},
     "layout":       {"...": "..."},
     "debug":        {"...": "..."},
@@ -49,7 +49,7 @@ named sections.
     "semantic_ir":  {"...": "..."}
   },
   "section_schema_versions": {
-    "binary": 1, "build": 1, "debug": 1, "declarations": 1, "graph": 1,
+    "binary": 1, "build": 1, "debug": 1, "declarations": 5, "graph": 1,
     "layout": 1, "provenance": 1, "semantic_ir": 2, "types": 1
   },
   "section_availability": {

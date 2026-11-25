@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 from ..diff_helpers import make_change
+from ..dwarf_advanced import _named_convention
 from ..model.call_interface import SYSV_AMD64
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.declarations import Function
 from ..model.snapshot import AbiSnapshot
+from ..model.special_member_identity import resolve_special_member_linker_names
+from ..model.synthetic_key import is_synthetic_ctor_key
 from .call_axis_shadow import abi_of
 from .export_names import default_export_names
 
@@ -26,9 +29,12 @@ def value_parameter_changes(
     ):
         return []
     changes = []
-    for symbol in sorted(
-        (default_export_names(old) or set()) & (default_export_names(new) or set())
-    ):
+    exports = (default_export_names(old) or set()) & (
+        default_export_names(new) or set()
+    )
+    old_functions = _with_constructor_params(old, old_functions, exports)
+    new_functions = _with_constructor_params(new, new_functions, exports)
+    for symbol in sorted(exports):
         a, b = old_functions.get(symbol), new_functions.get(symbol)
         if a is None or b is None or len(a.params) != len(b.params):
             continue
@@ -67,8 +73,17 @@ def value_parameter_changes(
             if old_debug and new_debug:
                 dwarf_before = old_debug.value_abi_traits.get(symbol, "").split("|")
                 dwarf_after = new_debug.value_abi_traits.get(symbol, "").split("|")
-                if set(before).issubset(dwarf_before) and set(after).issubset(
-                    dwarf_after
+                old_cc = old_debug.calling_conventions.get(symbol)
+                new_cc = new_debug.calling_conventions.get(symbol)
+                excluded = (
+                    old_cc is not None
+                    and new_cc is not None
+                    and _named_convention(old_cc) != _named_convention(new_cc)
+                )
+                if (
+                    not excluded
+                    and set(before).issubset(dwarf_before)
+                    and set(after).issubset(dwarf_after)
                 ):
                     continue
             changes.append(
@@ -83,3 +98,26 @@ def value_parameter_changes(
                 )
             )
     return changes
+
+
+def _with_constructor_params(
+    snap: AbiSnapshot, functions: dict[str, Function], exports: set[str]
+) -> dict[str, Function]:
+    constructors = [
+        f for f in snap.declarations.functions if is_synthetic_ctor_key(f.mangled)
+    ]
+    if not any(
+        p.trivial_for_calls_fact is not None for f in constructors for p in f.params
+    ):
+        return functions
+    result = dict(functions)
+    resolved = resolve_special_member_linker_names(
+        constructors,
+        default_export_names(snap) or set(),
+        snap.declarations.typedefs_qualified,
+    )
+    for index, names in resolved.items():
+        for symbol in (names.canonical, *names.variants):
+            if symbol in exports and not getattr(result.get(symbol), "params", None):
+                result[symbol] = constructors[index]
+    return result

@@ -15,6 +15,8 @@ COMPONENTS = ("core", "thread", "parameters", "main")
 
 
 def run(prefix, out):
+    if out.exists() and any(out.iterdir()):
+        raise ValueError(f"loadability requires an empty output directory: {out}")
     baseline = out / "baseline"
     baseline.mkdir(parents=True, exist_ok=True)
     lib = prefix / "lib"

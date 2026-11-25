@@ -64,3 +64,26 @@ def test_installed_cpu_sdk(tmp_path):
     assert onedal_status_return.run(old, tmp_path / "status")
     assert onedal_arguments.run(old, tmp_path / "arguments", check=True)
     assert onedal_table_ownership.run(old, new, tmp_path / "tables")
+
+
+def test_release_campaigns_reject_ambiguous_inputs(tmp_path):
+    from abiforge.run import onedal_loadability
+
+    old = tmp_path / "old/install"
+    new = tmp_path / "new/install"
+    with pytest.raises(ValueError, match="distinct package names"):
+        onedal_table_ownership.run(old, new, tmp_path / "ownership")
+    (tmp_path / "stale").touch()
+    with pytest.raises(ValueError, match="empty output"):
+        onedal_loadability.run(old, tmp_path)
+
+
+def test_export_identity_includes_compatibility_versions(monkeypatch):
+    from abiforge.run import onedal_exports
+
+    monkeypatch.setattr(
+        onedal_exports.subprocess,
+        "check_output",
+        lambda *a, **kw: "foo@VER_1 T 0\nbar@@VER_2 T 1\nbaz T 2\n",
+    )
+    assert onedal_exports.symbols("provider.so") == {"foo", "bar", "baz"}

@@ -221,6 +221,10 @@ def _unexplained_profile_fields(
                 new_fields.get("compiler_version")
             ):
                 unexplained.discard("compiler_version")
+                new_fields = {
+                    **new_fields,
+                    "compiler_version": old_fields["compiler_version"],
+                }
 
     # Legacy-unrecorded carve-out: a platform field one side never recorded
     # (every pre-recording baseline stores "") is unknown, never a mismatch

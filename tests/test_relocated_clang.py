@@ -21,7 +21,10 @@ from abicheck.model import AbiSnapshot
         ("a" * 64, "aarch64", False),
     ],
 )
-def test_relocated_clang_version_banner(new_digest, new_target, comparable):
+@pytest.mark.parametrize("probe_upgrade", [False, True])
+def test_relocated_clang_version_banner(
+    new_digest, new_target, comparable, probe_upgrade
+):
     import json
 
     def snapshot(path, digest, target):
@@ -29,6 +32,9 @@ def test_relocated_clang_version_banner(new_digest, new_target, comparable):
         contract = compute_extraction_contract(
             l2_frontend_ran=True,
             compiler_family="clang",
+            language_standard="c++:probed:__cplusplus=201703L"
+            if probe_upgrade and path == "/opt/bin"
+            else "c++",
             compiler_version=json.dumps(["clang", banner, banner]),
         )
         return AbiSnapshot(

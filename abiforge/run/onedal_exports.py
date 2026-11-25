@@ -26,7 +26,7 @@ def symbols(path):
     output = subprocess.check_output(
         ["nm", "-D", "--defined-only", "-P", str(path)], text=True
     )
-    return {line.split()[0].split("@@")[0] for line in output.splitlines() if line}
+    return {line.split()[0].split("@", 1)[0] for line in output.splitlines() if line}
 
 
 def binary(directory, evidence):

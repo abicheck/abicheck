@@ -78,9 +78,19 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
     """Whether an exported declaration has a record parameter passed by value."""
     by_id = {el.get("id"): el for el in root if el.get("id")}
     for fn in root:
-        if fn.tag not in ("Function", "Method", "OperatorMethod", "OperatorFunction"):
+        if fn.tag not in (
+            "Function",
+            "Method",
+            "Constructor",
+            "OperatorMethod",
+            "OperatorFunction",
+        ):
             continue
-        if exported and (fn.get("mangled") or fn.get("name")) not in exported:
+        if (
+            exported
+            and not (fn.tag == "Constructor" and not fn.get("mangled"))
+            and (fn.get("mangled") or fn.get("name")) not in exported
+        ):
             continue
         for arg in fn:
             if arg.tag != "Argument":

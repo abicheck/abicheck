@@ -45,6 +45,21 @@ def run(old, new, compiler, out):
                     [str(prefix / "lib"), os.environ.get("LD_LIBRARY_PATH", "")]
                 ),
             }
+            linked = subprocess.check_output(["ldd", client], env=env, text=True)
+            providers = {}
+            for line in linked.splitlines():
+                name_so, sep, target = line.strip().partition(" => ")
+                if sep and name_so.startswith("libonedal"):
+                    path = Path(target.rsplit(" (", 1)[0])
+                    if not path.is_file() or not path.resolve().is_relative_to(
+                        (prefix / "lib").resolve()
+                    ):
+                        raise ValueError(
+                            f"{client}: {name_so} resolved outside {prefix}: {target}"
+                        )
+                    providers[name_so] = str(path.resolve())
+            if not providers:
+                raise ValueError(f"{client}: no oneDAL providers in loader trace")
             result = subprocess.run(
                 [client, data], env=env, capture_output=True, text=True
             )
@@ -58,6 +73,7 @@ def run(old, new, compiler, out):
                 dict(
                     client=name,
                     package=prefix.name,
+                    providers=providers,
                     exit=result.returncode,
                     stdout=result.stdout.strip(),
                     stderr=result.stderr.strip(),
