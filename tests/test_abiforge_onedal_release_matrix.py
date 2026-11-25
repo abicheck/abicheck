@@ -5,6 +5,8 @@ import csv
 import gzip
 import json
 
+import pytest
+
 from abiforge.run.onedal_release_matrix import PRODUCT, obligations
 
 
@@ -175,8 +177,7 @@ def test_original_sdk_status_impact_matches_ledger_on_both_frontends():
         }
 
 
-def test_frozen_host_and_sycl_table_layout_receipt():
-    receipt = json.loads((PRODUCT / "table-layout.json").read_text())
+def assert_table_clients(receipt, variants):
     assert receipt["selector"] == "opencl:cpu"
     assert sorted(
         (r["mode"], r["package"], r["provider"], r["exit"]) for r in receipt["clients"]
@@ -184,8 +185,13 @@ def test_frozen_host_and_sycl_table_layout_receipt():
         (mode, package, provider, code)
         for mode in ("host", "sycl")
         for package in ("dal-2025.9.0", "dal-2025.11.0")
-        for provider, code in (("old", 0), ("extend", 0), ("swap", 42))
+        for provider, code in variants
     )
+
+
+def test_frozen_host_and_sycl_table_layout_receipt():
+    receipt = json.loads((PRODUCT / "table-layout.json").read_text())
+    assert_table_clients(receipt, (("old", 0), ("extend", 0), ("swap", 42)))
     assert receipt["checker"] == {
         "extend": {"members": [], "verdict": "COMPATIBLE", "exit": 0},
         "old": {"members": [], "verdict": "NO_CHANGE", "exit": 0},
@@ -217,3 +223,32 @@ def test_two_rank_sycl_communicator_release_receipt():
         assert "libonedal_dpc.so.3" in rows[package]["providers"]
     assert rows["dal-2026.2.0"]["exit"] == 127
     assert rows["dal-2026.2.0"]["missing_soname"] == "libonedal_dpc.so.3"
+
+
+@pytest.mark.parametrize("frontend", ["clang", "castxml"])
+def test_frozen_sparse_indexing_value_and_storage_changes(frontend):
+    receipt = json.loads((PRODUCT / f"sparse-indexing-{frontend}.json").read_text())
+    assert receipt["frontend"] == frontend
+    assert_table_clients(
+        receipt, (("old", 0), ("extend", 0), ("swap", 42), ("narrow", 42))
+    )
+    assert receipt["checker"] == {
+        "old": {"members": [], "exit": 0, "verdict": "NO_CHANGE"},
+        "extend": {"members": [], "exit": 0, "verdict": "COMPATIBLE"},
+        "swap": {
+            "members": ["sparse_indexing::one_based", "sparse_indexing::zero_based"],
+            "exit": 4,
+            "verdict": "BREAKING",
+        },
+        "narrow": {
+            "members": [],
+            "exit": 4,
+            "verdict": "BREAKING",
+            "layout_changes": {
+                "enum_underlying_size_changed": ["4", "1"],
+                "type_size_changed": ["64", "16"],
+                "type_alignment_changed": ["32", "8"],
+                "type_field_offset_changed": ["32", "8"],
+            },
+        },
+    }

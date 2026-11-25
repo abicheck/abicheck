@@ -202,6 +202,7 @@ old executable can load.
 | `return-lowering.csv`, `shared-return-types.csv` | Clang IR for 225 remaining SDK return declarations and 52 concrete SharedPtr types exercised across a compiled return boundary with deleter counters. These type-level probes represent 185 exports. |
 | `option-returns.csv`, `release-clients.json` | Frozen clients import the 38 option getters and verify mask values on both minor releases. Additional real clients exercise heterogen table and exception returns, two collection getters with ownership mutants, virtual destruction and the exported string limit. |
 | `variant-loss.json` | Six individual export withdrawals compared against six independent ELF relocations and an unchanged fixture. |
+| `sparse-indexing-clang.json`, `sparse-indexing-castxml.json` | Frozen host and SYCL CSR accessors pull two rows, including an empty row. The fixture provider writes the requested indexing into a shared C++ record. Swapping the enum values or narrowing its storage changes both column indices and row offsets. |
 | `table-layout.json` | Frozen host and SYCL clients read a converted row slice from a column-major table on both minor releases. A separate fixture DSO compiled against reordered SDK enum members supplies the layout value. Both clients observe the corresponding row-major sequence. Appending an enumerator preserves the original observations. |
 | `device-release-matrix.json` | Frozen clients on the OpenCL CPU, including a cross-queue host-task dependency, and a standalone major-release loader control. The optional two-rank Open MPI run checks typed and byte-buffer collectives through the SYCL communicator. GPU replay accepts `--selector level_zero:gpu` or `--selector opencl:gpu`. |
 
@@ -228,5 +229,8 @@ python -m abiforge.run.onedal_option_returns "$OLD" "$MINOR" "$MAJOR" "$OUT/opti
 python -m abiforge.run.onedal_release_clients "$OLD" "$MINOR" "$MAJOR" "$OUT/clients"
 python -m abiforge.run.onedal_variant_loss "$OLD" "$OUT/variants"
 python -m abiforge.run.onedal_table_layout "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/table-layout"
+for frontend in clang castxml; do
+  python -m abiforge.run.onedal_table_layout "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/sparse-indexing-$frontend" --enum sparse_indexing --frontend "$frontend"
+done
 python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR" --mpi
 ```

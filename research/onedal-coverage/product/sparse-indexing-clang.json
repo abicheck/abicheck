@@ -1,0 +1,145 @@
+{
+  "clients": [
+    {
+      "mode": "host",
+      "package": "dal-2025.9.0",
+      "provider": "old",
+      "exit": 0
+    },
+    {
+      "mode": "host",
+      "package": "dal-2025.9.0",
+      "provider": "extend",
+      "exit": 0
+    },
+    {
+      "mode": "host",
+      "package": "dal-2025.9.0",
+      "provider": "swap",
+      "exit": 42
+    },
+    {
+      "mode": "host",
+      "package": "dal-2025.9.0",
+      "provider": "narrow",
+      "exit": 42
+    },
+    {
+      "mode": "host",
+      "package": "dal-2025.11.0",
+      "provider": "old",
+      "exit": 0
+    },
+    {
+      "mode": "host",
+      "package": "dal-2025.11.0",
+      "provider": "extend",
+      "exit": 0
+    },
+    {
+      "mode": "host",
+      "package": "dal-2025.11.0",
+      "provider": "swap",
+      "exit": 42
+    },
+    {
+      "mode": "host",
+      "package": "dal-2025.11.0",
+      "provider": "narrow",
+      "exit": 42
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.9.0",
+      "provider": "old",
+      "exit": 0
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.9.0",
+      "provider": "extend",
+      "exit": 0
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.9.0",
+      "provider": "swap",
+      "exit": 42
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.9.0",
+      "provider": "narrow",
+      "exit": 42
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.11.0",
+      "provider": "old",
+      "exit": 0
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.11.0",
+      "provider": "extend",
+      "exit": 0
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.11.0",
+      "provider": "swap",
+      "exit": 42
+    },
+    {
+      "mode": "sycl",
+      "package": "dal-2025.11.0",
+      "provider": "narrow",
+      "exit": 42
+    }
+  ],
+  "selector": "opencl:cpu",
+  "checker": {
+    "old": {
+      "verdict": "NO_CHANGE",
+      "members": [],
+      "exit": 0
+    },
+    "extend": {
+      "verdict": "COMPATIBLE",
+      "members": [],
+      "exit": 0
+    },
+    "swap": {
+      "verdict": "BREAKING",
+      "members": [
+        "sparse_indexing::one_based",
+        "sparse_indexing::zero_based"
+      ],
+      "exit": 4
+    },
+    "narrow": {
+      "verdict": "BREAKING",
+      "members": [],
+      "exit": 4,
+      "layout_changes": {
+        "type_size_changed": [
+          "64",
+          "16"
+        ],
+        "type_alignment_changed": [
+          "32",
+          "8"
+        ],
+        "type_field_offset_changed": [
+          "32",
+          "8"
+        ],
+        "enum_underlying_size_changed": [
+          "4",
+          "1"
+        ]
+      }
+    }
+  },
+  "frontend": "clang"
+}
