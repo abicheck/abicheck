@@ -956,8 +956,8 @@ _LAYOUT_ROLES: dict[str, RoleText] = {
         "int ld3_use(LD3* p) { return p->d; }",
     ),
     "lay.tcopy": (
-        "struct LTC { int a; };\nint ltc_get(LTC v);",
-        "int ltc_get(LTC v) { return v.a; }",
+        "struct LTC { int a; };\nint ltc_get(LTC v);\nint ltc_ptr(const LTC* p);\nint ltc_ref(const LTC& v);",
+        "int ltc_get(LTC v) { return v.a; }\nint ltc_ptr(const LTC* p) { return p->a; }\nint ltc_ref(const LTC& v) { return v.a; }",
     ),
     "lay.stdlay": (
         "struct LSL { int a; int b; };\nint lsl_use(LSL* p);",

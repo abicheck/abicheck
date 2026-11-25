@@ -793,4 +793,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "DWARF signature completeness: declaration-only records add extraction limitations. "
         "Stored type and symbol spellings are unchanged."
     ),
+    95: GenerationSpellingChange(
+        "C++ record parameters gain a header-derived call-triviality fact. Older parameters retain unknown passing semantics. No spelling rewrite."
+    ),
 }

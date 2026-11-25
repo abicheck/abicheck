@@ -68,7 +68,7 @@ from .names import (
     _ref_qualifier_from_mangled,
 )
 from .out_of_line_inline import declared_inline_out_of_line
-from .return_by_value import castxml_return_by_value_fact
+from .return_by_value import castxml_return_by_value_fact, parameter_call_trait
 from .scope import scope_path
 from .type_resolution import (
     is_global_scope,
@@ -273,11 +273,8 @@ def parse_function_params(
             p_type = type_name(ctx, p_type_id)
             p_depth = pointer_depth(ctx, p_type_id)
             _, _, p_restrict = resolve_cv_restrict(ctx, p_type_id)
-            # castxml emits default="<expr>" on Arguments that carry a
-            # default value. Removing/changing a default is a source-API
-            # (and silent-behaviour) concern even though the mangled name
-            # is unchanged; capture it so the param_defaults detector can
-            # fire. Absent attribute → None (no default).
+            # CastXML preserves a default expression when the declaration has one.
+            identities = type_identities(ctx, p_type_id)
             params.append(
                 Param(
                     name=p_name,
@@ -298,7 +295,10 @@ def parse_function_params(
                     # type_name's CvQualifiedType handling above).
                     is_restrict=p_restrict,
                     is_va_list_fact=Fact.present(param_is_va_list(ctx, arg)),
-                    type_identities_fact=Fact.present(type_identities(ctx, p_type_id)),
+                    type_identities_fact=Fact.present(identities),
+                    trivial_for_calls_fact=parameter_call_trait(
+                        ctx, p_type_id, identities
+                    ),
                     type_abi_fact=castxml_type_abi_fact(ctx, p_type_id),
                 )
             )

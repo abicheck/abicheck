@@ -17,6 +17,7 @@ from typing import Any
 
 from abiforge.checkers.abicheck import default_verdict
 from abiforge.model.expect import Rule
+from abiforge.model.finding import EntityClaim, EntityRef
 from abiforge.model.opkit import (
     _ALIGN,
     _FIELD_TYPE,
@@ -369,6 +370,20 @@ _TRAITS = (
         "ltc_get now takes it by invisible reference where old callers pass it "
         "in a register, and it is no longer trivially copyable",
         expected=frozenset({"TRIVIALLY_COPYABLE_LOST", "VALUE_ABI_TRAIT_CHANGED"}),
+        claims=tuple(
+            EntityClaim(
+                EntityRef(name, symbol),
+                required=required,
+                kinds=frozenset({"VALUE_ABI_TRAIT_CHANGED"}),
+                needs=frozenset({"H"}),
+                why="only the by-value argument changes passing convention",
+            )
+            for name, symbol, required in (
+                ("ltc_get", "_Z7ltc_get3LTC", True),
+                ("ltc_ptr", "_Z7ltc_ptrPK3LTC", False),
+                ("ltc_ref", "_Z7ltc_refRK3LTC", False),
+            )
+        ),
         rules=(
             Rule(
                 lambda c: c.evidence == "dwarf",

@@ -196,6 +196,8 @@ STRIPPED_HEADERS = "headers.stripped"
 CXX_L2_PR = tuple(
     (op, "cxx_more", family, {"evidence": STRIPPED_HEADERS})
     for op, family in (
+        ("record_lost_trivially_copyable", "gcc"),
+        ("record_lost_trivially_copyable", "clang"),
         ("virtual_appended_after_last_slot", "gcc"),
         ("base_became_nonvirtual", "clang"),
         ("method_became_nonvirtual", "gcc"),

@@ -81,7 +81,7 @@ from __future__ import annotations
 #: respells unbounded arrays and _Atomic. A warm entry would carry none.
 #:
 #: v50: a native gcc dump records constraints as conjunctive atom sets.
-SNAPSHOT_CACHE_VERSION: str = "50"
+SNAPSHOT_CACHE_VERSION: str = "51"  # C++ by-value parameter call traits
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

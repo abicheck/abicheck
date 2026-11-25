@@ -44,6 +44,48 @@ def _unwrap_type(spelling: str) -> str:
     return " ".join("".join(parts).split())
 
 
+def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
+    """Clang's call-triviality decision on complete, named C++ definitions.
+
+    Stay within namespace and record scopes. A local class or a template
+    pattern cannot be joined by the qualified name of an ordinary record.
+    """
+    traits: dict[str, bool] = {}
+    ambiguous: set[str] = set()
+
+    def walk(node: dict[str, Any], scope: tuple[str, ...]) -> None:
+        for child in ast_inner(node):
+            if not isinstance(child, dict):
+                continue
+            kind = child.get("kind")
+            name = child.get("name")
+            if kind == "LinkageSpecDecl":
+                walk(child, scope)
+            if not name or kind not in ("NamespaceDecl", "CXXRecordDecl"):
+                continue
+            path = (*scope, name)
+            if kind == "CXXRecordDecl":
+                data = child.get("definitionData")
+                if not child.get("completeDefinition") or not isinstance(data, dict):
+                    continue
+                key = "::".join(path)
+                trait = data.get("canPassInRegisters", False)
+                # Require affirmative special-member evidence on the indirect
+                # side: an AST producer omitting the flag alone proves nothing.
+                if trait is not True and not any(
+                    data.get(slot, {}).get("nonTrivial")
+                    for slot in ("copyCtor", "moveCtor", "dtor")
+                ):
+                    continue
+                if key in traits:
+                    ambiguous.add(key)
+                traits[key] = trait is True
+            walk(child, path)
+
+    walk(root, ())
+    return {k: v for k, v in traits.items() if k not in ambiguous}
+
+
 class TypeIdentityIndex:
     """One parse-local index; ambiguous lookup never confirms a record identity."""
 
@@ -54,6 +96,7 @@ class TypeIdentityIndex:
         enums: list[_Decl],
         aliases: list[_Decl],
     ):
+        self.call_traits = record_call_traits(root)
         self.names = {
             "::".join((*e.scope, e.node["name"]))
             for e in (*records, *enums)
@@ -155,6 +198,16 @@ class TypeIdentityIndex:
             if matches:
                 return next(iter(matches))
         return None
+
+    def parameter_call_trait(
+        self, spelling: str, scope: tuple[str, ...]
+    ) -> Fact[bool] | None:
+        identities = self.resolve(spelling, scope).value
+        if not identities or identities[0] not in self.call_traits:
+            return None
+        if self.by_value_fact(spelling, scope).value is not True:
+            return None
+        return Fact.present(self.call_traits[identities[0]])
 
     def by_value_fact(self, spelling: str, scope: tuple[str, ...]) -> Fact[bool]:
         """Whether *spelling* is a record returned by value (``Function.return_by_value_fact``).

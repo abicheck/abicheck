@@ -74,6 +74,7 @@ from .compare.public_surface import (
 )
 from .compare.template_instance_absence import TemplateInstanceAbsence
 from .compare.type_map_pair import TypeMap, type_map_key
+from .compare.value_parameter_convention import value_parameter_changes
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -526,8 +527,7 @@ def _detect_newly_deleted_functions(
 @registry.detector("functions")
 def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     elf_only_mode = getattr(old, "elf_only_mode", False)
-    # RD2-5: when one side is a stripped symbols-only stub, its parameter lists
-    # are unknown (not "zero args"), so parameter diffs are unconfirmed.
+    # A stripped symbols-only stub carries no confirmed parameter list.
     params_unconfirmed = _is_stripped_symbols_only(old) or _is_stripped_symbols_only(
         new
     )
@@ -551,8 +551,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_map = function_identity_index(_reconciled_new_functions, new)
     _prewarm_elf_only_demangling(old_map, new_map)
 
-    # Lookups for the virtual-method-addition check below: type records
-    # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
+    # The virtual-method-addition check needs an ambiguity-safe TypeMap, the
     # old surface's scope-qualified owner classes, and per-class virtual
     # signatures (to skip inherited overrides). See ``virtual_method_addition``.
     old_decls = old.declarations
@@ -635,6 +634,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
 
+    changes.extend(value_parameter_changes(old, new))
     old_all = old.function_map
     changes.extend(_detect_newly_deleted_functions(old_all, new_all, old, new))
 

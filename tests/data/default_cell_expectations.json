@@ -3896,6 +3896,66 @@
   "verdict_max": null,
   "verdict_min": "BREAKING"
  },
+ "union_array_stride_grows|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_array_stride_shrinks|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_array_stride_unchanged|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "UNION_FIELD_TYPE_CHANGED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_member_lowers_alignment|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_ALIGNMENT_CHANGED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED",
+   "UNION_FIELD_REMOVED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
+ "union_member_raises_alignment|c_layout": {
+  "any_of": [],
+  "expected": [
+   "SONAME_BUMP_RECOMMENDED",
+   "TYPE_ALIGNMENT_CHANGED",
+   "TYPE_FIELD_OFFSET_CHANGED",
+   "TYPE_SIZE_CHANGED",
+   "UNION_FIELD_ADDED"
+  ],
+  "observable": true,
+  "verdict_max": null,
+  "verdict_min": "BREAKING"
+ },
  "union_char_extent_15_to_16|c_layout": {
   "any_of": [],
   "expected": [
