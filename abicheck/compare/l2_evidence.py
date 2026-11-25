@@ -80,8 +80,8 @@ def enum_paths(snapshot: AbiSnapshot) -> tuple[EnumPaths, EnumPaths]:
         for member in record.fields:
             identities = present_identities(member.type_identities_fact)
             if not identities and ("::" in member.type or not record.qualified_name):
-                if name := spellings.get(member.type):
-                    identities = (name,)
+                if matched_name := spellings.get(member.type):
+                    identities = (matched_name,)
             for identity in identities:
                 fields[identity].append(
                     [record.qualified_name or record.name, member.name, identity]
