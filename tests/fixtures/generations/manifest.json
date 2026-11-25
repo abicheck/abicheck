@@ -497,6 +497,12 @@
       "commit": "544ef90fbb5c",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen94/corpus.json.gz"
+    },
+    "95": {
+      "castxml": "castxml version 0.6.11",
+      "commit": "a538acb3b3aa",
+      "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+      "snapshot": "gen95/corpus.json.gz"
     }
   },
   "skipped": {

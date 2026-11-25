@@ -796,4 +796,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     95: GenerationSpellingChange(
         "C++ record parameters gain a header-derived call-triviality fact. Older parameters retain unknown passing semantics. No spelling rewrite."
     ),
+    96: GenerationSpellingChange(
+        "ELF consumers now record undefined symbol bindings and version requirements, "
+        "including references from relocatable objects. Stored symbol spellings need no rewrite."
+    ),
 }
