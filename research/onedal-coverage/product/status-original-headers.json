@@ -1,0 +1,36 @@
+{
+  "clang": {
+    "old-mutant": {
+      "verdict": "BREAKING",
+      "affected_exports": 909,
+      "ledger_exports": 795
+    },
+    "mutant-old": {
+      "verdict": "BREAKING",
+      "affected_exports": 909,
+      "ledger_exports": 795
+    },
+    "old-old": {
+      "verdict": "NO_CHANGE",
+      "affected_exports": 0,
+      "ledger_exports": 0
+    }
+  },
+  "castxml": {
+    "old-mutant": {
+      "verdict": "BREAKING",
+      "affected_exports": 947,
+      "ledger_exports": 795
+    },
+    "mutant-old": {
+      "verdict": "BREAKING",
+      "affected_exports": 947,
+      "ledger_exports": 795
+    },
+    "old-old": {
+      "verdict": "NO_CHANGE",
+      "affected_exports": 0,
+      "ledger_exports": 0
+    }
+  }
+}

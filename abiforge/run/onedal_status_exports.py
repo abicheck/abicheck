@@ -134,6 +134,10 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
             "verdict": report["verdict"],
             "affected_exports": len(observed[left, right]),
         }
+        if original_headers:
+            receipt[f"{left}-{right}"]["ledger_exports"] = len(
+                observed[left, right].intersection(expected)
+            )
     write_status_rows(out, observed)
     (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
 

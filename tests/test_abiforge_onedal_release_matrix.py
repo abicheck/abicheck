@@ -153,3 +153,23 @@ def test_minor_release_added_virtual_cells():
             ("40", "11checkResultEv"),
         )
     }
+
+
+def test_original_sdk_status_impact_matches_ledger_on_both_frontends():
+    expected = {
+        row["symbol"]
+        for row in obligations()
+        if row["kind"] == "by_value_return" and row["detail"] == "services::Status"
+    }
+    receipts = json.loads((PRODUCT / "status-original-headers.json").read_text())
+    assert set(receipts) == {"clang", "castxml"}
+    for runs in receipts.values():
+        assert runs["old-mutant"] == runs["mutant-old"]
+        assert runs["old-mutant"]["verdict"] == "BREAKING"
+        assert runs["old-mutant"]["ledger_exports"] == len(expected)
+        assert runs["old-mutant"]["affected_exports"] >= len(expected)
+        assert runs["old-old"] == {
+            "verdict": "NO_CHANGE",
+            "affected_exports": 0,
+            "ledger_exports": 0,
+        }
