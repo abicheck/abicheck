@@ -154,3 +154,35 @@ with the snapshot cache enabled. The fixtures exercise the exported loader
 interface only.
 
 Run both integration tests with `ABIFORGE_ONEDAL_PREFIX="$PWD/sdk" pytest -m integration tests/test_abiforge_sycl_campaigns.py`.
+
+### oneDAL-relevant L2 representatives on Linux x86-64
+
+Run `python -m abiforge.run.l2_representatives OUT --frontend clang` or
+select `castxml`. Repeat `--family layout`, `--family calls`, or
+`--family virtual` to restrict the run. Use a separate output directory per
+frontend. The generator writes C++ sources, one frozen executable per family,
+stripped DSOs, public CLI snapshots and comparisons, and a checked JSON
+receipt. Clang supplies the LLVM call signatures independently of either
+header frontend. The regular corpus's `struct_swap_fields` and
+`by_value_struct_became_nontrivial` operators supply the corresponding edits.
+
+| Representative | Independent observation and fault distinguished |
+| --- | --- |
+| Equal-width field swap | A frozen reader returns 29 instead of 17. Both field offsets reverse and the record stays eight bytes. |
+| Stronger alignment | The same eight-byte record begins at byte 8 instead of 4 inside an enclosing record. The client queries the provider's offset without passing it an under-aligned object. |
+| Nontrivial destructor | A four-byte value moves from a register to an indirect argument and from a register return to a hidden result pointer. The checker must attribute exactly the two changed argument positions and the one affected return. |
+| Register class at constant size | A 16-byte result changes from floating-point plus integer registers to two integer registers. Both versions still return directly. |
+| Late argument with an existing hidden result | The same edit affects the third source parameter after an integer and a floating-point parameter. The compiler still emits a separate leading result pointer. |
+| Pointer, reference and assignment controls | Frozen pointer/reference calls keep returning 34 in total. User-provided copy assignment alone leaves all five LLVM call signatures stable. Other properties such as trivial copyability can still change. |
+| Insert and reorder virtual slots | The two frozen calls through the secondary base return 19/17 after insertion and 18/17 after a swap. Checking only vtable growth would miss the swap. |
+| Override in the primary or secondary base | Each frozen call reads the derived object's payload. The primary override reuses its slot. The secondary override also adds a primary entry, growing this complete vtable from 64 to 72 bytes. |
+| Reorder polymorphic bases | The old client's baked-in base adjustment reaches the other subobject and reads 41 instead of 17. Both base offsets must change in the checker report. |
+| Implementation-only controls | One per family checks the frozen workload and requires an empty ABI diff. |
+
+These representatives cover the specified SysV AMD64 C++ decisions. ELF
+withdrawals, actual SYCL queue dependencies, and two-rank collectives have
+separate [oneDAL product witnesses](../research/onedal-coverage/product/README.md).
+
+The recorded Linux runs contain 13 comparisons per frontend, plus the three
+baselines. [Clang receipt](../research/onedal-coverage/product/l2-representatives-clang.json)
+and [CastXML receipt](../research/onedal-coverage/product/l2-representatives-castxml.json).
