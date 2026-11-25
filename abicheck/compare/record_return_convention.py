@@ -133,11 +133,15 @@ def _scalar_fields(
     record: RecordType, index: LayoutIndex, offset: int, active: set[int]
 ) -> list[TypeField] | None:
     """Expand nonvirtual base and record subobjects at their observed bit offsets."""
-    if id(record) in active or record.virtual_bases or record.vtable:
+    if (
+        id(record) in active
+        or record.resolved_virtual_bases()
+        or record.resolved_vtable()
+    ):
         return None
     active = active | {id(record)}
     leaves = []
-    for base in record.bases:
+    for base in record.resolved_bases():
         scope = (record.qualified_name or "").rpartition("::")[0]
         target = index.records_by_name.get(f"{scope}::{base}") if scope else None
         if target is None:

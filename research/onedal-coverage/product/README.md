@@ -115,7 +115,9 @@ Clang IR records the calling sequence. A frozen GCC client passes a tagged
 pointer through each real SDK entry point to a stripped observation adapter.
 It exits 0 for both controls and 41 for every mismatched argument.
 The public checker independently compares libonedal_core with the respective
-headers and identifies argument zero on each symbol.
+headers and identifies argument zero on each symbol. The merged ledgers contain
+49 source argument obligations across positions zero through seven. Only the six
+position-zero declarations match an exported provider.
 
 [table-accessors.csv](table-accessors.csv) selects one named table, index or
 model member per additional access path. [table-ownership.csv](table-ownership.csv)
@@ -194,11 +196,13 @@ old executable can load.
 | `release-matrix.csv.gz` | 3,521 declaration/provider obligations checked against the dynamic exports of each released image. |
 | `status-impact.csv.gz` | Each SDK Status return's provider and virtual/nonvirtual declaration, joined to the L2 affected-symbol lists from both mutation directions and the unchanged control. The public CLI consumes a return-slot projection of the SDK ledger and the real core DSO. The three executable clients separately exercise actual method signatures. |
 | `virtual-slots.csv.gz`, `header-slots.csv` | Relocation targets in exported ELF vtables and byte offsets from the table symbol. Three unmatched methods have separate SDK pointer-to-member measurements relative to the vtable address point. Empty ELF cells convey lack of a unique observed relocation. |
-| `serialization-slots.json` | Frozen calls to both serialization methods through a secondary base in a derived fixture. Reordering and removal use the real SDK interface. |
+| `serialization-slots.json` | Frozen calls to both serialization methods through a secondary base in a derived fixture. Inserting a method before the first dispatch changes the two client exits from 21/22 to 23/21. The checker also detects reordering and removal. |
 | `return-lowering.csv`, `shared-return-types.csv` | Clang IR for 225 remaining SDK return declarations and 52 concrete SharedPtr types exercised across a compiled return boundary with deleter counters. These type-level probes represent 185 exports. |
 | `option-returns.csv`, `release-clients.json` | Frozen clients import the 38 option getters and verify mask values on both minor releases. Additional real clients exercise heterogen table and exception returns, two collection getters with ownership mutants, virtual destruction and the exported string limit. |
 | `variant-loss.json` | Six individual export withdrawals compared against six independent ELF relocations and an unchanged fixture. |
 | `device-release-matrix.json` | Four old device clients on the OpenCL CPU and the standalone major-release loader control. GPU replay accepts `--selector level_zero:gpu` or `--selector opencl:gpu`. |
+
+The minor release adds exported vtables for optimization_solver BatchIface and kmeans init BatchBase in libonedal_core. Both tables are 88 bytes in 2025.11. Their observed relocations at offsets 32 and 40 target checkComputeParams and checkResult respectively. All previously observed cells retain their targets.
 
 Run from the repository root with the installed prefixes in `OLD`, `MINOR`,
 and `MAJOR` and a writable output directory `OUT`. The lowering campaign
@@ -211,6 +215,9 @@ python -m abiforge.run.onedal_release_matrix "$OLD" "$MINOR" "$MAJOR" "$OUT/matr
 python -m abiforge.run.onedal_virtual_slots "$OLD" "$MINOR" "$MAJOR" "$OUT/slots.csv"
 python -m abiforge.run.onedal_status_return "$OLD" "$OUT/status"
 python -m abiforge.run.onedal_status_exports "$OLD" "$OUT/status" "$OUT/impact"
+for backend in clang castxml; do
+  python -m abiforge.run.onedal_status_exports "$OLD" "$OUT/status" "$OUT/original-$backend" --original-headers --backend "$backend"
+done
 python -m abiforge.run.onedal_serialization_slots "$OLD" "$OUT/serialization"
 python -m abiforge.run.onedal_return_lowering "$OLD" "$OUT/lowering"
 python -m abiforge.run.onedal_shared_return_types "$OLD" "$MINOR" "$OUT/shared"

@@ -10,6 +10,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from abicheck.serialization import load_snapshot
+
+from .onedal_exports import symbols
 from .onedal_release_matrix import obligations
 
 
@@ -71,6 +74,26 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
             check=True,
             env=env,
         )
+    expected_by_side = {}
+    for name in ("old", "mutant"):
+        expected_by_side[name] = set(expected)
+        if original_headers:
+            exports = symbols(binary)
+            snapshot = load_snapshot(out / name / "snapshot.json.gz")
+            declared = {
+                f.mangled
+                for f in snapshot.declarations.functions
+                if f.mangled in exports
+                and f.return_by_value_fact
+                and f.return_by_value_fact.value is True
+                and f.return_type_identities_fact
+                and "daal::services::interface1::Status"
+                in (f.return_type_identities_fact.value or ())
+            }
+            if not expected_by_side[name] <= declared:
+                raise ValueError(f"{name}: missing ledger Status declarations")
+            expected_by_side[name] = declared
+            del snapshot
     receipt = {}
     observed = {}
     for left, right in (("old", "mutant"), ("mutant", "old"), ("old", "old")):
@@ -99,7 +122,7 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
         elif (
             result.returncode != 4
             or len(changes) != 1
-            or sorted(changes[0].get("affected_symbols", [])) != expected
+            or set(changes[0].get("affected_symbols", [])) != expected_by_side[left]
         ):
             raise ValueError(
                 f"{left}-{right}: L2 affected exports differ from the SDK ledger"
@@ -109,7 +132,7 @@ def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
         )
         receipt[f"{left}-{right}"] = {
             "verdict": report["verdict"],
-            "affected_exports": len(expected) if changes else 0,
+            "affected_exports": len(observed[left, right]),
         }
     write_status_rows(out, observed)
     (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")

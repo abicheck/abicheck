@@ -232,7 +232,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `secondary_vtable_group_changed` | BREAKING | 1 | 0 | 0 |
 | `struct_field_type_changed` | BREAKING | 0 | 0 | 0 |
 | `struct_packing_changed` | BREAKING | 1 | 0 | 5 |
-| `struct_return_convention_changed` | BREAKING | 1 | 0 | 3 |
+| `struct_return_convention_changed` | BREAKING | 1 | 0 | 4 |
 | `struct_size_changed` | BREAKING | 1 | 0 | 2 |
 | `suppression_reachability_unknown` | RISK | 0 | 0 | 0 |
 | `suppression_would_hide_public_break` | RISK | 0 | 0 | 0 |

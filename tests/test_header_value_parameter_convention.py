@@ -49,6 +49,19 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             '#include "api.hpp"\nabi::Result make_result(){return {};} abi::Result* pointer_result(){return nullptr;} void observe_result(const abi::Result&){} int templ(int i,BoxR b){return i+b.item.x;} Big late(int i,double d,R r){return {{i,(long)d,r.x}};} int val(int i,R r){return i+r.x;} int ptr(R* r){return r->x;} '
             "int ref(R& r){return r.x;} int attr(T t){return t.x;} int assign(S s){return s.x;}\n"
         )
+        ir = subprocess.check_output(
+            ["clang++", "-S", "-emit-llvm", src, "-o", "-"], text=True
+        )
+        signature = next(
+            line
+            for line in ir.splitlines()
+            if line.startswith("define ") and "@late(" in line
+        )
+        args = signature.split("@late(", 1)[1].split(", ")
+        assert len(args) == 4 and "sret(" in args[0]
+        assert args[2].startswith("double ") and args[3].startswith(
+            "ptr " if changed else "i32 "
+        )
         lib = root / "libapi.so"
         subprocess.run(
             ["clang++", "-shared", "-fPIC", "-s", str(src), "-o", str(lib)], check=True
