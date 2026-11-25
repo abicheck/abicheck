@@ -119,7 +119,7 @@ def test_llvm_convention_codes_name_what_clang_writes(tmp_path: Path) -> None:
     ``llvm-dwarfdump`` prints the symbolic name, both in DIE order, so the two
     lists pair up one to one.
     """
-    from abicheck.extract.dwarf_calling_conventions import CC_NAMES as _CC_NAMES
+    from abicheck.model.dwarf_calling_conventions import CC_NAMES as _CC_NAMES
 
     prefix = elf_capability("clang", "object")
     if prefix is None:

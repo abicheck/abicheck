@@ -43,6 +43,7 @@ from .compare.opaque_types import (
 )
 from .compare.public_surface import impact_candidate_functions
 from .compare.type_name_boundary import bounded_hits, occurs_as_identifier
+from .compare.type_symbol_disambiguation import _collect_function_type_refs
 from .model import AbiSnapshot, Function
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -405,17 +406,6 @@ class _SubstringMatcher:
             if out[node]:
                 result |= out[node]
         return result
-
-
-def _collect_function_type_refs(func: Function) -> set[str]:
-    """Return the set of type strings referenced in *func*'s signature."""
-    out: set[str] = set()
-    if func.return_type:
-        out.add(func.return_type)
-    for p in func.params:
-        if p.type:
-            out.add(p.type)
-    return out
 
 
 def _build_type_to_funcs(
