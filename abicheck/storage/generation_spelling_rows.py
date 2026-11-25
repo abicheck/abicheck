@@ -12,11 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The audited per-generation spelling rows (ADR-062 D2).
-
-The corpus gate reads this dict literal by AST and validates each reason.
-The frozen corpus tests every generation against the current spellings.
-"""
+"""Generation spelling migrations audited by the AST gate and frozen corpus (ADR-062 D2)."""
 
 from __future__ import annotations
 
