@@ -25,7 +25,9 @@ Mach-O, plus optional debug info, headers, build data and sources — evidence
 levels L0–L5), classifies every change into one of 436 `ChangeKind`s
 (`BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`), and
 gates CI on the result while reporting what the evidence could not establish.
-Pure Python, 3.11+. Product direction: [`vision.md`](vision.md); this file owns
+Python package, 3.11+, with the official CastXML wheel installed by default
+for native header scanning (no compiled Python extension). Product direction:
+[`vision.md`](vision.md); this file owns
 development procedure.
 
 **Python versions:** `requires-python = ">=3.11"` is the supported minimum;
@@ -325,7 +327,8 @@ axes fold in with `max` and can only raise 0 → 1. Full matrix:
 
 - Add changelog fragments via `scriv create`.
 - Change `examples/` cases only together with the ground truth they encode (`catalog/ground_truth.json`).
-- Justify every new dependency; abicheck stays lightweight.
+- Justify every new dependency; keep the default footprint intentional. The
+  pinned CastXML 0.8.0 wheel is part of the default install for L2 scanning.
 - Regenerate expected outputs whenever you change a binary test fixture.
 - Check public API signature changes for breakage; keep platform code cross-platform.
 - Resolve a new import cycle with a function-local import or a shared leaf

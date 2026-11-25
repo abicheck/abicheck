@@ -99,7 +99,7 @@
       "abicheck/extract/headers/backend_registry.py": "5223cf34abe3322c36cf70d9381f22a8c079408aca80a1559b82f7d007c7cccb",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
       "abicheck/extract/headers/castxml/abi_fundamental.py": "1317349eb6f7c59851d049270b8065a22c3d2465fa44b714ade2c9c45bda8d50",
-      "abicheck/extract/headers/castxml/backend.py": "9993674214e2ec171b7738df4cc5da22b0741a22b2c5352642ed9497bb64aea7",
+      "abicheck/extract/headers/castxml/backend.py": "d2fc15d69d1774d91d7c54584025c568af44c3d563cfa03645e66172a1b3ae5a",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "e363ac7d1407d679798c84459d376450207e20bfd2c67789052ab0c6ee48a9ca",
       "abicheck/extract/headers/castxml/clang_semantics_join.py": "ff93901a6bae843058554ffc10e8ca26f845c4b83f51a95ddfd944148a8444bf",
@@ -117,7 +117,7 @@
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
       "abicheck/extract/headers/castxml/out_of_line_inline.py": "79be984938819c77feb6ed867552f99e0245f0ff0fce78cf57b2cb7198730246",
-      "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
+      "abicheck/extract/headers/castxml/policy.py": "b27a307ee46d795782c19935581f69cda9f092e89225e2a2582043147967daa5",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
@@ -250,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "fea1d9abe001cb5008c6c24db129cafa34b77f286945f667735c913add51802c",
+    "fingerprint": "d30bcc4713f0bea99b326c5708df1c0a040018e1336f3bd04ed811148e11911f",
     "generation": 94,
-    "reason": "Record limits for incomplete public DWARF signature types"
+    "reason": "CastXML 0.8 is now accepted. The gate and diagnostic text do not change the facts recorded for existing supported toolchains."
   },
   "resolver": {
     "files": {

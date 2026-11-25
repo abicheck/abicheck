@@ -94,7 +94,7 @@ line only if you saw it.
 ## 3. Header AST backends
 
 - **Default `castxml`** (Action `frontend: auto`), policy range
-  `>=0.6.11,<0.8.0`. Fails closed: no CastXML, no silent switch.
+  `>=0.6.11,<0.9.0`. Fails closed: no CastXML, no silent switch.
 - **`frontend: clang`** — for a project that genuinely cannot use
   CastXML (clang-only toolchain, SYCL/DPC++ device code). It does **not**
   compute record layout (size, alignment, field offsets); layout breaks then
