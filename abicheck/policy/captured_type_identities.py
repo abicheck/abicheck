@@ -30,8 +30,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from ..model import AbiSnapshot, Fact, FactStatus, RecordType
-from ..model.surface_facts import in_public_surface
+from ..model import AbiSnapshot, RecordType
+from ..model.surface_facts import (
+    in_public_surface,
+    present_identities as present_identities,
+)
 
 
 def captured_identity_seeds(snap: AbiSnapshot) -> set[str]:
@@ -83,18 +86,3 @@ def field_identities(rec: RecordType) -> Iterator[str]:
     without a ``PRESENT`` fact yields nothing, leaving the walk as before."""
     for fld in rec.fields:
         yield from present_identities(fld.type_identities_fact)
-
-
-def present_identities(fact: Fact[tuple[str, ...]] | None) -> tuple[str, ...]:
-    """The identities a slot fact *established*, else nothing.
-
-    ``NOT_COLLECTED``/``UNSUPPORTED`` (clang JSON, DWARF, a pre-v54 snapshot)
-    and ``PRESENT(())`` (a slot naming no record) are different facts, and
-    the distinction is kept in the model for any consumer that needs it --
-    but for seeding, both mean "no entry point", so neither contributes.
-    Status is read first, never the bare value (the ``fact-detector-misuse``
-    discipline).
-    """
-    if fact is None or fact.status is not FactStatus.PRESENT:
-        return ()
-    return fact.value or ()

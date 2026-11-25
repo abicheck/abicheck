@@ -394,6 +394,20 @@ def _apply_used_by_scoping(
             # Graph lookup only; old_lib still owns every export/version read.
             old_snapshot=old_snapshot,
         )
+        from ..compare.l2_evidence import record_client
+        from ..model.consumer_spec import as_consumer_spec
+        from .control_link import control_link
+
+        spec = as_consumer_spec(app)
+        link = None
+        if (
+            spec.artifact_role == "control_object"
+            and scoped.direct_elf_imports is not None
+        ):
+            link = control_link(spec.path, old_lib, new_lib)
+        record_client(
+            result, scoped.app_path, scoped.direct_elf_imports, spec.artifact_role, link
+        )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(
             report_finding_id(c) for c in scoped.breaking_for_app

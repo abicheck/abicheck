@@ -117,7 +117,7 @@ def add_changes_block(
     )
     _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
     _ig_lookup = scoped_only_impact_group_lookup(result, changes, show_only)
-    d["changes"] = [
+    entries = [
         change_to_dict(
             c,
             policy=effective_policy,
@@ -132,6 +132,11 @@ def add_changes_block(
         )
         for c in changes
     ]
+    from .l2_evidence import grouped_export_variants
+
+    d["changes"] = entries
+    if variants := grouped_export_variants(entries):
+        d["removed_export_groups"] = variants
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count
     # ADR-027 A4 — pattern-aware modulation ledger (disclosed, reversible).

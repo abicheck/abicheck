@@ -90,6 +90,9 @@ def project_release_outcome(
         show_only=show_only,
         show_impact=show_impact,
     )
+    from .l2_evidence import attach_deployment_observations
+
+    attach_deployment_observations(outcome.library_results, outcome.consumer_binding)
     # ADR-065 D8: a FAILED member -- matched (a "failed" library result) or
     # OLD-only (no library result at all, only the scope record knows) --
     # ranks like an operational ERROR in the reported verdict, the same

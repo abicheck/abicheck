@@ -42,12 +42,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .availability import FactStatus
+from .elf_facts import ElfImport
 
 
 @dataclass
 class AppRequirements:
     """Symbols and versions an application binary requires from a library."""
 
+    direct_elf_imports: list[ElfImport] | None = field(default=None, kw_only=True)
     needed_libs: list[str] = field(default_factory=list)
     undefined_symbols: set[str] = field(default_factory=set)
     required_versions: dict[str, str] = field(default_factory=dict)

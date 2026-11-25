@@ -22,10 +22,10 @@ from collections.abc import Collection, Mapping
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.embedded_growth_shift import stamp_embedded_growth_shifts
 from .compare.enum_additions import added_enum_changes
-from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.enum_underlying import enum_underlying_size_detector
 from .compare.fact_gate import both_facts_present
 from .compare.field_addition import new_field_change_kind
+from .compare.l2_evidence import enum_paths, enum_value_change
 from .compare.live_member_scopes import removal_unconfirmed
 from .compare.public_surface import (
     reconciled_function_surfaces,
@@ -1071,6 +1071,8 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     # A wholly-removed (or added) enum is stored in snap.enums, NOT snap.types, so the TYPE_REMOVED loop in _diff_types() never sees it, so the removal went silently undetected (case78). Emit it here, guarded by the same stripped-binary suppression _diff_types uses so a stripped new side can't manufacture phantom removals.
     suppress_removed = _removals_are_unconfirmed(old, new)
+    argument_paths = None
+
     underlying_size_changes = enum_underlying_size_detector(old, new)
 
     for e_old in old_map.values():
@@ -1123,20 +1125,11 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     )
                 )
             elif new_members[mname] != mval:
-                kind = (
-                    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
-                    if is_confirmed_enum_sentinel(mname, old_members, new_members)
-                    else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
-                )
+                if argument_paths is None:
+                    argument_paths = enum_paths(old), enum_paths(new)
                 changes.append(
-                    make_change(
-                        kind,
-                        symbol=f"{name}::{mname}",
-                        name=name,
-                        detail=mname,
-                        old_value=str(mval),
-                        new_value=str(new_members[mname]),
-                        entity_id=e_old.entity_id or e_new.entity_id,
+                    enum_value_change(
+                        e_old, e_new, mname, old_members, new_members, argument_paths
                     )
                 )
 

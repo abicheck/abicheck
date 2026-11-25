@@ -547,6 +547,10 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
             scope=terms.completeness,
         ),
     }
+    from .l2_evidence import dependency_changes
+
+    if dependencies := dependency_changes(library_results):
+        summary["dependency_changes"] = dependencies
     if ev.consumer_binding is not None:
         summary["consumer_binding"] = ev.consumer_binding
     if ev.baseline_provenance is not None:

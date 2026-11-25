@@ -82,6 +82,7 @@ def _build_version_index(
     elf: object,
     reqs: AppRequirements,
     library_soname: str,
+    version_names: dict[int, str] | None = None,
 ) -> dict[int, str]:
     """Build version-index -> library SONAME map from .gnu.version_r.
 
@@ -102,6 +103,8 @@ def _build_version_index(
                     ver_idx = vernaux.entry.vna_other
                     ver_idx_to_lib[ver_idx] = lib
                     ver = vernaux.name
+                    if version_names is not None:
+                        version_names[ver_idx] = ver
                     # Collect required version tags for the target library
                     if ver and library_soname and lib == library_soname:
                         reqs.required_versions[ver] = lib
@@ -152,13 +155,19 @@ def _collect_undefined_symbols(
     library_soname: str,
     ver_idx_to_lib: dict[int, str],
     versym_section: object | None,
+    version_names: dict[int, str] | None = None,
 ) -> None:
     """Read undefined symbols from .dynsym, filtered by target library."""
     from elftools.elf.sections import SymbolTableSection
 
+    from ..model.elf_facts import ElfImport, SymbolBinding
+
+    relocatable = elf.header.e_type == "ET_REL"
+    table_name = ".symtab" if relocatable else ".dynsym"
     for section in elf.iter_sections():
-        if not (isinstance(section, SymbolTableSection) and section.name == ".dynsym"):
+        if not (isinstance(section, SymbolTableSection) and section.name == table_name):
             continue
+        reqs.direct_elf_imports = []
         for idx, sym in enumerate(section.iter_symbols()):
             if sym.entry.st_shndx != "SHN_UNDEF" or not sym.name:
                 continue
@@ -166,7 +175,17 @@ def _collect_undefined_symbols(
             if binding not in ("STB_GLOBAL", "STB_WEAK"):
                 continue
             ver_ndx = _symbol_version_index(versym_section, idx)
-            if not _symbol_from_target_library(
+            reqs.direct_elf_imports.append(
+                ElfImport(
+                    sym.name,
+                    SymbolBinding.WEAK
+                    if binding == "STB_WEAK"
+                    else SymbolBinding.GLOBAL,
+                    version=(version_names or {}).get(ver_ndx, ""),
+                    version_soname=ver_idx_to_lib.get(ver_ndx, ""),
+                )
+            )
+            if relocatable or not _symbol_from_target_library(
                 sym.name,
                 binding,
                 ver_ndx,
@@ -202,7 +221,10 @@ def _parse_elf_app_requirements(
             _collect_needed_libs(elf, reqs)
 
             # 2. Build version-index → library SONAME map from .gnu.version_r
-            ver_idx_to_lib = _build_version_index(elf, reqs, library_soname)
+            version_names: dict[int, str] = {}
+            ver_idx_to_lib = _build_version_index(
+                elf, reqs, library_soname, version_names
+            )
 
             # 3. Read .gnu.version section (per-symbol version indices)
             versym_section: GNUVerSymSection | None = None
@@ -213,7 +235,7 @@ def _parse_elf_app_requirements(
 
             # 4. Read undefined symbols from .dynsym, filtered by target library
             _collect_undefined_symbols(
-                elf, reqs, library_soname, ver_idx_to_lib, versym_section
+                elf, reqs, library_soname, ver_idx_to_lib, versym_section, version_names
             )
 
     except (ELFError, OSError, ValueError) as exc:

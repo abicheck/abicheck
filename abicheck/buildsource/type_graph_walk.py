@@ -746,6 +746,11 @@ def _walk_types(
         _walk_children(node, scope, field_ident or enclosing_func, edges, idx)
         return
 
+    if kind == "CallExpr" and enclosing_func:
+        from .enum_arguments import enum_call_arguments
+
+        enum_call_arguments(node, enclosing_func, edges, idx)
+
     if kind == "DeclRefExpr" and enclosing_func:
         _emit_decl_ref_edge(node, enclosing_func, edges, idx)
 
