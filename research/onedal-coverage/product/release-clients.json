@@ -1,0 +1,110 @@
+{
+  "dal-2025.9.0": {
+    "providers": {
+      "libonedal_core.so.3": "libonedal_core.so.3",
+      "libonedal_thread.so.3": "libonedal_thread.so.3"
+    },
+    "cases": {
+      "collection": {
+        "exit": 0,
+        "stdout": ""
+      },
+      "key_value": {
+        "exit": 0,
+        "stdout": ""
+      },
+      "delete_base": {
+        "exit": 0,
+        "stdout": ""
+      },
+      "variable": {
+        "exit": 0,
+        "stdout": "4096"
+      },
+      "collection_forward": {
+        "exit": 0
+      },
+      "collection_borrow": {
+        "exit": 1
+      },
+      "collection_extra_owner": {
+        "exit": 2
+      },
+      "key_value_forward": {
+        "exit": 0
+      },
+      "key_value_borrow": {
+        "exit": 4
+      },
+      "key_value_extra_owner": {
+        "exit": 5
+      }
+    }
+  },
+  "dal-2025.11.0": {
+    "providers": {
+      "libonedal_core.so.3": "libonedal_core.so.3",
+      "libonedal_thread.so.3": "libonedal_thread.so.3"
+    },
+    "cases": {
+      "collection": {
+        "exit": 0,
+        "stdout": ""
+      },
+      "key_value": {
+        "exit": 0,
+        "stdout": ""
+      },
+      "delete_base": {
+        "exit": 0,
+        "stdout": ""
+      },
+      "variable": {
+        "exit": 0,
+        "stdout": "4096"
+      },
+      "collection_forward": {
+        "exit": 0
+      },
+      "collection_borrow": {
+        "exit": 1
+      },
+      "collection_extra_owner": {
+        "exit": 2
+      },
+      "key_value_forward": {
+        "exit": 0
+      },
+      "key_value_borrow": {
+        "exit": 4
+      },
+      "key_value_extra_owner": {
+        "exit": 5
+      }
+    }
+  },
+  "dal-2026.2.0": {
+    "providers": {
+      "libonedal_core.so.3": "not found",
+      "libonedal_thread.so.3": "not found"
+    },
+    "cases": {
+      "collection": {
+        "exit": 127,
+        "stdout": ""
+      },
+      "key_value": {
+        "exit": 127,
+        "stdout": ""
+      },
+      "delete_base": {
+        "exit": 127,
+        "stdout": ""
+      },
+      "variable": {
+        "exit": 127,
+        "stdout": ""
+      }
+    }
+  }
+}

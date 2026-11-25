@@ -271,7 +271,7 @@ class TestSlottingDidNotChangeBehaviour:
         # 9: ADR-063 Phase 10 retired `is_va_list` to an InitVar view.
         # 10: schema v54 added `type_identities_fact`, same encode rule.
         # 11: schema v69 added `type_abi_fact`, same encode rule.
-        assert len(dataclasses.fields(Param)) == 11
+        assert len(dataclasses.fields(Param)) == 12
         assert len(dataclasses.fields(Fact)) == 4
 
 

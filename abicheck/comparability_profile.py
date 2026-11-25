@@ -35,6 +35,7 @@ the same shape ``type_reachability.py``'s own
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 
 from .comparability import (
@@ -154,6 +155,27 @@ def _canonical_orders_proven_equal(
     )
 
 
+def _clang_version_without_install_dir(value: object) -> tuple[str, str] | None:
+    """Read the two version banners from a recorded clang compiler identity."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parts = json.loads(value)
+    except ValueError:
+        return None
+    if not isinstance(parts, list) or len(parts) != 3 or parts[0] != "clang":
+        return None
+    banners = []
+    for banner in parts[1:]:
+        if not isinstance(banner, str):
+            return None
+        version, sep, path = banner.rpartition("\nInstalledDir: ")
+        if not sep or not version or not path.startswith("/") or "\n" in path:
+            return None
+        banners.append(version)
+    return banners[0], banners[1]
+
+
 def _unexplained_profile_fields(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -186,6 +208,23 @@ def _unexplained_profile_fields(
     old_fields = old_contract.profile_fields
     new_fields = new_contract.profile_fields
     unexplained = set(differing)
+
+    # Clang prints its installation directory in --version. Moving the same
+    # executable preserves its identity. Keep every other profile dimension.
+    if "compiler_version" in unexplained:
+        digest = (old.ast_toolchain or {}).get("compiler_sha256")
+        if digest and digest == (new.ast_toolchain or {}).get("compiler_sha256"):
+            banner = _clang_version_without_install_dir(
+                old_fields.get("compiler_version")
+            )
+            if banner and banner == _clang_version_without_install_dir(
+                new_fields.get("compiler_version")
+            ):
+                unexplained.discard("compiler_version")
+                new_fields = {
+                    **new_fields,
+                    "compiler_version": old_fields["compiler_version"],
+                }
 
     # Legacy-unrecorded carve-out: a platform field one side never recorded
     # (every pre-recording baseline stores "") is unknown, never a mismatch

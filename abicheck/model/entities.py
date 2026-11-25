@@ -212,6 +212,11 @@ class RecordType:
     # by value (in registers vs. on the stack / via hidden reference).
     is_standard_layout: bool | None = None
     is_trivially_copyable: bool | None = None
+    # The C++ ABI includes eligible copy/move constructors and the destructor.
+    # Clang's trivial_abi attribute can override the ordinary classification.
+    trivial_for_calls: bool | None = field(
+        default=None, kw_only=True, metadata={"wire": False}
+    )
     # Bit offset of the vtable pointer within the object (0 for a simple
     # polymorphic class; nonzero with virtual bases). None when the type is
     # non-polymorphic or the dumper could not determine it. Introducing the

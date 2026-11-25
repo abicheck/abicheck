@@ -312,6 +312,7 @@
           "kind_fact",
           "name",
           "pointer_depth",
+          "trivial_for_calls_fact",
           "type",
           "type_abi_fact",
           "type_identities_fact"
@@ -355,7 +356,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 4
+      "section_schema_version": 5
     },
     "graph": {
       "fields": {

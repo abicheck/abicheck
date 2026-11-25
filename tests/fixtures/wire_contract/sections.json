@@ -1,5 +1,5 @@
 {
-  "schema_version": 70,
+  "schema_version": 71,
   "sections": {
     "binary": {
       "fields": [
@@ -74,8 +74,8 @@
         "typedefs_qualified",
         "variables"
       ],
-      "section_schema_version": 4,
-      "sha256": "176bcb6686a1feb7cbf2ba9ff9ac3b375d9bfc8447bc86ba0a216b305a55d2c7"
+      "section_schema_version": 5,
+      "sha256": "e8a14c466b338f4505140d525f40dd5ccbb9bad789489571df431af0dbc7b221"
     },
     "layout": {
       "fields": [

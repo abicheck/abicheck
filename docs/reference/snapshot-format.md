@@ -36,10 +36,10 @@ named sections.
 
 ```json
 {
-  "schema_version": 70,
+  "schema_version": 71,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
-    "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
+    "declarations": {"section_kind": "declarations", "section_schema_version": 5, "payload": {"...": "..."}},
     "types":        {"section_kind": "types",        "section_schema_version": 1, "payload": {"...": "..."}},
     "layout":       {"...": "..."},
     "debug":        {"...": "..."},
@@ -49,7 +49,7 @@ named sections.
     "semantic_ir":  {"...": "..."}
   },
   "section_schema_versions": {
-    "binary": 1, "build": 1, "debug": 1, "declarations": 1, "graph": 1,
+    "binary": 1, "build": 1, "debug": 1, "declarations": 5, "graph": 1,
     "layout": 1, "provenance": 1, "semantic_ir": 2, "types": 1
   },
   "section_availability": {
@@ -168,7 +168,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`70`**. See
+The current value is **`71`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 

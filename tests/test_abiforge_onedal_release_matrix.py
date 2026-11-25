@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Join executable and compiler receipts back to the SDK's export obligations."""
+
+import csv
+import gzip
+import json
+
+from abiforge.run.onedal_release_matrix import PRODUCT, obligations
+
+
+def test_three_release_presence_and_complete_return_receipts():
+    with gzip.open(PRODUCT / "release-matrix.csv.gz", "rt") as f:
+        matrix = list(csv.DictReader(f))
+    keys = [
+        (r["kind"], r["declaration"], r["symbol"], r["baseline_provider"])
+        for r in matrix
+    ]
+    assert len(set(keys)) == len(keys)
+    assert set(keys) == {
+        (r["kind"], r["key"], r["symbol"], provider)
+        for r in obligations()
+        for provider in r["providers"].split(",")
+    }
+    assert all(r["dal-2025.9.0"] == r["dal-2025.11.0"] == "1" for r in matrix)
+    assert {r["dal-2026.2.0"] for r in matrix} == {"0", "1"}
+    returns = [r for r in matrix if r["kind"] == "by_value_return"]
+    status = {r["symbol"] for r in returns if r["detail"] == "services::Status"}
+    receipt = json.loads((PRODUCT / "status-exports.json").read_text())
+    for mode in ("old-mutant", "mutant-old"):
+        assert receipt[mode] == {"verdict": "BREAKING", "affected_exports": len(status)}
+    assert receipt["old-old"] == {"verdict": "NO_CHANGE", "affected_exports": 0}
+    with (PRODUCT / "return-lowering.csv").open() as f:
+        lowering = {r["symbol"]: r for r in csv.DictReader(f)}
+    assert set(lowering) == {
+        r["symbol"]
+        for r in returns
+        if r["detail"] not in ("services::Status", "data_management::NumericTablePtr")
+    }
+    with (PRODUCT / "option-returns.csv").open() as f:
+        options = list(csv.DictReader(f))
+    assert {r["symbol"] for r in options} == {
+        r["symbol"]
+        for r in returns
+        if r["detail"] in ("result_option_id", "optional_result_id")
+    }
+    assert all(
+        lowering[r["symbol"]]["llvm_return"] == "i64"
+        and r["dal-2025.9.0"] == r["dal-2025.11.0"]
+        for r in options
+    )
+
+
+def test_serialization_dispatch_and_variant_loss_receipts():
+    slots = json.loads((PRODUCT / "serialization-slots.json").read_text())
+    assert slots["old"]["method_exits"] == slots["control"]["method_exits"] == [21, 22]
+    assert slots["swap"]["method_exits"] == [22, 21]
+    assert slots["remove"]["method_exits"] == [22]
+    for key in ("swap", "remove"):
+        assert slots[key]["verdict"] == "BREAKING"
+        assert "type_vtable_changed" in slots[key]["kinds"]
+    variants = json.loads((PRODUCT / "variant-loss.json").read_text())
+    assert set(variants) == {"control", "C1", "C2", "D0", "D1", "D2", "data"}
+    for absent, r in variants.items():
+        assert len(r["exits"]) == 6
+        assert {tag for tag, code in r["exits"].items() if code == 127} == (
+            {absent} if absent != "control" else set()
+        )
+        assert set(r["exits"].values()) <= {0, 127}
+
+
+def test_virtual_offsets_and_status_impact_keep_their_evidence_sources():
+    rows = list(obligations())
+    virtuals = {r["symbol"] for r in rows if r["kind"] == "virtual_slot"}
+    with gzip.open(PRODUCT / "virtual-slots.csv.gz", "rt") as f:
+        cells = list(csv.DictReader(f))
+    with (PRODUCT / "header-slots.csv").open() as f:
+        headers = list(csv.DictReader(f))
+    for release in ("dal-2025.9.0", "dal-2025.11.0"):
+        observed = {
+            r["symbol"] for r in cells if r["release"] == release and r["vtable"]
+        }
+        header_only = {r["symbol"] for r in headers if r["release"] == release}
+        assert virtuals - observed == header_only
+        assert all(int(r["byte_offset"]) % 8 == 0 for r in cells if r["vtable"])
+    with gzip.open(PRODUCT / "status-impact.csv.gz", "rt") as f:
+        impact = list(csv.DictReader(f))
+    assert {r["symbol"] for r in impact} == {
+        r["symbol"]
+        for r in rows
+        if r["kind"] == "by_value_return" and r["detail"] == "services::Status"
+    }
+    for r in impact:
+        assert (r["sdk_declaration"] == "virtual") == (r["symbol"] in virtuals)
+        assert (r["forward"], r["reverse"], r["control"]) == ("1", "1", "0")
+
+
+def test_shared_return_types_have_independent_ownership_controls():
+    from collections import Counter
+
+    with (PRODUCT / "return-lowering.csv").open() as f:
+        counts = Counter(
+            r["sdk_type"]
+            for r in csv.DictReader(f)
+            if r["sdk_type"].startswith("daal::services::interface1::SharedPtr<")
+        )
+    with (PRODUCT / "shared-return-types.csv").open() as f:
+        runs = list(csv.DictReader(f))
+    for release in ("dal-2025.9.0", "dal-2025.11.0"):
+        assert {
+            r["sdk_type"]: int(r["return_symbols"])
+            for r in runs
+            if r["release"] == release
+        } == counts
+    assert all(
+        (r["control"], r["borrow"], r["extra_owner"]) == ("0", "11", "12") for r in runs
+    )

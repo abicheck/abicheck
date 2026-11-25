@@ -7,6 +7,8 @@ the codes, and the names are what its change reports print.
 
 from __future__ import annotations
 
+import re
+
 #: ``DW_AT_calling_convention`` value -> name. The LLVM entries are what clang 18
 #: writes for x86-64 conventions, read back with ``llvm-dwarfdump`` beside the
 #: numeric code (tests/test_abiforge_producer_capabilities.py).
@@ -34,3 +36,15 @@ CC_NAMES: dict[int, str] = {
     0xC1: "LLVM_Win64",  # ms_abi
     0xCB: "LLVM_X86RegCall",  # regcall
 }
+
+
+def named_convention(name: str) -> str:
+    """A stored convention name, with a legacy ``unknown(0x..)`` code mapped to its name.
+
+    A snapshot written before a code was named stores ``unknown(0xc1)``; the same
+    function read now says ``LLVM_Win64``. Both must compare equal.
+    """
+    m = re.fullmatch(r"unknown\(0x([0-9a-fA-F]+)\)", name)
+    if m is None:
+        return name
+    return CC_NAMES.get(int(m.group(1), 16), name)

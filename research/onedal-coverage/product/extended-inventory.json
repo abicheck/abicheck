@@ -1,0 +1,32 @@
+{
+  "headers": 541,
+  "root_list_sha256": "c5fc3f7f3da144383dcd3caaec739de11b0c17e1993ea8db7fe48105df9203fa",
+  "unparsed": 0,
+  "candidate_rows": 18808,
+  "additional_rows": 2286,
+  "provider_matched_names": 3516,
+  "additional_by_kind": {
+    "by_value_arg0": 4,
+    "by_value_return": 584,
+    "class_decl": 11,
+    "class_template": 8,
+    "constructor": 81,
+    "constructor_abi_variant": 72,
+    "cxx_base_specifier": 17,
+    "cxx_method": 573,
+    "destructor": 3,
+    "destructor_abi_variant": 2,
+    "enum_decl": 1,
+    "exported_variable": 1,
+    "field_decl": 199,
+    "function_decl": 6,
+    "function_template": 204,
+    "virtual_slot": 520
+  },
+  "optional_headers": {
+    "table.h": "8df8a2c1da5cd0591572cc93ea34276fa6c51eec4f71468ffe68f3acc0a5edf8",
+    "k.h": "7da364e03c053942ab35ea52da28c6fe75dda69aba6dc25fbd7503e42a72209a",
+    "sql.h": "277553e376e776bce7b59f88db7384072f93828ee9233a8910c04cb47a026862",
+    "unixodbc.h": "e27a51633601ccd761e0c27a31ab7088c23ebc452857ce012f5c62ee97805fc3"
+  }
+}

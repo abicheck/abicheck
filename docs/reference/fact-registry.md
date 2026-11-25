@@ -60,6 +60,7 @@ Phase 5 section for the design this page's data comes from.
 | `Param.is_restrict` | `bool` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.kind` | `ParamKind` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
+| `Param.trivial_for_calls` | `bool` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `Param.type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
 | `PeMetadata.delay_imports` | `dict[str, list[str]] \| None` | pe | persisted | ✅ | — | ✅ | — | ✅ |

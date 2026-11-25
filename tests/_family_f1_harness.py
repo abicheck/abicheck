@@ -215,6 +215,7 @@ def _param(name: str, type_: str = "int") -> Param:
         name=name,
         type=type_,
         type_identities_fact=_ids(type_),
+        trivial_for_calls_fact=Fact.present(True) if type_ == "Point" else None,
         kind=ParamKind.VALUE,
         is_va_list=False,
         is_restrict=False,

@@ -243,6 +243,9 @@ def build_record_type(
             ctx, el, el.get("name", "")
         ),
         is_trivially_copyable=trivially,
+        trivial_for_calls=ctx.clang_semantics.record_call_traits.get(
+            qualified_name or name
+        ),
         is_standard_layout=standard,
         # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see the
         # local variable's own comment above for why this is always a real,

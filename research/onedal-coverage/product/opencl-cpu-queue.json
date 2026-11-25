@@ -1,0 +1,48 @@
+{
+  "cpu/old": {
+    "run": 0,
+    "rebuild": 0,
+    "loader_error": "",
+    "matches": true
+  },
+  "cpu/withdrawn": {
+    "run": 0,
+    "rebuild": 0,
+    "loader_error": "",
+    "matches": true
+  },
+  "queue/old": {
+    "run": 0,
+    "rebuild": 0,
+    "loader_error": "",
+    "matches": true
+  },
+  "queue/withdrawn": {
+    "run": 127,
+    "rebuild": 1,
+    "loader_error": "/tmp/dal-sycl-proof/queue: symbol lookup error: /tmp/dal-sycl-proof/queue: undefined symbol: _Z10array_wrapRN4sycl3_V15queueEPf",
+    "matches": true
+  },
+  "compare-old": {
+    "verdict": "NO_CHANGE",
+    "kinds": {},
+    "affected": [],
+    "matches": true
+  },
+  "compare-withdrawn": {
+    "verdict": "BREAKING",
+    "kinds": {
+      "sycl_overload_set_removed": 1
+    },
+    "affected": [
+      "_Z10array_wrapRN4sycl3_V15queueEPf",
+      "_Z10table_wrapRN4sycl3_V15queueEPf",
+      "_Z8row_pullRN4sycl3_V15queueEPf",
+      "_Z11column_pullRN4sycl3_V15queueEPf",
+      "_Z11array_emptyRN4sycl3_V15queueEPf",
+      "_Z11array_zerosRN4sycl3_V15queueEPf",
+      "_Z10array_fullRN4sycl3_V15queueEPf"
+    ],
+    "matches": true
+  }
+}

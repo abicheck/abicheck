@@ -239,6 +239,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "hidden_friend_removed",
                 "inline_function_removed",
                 "type_vtable_changed",
+                "value_abi_trait_changed",
                 "virtual_method_added",
             }
         ),

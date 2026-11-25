@@ -120,6 +120,8 @@ _MORE_CLASSES = r"""#include <cstdio>
 #include "edit_seed.h"
 struct MyWidget : Widget { int get() const override { return 99; } };
 int main() {
+  LTC value; value.a = 42;
+  std::printf("ltc=%d,%d,%d\n", ltc_get(value), ltc_ptr(&value), ltc_ref(value));
   Widget w(4);
   MyWidget mw;
   Gadget gd = 6L;

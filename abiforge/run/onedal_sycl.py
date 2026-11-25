@@ -69,6 +69,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("out", type=Path)
     parser.add_argument("--prefix", type=Path, required=True)
+    parser.add_argument(
+        "--compiler",
+        type=Path,
+        help="DPC++ compiler when installed separately from oneDAL",
+    )
     args = parser.parse_args()
     root, prefix = args.out.resolve(), args.prefix.resolve()
     old, new = root / "old", root / "withdrawn"
@@ -79,21 +84,38 @@ def main() -> int:
     env["LD_LIBRARY_PATH"] = os.pathsep.join([str(lib), env.get("LD_LIBRARY_PATH", "")])
     env.setdefault("OCL_ICD_VENDORS", str(prefix / "etc/OpenCL/vendors"))
     cc = [
-        str(prefix / "bin/icpx"),
+        str(args.compiler.resolve() if args.compiler else prefix / "bin/icpx"),
         "-std=c++17",
         "-fsycl",
         "-DONEDAL_DATA_PARALLEL",
         "-I",
         str(prefix / "include"),
     ]
+    components = (
+        "libonedal_dpc",
+        "libonedal_parameters_dpc",
+        "libonedal_core",
+        "libonedal_thread",
+    )
+    versions = [
+        {
+            f.name.rsplit(".", 1)[1]
+            for f in lib.glob(f"{name}.so.*")
+            if f.name.removeprefix(f"{name}.so.").isdigit()
+        }
+        for name in components
+    ]
+    common = set.intersection(*versions)
+    if len(common) != 1:
+        raise ValueError(
+            f"expected a unique common oneDAL SONAME major in {lib}, found {sorted(common)}"
+        )
+    major = common.pop()
     links = [
         "-L",
         str(lib),
-        "-l:libonedal_dpc.so.3",
         "-Wl,--no-as-needed",
-        "-l:libonedal_parameters_dpc.so.3",
-        "-l:libonedal_core.so.3",
-        "-l:libonedal_thread.so.3",
+        *(f"-l:{name}.so.{major}" for name in components),
     ]
 
     def run(argv: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:

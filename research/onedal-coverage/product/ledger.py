@@ -12,6 +12,14 @@ with (Path(__file__).resolve().parent / 'return-witnesses.csv').open() as f:
         # drop_sum tests a method postcondition with an unchanged successful return.
         if int(result['client_exit']) != 0 and result['variant'] != 'drop_sum':
             return_edits.setdefault(result['symbol'], set()).add(result['variant'])
+product = Path(__file__).resolve().parent
+table_runs = {}
+with (product / 'table-ownership.csv').open() as stream:
+    for result in csv.DictReader(stream):
+        if tuple(int(result[k]) for k in ('baseline', 'forward', 'borrow', 'extra_owner')) == (0, 0, 11, 12):
+            table_runs.setdefault(result['symbol'], set()).add(result['package'])
+with (product / 'argument-abi.json').open() as stream:
+    argument_runs = json.load(stream)['client_exits']
 counts=Counter()
 for row in rows:
     kind=row['kind']
@@ -33,6 +41,12 @@ for row in rows:
     if kind == 'by_value_return' and row['symbol'] in return_edits:
         row['independent_edit_witness'] = 'return-witnesses.csv'
         row['edit_family'] = '|'.join(sorted(return_edits[row['symbol']]))
+    if kind == 'by_value_return' and table_runs.get(row['symbol']) == {'dal-2025.9.0', 'dal-2025.11.0'}:
+        row['independent_edit_witness'] = 'table-ownership.csv'
+        row['edit_family'] = 'borrow|extra_owner'
+    if kind == 'by_value_arg0' and argument_runs.get(row['symbol']) == {'old': 0, 'control': 0, 'mutant': 41}:
+        row['independent_edit_witness'] = 'argument-abi.json'
+        row['edit_family'] = 'record_call_triviality'
     if kind == 'cxx_method' and row['symbol'] == '_ZN4daal8services10interface16Status5clearEv':
         row['independent_edit_witness'] = 'status-clear.csv'
         row['edit_family'] = 'no_op_clear'

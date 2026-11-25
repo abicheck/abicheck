@@ -1,0 +1,105 @@
+{
+  "compiler": "Debian clang version 19.1.7 (3+b1)",
+  "header_sha256": "43a5a5674781cc65fa834c5a1545aa7193198360456884b100122cee9602c8b0",
+  "calls": {
+    "_ZN4daal10algorithms10brownboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10classifier10interface15ModelEEE": {
+      "old": "indirect",
+      "control": "indirect",
+      "mutant": "stack-by-value"
+    },
+    "_ZN4daal10algorithms10logitboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10regression10interface15ModelEEE": {
+      "old": "indirect",
+      "control": "indirect",
+      "mutant": "stack-by-value"
+    },
+    "_ZN4daal10algorithms8adaboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10classifier10interface15ModelEEE": {
+      "old": "indirect",
+      "control": "indirect",
+      "mutant": "stack-by-value"
+    },
+    "_ZN4daal15data_management10interface115SOANumericTable6createENS_8services10interface19SharedPtrINS1_10DictionaryINS1_19NumericTableFeatureELi6000EEEEEmNS1_17NumericTableIface14AllocationFlagEPNS4_6StatusE": {
+      "old": "indirect",
+      "control": "indirect",
+      "mutant": "stack-by-value"
+    },
+    "_ZN4daal15data_management10interface118MergedNumericTable15addNumericTableENS_8services10interface19SharedPtrINS1_12NumericTableEEE": {
+      "old": "indirect",
+      "control": "indirect",
+      "mutant": "stack-by-value"
+    },
+    "_ZN4daal15data_management10interface121RowMergedNumericTable15addNumericTableENS_8services10interface19SharedPtrINS1_12NumericTableEEE": {
+      "old": "indirect",
+      "control": "indirect",
+      "mutant": "stack-by-value"
+    }
+  },
+  "client_exits": {
+    "_ZN4daal10algorithms8adaboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10classifier10interface15ModelEEE": {
+      "old": 0,
+      "control": 0,
+      "mutant": 41
+    },
+    "_ZN4daal10algorithms10brownboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10classifier10interface15ModelEEE": {
+      "old": 0,
+      "control": 0,
+      "mutant": 41
+    },
+    "_ZN4daal10algorithms10logitboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10regression10interface15ModelEEE": {
+      "old": 0,
+      "control": 0,
+      "mutant": 41
+    },
+    "_ZN4daal15data_management10interface118MergedNumericTable15addNumericTableENS_8services10interface19SharedPtrINS1_12NumericTableEEE": {
+      "old": 0,
+      "control": 0,
+      "mutant": 41
+    },
+    "_ZN4daal15data_management10interface121RowMergedNumericTable15addNumericTableENS_8services10interface19SharedPtrINS1_12NumericTableEEE": {
+      "old": 0,
+      "control": 0,
+      "mutant": 41
+    },
+    "_ZN4daal15data_management10interface115SOANumericTable6createENS_8services10interface19SharedPtrINS1_10DictionaryINS1_19NumericTableFeatureELi6000EEEEEmNS1_17NumericTableIface14AllocationFlagEPNS4_6StatusE": {
+      "old": 0,
+      "control": 0,
+      "mutant": 41
+    }
+  },
+  "checker": {
+    "control": {
+      "verdict": "NO_CHANGE",
+      "exit": 0,
+      "arguments": {}
+    },
+    "mutant": {
+      "verdict": "BREAKING",
+      "exit": 4,
+      "arguments": {
+        "_ZN4daal10algorithms10brownboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10classifier10interface15ModelEEE": [
+          "p0:nontrivial",
+          "p0:trivial"
+        ],
+        "_ZN4daal10algorithms10logitboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10regression10interface15ModelEEE": [
+          "p0:nontrivial",
+          "p0:trivial"
+        ],
+        "_ZN4daal10algorithms8adaboost10interface25Model19addWeakLearnerModelENS_8services10interface19SharedPtrINS0_10classifier10interface15ModelEEE": [
+          "p0:nontrivial",
+          "p0:trivial"
+        ],
+        "_ZN4daal15data_management10interface115SOANumericTable6createENS_8services10interface19SharedPtrINS1_10DictionaryINS1_19NumericTableFeatureELi6000EEEEEmNS1_17NumericTableIface14AllocationFlagEPNS4_6StatusE": [
+          "p0:nontrivial",
+          "p0:trivial"
+        ],
+        "_ZN4daal15data_management10interface118MergedNumericTable15addNumericTableENS_8services10interface19SharedPtrINS1_12NumericTableEEE": [
+          "p0:nontrivial",
+          "p0:trivial"
+        ],
+        "_ZN4daal15data_management10interface121RowMergedNumericTable15addNumericTableENS_8services10interface19SharedPtrINS1_12NumericTableEEE": [
+          "p0:nontrivial",
+          "p0:trivial"
+        ]
+      }
+    }
+  }
+}

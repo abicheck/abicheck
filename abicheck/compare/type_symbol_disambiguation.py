@@ -370,3 +370,14 @@ def _assign_affected_symbols_to_changes(
         if funcs:
             # Store both demangled and mangled names for cross-format matching
             c.affected_symbols = sorted(funcs | mangled_funcs)
+
+
+def _collect_function_type_refs(func: Function) -> set[str]:
+    """Return the set of type strings referenced in *func*'s signature."""
+    out: set[str] = set()
+    if func.return_type:
+        out.add(func.return_type)
+    for p in func.params:
+        if p.type:
+            out.add(p.type)
+    return out

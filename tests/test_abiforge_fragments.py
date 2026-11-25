@@ -156,6 +156,35 @@ def test_union_extent_boundaries(op, storage) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "op,fid,offsets",
+    [
+        ("union_array_stride_grows", "ustride_grow", (32, 56)),
+        ("union_array_stride_shrinks", "ustride_shrink", (56, 32)),
+        ("union_array_stride_unchanged", "ustride_same", None),
+    ],
+)
+def test_three_union_elements_set_the_trailing_word_offset(op, fid, offsets) -> None:
+    rows = _exact(OP_BY_NAME[op], _cfg(stripped=True)).assertions[0].rows
+    moved = [r for r in rows if r.kind == "TYPE_FIELD_OFFSET_CHANGED"]
+    # Eight leading bytes, then three unions of eight or sixteen bytes each.
+    assert moved == (
+        [
+            ExactRow(
+                "TYPE_FIELD_OFFSET_CHANGED",
+                f"Envelope_{fid}",
+                "t",
+                Bytes(offsets[0]),
+                Bytes(offsets[1]),
+            )
+        ]
+        if offsets
+        else []
+    )
+    if offsets is None:
+        assert [r.kind for r in rows] == ["UNION_FIELD_TYPE_CHANGED"]
+
+
 def test_alignment_rows_need_headers_and_are_unknown_below() -> None:
     op = OP_BY_NAME["union_rebuild_packed_alignment_only"]
     with_h = _exact(op, _cfg())

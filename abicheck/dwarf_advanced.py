@@ -55,7 +55,6 @@ from .dwarf_utils import (
     resolve_type_die as _resolve_type_die,
 )
 from .extract import dwarf_subtree_index as _dsi
-from .extract.dwarf_calling_conventions import CC_NAMES as _CC_NAMES
 from .extract.dwarf_type_alignment import (
     _NATURAL_ALIGN,
     _aggregate_has_unaligned_member,
@@ -68,6 +67,10 @@ from .extract.dwarf_value_abi_trait import (
     is_copy_or_move_ctor,
     ret_component as _ret_component,
     returns_in_registers as _returns_in_registers,
+)
+from .model.dwarf_calling_conventions import (
+    CC_NAMES as _CC_NAMES,
+    named_convention as _named_convention,
 )
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -720,18 +723,6 @@ def _parse_producer(producer: str) -> ToolchainInfo:
 # ---------------------------------------------------------------------------
 # Diff (called from checker.py _diff_advanced_dwarf)
 # ---------------------------------------------------------------------------
-
-
-def _named_convention(name: str) -> str:
-    """A stored convention name, with a legacy ``unknown(0x..)`` code mapped to its name.
-
-    A snapshot written before a code was named stores ``unknown(0xc1)``; the same
-    function read now says ``LLVM_Win64``. Both must compare equal.
-    """
-    m = re.fullmatch(r"unknown\(0x([0-9a-fA-F]+)\)", name)
-    if m is None:
-        return name
-    return _CC_NAMES.get(int(m.group(1), 16), name)
 
 
 def _diff_calling_conventions(
