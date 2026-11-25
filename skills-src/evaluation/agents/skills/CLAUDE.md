@@ -113,7 +113,7 @@ actual cause is that neither arm had a workable toolchain.
    convenience.
 2. **`abicheck compare --depth headers`/`dump` need a header-AST frontend
    this host can satisfy.** `abicheck`'s default is CastXML, policy-gated to
-   `>=0.6.11,<0.8.0` (`castxml_policy.py`); a plain `apt install castxml` on
+   `>=0.6.11,<0.9.0` (`castxml_policy.py`); a plain `apt install castxml` on
    a recent Ubuntu base commonly resolves an older build (observed:
    `0.6.3-1build2`) that abicheck correctly refuses as unsupported rather
    than silently trusting. Either install a real conda-forge CastXML in the

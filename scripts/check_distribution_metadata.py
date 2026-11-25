@@ -9,6 +9,8 @@ import zipfile
 from email import message_from_bytes
 from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
+
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 
@@ -53,20 +55,23 @@ def main() -> int:
     for field, expected in checks.items():
         if metadata.get(field) != expected:
             fail(f"wheel {field} is {metadata.get(field)!r}, expected {expected!r}")
-    # PyPI/pip-installed abicheck is the lightweight/core distribution: it must
-    # never pull in CastXML transitively, on any extra. `pip install abicheck`
-    # (or `abicheck[dev]`/`[docs]`/`[dist]`) installing
-    # CastXML would silently promote the legacy, unsupported PyPI `castxml`
-    # distribution (last released 0.4.5 in 2018 — see castxml_policy.py) into
-    # abicheck's default install path, contradicting the documented contract
-    # that a real L2 scanner setup comes from conda-forge or an explicitly
-    # managed CastXML/compiler install.
+    # The official CastXML wheel is part of the standard install so pip users
+    # get the L2 scanner by default. Keep its executable release pinned.
     requires_dist = metadata.get_all("Requires-Dist", [])
     castxml_requires = [r for r in requires_dist if "castxml" in r.lower()]
-    if castxml_requires:
+    try:
+        parsed_castxml = [Requirement(requirement) for requirement in castxml_requires]
+    except InvalidRequirement as exc:
+        fail(f"wheel has invalid CastXML Requires-Dist metadata: {exc}")
+    if (
+        len(parsed_castxml) != 1
+        or parsed_castxml[0].name.lower() != "castxml"
+        or str(parsed_castxml[0].specifier) != "==0.8.0"
+        or parsed_castxml[0].marker is not None
+    ):
         fail(
-            "wheel Requires-Dist pulls in castxml, which must never be a "
-            f"pip-installed abicheck dependency: {castxml_requires!r}"
+            "wheel Requires-Dist must include exactly the pinned default "
+            f"CastXML 0.8.0 dependency: {castxml_requires!r}"
         )
     project_urls: dict[str, str] = {}
     for value in metadata.get_all("Project-URL", []):

@@ -768,7 +768,7 @@ inputs:
     description: >
       How to install system dependencies (castxml, gcc/g++, clang, bear):
       'conda-forge' (default — this repo's pixi-managed `scanner` conda-forge
-      environment, castxml 0.7.x + whichever gcc/g++ conda-forge currently
+      environment, castxml 0.8.x + whichever gcc/g++ conda-forge currently
       resolves as default; Linux/macOS only, no clang, no bear),
       'conda-forge-gcc14' (same, but pinned to gcc/g++ 14.x instead of
       whatever's currently default; Linux-only, no clang, no bear),

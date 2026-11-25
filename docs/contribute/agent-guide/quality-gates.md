@@ -519,7 +519,7 @@ runs) against the **newest** release of one tool at a time:
 |---|---|---|---|
 | `castxml` | Newest CastXML Superbuild release, resolved from the GitHub API (authenticated with `github.token`) and verified by the asset's reported SHA-256 digest; an asset with no `digest`, or a non-`sha256` one, fails the leg with its own error | `ubuntu-24.04`, 2 shards | runner's default GCC; no pinned castxml needed |
 | `gcc` | Newest GCC release on conda-forge (`gcc`/`gxx`, checked against conda-forge's index), installed with the pinned micromamba `setup_dev_env.sh` uses | `ubuntu-24.04`, 2 shards | pinned castxml via `setup-castxml` |
-| `xcode` | Newest *released* Xcode installed on the runner (`sort -V` over `/Applications/Xcode_<ver>.app`; `_beta` and `_Release_Candidate` bundles excluded) and its Apple clang | `macos-26`, the newest GA label (named explicitly, not `macos-latest`) | the conda-forge castxml 0.7.0 build `integration.yml` pins |
+| `xcode` | Newest *released* Xcode installed on the runner (`sort -V` over `/Applications/Xcode_<ver>.app`; `_beta` and `_Release_Candidate` bundles excluded) and its Apple clang | `macos-26`, the newest GA label (named explicitly, not `macos-latest`) | the conda-forge castxml 0.8.0 build `integration.yml` pins |
 
 Each leg changes one tool, so a red leg points at that tool. The step summary
 records the versions each leg actually ran, and the leg fails if its own tool
@@ -559,7 +559,7 @@ code.
   may be a packaging difference. GCC trunk is out of scope.
 - **The castxml leg gives two separate answers.** The integration suite runs
   with `ABICHECK_ALLOW_UNSUPPORTED_CASTXML=1`, so a release past `MAX_CASTXML`
-  (`abicheck/extract/headers/castxml/policy.py`, currently `>=0.6.11,<0.8.0`)
+  (`abicheck/extract/headers/castxml/policy.py`, currently `>=0.6.11,<0.9.0`)
   still shows output-format drift. A separate step runs **without** the override
   and asserts the version gate's answer: refused with
   `UnsupportedCastxmlVersionError` when the release is outside the range,

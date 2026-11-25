@@ -54,12 +54,15 @@ class TestCastxmlVersionGate:
         )
         monkeypatch.setattr(
             "abicheck.extract.headers.castxml.backend._tool_identity_metadata",
-            _mock_identity("castxml version 0.8.0\nclang version 18.1.8"),
+            _mock_identity("castxml version 0.9.0\nclang version 18.1.8"),
         )
         with pytest.raises(UnsupportedCastxmlVersionError):
             _castxml_dump([Path("h.h")], [])
 
-    def test_supported_version_does_not_raise_from_gate(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("castxml_version", ["0.7.0", "0.8.0"])
+    def test_supported_version_does_not_raise_from_gate(
+        self, monkeypatch, tmp_path, castxml_version
+    ):
         # Supported version passes the gate; let the (mocked) subsequent
         # castxml invocation fail with a distinct, unrelated error so this
         # test only proves the *gate* didn't fire.
@@ -69,7 +72,7 @@ class TestCastxmlVersionGate:
         )
         monkeypatch.setattr(
             "abicheck.extract.headers.castxml.backend._tool_identity_metadata",
-            _mock_identity("castxml version 0.7.0\nclang version 18.1.8"),
+            _mock_identity(f"castxml version {castxml_version}\nclang version 20.1.8"),
         )
         monkeypatch.setattr(
             "abicheck.extract.headers.castxml.backend._cache_key", lambda *a, **kw: "k"

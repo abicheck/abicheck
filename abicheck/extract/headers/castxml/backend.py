@@ -127,7 +127,7 @@ def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
     """Resolve the castxml executable and fail closed on an out-of-policy build.
 
     The version gate (``castxml_policy``) runs *before* any header is parsed. An
-    out-of-policy build (notably the legacy PyPI ``castxml`` distribution) is
+    out-of-policy build (for example, the old PyPI 0.4.5 release) is
     rejected unless the caller explicitly opted in via
     ``ABICHECK_ALLOW_UNSUPPORTED_CASTXML``. Skipped when the executable itself
     could not even be resolved/probed (``"error"`` key) — that is a different,

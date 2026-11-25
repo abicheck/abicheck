@@ -268,7 +268,7 @@ one). Reasons to keep it opt-in/alternative rather than default:
   independent of whatever `clang`/`gcc`/`castxml` toolchain a given host
   actually resolves via `--gcc-path`/`--compiler-option`. `castxml_policy.py`
   already establishes the precedent this migration would need to follow:
-  an explicit supported-version *range* (there, `>=0.6.11,<0.8.0` for
+  an explicit supported-version *range* (there, `>=0.6.11,<0.9.0` for
   castxml itself) with a clear, actionable error when the resolved tool
   falls outside it — a libclang-bindings mode would need the equivalent
   policy for "the `libclang` Python package's bundled/linked LLVM version

@@ -26,7 +26,7 @@ which ``dumper_castxml.py``'s flat, once-per-element iteration
 independent, same-valued declarations.
 
 This locks in the finding from actually reproducing that construct against
-a real, policy-conformant castxml build (``>=0.6.11,<0.8.0`` per
+a real, policy-conformant castxml build (``>=0.6.11,<0.9.0`` per
 ``castxml_policy.py``), invoked the same way ``_build_castxml_command``
 invokes it (``--castxml-cc-gnu g++`` compiler emulation, not castxml's bare
 default): castxml emits exactly **one** element for the target

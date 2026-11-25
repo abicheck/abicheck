@@ -59,31 +59,36 @@ class TestEvaluateCastxmlVersion:
         result = evaluate_castxml_version(_version_text("0.7.3"))
         assert result.supported is True
 
+    def test_supported_castxml_08_release(self):
+        result = evaluate_castxml_version(_version_text("0.8.0"))
+        assert result.supported is True
+        assert result.reasons == []
+
     def test_legacy_pypi_version_rejected(self):
-        # The legacy PyPI `castxml` distribution's last release.
+        # The old PyPI 0.4.5 release has no supported bundled-Clang metadata.
         result = evaluate_castxml_version(_version_text("0.4.5", "8.0.0"))
         assert result.supported is False
         assert REASON_VERSION_BELOW_MINIMUM in result.reasons
         assert REASON_CLANG_MAJOR_BELOW_MINIMUM in result.reasons
 
     def test_version_at_or_above_max_rejected(self):
-        result = evaluate_castxml_version(_version_text("0.8.0"))
+        result = evaluate_castxml_version(_version_text("0.9.0"))
         assert result.supported is False
         assert REASON_VERSION_AT_OR_ABOVE_MAXIMUM in result.reasons
 
     def test_prerelease_of_next_line_rejected(self):
         """Regression (Codex review): a plain PEP 440 comparison sorts a
-        prerelease of the next line (0.8.0-rc1) *below* final 0.8.0, so it
+        prerelease of the next line (0.9.0-rc1) *below* final 0.9.0, so it
         slipped past both the minimum and maximum checks entirely and
         would have run as an unvalidated 0.8 build."""
-        result = evaluate_castxml_version(_version_text("0.8.0-rc1"))
+        result = evaluate_castxml_version(_version_text("0.9.0-rc1"))
         assert result.supported is False
         assert REASON_VERSION_AT_OR_ABOVE_MAXIMUM in result.reasons
 
     def test_dev_release_of_next_line_rejected(self):
         """Companion: a dev-release spelling of the same next-line
         prerelease."""
-        result = evaluate_castxml_version(_version_text("0.8.0.dev1"))
+        result = evaluate_castxml_version(_version_text("0.9.0.dev1"))
         assert result.supported is False
         assert REASON_VERSION_AT_OR_ABOVE_MAXIMUM in result.reasons
 

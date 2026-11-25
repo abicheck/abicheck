@@ -45,6 +45,9 @@ dependencies = [
     # extra (conda-forge `.conda` archive extraction); that usage still
     # applies but no longer needs its own extra now that it's core.
     "zstandard>=0.21",
+    # Official PyPI wheel bundles the native CastXML executable so header-AST
+    # (L2) analysis works after a standard pip install on supported platforms.
+    "castxml==0.8.0",
 ]
 
 [project.scripts]
@@ -116,7 +119,6 @@ dist = [
     "build",
     "twine",
 ]
-
 [tool.mypy]
 python_version = "3.11"
 strict = true
@@ -872,7 +874,7 @@ check = "python scripts/verify.py --profile pr"
 platforms = ["linux-64", "osx-64", "osx-arm64"]
 
 [tool.pixi.feature.native-toolchain.dependencies]
-castxml = "*"
+castxml = "0.8.*"
 c-compiler = "*"
 cxx-compiler = "*"
 
@@ -892,7 +894,7 @@ cxx-compiler = "*"
 platforms = ["linux-64"]
 
 [tool.pixi.feature.native-toolchain-gcc14.dependencies]
-castxml = "*"
+castxml = "0.8.*"
 gcc = "14.*"
 gxx = "14.*"
 
@@ -900,7 +902,7 @@ gxx = "14.*"
 platforms = ["linux-64", "osx-64", "osx-arm64"]
 
 [tool.pixi.feature.native-toolchain-clang20.dependencies]
-castxml = "*"
+castxml = "0.8.*"
 clang = "20.*"
 clangxx = "20.*"
 
