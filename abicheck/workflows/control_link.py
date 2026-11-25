@@ -11,6 +11,8 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..deadline import PROBE_HANG_TIMEOUT_S, run_bounded
+
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
@@ -45,12 +47,12 @@ def control_link(
                     str(control),
                     str(library.resolve()),
                 ]
-                run = subprocess.run(
+                run = run_bounded(
                     command,
                     capture_output=True,
                     text=True,
                     errors="replace",
-                    timeout=30,
+                    timeout=PROBE_HANG_TIMEOUT_S,
                     env={**os.environ, "LC_ALL": "C"},
                     cwd=directory,
                 )

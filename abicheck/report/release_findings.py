@@ -216,6 +216,8 @@ def release_finding_dicts(
     way the retired ``cli_scan_baseline._baseline_summary`` did, instead of a bare
     ``findings_truncated`` boolean that hides the shape of what was cut.
     """
+    from ..policy.gate_contribution import gate_contribution_for_change
+
     cap = None if uncapped else MAX_RELEASE_FINDINGS_PER_LIBRARY
     kind_sets = effective_kind_sets(diff)
     findings: list[dict[str, object]] = []
@@ -240,9 +242,15 @@ def release_finding_dicts(
                     c,
                     bucket_name,
                     diff.policy_file,
-                    severity_config=severity_config,
-                    policy=diff.policy,
-                    kind_sets=kind_sets,
+                    gate_contribution=gate_contribution_for_change(
+                        c,
+                        severity_config,
+                        policy=diff.policy,
+                        kind_sets=kind_sets,
+                        policy_file=diff.policy_file,
+                    )
+                    if c.review_evidence
+                    else 0,
                 )
             )
         # Keep tallying excluded kinds across every remaining bucket (not

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -71,6 +72,9 @@ def test_dependency_enumerator_observed_by_two_libraries(exposed):
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform != "linux", reason="uses GNU ELF version scripts and SONAME"
+)
 def test_hidden_inline_and_control_object(tmp_path):
     if not shutil.which("g++") or not shutil.which("ld"):
         pytest.skip("requires g++ and ld")

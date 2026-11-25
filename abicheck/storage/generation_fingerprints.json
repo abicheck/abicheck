@@ -30,7 +30,7 @@
       "abicheck/extract/castxml_header_compat.py": "8d754cf6c1f15ad1b219c2bdccfa32171d34c364728c5c1a9b34d7ab79d48cf6",
       "abicheck/extract/compile_header_inputs.py": "38655d35c5309694ebf12be60e5e4fcd3fa5c8ea7eb8a73a9b4ab2fcf46338b9",
       "abicheck/extract/compiler_driver.py": "fd1aab0b3aefd3583f11cd68a5043917fabd5611c00fdf20c384a8471536a877",
-      "abicheck/extract/consumer_imports.py": "6c40a6e5ac51b0777b89b59031c6321b22fe9e3e7ff7672ee78faaa514a28593",
+      "abicheck/extract/consumer_imports.py": "6d7a279d8c6f409389e2a51d69246832361ae6cea79369f3f097f7893d0e8709",
       "abicheck/extract/cpp20_header_prep.py": "bfc43b5382a9e60e83a022979b25e91dce311813b06b592ede31e099889228fe",
       "abicheck/extract/cxx_digit_separator.py": "04956886d39b50304096a99c11b434fa7f3edd648efb3a3be3cb8b6d12480bfd",
       "abicheck/extract/debug_artifact.py": "e93c500a1bbaf795abc74d91487f038f3ca6337c1243f3a33b4af2850f41e058",
@@ -250,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "fea1d9abe001cb5008c6c24db129cafa34b77f286945f667735c913add51802c",
-    "generation": 94,
-    "reason": "Record limits for incomplete public DWARF signature types"
+    "fingerprint": "7d7bf691d929dbd2c2fb7d9ac4f3b9600d9ba49bd11267f0dd9b0e1a067783da",
+    "generation": 95,
+    "reason": "bumped to 95 for a semantic change"
   },
   "resolver": {
     "files": {
@@ -323,11 +323,11 @@
       "abicheck/buildsource/template_graph.py": "57c5248820c2ade147850c9cb92a281087213b6d3b7420620ecbbdeef6a26756",
       "abicheck/buildsource/template_graph_fold.py": "630006aa35ad1a6dc2e3797b662e857aee790e94acee759331478993f5ffad03",
       "abicheck/buildsource/template_graph_value_decls.py": "d50b5cd979744d4ecb4ae2ad859faf99689d6af50d0e0d0a24d867f99a83931c",
-      "abicheck/buildsource/type_graph.py": "e836e687fe95d52f6483a70893cff385b8d175284e6f5bebadaa2b805b7387c5",
-      "abicheck/buildsource/type_graph_index.py": "456fd36d7d326e2001855f1768bdadee49ab738a9c515f57f557bc5e5b693ced"
+      "abicheck/buildsource/type_graph.py": "7f9b20e7762f67eeedd598989d0cfd7abce20763526cf2246b5d9068083985d9",
+      "abicheck/buildsource/type_graph_index.py": "20142a0ef7bcae6c923406c6ee41b933f20e1d1dda851ec5704d8d2d4119ae7c"
     },
-    "fingerprint": "7fccc5162aea494e5b5b1edf53379de93d0a8f0c712d9677a940b9d235e11f5c",
-    "generation": 16,
-    "reason": "Clang source replay 0.15 selects and replays the DPC++ host invocation"
+    "fingerprint": "227ecf0712f22299380e55a441242039f78a286b248d64b8c7482c1f6d8d67dd",
+    "generation": 17,
+    "reason": "bumped to 17 for a semantic change"
   }
 }

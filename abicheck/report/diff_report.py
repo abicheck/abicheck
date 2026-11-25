@@ -46,7 +46,7 @@ from .json_sections import (
 from .outcome_summary import report_verdict
 
 if TYPE_CHECKING:
-    from ..policy.severity import KindSets, SeverityConfig
+    from ..policy.severity import SeverityConfig
     from .envelope import ReportEnvelope
 from ..checker import Change, DiffResult
 from ..root_cause_evidence import (
@@ -519,9 +519,7 @@ def release_finding_entry(
     bucket: str,
     policy_file: object | None,
     *,
-    severity_config: SeverityConfig | None = None,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
+    gate_contribution: int = 0,
 ) -> dict[str, object]:
     """The release fan-out's own minimal finding dict, plus ``reclassified_by``.
 
@@ -546,7 +544,6 @@ def release_finding_entry(
         "source_location": c.source_location,
     }
     if evidence := getattr(c, "review_evidence", None):
-        from ..policy.gate_contribution import gate_contribution_for_change
         from .change_json import resolve_demangled_symbol
         from .contract_fields import add_contract_evaluation_fields
 
@@ -560,13 +557,7 @@ def release_finding_entry(
         add_contract_evaluation_fields(
             entry,
             c,
-            gate_contribution=gate_contribution_for_change(
-                c,
-                severity_config,
-                policy=policy,
-                policy_file=policy_file,
-                kind_sets=kind_sets,
-            ),
+            gate_contribution=gate_contribution,
         )
 
     reclassified_by = reclassified_by_for_change(c, policy_file)

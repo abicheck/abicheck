@@ -247,8 +247,7 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
     loc = row.get("source_location")
     if loc:
         line += f" — {md_text(clip_name(loc), code=True)}"
-    for observation in row.get("l2_observations", ()):
-        line += f"\n  > {md_text(observation)}"
+    line += "".join(f"\n  > {md_text(obs)}" for obs in row.get("l2_observations", ()))
     impact = row.get("impact")
     if impact:
         line += f"\n  > {impact}"

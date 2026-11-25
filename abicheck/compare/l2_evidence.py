@@ -39,8 +39,10 @@ def public_enum_arguments(snapshot: AbiSnapshot) -> EnumPaths:
     from ..model.graph_identity import decl_node_identity
 
     paths: EnumPaths = defaultdict(list)
+    if not snapshot.elf:
+        return paths
     graph = resolve_l5_source_graph(snapshot, snapshot.build_source)
-    if not graph or not snapshot.elf:
+    if not graph:
         return paths
     callers = {
         fn.mangled: fn.name
@@ -106,6 +108,7 @@ def attach_removed_exports(
 ) -> None:
     if (
         old is None
+        or new is None
         or old.elf is None
         or new.elf is None
         or old.static_archive
@@ -122,9 +125,10 @@ def attach_removed_exports(
     if not losses or snapshot_export_table_state(new) != ExportTableState.READ:
         return
     declarations = {}
+    store = old.declarations
     decls: list[Function | Variable] = [
-        *old.declarations.functions,
-        *old.declarations.variables,
+        *store.functions,
+        *store.variables,
     ]
     for decl in decls:
         if decl.source_header:

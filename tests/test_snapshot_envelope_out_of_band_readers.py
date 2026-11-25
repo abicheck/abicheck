@@ -258,6 +258,8 @@ _NOT_SNAPSHOT_DOCUMENT_READERS = frozenset(
         "tests/test_dump_write_after_resolve_time_embed.py",
         # This file: its whole job is to exercise both encodings.
         "tests/test_snapshot_envelope_out_of_band_readers.py",
+        # Reads dependency_changes in a release report.
+        "tests/test_l2_observations.py::test_release_groups_dependency_header_across_two_real_libraries",
         # Reads the wire-contract field inventory (a JSON pin of section
         # versions), never a snapshot document; the key it indexes is a
         # section name, not an envelope key.

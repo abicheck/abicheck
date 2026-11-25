@@ -70,6 +70,9 @@
 ## ❌ Breaking Changes
 
 - **enum_member_value_changed**: Enum member value changed: Color::GREEN (`1` → `5`)
+  > old: Color in unknown header (owner: unresolved).
+  > new: Color in unknown header (owner: unresolved).
+  > The available declarations do not establish a product ABI dependency on this value.
   > Old binaries use stale numeric values; logic comparisons and switch statements silently break. (Evidence note: this run's available evidence does not fully confirm this specific finding -- treat the consequence above as plausible, not confirmed.)
 
 
