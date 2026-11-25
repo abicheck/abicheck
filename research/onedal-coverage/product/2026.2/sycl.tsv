@@ -1,0 +1,62 @@
+header	qualified_name	signature
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, T *, std::int64_t, Deleter &&, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, const T *, std::int64_t, ConstDeleter &&, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, const std::shared_ptr<T> &, std::int64_t, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::array<T>	void (const sycl::queue &, const std::shared_ptr<const T> &, std::int64_t, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::empty	array<T> (const sycl::queue &, std::int64_t, const sycl::usm::alloc &)
+array.hpp	oneapi::dal::v2::array::full	array<T> (sycl::queue &, std::int64_t, K &&, const sycl::usm::alloc &)
+array.hpp	oneapi::dal::v2::array::get_queue	std::optional<sycl::queue> () const
+array.hpp	oneapi::dal::v2::array::need_mutable_data	array<T> &(sycl::queue &, const sycl::usm::alloc &)
+array.hpp	oneapi::dal::v2::array::reset	void (const sycl::queue &, T *, std::int64_t, Deleter &&, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::reset	void (const sycl::queue &, const T *, std::int64_t, ConstDeleter &&, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::reset	void (const sycl::queue &, std::int64_t, const sycl::usm::alloc &)
+array.hpp	oneapi::dal::v2::array::wrap	array<T> (Y *, std::int64_t, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::wrap	array<T> (const sycl::queue &, Y *, std::int64_t, const std::vector<sycl::event> &)
+array.hpp	oneapi::dal::v2::array::zeros	array<T> (sycl::queue &, std::int64_t, const sycl::usm::alloc &)
+chunked_array.hpp	oneapi::dal::v2::chunked_array::flatten	array<T> (const detail::data_parallel_policy &, const std::vector<sycl::event> &) const
+chunked_array.hpp	oneapi::dal::v2::chunked_array::flatten	array<T> (sycl::queue &, sycl::usm::alloc, const std::vector<sycl::event> &) const
+chunked_array.hpp	oneapi::dal::v2::chunked_array::get_data	array<const T *> (const detail::data_parallel_policy &, const std::vector<sycl::event> &) const
+chunked_array.hpp	oneapi::dal::v2::chunked_array::get_data	array<const T *> (sycl::queue &, sycl::usm::alloc, const std::vector<sycl::event> &) const
+compute.hpp	oneapi::dal::preview::compute	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)
+compute.hpp	oneapi::dal::v1::compute	auto (sycl::queue &, Args &&...)
+finalize_compute.hpp	oneapi::dal::preview::finalize_compute	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)
+finalize_compute.hpp	oneapi::dal::v1::finalize_compute	auto (sycl::queue &, Args &&...)
+finalize_train.hpp	oneapi::dal::preview::finalize_train	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)
+finalize_train.hpp	oneapi::dal::v1::finalize_train	auto (sycl::queue &, Args &&...)
+infer.hpp	oneapi::dal::preview::infer	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)
+infer.hpp	oneapi::dal::v1::infer	auto (sycl::queue &, Args &&...)
+partial_compute.hpp	oneapi::dal::v1::partial_compute	auto (sycl::queue &, Args &&...)
+partial_train.hpp	oneapi::dal::preview::partial_train	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)
+partial_train.hpp	oneapi::dal::v1::partial_train	auto (sycl::queue &, Args &&...)
+read.hpp	oneapi::dal::v1::read	auto (sycl::queue &, Args &&...)
+spmd/communicator.hpp	oneapi::dal::preview::spmd::make_communicator	communicator<device_memory_access::usm> (sycl::queue &)
+spmd/communicator.hpp	oneapi::dal::preview::spmd::make_communicator	communicator<device_memory_access::usm> (sycl::queue &, std::int64_t)
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allgatherv	request (sycl::queue &, const D *, std::int64_t, D *, const std::int64_t *, const std::int64_t *, const std::vector<sycl::event> &) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allgatherv	request (sycl::queue &, const byte_t *, std::int64_t, byte_t *, const std::int64_t *, const std::int64_t *, const data_type &, const std::vector<sycl::event> &) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allreduce	request (sycl::queue &, const D *, D *, std::int64_t, const reduce_op &, const std::vector<sycl::event> &) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::allreduce	request (sycl::queue &, const byte_t *, byte_t *, std::int64_t, const data_type &, const reduce_op &, const std::vector<sycl::event> &) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::bcast	request (sycl::queue &, D *, std::int64_t, const std::vector<sycl::event> &, std::int64_t) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::bcast	request (sycl::queue &, byte_t *, std::int64_t, const data_type &, const std::vector<sycl::event> &, std::int64_t) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::get_queue	sycl::queue () const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::sendrecv_replace	request (sycl::queue &, D *, std::int64_t, std::int64_t, std::int64_t, const std::vector<sycl::event> &) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator::sendrecv_replace	request (sycl::queue &, byte_t *, std::int64_t, const data_type &, std::int64_t, std::int64_t, const std::vector<sycl::event> &) const
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::allgatherv	request_iface *(sycl::queue &, const byte_t *, std::int64_t, byte_t *, const std::int64_t *, const std::int64_t *, const data_type &, const std::vector<sycl::event> &)
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::allreduce	request_iface *(sycl::queue &, const byte_t *, byte_t *, std::int64_t, const data_type &, const reduce_op &, const std::vector<sycl::event> &)
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::bcast	request_iface *(sycl::queue &, byte_t *, std::int64_t, const data_type &, const std::vector<sycl::event> &, std::int64_t)
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::get_queue	sycl::queue ()
+spmd/communicator.hpp	oneapi::dal::preview::spmd::v1::communicator_iface::sendrecv_replace	request_iface *(sycl::queue &, byte_t *, std::int64_t, const data_type &, std::int64_t, std::int64_t, const std::vector<sycl::event> &)
+table/column_accessor.hpp	oneapi::dal::v1::column_accessor::pull	T *(sycl::queue &, dal::array<data_t> &, std::int64_t, const range &, const sycl::usm::alloc &) const
+table/column_accessor.hpp	oneapi::dal::v1::column_accessor::pull	dal::array<data_t> (sycl::queue &, std::int64_t, const range &, const sycl::usm::alloc &) const
+table/column_accessor.hpp	oneapi::dal::v1::column_accessor::push	void (sycl::queue &, const dal::array<data_t> &, std::int64_t, const range &)
+table/common.hpp	oneapi::dal::v1::table::get_queue	std::optional<sycl::queue> () const
+table/csr.hpp	oneapi::dal::v1::csr_table::csr_table	void (sycl::queue &, const Data *, const std::int64_t *, const std::int64_t *, std::int64_t, std::int64_t, ConstDataDeleter &&, ConstColumnIndicesDeleter &&, ConstRowOffsetsDeleter &&, sparse_indexing, const std::vector<sycl::event> &)
+table/csr.hpp	oneapi::dal::v1::csr_table::wrap	csr_table (sycl::queue &, const Data *, const std::int64_t *, const std::int64_t *, std::int64_t, std::int64_t, sparse_indexing, const std::vector<sycl::event> &)
+table/csr_accessor.hpp	oneapi::dal::v1::csr_accessor::pull	std::tuple<T *, I *, I *> (sycl::queue &, array_d &, array_i &, array_i &, const range &, const sparse_indexing, const sycl::usm::alloc &) const
+table/csr_accessor.hpp	oneapi::dal::v1::csr_accessor::pull	std::tuple<array_d, array_i, array_i> (sycl::queue &, const range &, const sparse_indexing, const sycl::usm::alloc &) const
+table/homogen.hpp	oneapi::dal::v1::homogen_table::homogen_table	void (const sycl::queue &, const Data *, std::int64_t, std::int64_t, ConstDeleter &&, const std::vector<sycl::event> &, data_layout)
+table/homogen.hpp	oneapi::dal::v1::homogen_table::wrap	homogen_table (const sycl::queue &, const Data *, std::int64_t, std::int64_t, const std::vector<sycl::event> &, data_layout)
+table/row_accessor.hpp	oneapi::dal::v1::row_accessor::pull	T *(sycl::queue &, dal::array<data_t> &, const range &, const sycl::usm::alloc &) const
+table/row_accessor.hpp	oneapi::dal::v1::row_accessor::pull	dal::array<data_t> (sycl::queue &, const range &, const sycl::usm::alloc &) const
+table/row_accessor.hpp	oneapi::dal::v1::row_accessor::push	void (sycl::queue &, const dal::array<data_t> &, const range &)
+train.hpp	oneapi::dal::preview::train	auto (spmd::communicator<spmd::device_memory_access::usm> &, Args &&...)
+train.hpp	oneapi::dal::v1::train	auto (sycl::queue &, Args &&...)

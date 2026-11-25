@@ -311,3 +311,58 @@ def test_status_member_specializations_have_independent_call_witnesses():
     assert len(names) == 38
     assert sum("HomogenNumericTable" in name for name in names) == 36
     assert sum("8allocateIfE" in name for name in names) == 2
+
+
+def test_frozen_import_coverage_tracks_real_consumers_and_sdk_locations():
+    surface = json.loads((PRODUCT / "export-surface.json").read_text())
+    locations = json.loads((PRODUCT / "import-declarations.json").read_text())
+    withdrawals = json.loads((PRODUCT / "import-withdrawals.json").read_text())
+    expected = {
+        (provider, name)
+        for provider, names in surface["sdk_inventory"][
+            "client_imports_outside_sdk"
+        ].items()
+        for name in names
+    }
+    assert {(p, s) for p, names in locations.items() for s in names} == expected
+    assert {(row["provider"], row["symbol"]) for row in withdrawals} == expected
+    assert len(withdrawals) == len(expected)
+    scenarios = json.loads((PRODUCT / "withdrawal-scenarios.json").read_text())
+    assert sum(s["count"] for s in scenarios) == len(withdrawals)
+    assert len(
+        {(s["entity"], tuple(s["relocations"]), s["withdrawn"]) for s in scenarios}
+    ) == len(scenarios)
+    outcomes = {
+        (r["provider"], r["symbol"], r["client"], r["withdrawn"]) for r in withdrawals
+    }
+    assert all(
+        (s["provider"], s["symbol"], s["client"], s["withdrawn"]) in outcomes
+        for s in scenarios
+    )
+    for row in withdrawals:
+        provider, symbol = row["provider"], row["symbol"]
+        loc = locations[provider][symbol]
+        assert loc["line"] > 0 and loc["header"] and loc["declaration"] and loc["type"]
+        assert (
+            row["client"]
+            in surface["providers"][provider]["imports_outside_sdk"][symbol]
+        )
+        assert row["baseline_exit"] == row["minor_exit"] == 0
+        assert row["unresolved_relocation"] and row["withdrawn"] in {0, 127}
+
+
+def test_major_dispatcher_and_sycl_inventory():
+    folder = PRODUCT / "2026.2"
+    roots = set((folder / "roots.txt").read_text().splitlines())
+    with (folder / "unparsed.csv").open() as stream:
+        assert list(csv.DictReader(stream)) == []
+    with gzip.open(folder / "obligations.csv.gz", "rt") as stream:
+        rows = list(csv.DictReader(stream))
+    params = {r for r in roots if "/parameters/cpu/" in r}
+    assert len(roots) == 432 and len(params) == 6
+    assert params <= {r["header"] for r in rows}
+    assert len({r["symbol"] for r in rows if r["symbol"] and r["providers"]}) == 2189
+    original = PRODUCT.parents[1] / "onedal-sycl-usm/inventory.tsv"
+    before = set(original.read_text().splitlines()[1:])
+    after = set((folder / "sycl.tsv").read_text().splitlines()[1:])
+    assert before < after and len(after) == 61

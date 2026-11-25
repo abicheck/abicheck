@@ -1,0 +1,57 @@
+[
+  {
+    "entity": "function",
+    "relocations": [
+      "R_X86_64_64"
+    ],
+    "withdrawn": 127,
+    "count": 1,
+    "provider": "libonedal_core.so.3",
+    "symbol": "_ZNK4daal15data_management10interface130SerializableKeyValueCollectionINS1_18SerializationIfaceEE19getSerializationTagEv",
+    "client": "dal-release-clients/release_client"
+  },
+  {
+    "entity": "function",
+    "relocations": [
+      "R_X86_64_JUMP_SLOT"
+    ],
+    "withdrawn": 0,
+    "count": 19,
+    "provider": "libonedal_dpc.so.3",
+    "symbol": "_ZN6oneapi3dal6detail2v114error_messages10invalid_opEv",
+    "client": "layout-mpi-verified/spmd"
+  },
+  {
+    "entity": "function",
+    "relocations": [
+      "R_X86_64_JUMP_SLOT"
+    ],
+    "withdrawn": 127,
+    "count": 40,
+    "provider": "libonedal_dpc.so.3",
+    "symbol": "_ZN6oneapi3dal6detail2v121homogen_table_builderC1Ev",
+    "client": "layout-mpi-verified/buffer"
+  },
+  {
+    "entity": "typeinfo",
+    "relocations": [
+      "R_X86_64_64"
+    ],
+    "withdrawn": 127,
+    "count": 1,
+    "provider": "libonedal_core.so.3",
+    "symbol": "_ZTIN4daal10algorithms10covariance10interface113PartialResultE",
+    "client": "dal-release-clients/release_client"
+  },
+  {
+    "entity": "vtable",
+    "relocations": [
+      "R_X86_64_GLOB_DAT"
+    ],
+    "withdrawn": 127,
+    "count": 2,
+    "provider": "libonedal_core.so.3",
+    "symbol": "_ZTVN4daal10algorithms3pca9transform10interface15InputE",
+    "client": "dal-release-clients/release_client"
+  }
+]

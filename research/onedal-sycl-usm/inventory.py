@@ -54,6 +54,7 @@ def inventory(args, enabled):
         "--offload-host-only",
         *flags,
         "-I" + args.include,
+        *args.extra_flag,
         "-fsyntax-only",
         "-Xclang",
         "-ast-dump=json",
@@ -85,6 +86,12 @@ if __name__ == "__main__":
     parser.add_argument("compiler")
     parser.add_argument("include")
     parser.add_argument("headers", nargs="+")
+    parser.add_argument(
+        "--extra-flag",
+        action="append",
+        default=[],
+        help="additional compile context for installed SDK roots",
+    )
     args = parser.parse_args()
     args.include = str(Path(args.include).resolve())
     for header in args.headers:

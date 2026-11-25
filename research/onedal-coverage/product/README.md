@@ -194,22 +194,29 @@ with new SONAMEs. A fresh host-header scan of 2026.2 matched 2,188 of its 12,082
 parsed 535 of 541 roots for 2025.9 and 426 of 432 for 2026.2. Both skipped six
 CPU parameter headers requiring the source-tree backend dispatcher. [Machine-readable counts and missing client imports](export-surface.json)
 
-The next targets in priority order are:
+The frozen-client compiler pass located the SDK declarations for the remaining
+48 DPC, 11 host and four core imports in 2025.9. Together with the first-pass
+ledger this binds all 59 observed DPC imports. For RTTI and vtable objects the
+entry points to the defining class. These counts measure provider/name pairs.
+The withdrawal runner uses one mutation rule across them. It checks the old
+client's relocation, runs its normal workload, and compares the withdrawn ELF
+exports with the public checker. The real minor-release losses have a separate
+[four-relocation experiment](minor-dpc-withdrawals.json).
+Normal execution failed in 44 withdrawals. The other 19 were visible during
+eager relocation checks and the selected workload still exited successfully.
+Grouping by Itanium entity, relocation kind and observed process exit yields
+five distinct combinations on x86-64. One representative per combination
+suffices to replay these observed outcomes. The selection does not measure
+calling-convention or device coverage.
+[Compiler locations](import-declarations.json) · [Withdrawal results](import-withdrawals.json) · [Five replay cases](withdrawal-scenarios.json)
 
-1. The new scan binds 11 of the 59 DPC imports. Resolve the remaining 48 and add isolated mutations for
-   CSR initialization, queue/policy construction and row/column accessor
-   dispatch. Fifteen of the 59 imports are error-message helpers. Prioritize the queue and data-bearing calls, for which a frozen client can directly check the result. Four backend
-   `set_csr_data` overloads disappeared between the two minor releases. Four
-   independent frozen relocations load on 2025.9 and fail on 2025.11, and the
-   ELF comparator identifies the same four losses. [Loader witnesses](minor-dpc-withdrawals.json)
-2. Bind the 11 host imports and four core imports outside the provider ledger.
-   Include the covariance RTTI/vtable and the PCA transform vtable. Preserve
-   the matching provider and check a compatible control per mutation.
-3. Complete the six 2026.2 CPU parameter headers with the matching source-tree
-   dispatcher, then parse the SDK in SYCL mode. The parameters and thread providers need consumer evidence
-   before assigning a runtime-coverage percentage.
-4. Replay device and collective tests on a physical Level Zero GPU. OpenCL
-   CPU observations cover a different device backend.
+The 2026.2 host inventory with the source dispatcher parsed all 432 roots and
+matched 2,189 distinct exported names. Each of the six CPU parameter headers
+contributed declarations. With the same roots, enabling
+`ONEDAL_DATA_PARALLEL` added 61 public host-side callable signatures,
+including `table::get_queue()` and the two-argument SYCL communicator factory.
+Runtime evidence for the parameters/thread providers and replay on a physical
+Level Zero GPU remain open. [Major-release measurements](2026.2/)
 
 Reproduce the ELF survey with the prefixes, optional SDK include directories
 and frozen executables used by the campaigns below. The first-pass inventory
@@ -232,6 +239,37 @@ python -m abiforge.run.onedal_export_surface "$OLD" --candidate "$MINOR" --candi
   --client "$OUT/device/event" --client "$OUT/device/buffer" --client "$OUT/device/csr" \
   --client "$OUT/device/ownership" --client "$OUT/device/dependency" --client "$OUT/device/spmd" \
   --status-report "$OUT/original-castxml/old-mutant.json" --out "$OUT/export-surface.json"
+```
+
+Replay the compiler join and the release-client mutations with DPC++ 2025.2,
+Open MPI, and patchelf with `--rename-dynamic-symbols` support. Supply the
+ELF survey generated above so its executable labels match the output tree.
+
+```sh
+python -m abiforge.run.onedal_import_declarations "$OLD" "$ICPX" "$MPI_INCLUDE" "$OUT/import-declarations.json"
+python -m abiforge.run.onedal_import_withdrawals "$OLD" "$MINOR" "$OUT" "$OUT/withdrawals" --surface "$OUT/export-surface.json"
+python -m abiforge.run.onedal_withdrawal_scenarios "$OUT/withdrawals/receipt.json" "$OUT" "$OUT/scenarios.json"
+python -m abiforge.run.onedal_import_withdrawals "$OLD" "$MINOR" "$OUT" "$OUT/representatives" --surface "$OUT/export-surface.json" --selection "$OUT/scenarios.json"
+```
+
+For the major SDK scan, use oneDAL source commit
+`480788c54a09ddd3dbc7cc9bc76d2ee4ea350020` (tag `2026.2.0`).
+The include view below selects the installed oneDAL headers and lets the
+compiler supply its matching SYCL runtime headers.
+
+```bash
+python research/onedal-coverage/product/inventory.py "$MAJOR" "$OUT/major" \
+  --source "$ONEDAL_SOURCE" --extended --legacy-umbrella --all-providers \
+  --include "$ARROW_INCLUDE" --include "$KDB_INCLUDE" --include "$ODBC_INCLUDE" --include "$ODBC_PLATFORM_INCLUDE"
+view="$OUT/major-headers"
+mkdir -p "$view/oneapi"
+ln -s "$MAJOR/include/dal" "$MAJOR/include/daal.h" "$view/"
+ln -s "$MAJOR/include/oneapi/dal" "$MAJOR/include/oneapi/dal.hpp" "$view/oneapi/"
+mapfile -t roots < "$OUT/major/roots.txt"
+python research/onedal-sycl-usm/inventory.py "$ICPX" "$view" "${roots[@]}" \
+  --extra-flag=-D__ONEDAL_IDE_MODE__ --extra-flag="-I$ONEDAL_SOURCE/cpp" \
+  --extra-flag="-I$view/dal" --extra-flag="-I$ARROW_INCLUDE" \
+  --extra-flag=-include --extra-flag=arrow/array.h > "$OUT/major/sycl.tsv"
 ```
 
 ### Device release replay
