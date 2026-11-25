@@ -48,6 +48,7 @@ tests/test_analysis_assurance_manifest_targets_outputs.py
 tests/test_analysis_assurance_pack_accounting.py
 tests/test_analysis_assurance_schema_staleness.py
 tests/test_analysis_assurance_unobserved_registry.py
+tests/test_analysis_assurance_unparsed_headers.py
 tests/test_annotations.py
 tests/test_anon_union_fp.py
 tests/test_appcompat.py
@@ -95,6 +96,7 @@ tests/test_bundle_variants_capture.py
 tests/test_call_axis_shadow.py
 tests/test_canonical_finding_id.py
 tests/test_castxml_array_migration.py
+tests/test_castxml_array_order_migration.py
 tests/test_castxml_base_offset_migration.py
 tests/test_castxml_constructor_visibility.py
 tests/test_castxml_free_examples.py
@@ -213,6 +215,7 @@ tests/test_constant_cutover.py
 tests/test_constant_cutover_dedup.py
 tests/test_constexpr_constant_dedup.py
 tests/test_consumer_graph.py
+tests/test_consumer_impact_summary_format_parity.py
 tests/test_contract_api.py
 tests/test_contract_authoritative_pipeline.py
 tests/test_contract_context_io.py
@@ -296,6 +299,7 @@ tests/test_disposition_state_sweep.py
 tests/test_disposition_transitions.py
 tests/test_dual_abi_prefilter_reference.py
 tests/test_dump_bundle_facts.py
+tests/test_dump_bundle_facts_integration.py
 tests/test_dump_pe_macho_unit.py
 tests/test_dumper_contract_wiring.py
 tests/test_dumper_hybrid.py
@@ -352,6 +356,7 @@ tests/test_family_f5_optimization_reference.py
 tests/test_family_f5_packed_type_graph.py
 tests/test_family_f8_symbol_rule_parity.py
 tests/test_field_added_unknown_polymorphism.py
+tests/test_field_name_union_bitfield.py
 tests/test_field_qualifier_fact_status.py
 tests/test_finding_dedup_namesakes.py
 tests/test_finding_dedup_properties.py
@@ -388,9 +393,11 @@ tests/test_has_type_evidence.py
 tests/test_header_conditionals.py
 tests/test_header_exclusion.py
 tests/test_header_extraction_limitations.py
+tests/test_header_overload_withdrawals.py
 tests/test_header_parse_coverage.py
 tests/test_hidden_friends.py
 tests/test_history_scaling.py
+tests/test_html_consumer_impact_summary.py
 tests/test_html_report_demangle.py
 tests/test_html_surface_changes.py
 tests/test_html_template_golden.py
@@ -421,6 +428,7 @@ tests/test_lambda_closure_function_demotion.py
 tests/test_lambda_closure_type_classification.py
 tests/test_lambda_identity_ordinal.py
 tests/test_layer_coverage.py
+tests/test_layout_build_config_unverified.py
 tests/test_lazy_graph_loading.py
 tests/test_lean_field_offset_rule.py
 tests/test_libabigail_parity_extended.py
@@ -686,6 +694,7 @@ tests/test_visibility_leak_owned_name.py
 tests/test_vtable_evidence_guard.py
 tests/test_vtable_layout_identity_pairing.py
 tests/test_vtable_severity.py
+tests/test_vtt_entry_targets.py
 tests/test_weak_removal_note.py
 tests/test_wheel_declared_contract.py
 tests/test_windows_toolchain_smoke.py
