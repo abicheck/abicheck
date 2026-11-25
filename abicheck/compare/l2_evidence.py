@@ -68,14 +68,20 @@ def _public_target(decl: object) -> bool:
 
 def enum_paths(snapshot: AbiSnapshot) -> tuple[EnumPaths, EnumPaths]:
     fields: EnumPaths = defaultdict(list)
-    for record in snapshot.declarations.types:
+    declarations = snapshot.declarations
+    spellings = {}
+    for enum in declarations.enums:
+        name = enum.qualified_name or enum.name
+        for spelling in (name, f"::{name}", f"enum {name}", f"enum ::{name}"):
+            spellings[spelling] = name
+    for record in declarations.types:
         if not _public_target(record):
             continue
         for member in record.fields:
             identities = present_identities(member.type_identities_fact)
-            spelling = member.type.removeprefix("enum ")
-            if not identities and ("::" in spelling or not record.qualified_name):
-                identities = (spelling.removeprefix("::"),)
+            if not identities and ("::" in member.type or not record.qualified_name):
+                if name := spellings.get(member.type):
+                    identities = (name,)
             for identity in identities:
                 fields[identity].append(
                     [record.qualified_name or record.name, member.name, identity]

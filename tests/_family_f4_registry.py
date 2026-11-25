@@ -169,8 +169,6 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
-    "abicheck.compare.l2_evidence::enum_paths::affix.removeprefix:'enum '": "grammar",
-    "abicheck.compare.l2_evidence::enum_paths::affix.removeprefix:'::'": "grammar",
     # A member function's Itanium scope, naming the record whose members
     # still exist (compare/live_member_scopes): mangling grammar.
     "abicheck.compare.live_member_scopes::live_member_scopes::affix.startswith:'_Z'": "grammar",
