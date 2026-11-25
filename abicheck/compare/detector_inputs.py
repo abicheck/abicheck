@@ -406,6 +406,7 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
     "enums": DetectorInputs(
         requires=frozenset(["declarations.enums"]),
         tolerates={
+            "build_source": "optional graph evidence for public inline enum arguments",
             "canonical_ir": _CANONICAL,
             "declarations.typedefs": _LOOKUP,
             "declarations.types": _LOOKUP,

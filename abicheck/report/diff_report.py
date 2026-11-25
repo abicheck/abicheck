@@ -515,7 +515,11 @@ def to_json(
 
 
 def release_finding_entry(
-    c: Change, bucket: str, policy_file: object | None
+    c: Change,
+    bucket: str,
+    policy_file: object | None,
+    *,
+    gate_contribution: int = 0,
 ) -> dict[str, object]:
     """The release fan-out's own minimal finding dict, plus ``reclassified_by``.
 
@@ -539,6 +543,23 @@ def release_finding_entry(
         "description": c.description,
         "source_location": c.source_location,
     }
+    if evidence := getattr(c, "review_evidence", None):
+        from .change_json import resolve_demangled_symbol
+        from .contract_fields import add_contract_evaluation_fields
+
+        entry.update(
+            review_evidence=evidence, old_value=c.old_value, new_value=c.new_value
+        )
+        if c.surface_facts:
+            entry["surface_facts"] = dict(c.surface_facts)
+        if name := resolve_demangled_symbol(c):
+            entry["demangled_symbol"] = name
+        add_contract_evaluation_fields(
+            entry,
+            c,
+            gate_contribution=gate_contribution,
+        )
+
     reclassified_by = reclassified_by_for_change(c, policy_file)
     if reclassified_by:
         entry["reclassified_by"] = reclassified_by
@@ -554,6 +575,15 @@ def release_finding_detail_lines(entry: dict[str, object]) -> list[str]:
     projection above gained it).
     """
     lines: list[str] = []
+    from .l2_evidence import evidence_lines
+    from .markdown_text import md_text
+
+    lines.extend(
+        f"  - {md_text(line)}"
+        for line in evidence_lines(
+            entry.get("review_evidence"), entry.get("contract_reason_code")
+        )
+    )
     description = entry.get("description")
     if description:
         lines.append(f"  - {description}")

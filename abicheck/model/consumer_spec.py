@@ -123,6 +123,7 @@ class ConsumerSpec:
     """
 
     path: Path
+    artifact_role: str = field(default="unspecified", kw_only=True)
     manifest: Path | None = None
     digest: str | None = None
     platform: str | None = None
@@ -232,8 +233,12 @@ def _consumer_spec_from_entry(
             f"unknown requirement {requirement_raw!r} -- expected "
             f"{[r.value for r in ConsumerRequirement]!r}."
         ) from exc
+    role = entry.get("artifact_role", "unspecified")
+    if role not in ("unspecified", "released_client", "control_object"):
+        raise ValueError(f"Unknown consumer artifact_role: {role!r}")
     return ConsumerSpec(
         path=path,
+        artifact_role=role,
         manifest=manifest_path,
         digest=entry.get("digest"),
         platform=entry.get("platform"),

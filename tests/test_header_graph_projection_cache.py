@@ -796,6 +796,9 @@ class TestAgainstRealClang:
 #include <memory>
 
 namespace realdep {
+enum class Mode { enabled };
+void set_mode(Mode);
+inline void enable() { set_mode(Mode::enabled); }
 
 struct Point {
     int x;

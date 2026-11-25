@@ -95,6 +95,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from ..model.elf_facts import ElfImport
     from ..policy.disposition_ledger import DispositionLedger
     from ..policy.suppression.rules import SuppressionList
     from ..policy_file import PolicyFile
@@ -109,6 +110,7 @@ class AppCompatResult:
     new_lib_path: str
 
     # App's requirements
+    direct_elf_imports: list[ElfImport] | None = field(default=None, kw_only=True)
     required_symbols: set[str] = field(default_factory=set)
     required_symbol_count: int = 0
 
@@ -453,6 +455,7 @@ def scope_diff_to_consumer_facts(
         app_path=str(app_path),
         old_lib_path=old_facts.label,
         new_lib_path=new_facts.label,
+        direct_elf_imports=consumer.requirements.direct_elf_imports,
         required_symbols=app_reqs.undefined_symbols,
         required_symbol_count=evaluation.required_count,
         breaking_for_app=breaking_for_app,

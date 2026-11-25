@@ -57,6 +57,7 @@ def attach_analysis_assurance(
     an out-of-band ``--build-info``/``--sources`` pack is attached onto the
     snapshot before classification, so the depth-capped view carries it.
     """
+    from ..compare.l2_evidence import attach_removed_exports
     from ..evidence_depth import embedded_evidence_pack
     from ..policy.analysis_assurance import compute_analysis_assurance
     from ..policy.analysis_assurance._unobserved import (
@@ -65,6 +66,7 @@ def attach_analysis_assurance(
     )
     from ..storage.snapshot_encode import same_persisted_content
 
+    attach_removed_exports(result, old, new)
     attach_type_evidence(result, old, new)
     # One registry pass feeds both the rollup and the coverage rows below.
     unobserved = collect_unobserved(old, new)

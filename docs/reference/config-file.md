@@ -208,7 +208,15 @@ stays a flag).
 
 - `manifests:` — paths to consumer-manifest JSON documents (relative to the
   config file). Each manifest names one or more consumer binaries and merges into
-  the same scoping pipeline as `--used-by`.
+  the same scoping pipeline as `--used-by`. An ELF consumer entry can identify
+  a shipped binary with `"artifact_role": "released_client"`. For a PIC ELF
+  relocatable object, `"artifact_role": "control_object"` requests two shared
+  links using GNU ld, one against each supplied library binary. The report
+  records the exit codes and diagnostics. Neither link executes the output.
+  A bare path leaves release provenance unspecified. The per-finding
+  `review_evidence.client_observations` lists exact-name matches including
+  weak references, required versions and version providers when recorded.
+  An unversioned import alone cannot identify its runtime provider.
 - `required_symbols:` — exported symbols a plugin host resolves with
   dlopen/dlsym. An entry `@FILE` reads one symbol per line from that file (`#`
   comments allowed). Mutually exclusive with `--used-by` and with

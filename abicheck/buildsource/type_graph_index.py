@@ -26,7 +26,7 @@ an :func:`ast_derived_scope`; :func:`index_declared_type_files` and
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..model.execution_cache import request_key
@@ -132,6 +132,8 @@ class _AstIndexes:
     #: collide; such a name is never treated as TU-local
     #: (:func:`tu_local_identities`).
     external_types: set[str]
+    function_symbols: dict[str, str] = field(default_factory=dict)
+    enum_members: dict[str, str] = field(default_factory=dict)
 
 
 def _new_ast_indexes() -> _AstIndexes:
@@ -294,6 +296,14 @@ def _index_declared_entities(
             _mark_tu_local(qname, cur_file, idx)
         elif not in_anon_ns and not in_body:
             idx.external_types.add(qname)
+        if kind == "EnumDecl":
+            for member in node.get("inner", ()):
+                if (
+                    member.get("kind") == "EnumConstantDecl"
+                    and member.get("id")
+                    and member.get("name")
+                ):
+                    idx.enum_members[member["id"]] = f"{qname}::{member['name']}"
         # Enum constants (and any nested decls) still need indexing; no new
         # scope is opened — an unscoped/scoped enum's own name is not part of
         # its enumerators' spelling in clang's AST dump.
@@ -324,6 +334,8 @@ def _index_declared_entities(
         return _index_children(node, scope, cur_file, idx, in_body, in_anon_ns)
 
     if kind in _FUNCTION_DECL_KINDS:
+        if node.get("id") and node.get("mangledName"):
+            idx.function_symbols[node["id"]] = node["mangledName"]
         # Everything declared inside a function/method body — including a
         # plain block-scope local (``int api() { int x; return x; }``) — is
         # a private implementation detail, not a meaningful dependency

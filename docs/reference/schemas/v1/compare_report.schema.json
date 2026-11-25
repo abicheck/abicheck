@@ -599,6 +599,27 @@
     "run_outcome": {
       "$ref": "#/$defs/run_outcome"
     },
+    "removed_export_groups": {
+      "type": "array",
+      "description": "Exact removed ELF names sharing a demangled spelling in one library.",
+      "items": {
+        "type": "object",
+        "required": ["library", "demangled_symbol", "variants"],
+        "properties": {
+          "library": {"type": "string"},
+          "demangled_symbol": {"type": "string"},
+          "variants": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["name", "finding_id"],
+              "properties": {"name": {"type": "string"}, "finding_id": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
     "changes": {
       "type": "array",
       "items": {

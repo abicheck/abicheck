@@ -12,11 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The audited per-generation spelling rows (ADR-062 D2).
-
-The corpus gate reads this dict literal by AST and validates each reason.
-The frozen corpus tests every generation against the current spellings.
-"""
+"""Generation spelling migrations audited by the AST gate and frozen corpus (ADR-062 D2)."""
 
 from __future__ import annotations
 
@@ -795,5 +791,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     ),
     95: GenerationSpellingChange(
         "C++ record parameters gain a header-derived call-triviality fact. Older parameters retain unknown passing semantics. No spelling rewrite."
+    ),
+    96: GenerationSpellingChange(
+        "ELF consumers now record undefined symbol bindings and version requirements, "
+        "including references from relocatable objects. Stored symbol spellings need no rewrite."
     ),
 }

@@ -66,7 +66,15 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
     "enum_deprecated": frozenset(["binary", "declarations", "provenance"]),
     "enum_renames": frozenset(["binary", "declarations", "provenance"]),
     "enums": frozenset(
-        ["binary", "debug", "declarations", "provenance", "semantic_ir", "types"]
+        [
+            "binary",
+            "build",
+            "debug",
+            "declarations",
+            "provenance",
+            "semantic_ir",
+            "types",
+        ]
     ),
     "field_default_initializer": frozenset(
         ["binary", "debug", "declarations", "provenance", "types"]

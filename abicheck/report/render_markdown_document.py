@@ -181,6 +181,11 @@ def _row_contract_tag(row: Mapping[str, Any]) -> str | None:
     tag = str(row["contract_relevance"])
     if row.get("contract_reason_code"):
         tag += f" ({row['contract_reason_code']})"
+    if (
+        row.get("l2_observations")
+        and row.get("contract_reason_code") == "all_mode_normalized_entity"
+    ):
+        tag += ", included by the selected all-entities policy"
     if row.get("contract_assurance") is not None:
         tag += f", assurance: {row['contract_assurance']}"
     return tag
@@ -242,6 +247,7 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
     loc = row.get("source_location")
     if loc:
         line += f" — {md_text(clip_name(loc), code=True)}"
+    line += "".join(f"\n  > {md_text(obs)}" for obs in row.get("l2_observations", ()))
     impact = row.get("impact")
     if impact:
         line += f"\n  > {impact}"

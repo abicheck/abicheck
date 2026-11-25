@@ -161,20 +161,12 @@ class ExportSurface:
     #: Vacuously True when there are no roots -- pair it with ``has_roots``,
     #: never read it alone.
     all_roots_typed: bool = True
-    #: Export names that *were* matched to a declaration -- bookkeeping for
-    #: :attr:`unmatched_exports`, not itself a membership set (use
-    #: ``export_symbols``, which is keyed by every lookup alias).
+    #: Matched declaration spellings used to close the type graph.
     matched_exports: set[str] = field(default_factory=set)
-    #: ABI-relevant observed exports that no declaration accounted for. Each
-    #: is a real entry point whose own signature -- and therefore whose own
-    #: type closure -- this snapshot knows nothing about, so while any remain,
-    #: an absence from ``export_types`` is not proof of unreachability: the
-    #: missing export could be exactly what reaches the type being judged
-    #: (Codex review). Compiler/linker artifacts are excluded via
-    #: ``elf_symbol_filter.is_abi_relevant_elf_symbol``, the repo's existing
-    #: owner of that judgment, so ``_init``/``_fini``/thunks/transitive stdlib
-    #: exports don't count as unexplained.
+    #: Unexplained ABI-relevant exports keep the type closure open. This
+    #: excludes runtime artifacts filtered by `is_abi_relevant_elf_symbol`.
     unmatched_exports: frozenset[str] = frozenset()
+    observed_elf_names: frozenset[str] = field(default_factory=frozenset, kw_only=True)
     #: Type identifiers reachable from an export root that name no record,
     #: enum, or typedef this snapshot carries. Where ``unmatched_exports``
     #: records an unaccounted *root*, this records an unaccounted *edge*:
@@ -1214,6 +1206,10 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         snap, surface, join, owner_seed_by_identity=owner_seed_by_identity
     )
     surface.resolvable = True
+    # A ctor/dtor declaration may account for several concrete ELF names.
+    # The export policy promises each spelling, even if the declaration's
+    # own linker identity is a backend placeholder.
+    surface.observed_elf_names = frozenset(tables.get("elf", ()))
     surface.root_identities = set(roots.root_identities)
     surface.unmatched_exports = _unexplained_exports(
         join,
