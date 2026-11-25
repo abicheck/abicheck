@@ -171,3 +171,13 @@ USM on both releases. The other clients check buffer values, CSR indices,
 ownership and deleter calls. [Device release receipts](opencl-cpu-release.json)
 and [queue withdrawal receipts](opencl-cpu-queue.json) record the observed
 outcomes. GPU execution and distributed runtime coverage are separate profiles.
+
+### Small C++ record returns
+
+Run `python -m abiforge.run.onedal_status_return SDK_PREFIX OUTPUT` on Linux
+x86-64 to replay the two Status callers in `status-return-abi.json`.
+The frozen callers first run against the released library. Stripped adapters
+then observe the receiver argument under the original and mutated SDK
+declarations. Defaulting the copy constructor and destructor moves the
+eight-byte result from a hidden pointer to an integer register. The L2
+comparison checks this type-level change independently of the two client exits.

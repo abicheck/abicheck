@@ -1,0 +1,33 @@
+{
+  "client_exits": {
+    "compute": {
+      "release": 0,
+      "old": 0,
+      "control": 0,
+      "mutant": 42
+    },
+    "table": {
+      "release": 0,
+      "old": 0,
+      "control": 0,
+      "mutant": 42
+    }
+  },
+  "checker": {
+    "control": {
+      "exit": 0,
+      "verdict": "NO_CHANGE",
+      "status_return": []
+    },
+    "mutant": {
+      "exit": 4,
+      "verdict": "BREAKING",
+      "status_return": [
+        [
+          "memory (sret)",
+          "regs(INTEGER)"
+        ]
+      ]
+    }
+  }
+}

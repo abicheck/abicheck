@@ -56,6 +56,25 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
         )
         assert result.exit_code == 0, (result.output, result.exception)
         snapshots.append(str(snap))
+    from abicheck.compare.value_parameter_convention import value_parameter_changes
+    from abicheck.model.dwarf_facts import AdvancedDwarfMetadata
+    from abicheck.serialization import load_snapshot
+
+    old, new = (load_snapshot(tmp_path / path) for path in snapshots)
+    for snap in (old, new):
+        snap.declarations.debug_advanced = AdvancedDwarfMetadata(
+            value_abi_traits={"val": "ret:nontrivial|p1:unknown"}
+        )
+    assert "val" in {
+        c.symbol
+        for c in value_parameter_changes(old, new, old.function_map, new.function_map)
+    }
+    old.declarations.debug_advanced.value_abi_traits["val"] = "p1:trivial"
+    new.declarations.debug_advanced.value_abi_traits["val"] = "p1:nontrivial"
+    assert "val" not in {
+        c.symbol
+        for c in value_parameter_changes(old, new, old.function_map, new.function_map)
+    }
     report = tmp_path / "report.json"
     for operands, before, after in (
         (snapshots, "p1:trivial", "p1:nontrivial"),

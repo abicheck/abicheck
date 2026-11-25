@@ -171,6 +171,14 @@ def record_return_convention_changes(
     new_conv = return_convention(
         new_size.value if new_size.is_present else None, t_new.fields
     )
+    # A nontrivial copy or destructor forces an invisible result pointer,
+    # even for a one-word record. Older snapshots lack this independent fact;
+    # do not infer a transition from a one-sided observation.
+    if t_old.trivial_for_calls is not None and t_new.trivial_for_calls is not None:
+        if not t_old.trivial_for_calls:
+            old_conv = ("memory",)
+        if not t_new.trivial_for_calls:
+            new_conv = ("memory",)
     if old_conv is None or new_conv is None or old_conv == new_conv:
         return
     qualified = t_new.qualified_name or t_old.qualified_name

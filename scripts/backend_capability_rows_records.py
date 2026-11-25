@@ -269,6 +269,13 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "trivial_for_calls",
+        _PARTIAL,
+        _PARTIAL,
+        note="Confirmed C++ call triviality of a complete record. CastXML joins the Clang semantic pass.",
+    ),
+    FactRow(
+        "RecordType",
         "is_trivially_copyable",
         _PARTIAL,
         _FULL,
@@ -649,7 +656,7 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
             "which is target-independent. clang side wired in G31 Phase C "
             "continued (schema v23), x86-64 System V spelling only; an "
             "unrecognized target's real `va_list` still reads `False`. "
-            '`diff_symbols._diff_param_va_list` compares only a same-producer '
+            "`diff_symbols._diff_param_va_list` compares only a same-producer "
             'pair (`"clang"` or `"castxml"`), never `"hybrid"` or a mix.'
         ),
     ),

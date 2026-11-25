@@ -48,6 +48,20 @@ def _unwrap_type(spelling: str, *, strip_indirection: bool = True) -> str:
     return " ".join("".join(parts).split())
 
 
+def record_call_trait(node: dict[str, Any]) -> bool | None:
+    data = node.get("definitionData")
+    if not node.get("completeDefinition") or not isinstance(data, dict):
+        return None
+    if data.get("canPassInRegisters") is True:
+        return True
+    if any(
+        data.get(slot, {}).get("nonTrivial")
+        for slot in ("copyCtor", "moveCtor", "dtor")
+    ):
+        return False
+    return None
+
+
 def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
     """Clang's call-triviality decision on complete, named C++ definitions.
 
@@ -87,17 +101,12 @@ def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
                 if not child.get("completeDefinition") or not isinstance(data, dict):
                     continue
                 key = "::".join(path)
-                trait = data.get("canPassInRegisters")
-                # Require affirmative special-member evidence on the indirect
-                # side: an AST producer omitting the flag alone proves nothing.
-                if trait is not True and not any(
-                    data.get(slot, {}).get("nonTrivial")
-                    for slot in ("copyCtor", "moveCtor", "dtor")
-                ):
+                trait = record_call_trait(child)
+                if trait is None:
                     continue
                 if key in traits:
                     ambiguous.add(key)
-                traits[key] = trait is True
+                traits[key] = trait
             walk(child, path)
 
     walk(root, ())
@@ -136,6 +145,7 @@ class TypeIdentityIndex:
         }
         self.imports: dict[tuple[str, ...], list[str]] = {}
         self.namespace_ids: dict[str, str] = {}
+        self.namespace_aliases: dict[str, str] = {}
         self._namespaces(root, ())
         self._usings(root, ())
         self.memo: dict[tuple[str, tuple[str, ...]], Fact[tuple[str, ...]]] = {}
@@ -162,6 +172,12 @@ class TypeIdentityIndex:
             return
         if node.get("kind") == "NamespaceDecl" and node.get("name"):
             scope = (*scope, node["name"])
+        if node.get("kind") == "NamespaceAliasDecl" and node.get("name"):
+            target = self.namespace_ids.get(
+                node.get("aliasedNamespace", {}).get("id", "")
+            )
+            if target:
+                self.namespace_aliases["::".join((*scope, node["name"]))] = target
         if node.get("kind") == "UsingDirectiveDecl":
             target = node.get("nominatedNamespace", {})
             name = self.namespace_ids.get(target.get("id", ""))
@@ -172,6 +188,7 @@ class TypeIdentityIndex:
                 "NamespaceDecl",
                 "TranslationUnitDecl",
                 "UsingDirectiveDecl",
+                "NamespaceAliasDecl",
                 "LinkageSpecDecl",
             ):
                 self._usings(child, scope)
@@ -210,6 +227,11 @@ class TypeIdentityIndex:
                 candidates.extend(
                     f"{ns}::{name}" for ns in self.imports.get(prefix, ())
                 )
+            head, separator, tail = name.partition("::")
+            if separator and self.namespace_aliases:
+                alias = self.namespace_aliases.get("::".join((*prefix, head)))
+                if alias:
+                    candidates.append(f"{alias}::{tail}")
             matches = set(candidates) & self.known
             if len(matches) > 1:
                 return _AMBIGUOUS
@@ -235,7 +257,7 @@ class TypeIdentityIndex:
         any alias is looked through) is not by value, and a typedef is followed to
         its target. A name that resolves to a record declaration is by value; one
         that resolves to an enumeration or a builtin is not. Anything else (an
-        unresolved or ambiguous name, a function type, a template instance) is
+        unresolved or ambiguous name, a function type, an unresolved template instance) is
         undetermined, so the fact is not collected.
         """
         answer = self._by_value(spelling, scope, frozenset())

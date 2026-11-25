@@ -233,6 +233,7 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     `serialization.snapshot_to_dict()`.
     """
     for type_dict in d.get("types", []):
+        type_dict.pop("trivial_for_calls", None)
         for fact_key in _TYPE_FACT_KEYS:
             _encode_one(type_dict.get(fact_key))
         for field_dict in type_dict.get("fields", []):

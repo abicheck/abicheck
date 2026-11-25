@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from abiforge.run import onedal_arguments, onedal_table_ownership
+from abiforge.run import onedal_arguments, onedal_status_return, onedal_table_ownership
 
 
 def test_product_receipts_cover_provider_matched_signatures():
@@ -26,6 +26,15 @@ def test_product_receipts_cover_provider_matched_signatures():
     assert evidence["client_exits"] == {
         symbol: {"old": 0, "control": 0, "mutant": 41} for symbol in arguments
     }
+    status = json.loads((product / "status-return-abi.json").read_text())
+    assert status["client_exits"] == {
+        name: {"release": 0, "old": 0, "control": 0, "mutant": 42}
+        for name in ("compute", "table")
+    }
+    assert status["checker"]["control"]["verdict"] == "NO_CHANGE"
+    assert status["checker"]["mutant"]["status_return"] == [
+        ["memory (sret)", "regs(INTEGER)"]
+    ]
     tables = {
         r["symbol"]
         for r in ledger
@@ -52,5 +61,6 @@ def test_product_receipts_cover_provider_matched_signatures():
 def test_installed_cpu_sdk(tmp_path):
     old = Path(os.environ["ABIFORGE_ONEDAL_OLD"]).resolve()
     new = Path(os.environ["ABIFORGE_ONEDAL_NEW"]).resolve()
+    assert onedal_status_return.run(old, tmp_path / "status")
     assert onedal_arguments.run(old, tmp_path / "arguments", check=True)
     assert onedal_table_ownership.run(old, new, tmp_path / "tables")
