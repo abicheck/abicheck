@@ -467,6 +467,9 @@ def _enrich_affected_symbols(
     new: AbiSnapshot | None = None,
 ) -> None:
     """For type/enum changes, find exported functions that use the affected type."""
+    from .compare.record_return_convention import attribute_return_exports
+
+    attribute_return_exports(changes, old)
     # Only compute if there are type-related changes
     type_changes = [c for c in changes if c.kind in _TYPE_CHANGE_KINDS]
     if not type_changes:

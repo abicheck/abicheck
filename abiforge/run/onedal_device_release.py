@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 
-def run(old, new, compiler, out):
+def run(old, new, compiler, out, selector="opencl:cpu", major=None):
     out.mkdir(parents=True, exist_ok=True)
     data = out / "data.csv"
     data.write_text("7,8\n")
@@ -40,7 +40,7 @@ def run(old, new, compiler, out):
         for prefix in (old, new):
             env = {
                 **os.environ,
-                "ONEAPI_DEVICE_SELECTOR": "opencl:cpu",
+                "ONEAPI_DEVICE_SELECTOR": selector,
                 "LD_LIBRARY_PATH": os.pathsep.join(
                     [str(prefix / "lib"), os.environ.get("LD_LIBRARY_PATH", "")]
                 ),
@@ -73,11 +73,38 @@ def run(old, new, compiler, out):
                 dict(
                     client=name,
                     package=prefix.name,
+                    device_selector=selector,
                     providers=providers,
                     exit=result.returncode,
                     stdout=result.stdout.strip(),
                     stderr=result.stderr.strip(),
                     matches=matches,
+                )
+            )
+        if major is not None:
+            # The major image must stand alone. Inherited paths can contain
+            # OLD/lib and silently supply the withdrawn SONAME.
+            env = {**os.environ, "LC_ALL": "C", "LD_LIBRARY_PATH": str(major / "lib")}
+            env.pop("LD_PRELOAD", None)
+            run_major = subprocess.run(
+                [client, data], env=env, capture_output=True, text=True
+            )
+            missing = next(
+                (
+                    word.rstrip(":")
+                    for word in run_major.stderr.split()
+                    if word.startswith("libonedal") and ".so.3" in word
+                ),
+                None,
+            )
+            results.append(
+                dict(
+                    client=name,
+                    package=major.name,
+                    device_selector=selector,
+                    exit=run_major.returncode,
+                    missing_soname=missing,
+                    matches=run_major.returncode == 127 and missing is not None,
                 )
             )
     (out / "receipt.json").write_text(json.dumps(results, indent=2) + "\n")
@@ -88,6 +115,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ("old", "new", "compiler", "out"):
         parser.add_argument(arg, type=Path)
+    parser.add_argument(
+        "--selector",
+        choices=("opencl:cpu", "opencl:gpu", "level_zero:gpu"),
+        default="opencl:cpu",
+    )
+    parser.add_argument(
+        "--major",
+        type=Path,
+        help="also check the frozen client against a standalone major release",
+    )
     args = parser.parse_args()
     raise SystemExit(
         not run(
@@ -95,5 +132,7 @@ if __name__ == "__main__":
             args.new.resolve(),
             args.compiler.resolve(),
             args.out.resolve(),
+            args.selector,
+            args.major.resolve() if args.major else None,
         )
     )

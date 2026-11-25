@@ -1,0 +1,14 @@
+{
+  "old-mutant": {
+    "verdict": "BREAKING",
+    "affected_exports": 795
+  },
+  "mutant-old": {
+    "verdict": "BREAKING",
+    "affected_exports": 795
+  },
+  "old-old": {
+    "verdict": "NO_CHANGE",
+    "affected_exports": 0
+  }
+}
