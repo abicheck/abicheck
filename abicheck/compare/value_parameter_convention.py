@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 from ..diff_helpers import make_change
-from ..dwarf_advanced import _named_convention
 from ..model.call_interface import SYSV_AMD64
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.declarations import Function
+from ..model.dwarf_calling_conventions import named_convention
 from ..model.snapshot import AbiSnapshot
 from ..model.special_member_identity import resolve_special_member_linker_names
 from ..model.synthetic_key import is_synthetic_ctor_key
@@ -78,7 +78,7 @@ def value_parameter_changes(
                 excluded = (
                     old_cc is not None
                     and new_cc is not None
-                    and _named_convention(old_cc) != _named_convention(new_cc)
+                    and named_convention(old_cc) != named_convention(new_cc)
                 )
                 if (
                     not excluded

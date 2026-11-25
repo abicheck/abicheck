@@ -77,6 +77,16 @@ def _by_value(
 def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
     """Whether an exported declaration has a record parameter passed by value."""
     by_id = {el.get("id"): el for el in root if el.get("id")}
+    from ....model.mangled_name import itanium_scope_components
+
+    constructor_owners = {
+        parts[-2].split("<", 1)[0]
+        for name in exported
+        if name.startswith("_Z") and any(code in name for code in ("C1", "C2", "C3"))
+        if (parts := itanium_scope_components(name))
+        and len(parts) >= 2
+        and parts[-1] == "{ctor}"
+    }
     for fn in root:
         if fn.tag not in (
             "Function",
@@ -88,7 +98,11 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
             continue
         if (
             exported
-            and not (fn.tag == "Constructor" and not fn.get("mangled"))
+            and not (
+                fn.tag == "Constructor"
+                and not fn.get("mangled")
+                and fn.get("name") in constructor_owners
+            )
             and (fn.get("mangled") or fn.get("name")) not in exported
         ):
             continue

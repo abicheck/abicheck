@@ -5,7 +5,7 @@
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
       "abicheck/dumper.py": "6d6df4f72968133150ac026bf88846cabd8e44ed8185a88a9fb71451c8fb0864",
       "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
-      "abicheck/dwarf_advanced.py": "784007954e220cf6928da7e5877d1dc77143227235cc4ac7d9b8cdc0f20132cb",
+      "abicheck/dwarf_advanced.py": "1e903a0d8693daa7f5c264f013f4a29795ba5509b0ee6dd6ee373d0ff6bd5984",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "2c6b3932165efa71392ee68d3d516e467e9ca4125d0e21e328dbb2a033377b78",
@@ -45,7 +45,7 @@
       "abicheck/extract/dpcpp_jobs.py": "87fe1b8ef8df6732e91160709e32d5ef11b03ced4fe08dc9fc8c045c20da293c",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_abi_fact.py": "b169fadd8bb32ee4e67f9c70d46e5392215f648fac55d0c782aeabe51bc58495",
-      "abicheck/extract/dwarf_calling_conventions.py": "3944725995f3cb59ee04d7a6dddb67ce82fd8a10e976f244903885efd1b65f98",
+      "abicheck/extract/dwarf_calling_conventions.py": "2532bef41884ad827b0b97182f2446e37f874f1213968341107524397aee7f55",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_export_gaps.py": "ed04bbe774a14bc4b1c695f05ceb6a1da8e376cce001d780d63ccb9a9a52b412",
       "abicheck/extract/dwarf_layout_backfill.py": "aa6e6647edc2f60129a9762ffd131e0286a8be0432cb141cdea30675a304b630",
@@ -122,7 +122,7 @@
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "eb0d6119475ceff657e89702641a66d20baf28e8fef130f73c4238a42482bf47",
-      "abicheck/extract/headers/castxml/return_by_value.py": "0eba8eac6e2005dc1735d98a01b1dbcbebf7d48da6aae804b55890f2bbdf512a",
+      "abicheck/extract/headers/castxml/return_by_value.py": "d48f1df1ebc2c35a2cac15ce0e70b406d881384f7937868d648ab9a337516d9d",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
@@ -250,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "0fbd95ceb0157b9a49132eaeac6733d4a27bb68bc3e563b47908b3ef77010962",
+    "fingerprint": "92b47a2479e417cfa0476ddd52aa786385c17ffc1b71f26548477b949905036d",
     "generation": 95,
-    "reason": "Classify parameter and result call traits, including defaulted specializations and exported constructors."
+    "reason": "Restrict the CastXML call-trait pass to candidate exported constructors and retain shared DWARF convention decoding."
   },
   "resolver": {
     "files": {
