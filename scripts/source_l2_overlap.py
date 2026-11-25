@@ -282,6 +282,7 @@ _JUDGED: dict[str, Row] = {
     "STRUCT_PACKING_CHANGED": Row(
         L2_ONLY, note="header-visible packing; the source tier keeps no packing fact"
     ),
+    "VALUE_ABI_TRAIT_CHANGED": Row(L2_ONLY, note="header-derived C++ record parameter passing"),
     "STRUCT_RETURN_CONVENTION_CHANGED": Row(
         L2_ONLY,
         note="header-visible SysV return class; the source tier keeps no return convention",

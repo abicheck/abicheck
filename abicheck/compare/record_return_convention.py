@@ -43,11 +43,13 @@ from ..model.declarations import Function
 from ..model.entities import RecordType, TypeField
 from ..model.semantic_ir import CanonicalEntity
 from ..model.semantic_ir_record_layout import entity_layout
+from ..model.snapshot import AbiSnapshot
 
 __all__ = [
     "record_return_convention_changes",
     "returned_by_value_records",
     "return_convention",
+    "attribute_return_exports",
     "member_class",
 ]
 
@@ -171,6 +173,14 @@ def record_return_convention_changes(
     new_conv = return_convention(
         new_size.value if new_size.is_present else None, t_new.fields
     )
+    # A nontrivial copy or destructor forces an invisible result pointer,
+    # even for a one-word record. Older snapshots lack this independent fact;
+    # do not infer a transition from a one-sided observation.
+    if t_old.trivial_for_calls is not None and t_new.trivial_for_calls is not None:
+        if not t_old.trivial_for_calls:
+            old_conv = ("memory",)
+        if not t_new.trivial_for_calls:
+            new_conv = ("memory",)
     if old_conv is None or new_conv is None or old_conv == new_conv:
         return
     qualified = t_new.qualified_name or t_old.qualified_name
@@ -195,3 +205,31 @@ def _describe(conv: tuple[str, ...]) -> str:
     if conv[0] == "memory":
         return "memory (sret)"
     return "regs(" + ",".join(conv[1:]) + ")"
+
+
+def attribute_return_exports(changes: list[Change], old: AbiSnapshot) -> None:
+    """Attribute returning exports by resolved identity in the frozen client ABI."""
+    returns = [
+        c for c in changes if c.kind is ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED
+    ]
+    if returns:
+        from .export_names import default_export_names
+
+        exports = default_export_names(old) or set()
+        by_record: dict[str, set[str]] = {}
+        for fn in old.declarations.functions:
+            by_value = fn.return_by_value_fact
+            identities = fn.return_type_identities_fact
+            if (
+                fn.mangled in exports
+                and by_value is not None
+                and by_value.value is True
+                and identities is not None
+                and identities.is_present
+            ):
+                for identity in identities.value or ():
+                    by_record.setdefault(identity, set()).add(fn.mangled)
+        for change in returns:
+            change.affected_symbols = sorted(
+                by_record.get(change.qualified_name or change.symbol, ())
+            )

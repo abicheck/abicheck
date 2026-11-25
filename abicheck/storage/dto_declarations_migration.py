@@ -80,6 +80,19 @@ def declarations_v3_to_v4(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return payload
 
 
+def declarations_v4_to_v5(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Older parameters carry no C++ call-triviality decision."""
+    for fn in payload.get("functions", ()):
+        if isinstance(fn, Mapping) and any(
+            isinstance(p, Mapping) and "trivial_for_calls_fact" in p
+            for p in fn.get("params", ())
+        ):
+            raise ValueError(
+                "'declarations' section v4 carries 'trivial_for_calls_fact'"
+            )
+    return payload
+
+
 #: The section's migration steps by source version, registered in
 #: ``dto._MIGRATIONS``.
 DECLARATIONS_MIGRATIONS: Mapping[
@@ -88,4 +101,5 @@ DECLARATIONS_MIGRATIONS: Mapping[
     1: declarations_v1_to_v2,
     2: declarations_v2_to_v3,
     3: declarations_v3_to_v4,
+    4: declarations_v4_to_v5,
 }

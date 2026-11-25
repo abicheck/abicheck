@@ -69,6 +69,7 @@ __all__ = [
     "MACHO_OBJECT_SIZES",
     "ELF_VTT_ENTRIES",
     "FINAL_MEMBER_FUNCTIONS",
+    "RECORD_CALL_TRAITS",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
     "STD_REEXPORTS",
@@ -472,6 +473,25 @@ FINAL_MEMBER_FUNCTIONS: ExtensionFact[dict[str, list[str]]] = ExtensionFact(
 )
 
 
+def _record_call_traits(value: Any) -> dict[str, bool]:
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and type(v) is bool for k, v in value.items()
+    ):
+        raise TypeError("expected record names mapped to call-triviality booleans")
+    return value
+
+
+RECORD_CALL_TRAITS: ExtensionFact[dict[str, bool]] = ExtensionFact(
+    name="abicheck.record_call_traits",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="C++ call triviality was not recorded",
+    owner="ADR-062",
+    encode=_record_call_traits,
+    decode=_record_call_traits,
+)
+
+
 def _binary_purity(value: Any) -> dict[str, Any]:
     """``{"functions": {mangled: bool}, "records": {name: bool},
     "unobserved": {name: reason}}`` -- the binary purity evidence of a
@@ -739,6 +759,7 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         ELF_VTT_ENTRIES,
         EXPORT_READ,
         FINAL_MEMBER_FUNCTIONS,
+        RECORD_CALL_TRAITS,
         MACHO_OBJECT_SIZES,
         NOEXCEPT_UNOBSERVED,
         STD_REEXPORTS,

@@ -210,6 +210,7 @@ _ELF_FACT_KEYS = (
 # "types". Phase 0's is_va_list_fact was encoded by a single hardcoded
 # .get() line until this batch gave Param a second one.
 _PARAM_FACT_KEYS = (
+    "trivial_for_calls_fact",
     "is_va_list_fact",
     "is_restrict_fact",
     # ADR-063 Phase 5 (eleventh batch): kind_fact.
@@ -232,6 +233,7 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     `serialization.snapshot_to_dict()`.
     """
     for type_dict in d.get("types", []):
+        type_dict.pop("trivial_for_calls", None)
         for fact_key in _TYPE_FACT_KEYS:
             _encode_one(type_dict.get(fact_key))
         for field_dict in type_dict.get("fields", []):
@@ -251,6 +253,8 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
         for fact_key in _FUNCTION_FACT_KEYS:
             _encode_one(func_dict.get(fact_key))
         for param_dict in func_dict.get("params", []):
+            if param_dict.get("trivial_for_calls_fact") is None:
+                param_dict.pop("trivial_for_calls_fact", None)
             for fact_key in _PARAM_FACT_KEYS:
                 _encode_one(param_dict.get(fact_key))
     # AbiSnapshot's own case-(b) field -- a single top-level key, not
@@ -546,6 +550,11 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
             p, "kind", schema_version, _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
         )
     return {
+        "trivial_for_calls_fact": decode_fact(
+            p.get("trivial_for_calls_fact"), schema_version
+        )
+        if p.get("trivial_for_calls_fact") is not None
+        else None,
         "is_va_list_fact": decode_fact(p.get("is_va_list_fact"), schema_version),
         "is_restrict_fact": decode_fact_with_legacy_presence(
             p, "is_restrict", schema_version, _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS

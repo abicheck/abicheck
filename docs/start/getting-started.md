@@ -40,8 +40,8 @@ policy — see [**Choose Your Workflow**](choose-your-workflow.md).
 
 ## Your first five minutes
 
-1. ➡️ **[Install abicheck](install.md)** — conda-forge (recommended, bundles
-   `castxml`) or a lightweight `pip install`.
+1. ➡️ **[Install abicheck](install.md)** — conda-forge (recommended, bundles a
+   compiler toolchain) or `pip install` (includes CastXML).
 2. ➡️ **[Run your first check](first-check.md)** — compare two shared
    libraries from the repo's example catalog, then your own library.
 3. ➡️ **[Understand your first report](first-report.md)** — output formats

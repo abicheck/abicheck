@@ -53,6 +53,7 @@ from .extension_fact_catalog import (
     FINAL_MEMBER_FUNCTIONS,
     MACHO_OBJECT_SIZES,
     NOEXCEPT_UNOBSERVED,
+    RECORD_CALL_TRAITS,
     STD_REEXPORTS,
     TYPEDEF_ORIGINS,
     ExtensionFact,
@@ -374,6 +375,20 @@ def sync_model_extension_facts(snap: Any) -> None:
         _drop_extension_fact(snap, CU_STACK_PROTECTOR)
     encode_noexcept_unobserved(snap)
     _sync_final_member_functions(snap)
+    if _blocked_reason(snap, RECORD_CALL_TRAITS.section) is None:
+        traits: dict[str, bool] = {}
+        seen = set()
+        for record in snap.declarations.types:
+            key = record.qualified_name or record.name
+            if key in seen:
+                traits.pop(key, None)
+            elif record.trivial_for_calls is not None:
+                traits[key] = record.trivial_for_calls
+            seen.add(key)
+        if traits:
+            write_extension_fact(snap, RECORD_CALL_TRAITS, traits)
+        else:
+            _drop_extension_fact(snap, RECORD_CALL_TRAITS)
 
 
 def _sync_typedef_origins(snap: Any) -> None:
@@ -626,6 +641,17 @@ def apply_model_extension_facts(snap: Any) -> None:
     _apply_template_defaults(snap)
     decode_noexcept_unobserved(snap)
     _apply_final_member_functions(snap)
+    traits = read_extension_fact(snap, RECORD_CALL_TRAITS)
+    if traits.is_present and traits.value is not None:
+        for record in snap.declarations.types:
+            record.trivial_for_calls = traits.value.get(
+                record.qualified_name or record.name
+            )
+    elif (
+        traits.status == FactStatus.FAILED
+        and _blocked_reason(snap, RECORD_CALL_TRAITS.section) is None
+    ):
+        raise SnapshotError("unreadable record call traits: " + str(traits.diagnostics))
     _apply_binary_purity(snap)
     _apply_typedef_origins(snap)
     _apply_std_reexports(snap)

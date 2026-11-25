@@ -70,6 +70,7 @@ from ..clang.template_default_entries import (
     TemplateDefaultEntry,
     template_default_entries,
 )
+from ..clang.type_identity import record_call_traits
 from ..clang.var_alignment import clang_variable_alignment_map
 from ..concept_scan import concept_header_scan
 from .clang_semantics import SEMANTICS_ATTR, valid_template_default_entries
@@ -302,11 +303,17 @@ _Sidecar = tuple[
     list[tuple[str, str, str]],
     list[TemplateDefaultEntry],
     dict[str, int],
+    dict[str, bool],
 ]
 
 
 def _valid_sidecar(payload: Any) -> _Sidecar | None:
     if not isinstance(payload, dict):
+        return None
+    traits = payload.get("record_call_traits")
+    if not isinstance(traits, dict) or not all(
+        isinstance(k, str) and type(v) is bool for k, v in traits.items()
+    ):
         return None
     noexcept, concepts = payload.get("noexcept"), payload.get("concepts")
     # A sidecar written before the template defaults were joined is a miss.
@@ -334,6 +341,7 @@ def _valid_sidecar(payload: Any) -> _Sidecar | None:
         [(e[0], e[1], e[2]) for e in concepts],
         template_defaults,
         alignment,
+        traits,
     )
 
 
@@ -344,6 +352,7 @@ def _with_semantics(
     concepts: list[tuple[str, str, str]] | None,
     template_defaults: list[TemplateDefaultEntry] | None,
     variable_alignment: dict[str, int] | None,
+    traits: dict[str, bool] | None = None,
 ) -> Element:
     carried = Element(root.tag, dict(root.attrib))
     carried.set(
@@ -355,6 +364,7 @@ def _with_semantics(
                 "concepts": None if concepts is None else [list(e) for e in concepts],
                 "template_defaults": _encode_template_defaults(template_defaults),
                 "variable_alignment": variable_alignment,
+                "record_call_traits": traits,
             },
             sort_keys=True,
         ),
@@ -429,7 +439,16 @@ def join_clang_semantics(
     # baseline of a requires-clause added later is modelled: any template
     # (abbreviated ones included) counts, not only a constrained one.
     wants_concepts = cxx and (concept_header_scan(headers) or _spells_template(headers))
-    if not mention_files and not wants_concepts and not wants_alignment:
+    # Only a by-value record parameter needs Clang's call-triviality fact.
+    from .return_by_value import has_exported_record_argument
+
+    wants_traits = cxx and has_exported_record_argument(root, exported_symbols)
+    if (
+        not mention_files
+        and not wants_concepts
+        and not wants_alignment
+        and not wants_traits
+    ):
         return root
     store = ast_cache_store(key, SEMANTICS_SIDECAR_BACKEND)
     entry = store.path(key)
@@ -440,9 +459,15 @@ def join_clang_semantics(
     )
     if cached is not None:
         cache_dep_manifest.note(cache_dep_manifest.recall(str(entry), entry))
-        noexcept, concepts, template_defaults, alignment = cached
+        noexcept, concepts, template_defaults, alignment, traits = cached
         return _with_semantics(
-            root, noexcept, mention_files, concepts, template_defaults, alignment
+            root,
+            noexcept,
+            mention_files,
+            concepts,
+            template_defaults,
+            alignment,
+            traits,
         )
     try:
         with cache_dep_manifest.recording() as clang_parse:
@@ -483,6 +508,7 @@ def join_clang_semantics(
     concepts = concept_constraint_entries(clang_root)
     template_defaults = template_default_entries(clang_root)
     alignment = clang_variable_alignment_map(clang_root)
+    traits = record_call_traits(clang_root)
     deps = clang_parse.manifest()
     if deps is not None and cache_dep_manifest.write_sidecar(entry, deps):
         store.publish(
@@ -492,9 +518,10 @@ def join_clang_semantics(
                 "concepts": [list(e) for e in concepts],
                 "template_defaults": _encode_template_defaults(template_defaults),
                 "variable_alignment": alignment,
+                "record_call_traits": traits,
             },
             (),
         )
     return _with_semantics(
-        root, noexcept, mention_files, concepts, template_defaults, alignment
+        root, noexcept, mention_files, concepts, template_defaults, alignment, traits
     )

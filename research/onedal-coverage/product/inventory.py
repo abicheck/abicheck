@@ -1,20 +1,37 @@
 """Usage: python inventory.py PREFIX OUT CLIENT... (Linux, clang Python bindings 19)."""
+import argparse
 import csv
 import os
 import subprocess
-import sys
 from collections import defaultdict
 from pathlib import Path
 
 from clang import cindex as ci
 from variants import variant_reader
 
-prefix, out = map(Path, sys.argv[1:3])
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('prefix', type=Path)
+parser.add_argument('out', type=Path)
+parser.add_argument('clients', nargs='*', type=Path)
+parser.add_argument('--source', type=Path, help='also allow the oneDAL source tree and its IDE dispatcher context')
+parser.add_argument('--extended', action='store_true', help='inventory protected declarations and provider-matched exported variables')
+parser.add_argument('--include', action='append', type=Path, default=[], help='optional SDK include root, repeatable')
+parser.add_argument('--legacy-umbrella', action='store_true', help='parse legacy headers after daal.h')
+parser.add_argument('--roots', type=Path, help='read one installed include path per line')
+options = parser.parse_args()
+prefix, out = options.prefix, options.out
 inc = prefix.resolve() / 'include'
 out.mkdir(parents=True, exist_ok=True)
 ci.Config.set_library_file(os.environ.get('LIBCLANG', '/usr/lib/x86_64-linux-gnu/libclang-19.so.1'))
 variants = variant_reader(ci.Config.library_file)
 roots = ['daal.h'] + sorted(str(p.relative_to(inc)) for p in (inc/'oneapi/dal').rglob('*.hpp') if 'detail' not in p.parts and 'backend' not in p.parts and 'gpu' not in p.parts and 'spmd' not in p.parts)
+if options.extended:
+    roots += sorted(str(p.relative_to(inc)) for p in (inc/'dal').rglob('*.h')
+                    if not {'internal', 'backend', 'detail'} & set(p.relative_to(inc).parts))
+if options.roots:
+    roots = options.roots.read_text().splitlines()
+extra_flags = ['-I' + str(options.source.resolve() / 'cpp'), '-D__ONEDAL_IDE_MODE__'] if options.source else []
+extra_flags.extend('-I' + str(p.resolve()) for p in options.include)
 providers = defaultdict(set)
 clients = defaultdict(set)
 def symbols(path, flag):
@@ -24,14 +41,16 @@ for lib in sorted((prefix/'lib').glob('libonedal*.so.3')):
     if '_dpc' not in lib.name:
         for sym in symbols(lib,'--defined-only'):
             providers[sym].add(lib.name)
-for binary in map(Path,sys.argv[3:]):
+for binary in options.clients:
     for sym in symbols(binary,'--undefined-only'):
         clients[sym].add(binary.name)
 errors = []
 rows = set()
 def parse(group):
     source = ''.join(f'#include <{h}>\n' for h in group)
-    unit = ci.Index.create().parse('inventory.cpp', args=['-std=c++17','-I'+str(inc),'-I'+str(inc/'dal'),'-isystem',subprocess.check_output(['gcc','-print-file-name=include'],text=True).strip()],unsaved_files=[('inventory.cpp',source)], options=ci.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES)
+    if options.legacy_umbrella and any(h.startswith('dal/') for h in group):
+        source = '#include <daal.h>\n' + source
+    unit = ci.Index.create().parse('inventory.cpp', args=['-std=c++17','-I'+str(inc),'-I'+str(inc/'dal'),*extra_flags,'-isystem',subprocess.check_output(['gcc','-print-file-name=include'],text=True).strip()],unsaved_files=[('inventory.cpp',source)], options=ci.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES)
     failures = [str(d) for d in unit.diagnostics if d.severity >= ci.Diagnostic.Error]
     if failures:
         if len(group)>1:
@@ -49,9 +68,14 @@ def parse(group):
             rel=path.relative_to(inc)
             if {'detail','internal','backend'} & set(rel.parts):
                 return
-            if c.access_specifier in (ci.AccessSpecifier.PRIVATE,ci.AccessSpecifier.PROTECTED):
+            if c.access_specifier == ci.AccessSpecifier.PRIVATE or (c.access_specifier == ci.AccessSpecifier.PROTECTED and not options.extended):
                 return
             kind=c.kind.name
+            if options.extended and kind == 'VAR_DECL' and c.linkage == ci.LinkageKind.EXTERNAL:
+                symbol = c.mangled_name
+                if symbol in providers:
+                    rows.add((c.get_usr(), 'exported_variable', str(rel), c.spelling, symbol,
+                              ','.join(sorted(providers[symbol])), ','.join(sorted(clients.get(symbol, ())))))
             if kind in ('FUNCTION_DECL','CXX_METHOD','CONSTRUCTOR','DESTRUCTOR','FIELD_DECL','CXX_BASE_SPECIFIER','ENUM_DECL','FUNCTION_TEMPLATE','CLASS_TEMPLATE','STRUCT_DECL','CLASS_DECL'):
                 usr=c.get_usr()
                 sym=c.mangled_name if kind in ('FUNCTION_DECL','CXX_METHOD') and c.semantic_parent.kind!=ci.CursorKind.CLASS_TEMPLATE else ''

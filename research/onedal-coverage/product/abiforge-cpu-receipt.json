@@ -1,0 +1,380 @@
+{
+  "platform": "Linux x86-64",
+  "source_commit": "cb26da82f4672a7aad7e8d27be7d6b82fa1f300b",
+  "visitors": [
+    {
+      "task": "regression",
+      "case": "identity",
+      "client_exit": 0,
+      "verdict": "NO_CHANGE",
+      "checker_exit": 0,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "base_level_impurity_nNodeSampleCount_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "base_level_nNodeSampleCount_impurity",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "base_impurity_level_nNodeSampleCount",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "base_impurity_nNodeSampleCount_level",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "base_nNodeSampleCount_level_impurity",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "base_nNodeSampleCount_impurity_level",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "split_featureIndex_featureValue_coverValue_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "split_featureIndex_coverValue_featureValue",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "split_featureValue_featureIndex_coverValue",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "split_featureValue_coverValue_featureIndex",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "split_coverValue_featureIndex_featureValue",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "split_coverValue_featureValue_featureIndex",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "leaf_response_coverValue_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "leaf_coverValue_response",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "regression",
+      "case": "slots_onLeafNode_onSplitNode",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "identity",
+      "client_exit": 0,
+      "verdict": "NO_CHANGE",
+      "checker_exit": 0,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "base_level_impurity_nNodeSampleCount_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "base_level_nNodeSampleCount_impurity",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "base_impurity_level_nNodeSampleCount",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "base_impurity_nNodeSampleCount_level",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "base_nNodeSampleCount_level_impurity",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "base_nNodeSampleCount_impurity_level",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "split_featureIndex_featureValue_coverValue_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "split_featureIndex_coverValue_featureValue",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "split_featureValue_featureIndex_coverValue",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "split_featureValue_coverValue_featureIndex",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "split_coverValue_featureIndex_featureValue",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "split_coverValue_featureValue_featureIndex",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "leaf_label_prob_cover_extra",
+      "client_exit": 2,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "leaf_label_cover_prob",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "leaf_prob_label_cover",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "leaf_prob_cover_label",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "leaf_cover_label_prob",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "leaf_cover_prob_label",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    },
+    {
+      "task": "classification",
+      "case": "slots_onLeafNode_onSplitNode",
+      "client_exit": 1,
+      "verdict": "BREAKING",
+      "checker_exit": 4,
+      "matches": true
+    }
+  ],
+  "release_exports": {
+    "2025.9.0 to 2025.11.0": {
+      "libonedal.so.3": {
+        "candidate": "libonedal.so.3",
+        "identities": 148,
+        "absent": 0,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "ee44857d24e23cd2c948d50a035f15e3c1d209e51a2b17bcf51644ddfe3af25b",
+        "new_sha256": "36ac83bd3c989baeb86315147c1005ae00f048d498d58a17d9705443530dab6b"
+      },
+      "libonedal_core.so.3": {
+        "candidate": "libonedal_core.so.3",
+        "identities": 3367,
+        "absent": 0,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "db1ea327900e332db5c523d97c71dc137750e12849168efb170730af444edfa0",
+        "new_sha256": "4072ea404d1bb1dc6434d2242b08dafa3e4f502a5f871fd9d805b1d54702e96a"
+      },
+      "libonedal_parameters.so.3": {
+        "candidate": "libonedal_parameters.so.3",
+        "identities": 2,
+        "absent": 0,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "a4f880b6190afbdd0dcd79ab4b702885bc9aa70c4b9d219c8cfcaa05815f080b",
+        "new_sha256": "8d258bb170b6526a14692145cd30d602d0f7a1f817ba273ccf9241dde55cf25c"
+      },
+      "libonedal_thread.so.3": {
+        "candidate": "libonedal_thread.so.3",
+        "identities": 0,
+        "absent": 0,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "bb14376213581c50b311de801016a7ecbeb50a56f84fc4d3092b292b591825ea",
+        "new_sha256": "bb14376213581c50b311de801016a7ecbeb50a56f84fc4d3092b292b591825ea"
+      }
+    },
+    "2025.9.0 to 2026.2.0": {
+      "libonedal.so.3": {
+        "candidate": "libonedal.so.4",
+        "identities": 148,
+        "absent": 1,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "ee44857d24e23cd2c948d50a035f15e3c1d209e51a2b17bcf51644ddfe3af25b",
+        "new_sha256": "b98517e990c18d172ac736cfff739f85153e764c4e6d278aadd9b54a06f6d80b"
+      },
+      "libonedal_core.so.3": {
+        "candidate": "libonedal_core.so.4",
+        "identities": 3367,
+        "absent": 1337,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "db1ea327900e332db5c523d97c71dc137750e12849168efb170730af444edfa0",
+        "new_sha256": "ccfc2a6cea9800218b45fea7d9b02c881ce523de414aad08f4362870e8f162f0"
+      },
+      "libonedal_parameters.so.3": {
+        "candidate": "libonedal_parameters.so.4",
+        "identities": 2,
+        "absent": 1,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "a4f880b6190afbdd0dcd79ab4b702885bc9aa70c4b9d219c8cfcaa05815f080b",
+        "new_sha256": "17769ec506b1763f779a04a1146d156bcd1f2afdf16d977e1d823a4e0ba24b0c"
+      },
+      "libonedal_thread.so.3": {
+        "candidate": "libonedal_thread.so.4",
+        "identities": 0,
+        "absent": 0,
+        "missing_baseline": [],
+        "missed": [],
+        "false_positives": [],
+        "old_sha256": "bb14376213581c50b311de801016a7ecbeb50a56f84fc4d3092b292b591825ea",
+        "new_sha256": "9939759b4d92b5cfbb3cfa678c7996b4467024bd81d4155aa86ee8ee1e61438c"
+      }
+    }
+  }
+}

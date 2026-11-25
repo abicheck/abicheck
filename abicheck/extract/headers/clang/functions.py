@@ -534,9 +534,12 @@ def parse_functions(
                 name=str(p.get("name", "")),
                 # Top-level `restrict` is `is_restrict` below, not the type.
                 type=without_top_level_restrict(_qualtype(p)),
-                # Desugared, not the raw `qualType`: a typedef'd pointer/reference/rvalue-reference (`typedef int &Ref;`)
-                # spells its `qualType` as the bare alias name, with no `&`/`*` token for the spelling heuristic to find --
-                # see `context.qualtype_desugared`'s own docstring (Codex review, PR #1200).
+                # Desugar aliases before classifying indirection or record passing.
+                trivial_for_calls_fact=type_identities.parameter_call_trait(
+                    _qualtype_desugared(p), entry.scope
+                )
+                if type_identities
+                else None,
                 kind=_param_kind(_qualtype_desugared(p)),
                 type_abi_fact=builtin_type_fact(_qualtype_desugared(p), builtin_abi),
                 type_identities_fact=type_identities.resolve(
@@ -544,7 +547,6 @@ def parse_functions(
                 )
                 if type_identities
                 else None,
-                # Desugared too: castxml counts through a typedef'd pointer (case73).
                 pointer_depth=_pointer_depth(_qualtype_desugared(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                 is_restrict=_clang_param_is_restrict(p),

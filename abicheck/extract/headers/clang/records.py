@@ -103,6 +103,7 @@ from .qualifiers import (
     record_kind,
     reduce_opaque_kind_set,
 )
+from .type_identity import record_call_trait
 from .vtable import build_vtable_evidence, is_record_definition
 
 #: Evaluates a (possibly wrapped) clang constant-expression node to an int,
@@ -357,6 +358,7 @@ def _build_record(
         # the one place these can actually be populated.
         is_standard_layout=is_standard_layout,
         is_trivially_copyable=is_trivially_copyable,
+        trivial_for_calls=record_call_trait(node) if not entry.in_template else None,
         is_template_pattern=entry.in_template,
         # ADR-085 D1: the spelled defaults when the caller resolved them (a
         # class-template pattern whose defaults are all spelled), else not

@@ -37,6 +37,7 @@ class CastxmlClangSemantics:
     """The joined facts as the castxml parser reads them."""
 
     __slots__ = (
+        "record_call_traits",
         "concepts",
         "mention_files",
         "noexcept",
@@ -51,7 +52,9 @@ class CastxmlClangSemantics:
         concepts: list[tuple[str, str, str]] | None = None,
         template_defaults: list[TemplateDefaultEntry] | None = None,
         variable_alignment: dict[str, int] | None = None,
+        record_call_traits: dict[str, bool] | None = None,
     ) -> None:
+        self.record_call_traits = record_call_traits or {}
         self.noexcept = noexcept
         self.mention_files = mention_files
         self.concepts = concepts
@@ -107,6 +110,7 @@ def load_clang_semantics(root: Element) -> CastxmlClangSemantics:
     concepts = loaded.get("concepts")
     alignment = loaded.get("variable_alignment")
     return CastxmlClangSemantics(
+        record_call_traits=loaded.get("record_call_traits"),
         noexcept=None
         if noexcept is None
         else {str(k): bool(v) for k, v in noexcept.items()},

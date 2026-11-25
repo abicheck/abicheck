@@ -121,6 +121,12 @@ class Param:
         default=None, kw_only=True, compare=False
     )
 
+    # The compiler's C++ ABI decision for this by-value record argument.
+    # True means eligible for ordinary value passing, independent of size.
+    trivial_for_calls_fact: Fact[bool] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+
     def __post_init__(self, is_va_list: bool) -> None:
         _, self.is_va_list_fact = bridge_legacy_and_fact(
             is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False

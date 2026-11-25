@@ -10,6 +10,12 @@ from typing import Any
 from ....model import Fact
 from .ast_inner import ast_inner
 from .context import _Decl
+from .templates import (
+    _specialization_spelling,
+    _template_param_defaults,
+    _template_param_kinds,
+    _template_param_names,
+)
 
 _CV = re.compile(r"\b(?:const|volatile|restrict|struct|class|union|enum)\b")
 #: Marks a name that matches two declarations at one depth (never confirmed).
@@ -23,7 +29,7 @@ _BUILTIN_WORDS = frozenset(
 )  # fmt: skip
 
 
-def _unwrap_type(spelling: str) -> str:
+def _unwrap_type(spelling: str, *, strip_indirection: bool = True) -> str:
     # Only outer declarator wrappers are transparent. Template arguments
     # (including their pointers and cv qualifiers) belong to the identity.
     parts = []
@@ -40,8 +46,95 @@ def _unwrap_type(spelling: str) -> str:
             if depth == 0:
                 parts.append(spelling[start : i + 1])
                 start = i + 1
-    parts.append(_CV.sub("", re.sub(r"[&*]|\[[^\]]*\]", "", spelling[start:])))
+    suffix = spelling[start:]
+    if strip_indirection:
+        suffix = re.sub(r"[&*]|\[[^\]]*\]", "", suffix)
+    parts.append(_CV.sub("", suffix))
     return " ".join("".join(parts).split())
+
+
+def record_call_trait(node: dict[str, Any]) -> bool | None:
+    data = node.get("definitionData")
+    if not node.get("completeDefinition") or not isinstance(data, dict):
+        return None
+    if data.get("canPassInRegisters") is True:
+        return True
+    if any(
+        data.get(slot, {}).get("nonTrivial")
+        for slot in ("copyCtor", "moveCtor", "dtor")
+    ):
+        return False
+    return None
+
+
+def record_call_traits(root: dict[str, Any]) -> dict[str, bool]:
+    """Clang's call-triviality decision on complete, named C++ definitions.
+
+    Stay within namespace and record scopes. A local class or a template
+    pattern cannot be joined by the qualified name of an ordinary record.
+    """
+    traits: dict[str, bool] = {}
+    ambiguous: set[str] = set()
+
+    def walk(
+        node: dict[str, Any],
+        scope: tuple[str, ...],
+        template: dict[str, Any] | None = None,
+    ) -> None:
+        for child in ast_inner(node):
+            if not isinstance(child, dict):
+                continue
+            kind = child.get("kind")
+            name = child.get("name")
+            if kind == "LinkageSpecDecl":
+                walk(child, scope)
+            if kind == "ClassTemplateDecl":
+                # Visit its concrete instantiations only. The primary pattern
+                # has no single call convention for every possible argument.
+                for specialization in ast_inner(child):
+                    if (
+                        isinstance(specialization, dict)
+                        and specialization.get("kind")
+                        == "ClassTemplateSpecializationDecl"
+                    ):
+                        walk({"inner": [specialization]}, scope, child)
+                continue
+            if kind == "ClassTemplateSpecializationDecl" and name:
+                full = _specialization_spelling(child, name, None)
+                if template and full:
+                    short = _specialization_spelling(
+                        child,
+                        name,
+                        _template_param_kinds(template),
+                        _template_param_defaults(template),
+                        _template_param_names(template),
+                    )
+                    trait = record_call_trait(child)
+                    if short and short != full and trait is not None:
+                        key = "::".join((*scope, short))
+                        if key in traits:
+                            ambiguous.add(key)
+                        traits[key] = trait
+                name = full
+                kind = "CXXRecordDecl"
+            if not name or kind not in ("NamespaceDecl", "CXXRecordDecl"):
+                continue
+            path = (*scope, name)
+            if kind == "CXXRecordDecl":
+                data = child.get("definitionData")
+                if not child.get("completeDefinition") or not isinstance(data, dict):
+                    continue
+                key = "::".join(path)
+                trait = record_call_trait(child)
+                if trait is None:
+                    continue
+                if key in traits:
+                    ambiguous.add(key)
+                traits[key] = trait
+            walk(child, path)
+
+    walk(root, ())
+    return {k: v for k, v in traits.items() if k not in ambiguous}
 
 
 class TypeIdentityIndex:
@@ -54,6 +147,7 @@ class TypeIdentityIndex:
         enums: list[_Decl],
         aliases: list[_Decl],
     ):
+        self.call_traits = record_call_traits(root)
         self.names = {
             "::".join((*e.scope, e.node["name"]))
             for e in (*records, *enums)
@@ -66,7 +160,7 @@ class TypeIdentityIndex:
             for e in aliases
             if e.node.get("name")
         }
-        self.known = self.names | self.aliases.keys()
+        self.known = self.names | self.aliases.keys() | self.call_traits.keys()
         self.record_names = {
             "::".join((*e.scope, e.node["name"])) for e in records if e.node.get("name")
         }
@@ -75,6 +169,7 @@ class TypeIdentityIndex:
         }
         self.imports: dict[tuple[str, ...], list[str]] = {}
         self.namespace_ids: dict[str, str] = {}
+        self.namespace_aliases: dict[str, str] = {}
         self._namespaces(root, ())
         self._usings(root, ())
         self.memo: dict[tuple[str, tuple[str, ...]], Fact[tuple[str, ...]]] = {}
@@ -101,6 +196,12 @@ class TypeIdentityIndex:
             return
         if node.get("kind") == "NamespaceDecl" and node.get("name"):
             scope = (*scope, node["name"])
+        if node.get("kind") == "NamespaceAliasDecl" and node.get("name"):
+            target = self.namespace_ids.get(
+                node.get("aliasedNamespace", {}).get("id", "")
+            )
+            if target:
+                self.namespace_aliases["::".join((*scope, node["name"]))] = target
         if node.get("kind") == "UsingDirectiveDecl":
             target = node.get("nominatedNamespace", {})
             name = self.namespace_ids.get(target.get("id", ""))
@@ -111,6 +212,7 @@ class TypeIdentityIndex:
                 "NamespaceDecl",
                 "TranslationUnitDecl",
                 "UsingDirectiveDecl",
+                "NamespaceAliasDecl",
                 "LinkageSpecDecl",
             ):
                 self._usings(child, scope)
@@ -149,12 +251,27 @@ class TypeIdentityIndex:
                 candidates.extend(
                     f"{ns}::{name}" for ns in self.imports.get(prefix, ())
                 )
+            head, separator, tail = name.partition("::")
+            if separator and self.namespace_aliases:
+                alias = self.namespace_aliases.get("::".join((*prefix, head)))
+                if alias:
+                    candidates.append(f"{alias}::{tail}")
             matches = set(candidates) & self.known
             if len(matches) > 1:
                 return _AMBIGUOUS
             if matches:
                 return next(iter(matches))
         return None
+
+    def parameter_call_trait(
+        self, spelling: str, scope: tuple[str, ...]
+    ) -> Fact[bool] | None:
+        identities = self.resolve(spelling, scope).value
+        if not identities or identities[0] not in self.call_traits:
+            return None
+        if self.by_value_fact(spelling, scope).value is not True:
+            return None
+        return Fact.present(self.call_traits[identities[0]])
 
     def by_value_fact(self, spelling: str, scope: tuple[str, ...]) -> Fact[bool]:
         """Whether *spelling* is a record returned by value (``Function.return_by_value_fact``).
@@ -164,7 +281,7 @@ class TypeIdentityIndex:
         any alias is looked through) is not by value, and a typedef is followed to
         its target. A name that resolves to a record declaration is by value; one
         that resolves to an enumeration or a builtin is not. Anything else (an
-        unresolved or ambiguous name, a function type, a template instance) is
+        unresolved or ambiguous name, a function type, an unresolved template instance) is
         undetermined, so the fact is not collected.
         """
         answer = self._by_value(spelling, scope, frozenset())
@@ -173,7 +290,11 @@ class TypeIdentityIndex:
     def _by_value(
         self, spelling: str, scope: tuple[str, ...], seen: frozenset[str]
     ) -> bool | None:
-        text = " ".join(_CV.sub(" ", spelling).split())
+        text = (
+            _unwrap_type(spelling, strip_indirection=False)
+            if "<" in spelling
+            else " ".join(_CV.sub(" ", spelling).split())
+        )
         if not text or "(" in text:
             return None
         if text.endswith(("*", "&")):
@@ -191,7 +312,7 @@ class TypeIdentityIndex:
                 tuple(found.split("::")[:-1]),
                 seen | {text},
             )
-        if found in self.record_names:
+        if found in self.record_names or found in self.call_traits:
             return True
         if found in self.enum_names:
             return False

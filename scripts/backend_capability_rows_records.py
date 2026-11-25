@@ -269,6 +269,13 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "trivial_for_calls",
+        _PARTIAL,
+        _PARTIAL,
+        note="Confirmed C++ call triviality of a complete record. CastXML joins the Clang semantic pass.",
+    ),
+    FactRow(
+        "RecordType",
         "is_trivially_copyable",
         _PARTIAL,
         _FULL,
@@ -649,7 +656,7 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
             "which is target-independent. clang side wired in G31 Phase C "
             "continued (schema v23), x86-64 System V spelling only; an "
             "unrecognized target's real `va_list` still reads `False`. "
-            '`diff_symbols._diff_param_va_list` compares only a same-producer '
+            "`diff_symbols._diff_param_va_list` compares only a same-producer "
             'pair (`"clang"` or `"castxml"`), never `"hybrid"` or a mix.'
         ),
     ),
@@ -682,6 +689,13 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         note=(
             "Schema v70: whether the return type is a record passed by value (`Fact[bool]`). castxml reads it from its type graph (`extract/headers/castxml/return_by_value.py`): a Struct/Class/Union is by value; a pointer, a reference or a fundamental/enum is not. clang is `PARTIAL`: `-ast-dump=json` gives only the desugared `qualType`, so `extract/headers/clang/type_identity.py` decides it from the declarator and the unambiguous record/enum declaration of the desugared return type; an ambiguous or unresolved name stays NOT_COLLECTED."
         ),
+    ),
+    FactRow(
+        "Param",
+        "trivial_for_calls_fact",
+        _PARTIAL,
+        _PARTIAL,
+        note="Both frontends require an identifiable by-value record and affirmative Clang special-member evidence. Missing evidence leaves the parameter unclassified.",
     ),
     FactRow(
         "Param",

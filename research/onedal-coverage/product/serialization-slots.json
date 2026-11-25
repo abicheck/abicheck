@@ -1,0 +1,42 @@
+{
+  "old": {
+    "method_exits": [
+      21,
+      22
+    ]
+  },
+  "control": {
+    "method_exits": [
+      21,
+      22
+    ],
+    "verdict": "NO_CHANGE",
+    "kinds": [
+      "public_not_exported"
+    ]
+  },
+  "swap": {
+    "method_exits": [
+      22,
+      21
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "public_not_exported",
+      "type_vtable_changed"
+    ]
+  },
+  "remove": {
+    "method_exits": [
+      22
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "func_virtual_removed",
+      "inline_function_removed",
+      "public_not_exported",
+      "type_vtable_changed",
+      "vtable_slot_count_changed"
+    ]
+  }
+}

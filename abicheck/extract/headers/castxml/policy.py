@@ -24,11 +24,9 @@ bundled Clang major version, never CastXML's own version. This module adds
 that gate: a supported range for CastXML itself plus a minimum bundled/linked
 Clang major, checked once before the L2 scan runs.
 
-The floor targets the legacy PyPI ``castxml`` distribution specifically
-(last released as 0.4.5 in September 2022, with no bundled-Clang metadata
-at all) —
-that is exactly what this gate is meant to catch and reject by default. The
-floor is *not* pinned to conda-forge's current ``castxml`` feedstock line: the
+The floor rejects the old PyPI ``castxml`` 0.4.5 distribution (no bundled-Clang
+metadata) while accepting the maintained official PyPI 0.8.0 wheel. The floor
+is *not* pinned to conda-forge's current ``castxml`` feedstock line: the
 CastXML Superbuild (github.com/CastXML/CastXMLSuperbuild, what
 ``action/install-castxml.sh`` installs and what most CI/CD consumers of this
 project actually run) tracks its own, much slower-moving internal version
@@ -49,9 +47,9 @@ from dataclasses import dataclass, field
 
 from packaging.version import InvalidVersion, Version
 
-# Supported CastXML version range for an authoritative L2 scan: >=0.6.11,<0.8.0.
+# Supported CastXML version range for an authoritative L2 scan: >=0.6.11,<0.9.0.
 MIN_CASTXML = "0.6.11"
-MAX_CASTXML = "0.8.0"  # exclusive upper bound
+MAX_CASTXML = "0.9.0"  # exclusive upper bound
 # Minimum bundled/linked Clang major version a supported CastXML build must
 # carry (glibc sized-float types and the GCC 13+ __assume__ attribute need
 # this — see dumper_castxml_probe._RECOMMENDED_CLANG_MAJOR, which this
@@ -104,8 +102,11 @@ class CastxmlVersionCheck:
             f"CastXML {version_desc}{where}.",
             f"abicheck supports CastXML >={MIN_CASTXML},<{MAX_CASTXML} for "
             "authoritative L2 scans.",
-            "The PyPI `castxml` distribution is not a supported default scanner setup.",
-            "Install the complete conda-forge environment or select an "
+            "This CastXML build is not a supported default scanner setup.",
+            "Install the supported wheel with `pip install 'abicheck[castxml]'`, "
+            "which pins the official PyPI release to 0.8.0; older PyPI releases "
+            "such as 0.4.5 remain unsupported. Or use the complete "
+            "conda-forge environment / select an "
             "explicitly managed supported CastXML/direct-Clang profile.",
         ]
         return "\n".join(lines)
@@ -190,7 +191,7 @@ def evaluate_castxml_version(raw_output: str) -> CastxmlVersionCheck:
         # of the next line (0.8.0-rc1, 0.8.0.dev1) *below* final 0.8.0,
         # so it slipped through this gate entirely (neither below the
         # minimum nor at/above the maximum) and would have run as an
-        # unvalidated 0.8 build. The minimum-side check above is left
+        # unvalidated 0.9 build. The minimum-side check above is left
         # using the raw pre-release-aware comparison, since a prerelease
         # of the minimum itself (0.7.0-rc1) must still sort below it.
         elif Version(parsed.base_version) >= Version(MAX_CASTXML):

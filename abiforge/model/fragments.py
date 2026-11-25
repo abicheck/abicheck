@@ -62,6 +62,7 @@ def role_text(fid: str, records: tuple[Record, ...]) -> tuple[str, str]:
     header = "\n".join(
         [
             *(r.render() for r in records),
+            f"unsigned long {fn}_size(void);",
             f"void {fn}_fill({top.spelling} *p);",
             f"unsigned long {fn}_sum(const {top.spelling} *p);",
         ]
@@ -86,6 +87,7 @@ def role_text(fid: str, records: tuple[Record, ...]) -> tuple[str, str]:
             total.append(f"(unsigned long)p->{m.name}")
     source = "\n".join(
         [
+            f"unsigned long {fn}_size(void) {{ return sizeof({top.spelling}); }}",
             f"void {fn}_fill({top.spelling} *p) {{ {' '.join(fill)} }}",
             f"unsigned long {fn}_sum(const {top.spelling} *p) {{ return "
             + (" + ".join(total) or "0")
@@ -114,15 +116,23 @@ def consumer_text(fixtures: tuple[Fixture, ...]) -> str:
         fn = _fn(fx.id)
         names = _printed(fx.top)
         fmt = " ".join(f"{n}=%lu" for n in names)
-        args = "".join(f", (unsigned long)v_{fx.id}.{n}" for n in names)
+        args = "".join(f", (unsigned long)view.{n}" for n in names)
+        # The new fill can write a larger record than the old header declares.
+        # Allocate for both views, then inspect the bytes through the old type.
         body += [
-            f"  {{ {fx.top.spelling} v_{fx.id}; memset(&v_{fx.id}, 0, sizeof v_{fx.id});",
-            f"    {fn}_fill(&v_{fx.id});",
-            f'    printf("{fx.id} {fmt} sum=%lu\\n"{args}, {fn}_sum(&v_{fx.id})); }}',
+            f"  {{ {fx.top.spelling} view;",
+            f"    size_t size = {fn}_size();",
+            "    void *storage = calloc(1, size > sizeof view ? size : sizeof view);",
+            "    if (!storage) return 1;",
+            f"    {fn}_fill(storage);",
+            "    memcpy(&view, storage, sizeof view);",
+            f'    printf("{fx.id} {fmt} sum=%lu\\n"{args}, {fn}_sum(storage));',
+            "    free(storage); }",
         ]
     return "\n".join(
         [
             "#include <stdio.h>",
+            "#include <stdlib.h>",
             "#include <string.h>",
             '#include "edit_seed.h"',
             "int main(void) {",
@@ -141,14 +151,14 @@ def payload(fid: str, *members: Member) -> Record:
     return Record("union", f"Payload_{fid}", members)
 
 
-def envelope(fid: str) -> Record:
+def envelope(fid: str, *, extent: int | None = None) -> Record:
     """A record embedding the union between a leading byte and a trailing word."""
     return Record(
         "struct",
         f"Envelope_{fid}",
         (
             Member("h", "char"),
-            Member("p", f"union Payload_{fid}"),
+            Member("p", f"union Payload_{fid}", extent=extent),
             Member("t", "uint32_t"),
         ),
     )
@@ -194,8 +204,14 @@ LAYOUT_FIXTURES: tuple[Fixture, ...] = (
     _union_fx("uretype", _char(8), _U64),
     _union_fx("uretype_back", _char(8), _DBL),
     _union_fx("uadd", _char(8), _U64),
+    _union_fx("ualign_add", _char(8)),
+    _union_fx("ualign_remove", _char(8), _U64),
     _union_fx("uremove", _char(8), _U64, _REAL),
     *(_union_fx(f"uext{n}", _char(n), _U64) for n in (7, 8, 15, 16)),
+    *(
+        Fixture(fid, (payload(fid, _char(n), _U64), envelope(fid, extent=3)))
+        for fid, n in (("ustride_grow", 8), ("ustride_shrink", 9), ("ustride_same", 7))
+    ),
     _union_fx("uext_char", _char(8)),
     _union_fx("upack", _char(9), _U64),
     _union_fx("ualign", _char(8), _U64, embedded=False),

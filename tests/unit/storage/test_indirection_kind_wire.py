@@ -17,6 +17,7 @@ from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS, migration_source_versi
 from abicheck.storage.dto_declarations_migration import (
     DECLARATIONS_MIGRATIONS,
     declarations_v3_to_v4,
+    declarations_v4_to_v5,
 )
 from abicheck.storage.fact_decode import abi_fundamental_from_json, decode_abi_slot_fact
 
@@ -39,8 +40,9 @@ def test_a_pointer_fact_with_the_kind_decodes_as_a_pointer() -> None:
     assert abi_fundamental_from_json(_V4_FACT).indirection is Indirection.POINTER
 
 
-def test_the_declarations_section_is_at_v4_and_reaches_it_from_v3() -> None:
-    assert SECTION_SCHEMA_VERSIONS["declarations"] == 4
+def test_the_declarations_section_reaches_v5_from_v3() -> None:
+    assert SECTION_SCHEMA_VERSIONS["declarations"] == 5
+    assert DECLARATIONS_MIGRATIONS[4] is declarations_v4_to_v5
     assert 3 in migration_source_versions("declarations")
     assert DECLARATIONS_MIGRATIONS[3] is declarations_v3_to_v4
 
@@ -57,3 +59,12 @@ def test_a_v3_payload_without_the_kind_migrates_unchanged() -> None:
 def test_a_v3_payload_carrying_the_kind_is_refused() -> None:
     with pytest.raises(ValueError, match="indirection"):
         declarations_v3_to_v4(_payload_with_fact(_V4_FACT))
+
+
+def test_v4_parameters_have_no_call_trait() -> None:
+    payload = {"functions": [{"params": [{"type": "R"}]}]}
+    assert declarations_v4_to_v5(payload) == payload
+    with pytest.raises(ValueError, match="trivial_for_calls_fact"):
+        declarations_v4_to_v5(
+            {"functions": [{"params": [{"trivial_for_calls_fact": {}}]}]}
+        )

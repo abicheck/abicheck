@@ -1,0 +1,32 @@
+[
+  {
+    "absent": null,
+    "loader_exit": 0,
+    "loadability": "pass",
+    "matches": true
+  },
+  {
+    "absent": "libonedal_core.so.3",
+    "loader_exit": 127,
+    "loadability": "fail",
+    "matches": true
+  },
+  {
+    "absent": "libonedal_thread.so.3",
+    "loader_exit": 127,
+    "loadability": "fail",
+    "matches": true
+  },
+  {
+    "absent": "libonedal_parameters.so.3",
+    "loader_exit": 127,
+    "loadability": "fail",
+    "matches": true
+  },
+  {
+    "absent": "libonedal.so.3",
+    "loader_exit": 127,
+    "loadability": "fail",
+    "matches": true
+  }
+]

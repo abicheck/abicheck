@@ -184,12 +184,55 @@ ATTRIBUTION_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("func_removed_and_private_record_grew", "c_opaque", "gcc", {"evidence": "dwarf"}),
 )
 
+#: The evidence axis value of the stripped primary configuration (plan §4 B0):
+#: ``headers`` evidence on a stripped library. A row or factor names it as one
+#: value, so it is one more axis value in every pair draw, not a side flag.
+STRIPPED_HEADERS = "headers.stripped"
+
+
+#: Stripped C++ libraries whose public headers expose a change to base layout
+#: or virtual dispatch. Adding an override is the
+#: compatible control: it reuses an inherited slot.
+CXX_L2_PR = tuple(
+    (op, "cxx_more", family, {"evidence": STRIPPED_HEADERS})
+    for op, family in (
+        ("record_lost_trivially_copyable", "gcc"),
+        ("record_lost_trivially_copyable", "clang"),
+        ("virtual_appended_after_last_slot", "gcc"),
+        ("base_became_nonvirtual", "clang"),
+        ("method_became_nonvirtual", "gcc"),
+        ("override_added", "clang"),
+    )
+)
+
+
 #: The PR tier's union/bit-field exact-assertion guards
 #: (``abiforge.operators.fragments``): a unit spill that moves later fields at
 #: a fixed sizeof, a packed union boundary under DWARF, and an -O2 control
 #: (a required absence). The full family runs in the nightly/weekly draws
 #: and in ``python -m abiforge.run.fragment_campaign``.
 FRAGMENTS_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
+    # A union stays eight bytes while its alignment moves the enclosing fields.
+    (
+        "union_member_raises_alignment",
+        "c_layout",
+        "gcc",
+        {"evidence": STRIPPED_HEADERS},
+    ),
+    (
+        "union_member_lowers_alignment",
+        "c_layout",
+        "clang",
+        {"evidence": STRIPPED_HEADERS},
+    ),
+    *(
+        (op, "c_layout", family, {"evidence": STRIPPED_HEADERS})
+        for op, family in (
+            ("union_array_stride_grows", "clang"),
+            ("union_array_stride_shrinks", "gcc"),
+            ("union_array_stride_unchanged", "gcc"),
+        )
+    ),
     ("bitfield_width_16_to_17", "c_layout", "gcc", {}),
     (
         "union_char_extent_8_to_9",
@@ -213,12 +256,6 @@ DIALECT_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ),
     ("dialect_cxx20_char8_t_parameter", "cxx_dialect", "gcc", {}),
 )
-
-#: The evidence axis value of the stripped primary configuration (plan §4 B0):
-#: ``headers`` evidence on a stripped library. A row or factor names it as one
-#: value, so it is one more axis value in every pair draw, not a side flag.
-STRIPPED_HEADERS = "headers.stripped"
-
 
 # (op, seed, producer family, config changes). One guard per axis.
 _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
@@ -266,6 +303,7 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     *KIND_REACH_PR,
     *ATTRIBUTION_PR,
     *FRAGMENTS_PR,
+    *CXX_L2_PR,
     *DIALECT_PR,
 )
 

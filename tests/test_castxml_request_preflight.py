@@ -217,7 +217,7 @@ def _castxml_reports(monkeypatch: pytest.MonkeyPatch, version_output: str) -> No
     [
         _OLD_CASTXML,
         "castxml version 0.6.10\nclang version 18.1.8",
-        "castxml version 0.8.0\nclang version 18.1.8",
+        "castxml version 0.9.0\nclang version 18.1.8",
         "castxml version 0.7.0\nclang version 17.0.6",
         "garbage",
     ],

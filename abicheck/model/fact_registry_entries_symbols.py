@@ -709,6 +709,22 @@ SYMBOL_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="Param",
+        field="trivial_for_calls",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.compare.value_parameter_convention:value_parameter_changes",
+        ),
+        notes="Schema v71. Clang classification of an identified record passed by value.",
+    ),
+    _E(
+        owner="Param",
         field="type_identities",
         value_type="tuple[str, ...]",
         producing_backends=("castxml",),
