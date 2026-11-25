@@ -91,3 +91,6 @@ Across the 2025.9.0 to 2025.11.0 transition all 3,344 provider-symbol pairs
 remained defined. Across 2025.9.0 to 2026.2.0, 1,277 disappeared. Both comparisons
 matched the independent symbol inventory for every pair. These measurements
 complement the mutation-witness counts in the product ledger.
+
+The per-variant outcomes and release binary SHA-256 digests are recorded in
+[abiforge-cpu-receipt.json](abiforge-cpu-receipt.json).
