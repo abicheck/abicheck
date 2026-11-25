@@ -33,6 +33,7 @@ the table is written for.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import Protocol
 
 from ..diff_helpers import make_change
@@ -62,6 +63,9 @@ class LayoutIndex(Protocol):
 
     @property
     def returned_by_value(self) -> frozenset[str]: ...
+
+    @property
+    def records_by_name(self) -> dict[str, RecordType]: ...
 
     def entity_for(self, record: RecordType) -> CanonicalEntity | None: ...
 
@@ -125,6 +129,64 @@ def return_convention(
     return ("regs", *(str(c) for c in eightbytes))
 
 
+def _scalar_fields(
+    record: RecordType, index: LayoutIndex, offset: int, active: set[int]
+) -> list[TypeField] | None:
+    """Expand nonvirtual base and record subobjects at their observed bit offsets."""
+    if id(record) in active or record.virtual_bases or record.vtable:
+        return None
+    active = active | {id(record)}
+    leaves = []
+    for base in record.bases:
+        scope = (record.qualified_name or "").rpartition("::")[0]
+        target = index.records_by_name.get(f"{scope}::{base}") if scope else None
+        if target is None:
+            target = index.records_by_name.get(base)
+        base_offset = record.base_offsets.get(base)
+        if target is None or base_offset is None:
+            return None
+        nested = _scalar_fields(target, index, offset + base_offset, active)
+        if nested is None:
+            return None
+        leaves.extend(nested)
+    for member in record.fields:
+        if member.offset_bits is None:
+            return None
+        if member_class(member) is not None:
+            leaves.append(
+                replace(member, offset_bits=offset + member.offset_bits)
+                if offset
+                else member
+            )
+            continue
+        ids = member.type_identities_fact
+        if (
+            member.is_bitfield
+            or any(c in member.type for c in "[]*&")
+            or ids is None
+            or not ids.is_present
+            or len(ids.value or ()) != 1
+        ):
+            return None
+        target = index.records_by_name.get((ids.value or ())[0])
+        if target is None:
+            return None
+        nested = _scalar_fields(target, index, offset + member.offset_bits, active)
+        if nested is None:
+            return None
+        leaves.extend(nested)
+    return leaves
+
+
+def _record_convention(
+    size: int | None, record: RecordType, index: LayoutIndex
+) -> tuple[str, ...] | None:
+    if size is None or size > 128:
+        return return_convention(size, record.fields)
+    fields = _scalar_fields(record, index, 0, set())
+    return return_convention(size, fields) if fields is not None else None
+
+
 def returned_by_value_records(functions: Iterable[Function]) -> frozenset[str]:
     """The record identities some declared function returns by value.
 
@@ -167,11 +229,11 @@ def record_return_convention_changes(
         return
     old_size, _ = entity_layout(old_index.entity_for(t_old))
     new_size, _ = entity_layout(new_index.entity_for(t_new))
-    old_conv = return_convention(
-        old_size.value if old_size.is_present else None, t_old.fields
+    old_conv = _record_convention(
+        old_size.value if old_size.is_present else None, t_old, old_index
     )
-    new_conv = return_convention(
-        new_size.value if new_size.is_present else None, t_new.fields
+    new_conv = _record_convention(
+        new_size.value if new_size.is_present else None, t_new, new_index
     )
     # A nontrivial copy or destructor forces an invisible result pointer,
     # even for a one-word record. Older snapshots lack this independent fact;

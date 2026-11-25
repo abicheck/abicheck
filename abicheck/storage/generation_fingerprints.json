@@ -4,7 +4,7 @@
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
       "abicheck/dumper.py": "6d6df4f72968133150ac026bf88846cabd8e44ed8185a88a9fb71451c8fb0864",
-      "abicheck/dumper_clang.py": "55e11d6887eeed039ce65e9ce255c6a2c1f58d6e2073076bba3584ce619e2b1b",
+      "abicheck/dumper_clang.py": "433b6d8fa9a5b2654bbffb7a9087838b6c04f9534d923332dcb799ba16f57939",
       "abicheck/dwarf_advanced.py": "1e903a0d8693daa7f5c264f013f4a29795ba5509b0ee6dd6ee373d0ff6bd5984",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -159,7 +159,7 @@
       "abicheck/extract/headers/clang/pointer_depth.py": "88afcca3b65a1a95f6cea563085af926b45e5ed2d8e1bdd74b9332a129b07441",
       "abicheck/extract/headers/clang/qualifiers.py": "8fe5b0760eec5c2c83842d147a9734275693a5ab6167bcbf2b30a73a30f39c40",
       "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
-      "abicheck/extract/headers/clang/records.py": "e7637be6fad83ef6b441183fa2e49005be1e914c7be384f63fbda66f688097a3",
+      "abicheck/extract/headers/clang/records.py": "c595ad7ff033d6734726c30a854b78ca309bc5dee6f6f6ab1458e648faf91273",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
       "abicheck/extract/headers/clang/return_type.py": "40e53585fb537acbad76708d77137764625e2c3ee381529bb57aeb12629b389a",
@@ -170,7 +170,7 @@
       "abicheck/extract/headers/clang/template_default_spelling.py": "dd2f4d32ff440849edc6547afeacd9945502860e4536d158bde3109306908434",
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
-      "abicheck/extract/headers/clang/type_identity.py": "0a185cce66698ee2c3553a92637ba53e1229468ae0a89f2dfd6d0c815a104380",
+      "abicheck/extract/headers/clang/type_identity.py": "ef2ff3f7a9aeb59253e17f92195312b2ecce7bfa2d3f9760e1ddba3a2c776db3",
       "abicheck/extract/headers/clang/typedefs.py": "112486b3fd0a842f45c154334587639f23e9455adc125b93aa90b6dd47804202",
       "abicheck/extract/headers/clang/var_alignment.py": "f313f0f9c2941929fa649c7944c182adbbe6522743cf5a1972e477c2a7cd8d71",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "4185d24dcbee5fd5ec76a6bcab436fcb7df76214adb36f2269b5a1f2a8ef1a28",
-    "generation": 95,
-    "reason": "Remove the unused forwarding module after sharing DWARF convention names in the model."
+    "fingerprint": "6a6165a4a12369bcc795ade8c25b1ba00472448921ccc375d96f2052a4b20d84",
+    "generation": 96,
+    "reason": "Resolve imported record identities and nested return layouts"
   },
   "resolver": {
     "files": {

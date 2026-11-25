@@ -55,7 +55,8 @@ def test_serialization_dispatch_and_variant_loss_receipts():
     assert slots["old"]["method_exits"] == slots["control"]["method_exits"] == [21, 22]
     assert slots["swap"]["method_exits"] == [22, 21]
     assert slots["remove"]["method_exits"] == [22]
-    for key in ("swap", "remove"):
+    assert slots["insert"]["method_exits"] == [23, 21]
+    for key in ("swap", "remove", "insert"):
         assert slots[key]["verdict"] == "BREAKING"
         assert "type_vtable_changed" in slots[key]["kinds"]
     variants = json.loads((PRODUCT / "variant-loss.json").read_text())
@@ -114,3 +115,41 @@ def test_shared_return_types_have_independent_ownership_controls():
     assert all(
         (r["control"], r["borrow"], r["extra_owner"]) == ("0", "11", "12") for r in runs
     )
+
+
+def test_all_source_argument_positions_are_accounted_for():
+    from abiforge.run.onedal_arguments import argument_inventory
+
+    positions, symbols = argument_inventory()
+    receipt = json.loads((PRODUCT / "argument-abi.json").read_text())
+    assert receipt["positions"] == positions
+    assert set(receipt["calls"]) == symbols
+
+
+def test_minor_release_added_virtual_cells():
+    with gzip.open(PRODUCT / "virtual-slots.csv.gz", "rt") as stream:
+        releases = {}
+        for row in csv.DictReader(stream):
+            if row["vtable"]:
+                releases.setdefault(row["release"], set()).add(
+                    (row["provider"], row["vtable"], row["byte_offset"], row["symbol"])
+                )
+    old, new = (releases["dal-" + version] for version in ("2025.9.0", "2025.11.0"))
+    assert not old - new
+    assert new - old == {
+        (
+            "libonedal_core.so.3",
+            table,
+            offset,
+            "_ZN4daal10algorithms10interface113AlgorithmImplILNS_11ComputeModeE1EE"
+            + target,
+        )
+        for table in (
+            "_ZTVN4daal10algorithms19optimization_solver10interface110BatchIfaceE",
+            "_ZTVN4daal10algorithms6kmeans4init10interface29BatchBaseE",
+        )
+        for offset, target in (
+            ("32", "18checkComputeParamsEv"),
+            ("40", "11checkResultEv"),
+        )
+    }

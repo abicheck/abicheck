@@ -26,6 +26,11 @@ def run(prefix, out):
         .replace(DES, SER)
         .replace("PLACEHOLDER", DES),
         "remove": original.replace(SER, ""),
+        "insert": original.replace(
+            SER,
+            "virtual services::Status inserted(interface1::InputDataArchive*) { std::_Exit(23); }\n    "
+            + SER,
+        ).replace("#include", "#include <cstdlib>\n#include", 1),
     }
     src = SOURCE
     lib = prefix / "lib"
@@ -81,9 +86,13 @@ def run(prefix, out):
         ]
         if (
             exits
-            != {"old": [21, 22], "control": [21, 22], "swap": [22, 21], "remove": [22]}[
-                variant
-            ]
+            != {
+                "old": [21, 22],
+                "control": [21, 22],
+                "swap": [22, 21],
+                "remove": [22],
+                "insert": [23, 21],
+            }[variant]
         ):
             raise ValueError(f"{variant}: unexpected dispatch {exits}")
         subprocess.run(

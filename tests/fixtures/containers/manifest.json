@@ -121,17 +121,17 @@
       }
     },
     "clang_snapshot/5": {
-      "commit": "4f7f8fe3869b",
+      "commit": "a538acb3b3aa",
       "generations": {
-        "extractor": 95,
+        "extractor": 96,
         "resolver": 4
       },
       "path": "clang/5/libcorpus.json.gz",
       "sample": "clang_snapshot",
-      "sha256": "f3d49c36da229697322fd17e866d29e842b3a53ff1e747bca0d3fee229e3e407",
+      "sha256": "fe950039cfa758003bbd83e9809ecf2c6b17f93cca6c0872698871779164f196",
       "toolchain": {
-        "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
-        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+        "clang": "Debian clang version 19.1.7 (3+b1)",
+        "g++": "g++ (Debian 14.2.0-19) 14.2.0"
       },
       "versions": {
         "section_schema_versions": {
@@ -279,18 +279,18 @@
       }
     },
     "g38_document/5": {
-      "commit": "4f7f8fe3869b",
+      "commit": "a538acb3b3aa",
       "generations": {
-        "extractor": 95,
+        "extractor": 96,
         "resolver": 4
       },
       "path": "g38/5/release.json.gz",
       "sample": "g38_document",
-      "sha256": "d230e5b7a3418e97ce197a4dce81a2b71922b9f05fa6372380e1ec1c11eee5f1",
+      "sha256": "b75508c9b0597848b804b4187247ea378498b39ea995a5e7be55370d88363330",
       "toolchain": {
-        "castxml": "castxml version 0.7.0",
-        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+        "castxml": "castxml version 0.6.11",
+        "g++": "g++ (Debian 14.2.0-19) 14.2.0",
+        "gcc": "gcc (Debian 14.2.0-19) 14.2.0"
       },
       "versions": {
         "bundle_facts_schema_version": 5,
@@ -443,18 +443,18 @@
       }
     },
     "g40_archive/5": {
-      "commit": "4f7f8fe3869b",
+      "commit": "a538acb3b3aa",
       "generations": {
-        "extractor": 95,
+        "extractor": 96,
         "resolver": 4
       },
       "path": "g40/5/release.zip",
       "sample": "g40_archive",
-      "sha256": "ebc1420802c373767945ba40c353f6168b3b291e5fc2d572f225beaa1d2b0e03",
+      "sha256": "62e901d1956b448aa68789ac81a1094d0733f9ebdbc5ac222e4b39e6bf018bb1",
       "toolchain": {
-        "castxml": "castxml version 0.7.0",
-        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+        "castxml": "castxml version 0.6.11",
+        "g++": "g++ (Debian 14.2.0-19) 14.2.0",
+        "gcc": "gcc (Debian 14.2.0-19) 14.2.0"
       },
       "versions": {
         "bundle_archive_schema_version": 1,
@@ -584,14 +584,14 @@
       }
     },
     "macho_snapshot/5": {
-      "commit": "4f7f8fe3869b",
+      "commit": "a538acb3b3aa",
       "generations": {
-        "extractor": 95,
+        "extractor": 96,
         "resolver": 4
       },
       "path": "macho/5/libcorpus.json.gz",
       "sample": "macho_snapshot",
-      "sha256": "314cbe7ea60ce65514785c50737c66c29d5ecba3acb9a5e5e38afe11a55eb60f",
+      "sha256": "ff474938c73d4af988e2d8d90a45c9b730073127f2f616efdf15cd52bdc7f3b2",
       "toolchain": {},
       "versions": {
         "section_schema_versions": {
@@ -747,18 +747,18 @@
       }
     },
     "package/5": {
-      "commit": "4f7f8fe3869b",
+      "commit": "a538acb3b3aa",
       "generations": {
-        "extractor": 95,
+        "extractor": 96,
         "resolver": 4
       },
       "path": "package/5",
       "sample": "package",
-      "sha256": "030e38c0b3159abe827b335e2ae795538a5415848321a46b35c6f74e3425031c",
+      "sha256": "e6dd1ff93b845e48878a0d3ee545c83ec62ff4d7b009caece6d7cc2f08d82f97",
       "toolchain": {
-        "castxml": "castxml version 0.7.0",
-        "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+        "castxml": "castxml version 0.6.11",
+        "g++": "g++ (Debian 14.2.0-19) 14.2.0",
+        "gcc": "gcc (Debian 14.2.0-19) 14.2.0"
       },
       "versions": {
         "bundle_variant_spec_schema_version": 1,
@@ -889,14 +889,14 @@
       }
     },
     "pe_snapshot/5": {
-      "commit": "4f7f8fe3869b",
+      "commit": "a538acb3b3aa",
       "generations": {
-        "extractor": 95,
+        "extractor": 96,
         "resolver": 4
       },
       "path": "pe/5/corpus_pe.json.gz",
       "sample": "pe_snapshot",
-      "sha256": "2cc0e18a907f4ee5855a1d3f5903ab3dd4d44f3812105e646c3491ef0091cc10",
+      "sha256": "4b24c3398a42eeb477469d3aed4f3d1011c1ed93a7c57528825bed80d47b4599",
       "toolchain": {},
       "versions": {
         "section_schema_versions": {

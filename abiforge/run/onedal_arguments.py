@@ -107,13 +107,29 @@ def compile_calls(prefix, work, header, symbols):
     return result
 
 
+def argument_inventory():
+    rows = {}
+    for ledger in (LEDGER, LEDGER.with_name("extended-obligations.csv.gz")):
+        with gzip.open(ledger, "rt") as stream:
+            for row in csv.DictReader(stream):
+                match = re.fullmatch(r"by_value_arg(\d+)", row["kind"])
+                if match:
+                    rows[row["key"], match[1], row["symbol"]] = row
+    inventory = {}
+    symbols = set()
+    for (_, position, symbol), row in rows.items():
+        counts = inventory.setdefault(position, {"declarations": 0, "exported": 0})
+        counts["declarations"] += 1
+        if row["providers"]:
+            counts["exported"] += 1
+            if position != "0":
+                raise ValueError(f"add an executable p{position} witness for {symbol}")
+            symbols.add(symbol)
+    return inventory, symbols
+
+
 def run(prefix, output, check=False):
-    with gzip.open(LEDGER, "rt") as stream:
-        symbols = {
-            r["symbol"]
-            for r in csv.DictReader(stream)
-            if r["kind"] == "by_value_arg0" and r["providers"]
-        }
+    inventory, symbols = argument_inventory()
     if len(symbols) != 6:
         raise ValueError("review the campaign against the changed ledger")
     header = (prefix / "include/dal/services/daal_shared_ptr.h").read_text()
@@ -129,6 +145,7 @@ def run(prefix, output, check=False):
         ).splitlines()[0],
         "header_sha256": hashlib.sha256(header.encode()).hexdigest(),
         "calls": rows,
+        "positions": inventory,
     }
     runtime = observe(prefix, output, symbols, CLIENT)
     receipt["client_exits"] = runtime

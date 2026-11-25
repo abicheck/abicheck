@@ -103,7 +103,7 @@ from .qualifiers import (
     record_kind,
     reduce_opaque_kind_set,
 )
-from .type_identity import record_call_trait
+from .type_identity import TypeIdentityIndex, record_call_trait
 from .vtable import build_vtable_evidence, is_record_definition
 
 #: Evaluates a (possibly wrapped) clang constant-expression node to an int,
@@ -131,6 +131,7 @@ def parse_types(
     field_default_value: FieldDefaultValueEvaluator,
     template_param_defaults: Mapping[str, Sequence[str | None]] | None = None,
     builtin_abi: BuiltinAbi | None = None,
+    type_identities: TypeIdentityIndex | None = None,
 ) -> list[RecordType]:
     anon_names = _anon_typedef_names(typedefs)
     best: dict[str, tuple[_Decl, str]] = {}
@@ -192,6 +193,17 @@ def parse_types(
                 builtin_abi=builtin_abi,
             )
         )
+        if type_identities is not None:
+            for member in out[-1].fields:
+                if (
+                    type_identities.by_value_fact(
+                        member.type, (*rec[0].scope, rec[1])
+                    ).value
+                    is True
+                ):
+                    member.type_identities_fact = type_identities.resolve(
+                        member.type, (*rec[0].scope, rec[1])
+                    )
     return out
 
 

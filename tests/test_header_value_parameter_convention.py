@@ -42,11 +42,11 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             + (" ~Result();" if changed else "")
             + " }; } namespace abi = api; abi::Result make_result(); abi::Result* pointer_result(); void observe_result(const abi::Result&);\n"
             "static_assert(sizeof(BoxR) == sizeof(R));\n"
-            'extern "C" { int templ(int, BoxR); int val(int, R); int ptr(R*); int ref(R&); int attr(T); int assign(S); }\n'
+            'extern "C" { int templ(int, BoxR); int val(int, R); struct Big { long words[3]; }; Big late(int, double, R); int ptr(R*); int ref(R&); int attr(T); int assign(S); }\n'
         )
         src = root / "api.cpp"
         src.write_text(
-            '#include "api.hpp"\nabi::Result make_result(){return {};} abi::Result* pointer_result(){return nullptr;} void observe_result(const abi::Result&){} int templ(int i,BoxR b){return i+b.item.x;} int val(int i,R r){return i+r.x;} int ptr(R* r){return r->x;} '
+            '#include "api.hpp"\nabi::Result make_result(){return {};} abi::Result* pointer_result(){return nullptr;} void observe_result(const abi::Result&){} int templ(int i,BoxR b){return i+b.item.x;} Big late(int i,double d,R r){return {{i,(long)d,r.x}};} int val(int i,R r){return i+r.x;} int ptr(R* r){return r->x;} '
             "int ref(R& r){return r.x;} int attr(T t){return t.x;} int assign(S s){return s.x;}\n"
         )
         lib = root / "libapi.so"
@@ -109,7 +109,11 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             else ("memory (sret)", "regs(INTEGER)")
         ]
         assert returns[0]["affected_symbols"] == ["_Z11make_resultv"]
-        assert sorted(rows) == [("templ", before, after), ("val", before, after)]
+        assert sorted(rows) == [
+            ("late", before.replace("p1:", "p2:"), after.replace("p1:", "p2:")),
+            ("templ", before, after),
+            ("val", before, after),
+        ]
 
 
 @pytest.mark.integration

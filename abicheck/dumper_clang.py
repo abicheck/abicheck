@@ -1095,19 +1095,11 @@ class _ClangAstParser:
         )
 
     def parse_types(self) -> list[RecordType]:
-        """See ``extract.headers.clang.records.parse_types`` (the canonical
-        implementation this delegates to) for the full contract.
-
-        ``evaluate_bitfield_int``/``field_default_value`` are passed as
-        bound-method/module-function references for the same reason
-        ``parse_functions``'s own ``default_value`` is: the real evaluators
-        live in ``dumper_clang_expr.py``, which imports ``diff_cxx_rules``
-        and so cannot be imported from the ``extract``-classified
-        ``records.py`` module directly.
-        """
+        """Pass expression evaluators across the header extraction boundary."""
         records = _clang_records.parse_types(
             self._records,
             self._typedefs,
+            type_identities=self._type_identities,
             builtin_abi=self.builtin_abi,
             pub_header_segs=self._pub_header_segs,
             pub_dir_segs=self._pub_dir_segs,

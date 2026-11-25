@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 from .onedal_release_matrix import obligations
 
 
-def run(prefix, campaign, out):
+def run(prefix, campaign, out, *, original_headers=False, backend="clang"):
     expected = sorted(
         {
             r["symbol"]
@@ -21,7 +22,7 @@ def run(prefix, campaign, out):
         }
     )
     binary = prefix / "lib/libonedal_core.so.3"
-    env = {**os.environ, "ABICHECK_AST_FRONTEND": "clang"}
+    env = {**os.environ, "ABICHECK_AST_FRONTEND": backend}
     cli = [sys.executable, "-m", "abicheck"]
     # This projection tests return-slot attribution only. Executable clients
     # use the unmodified SDK declarations and exercise the actual call shapes.
@@ -30,13 +31,32 @@ def run(prefix, campaign, out):
         d.mkdir(parents=True, exist_ok=True)
         overlay = campaign / name
         api = d / "returns.hpp"
-        api.write_text(
-            '#include "services/error_handling.h"\n'
-            + "".join(
-                f'daal::services::interface1::Status projection_{i}() asm("{symbol}");\n'
-                for i, symbol in enumerate(expected)
+        if original_headers:
+            include = d / "include"
+            shutil.copytree(prefix / "include", include, dirs_exist_ok=True)
+            relative = Path("dal/services/error_handling.h")
+            shutil.copyfile(overlay / relative, include / relative)
+            headers = sorted(
+                {
+                    r["header"]
+                    for r in obligations()
+                    if r["kind"] == "by_value_return"
+                    and r["detail"] == "services::Status"
+                }
             )
-        )
+            api.write_text(
+                '#include "daal.h"\n' + "".join(f'#include "{h}"\n' for h in headers)
+            )
+            includes = [include / "dal", include]
+        else:
+            api.write_text(
+                '#include "services/error_handling.h"\n'
+                + "".join(
+                    f'daal::services::interface1::Status projection_{i}() asm("{symbol}");\n'
+                    for i, symbol in enumerate(expected)
+                )
+            )
+            includes = [overlay / "dal", prefix / "include/dal", prefix / "include"]
         subprocess.run(
             [
                 *cli,
@@ -44,12 +64,7 @@ def run(prefix, campaign, out):
                 binary,
                 "-H",
                 api,
-                "-I",
-                overlay / "dal",
-                "-I",
-                prefix / "include/dal",
-                "-I",
-                prefix / "include",
+                *(arg for path in includes for arg in ("-I", path)),
                 "-o",
                 d / "snapshot.json.gz",
             ],
@@ -131,5 +146,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ("prefix", "campaign", "out"):
         parser.add_argument(arg, type=Path)
+    parser.add_argument("--original-headers", action="store_true")
+    parser.add_argument("--backend", choices=("clang", "castxml"), default="clang")
     args = parser.parse_args()
-    run(args.prefix, args.campaign, args.out)
+    run(
+        args.prefix,
+        args.campaign,
+        args.out,
+        original_headers=args.original_headers,
+        backend=args.backend,
+    )
