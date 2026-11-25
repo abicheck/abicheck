@@ -14,8 +14,7 @@
 # limitations under the License.
 """The audited per-generation spelling rows (ADR-062 D2).
 
-The corpus gate reads this dict literal by AST and validates each reason.
-The frozen corpus tests every generation against the current spellings.
+The corpus gate validates these reasons and the frozen snapshots exercise the migrations.
 """
 
 from __future__ import annotations
@@ -25,7 +24,6 @@ from collections.abc import Mapping
 from .generation_spelling_types import GenerationSpellingChange
 
 __all__ = ["SPELLING_MIGRATIONS"]
-
 
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
@@ -797,8 +795,6 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "C++ record parameters gain a header-derived call-triviality fact. Older parameters retain unknown passing semantics. No spelling rewrite."
     ),
     96: GenerationSpellingChange(
-        "Clang records resolved identities for by-value nested fields and namespace using "
-        "declarations. The written type and symbol spellings are preserved. Older snapshots "
-        "need fresh header extraction to acquire the identities."
+        "Clang records identities for nested fields and imported types. Source spellings are preserved."
     ),
 }

@@ -1,10 +1,10 @@
 {
   "artifact_id": "linux-x86_64-gcc.libcorpus.so",
   "carriers": {
-    "digest": "sha256:e7566a5193811dbc312f2c726a9126fc963716f2a09f590c835e2bdb2d6ec168",
+    "digest": "sha256:44fe3e2d8544a53f6e383110796d5940450d489b9c0973d23f875d64980459ba",
     "kind": "wire_carriers"
   },
-  "evidence_digest": "sha256:0ddd08db90ca03ee6414916ab339fad495e3f434c3955adf314b0a139905aec3",
+  "evidence_digest": "sha256:69395a924108d9c70af9e3070548347ea15eb4ce9319720924b3d224405712da",
   "kind": "elf",
   "native_identity": {
     "library_name": "libcorpus.so"
@@ -12,7 +12,7 @@
   "ref_schema_version": 2,
   "sections": {
     "binary": {
-      "digest": "sha256:19e591a1e280dc98f31afcaa22980f7a260560dccd08777a26c4b8849269a27e",
+      "digest": "sha256:6303a02bd18fcb4188046490dd03e77232024c50648a439f20367b7ee1a8ed96",
       "kind": "binary"
     },
     "build": {
@@ -20,7 +20,7 @@
       "kind": "build"
     },
     "debug": {
-      "digest": "sha256:c5c8c7f297dc9e57596913c1f22e8710d5af5d13f4424f772308347f0bb7a901",
+      "digest": "sha256:3a540778ac9938cf5770d4b8bf04bf97c0656d1d426942251e7dfd728dfdb52c",
       "kind": "debug"
     },
     "declarations": {
@@ -32,7 +32,7 @@
       "kind": "graph"
     },
     "layout": {
-      "digest": "sha256:ac41e90b3355894a39c1c7ac91b63e0a6064ce692b47388c23ffee7183e09480",
+      "digest": "sha256:1a49038f0b523ef328598e0e1337e803d6ca590bff9d0e100e95d154b010612d",
       "kind": "layout"
     },
     "provenance": {

@@ -1,10 +1,10 @@
 {
   "artifact_id": "linux-x86_64-gcc.libextra.so",
   "carriers": {
-    "digest": "sha256:e7a6b6e83655e5f86f11dc126b73723cccf919ac7be1a2e3973e1afa87e40ee2",
+    "digest": "sha256:cc9d4933e6714c3a09b33b005e6736c3cd50f3c402b99ba2a1e7f0da1fc3637c",
     "kind": "wire_carriers"
   },
-  "evidence_digest": "sha256:5830316506d3b04356ff54781401c5d9030ed00ffc3c6ad6da78f27b8804bf84",
+  "evidence_digest": "sha256:251beda94c7bb9deeed345ecd8077e0f260608b1bdd89b5ff064df0cd92684ed",
   "kind": "elf",
   "native_identity": {
     "library_name": "libextra.so"
@@ -12,7 +12,7 @@
   "ref_schema_version": 2,
   "sections": {
     "binary": {
-      "digest": "sha256:848d4131881308f8f96268c95bb8cd05b59e506b440c2c29e7d14529ea0a158b",
+      "digest": "sha256:115731231f1aa987c6cf981a436b8ee14b7270ece2810d83498e5367e34ccefd",
       "kind": "binary"
     },
     "build": {
@@ -20,7 +20,7 @@
       "kind": "build"
     },
     "debug": {
-      "digest": "sha256:c5c8c7f297dc9e57596913c1f22e8710d5af5d13f4424f772308347f0bb7a901",
+      "digest": "sha256:3a540778ac9938cf5770d4b8bf04bf97c0656d1d426942251e7dfd728dfdb52c",
       "kind": "debug"
     },
     "declarations": {
@@ -32,7 +32,7 @@
       "kind": "graph"
     },
     "layout": {
-      "digest": "sha256:ac41e90b3355894a39c1c7ac91b63e0a6064ce692b47388c23ffee7183e09480",
+      "digest": "sha256:1a49038f0b523ef328598e0e1337e803d6ca590bff9d0e100e95d154b010612d",
       "kind": "layout"
     },
     "provenance": {
