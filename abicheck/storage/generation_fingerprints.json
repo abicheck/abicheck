@@ -121,7 +121,7 @@
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
-      "abicheck/extract/headers/castxml/records.py": "154b766dafc01b3ceec3d95312396a174cc39f17947902ce40f4be4011318493",
+      "abicheck/extract/headers/castxml/records.py": "eb0d6119475ceff657e89702641a66d20baf28e8fef130f73c4238a42482bf47",
       "abicheck/extract/headers/castxml/return_by_value.py": "482bf4c11d6485c4d6a578805d7b947d3c7cbf4647846f84a43b596e76184d2a",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
@@ -160,7 +160,7 @@
       "abicheck/extract/headers/clang/pointer_depth.py": "88afcca3b65a1a95f6cea563085af926b45e5ed2d8e1bdd74b9332a129b07441",
       "abicheck/extract/headers/clang/qualifiers.py": "8fe5b0760eec5c2c83842d147a9734275693a5ab6167bcbf2b30a73a30f39c40",
       "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
-      "abicheck/extract/headers/clang/records.py": "214671b358860f0fa02318f91701ba079de8a8e4fcef601d68f0613911ca36cf",
+      "abicheck/extract/headers/clang/records.py": "e7637be6fad83ef6b441183fa2e49005be1e914c7be384f63fbda66f688097a3",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
       "abicheck/extract/headers/clang/return_type.py": "40e53585fb537acbad76708d77137764625e2c3ee381529bb57aeb12629b389a",
@@ -171,7 +171,7 @@
       "abicheck/extract/headers/clang/template_default_spelling.py": "dd2f4d32ff440849edc6547afeacd9945502860e4536d158bde3109306908434",
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
-      "abicheck/extract/headers/clang/type_identity.py": "69e901f2a86ae329ba74be5603e1a2eefe33b937789b4cca34c9026f29eb4679",
+      "abicheck/extract/headers/clang/type_identity.py": "89f07e74f77f519b6e04762a8e7eeb02bf8282304dd397d9cf1e18ed13a4231d",
       "abicheck/extract/headers/clang/typedefs.py": "112486b3fd0a842f45c154334587639f23e9455adc125b93aa90b6dd47804202",
       "abicheck/extract/headers/clang/var_alignment.py": "f313f0f9c2941929fa649c7944c182adbbe6522743cf5a1972e477c2a7cd8d71",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
@@ -250,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "48bb2b7eaa97ffc263a5f1d4859c4c719e1179754186adb9d1f6e328457792e3",
+    "fingerprint": "9ff73178952f9a4c52a3d4ea51f319c3a58d6e3e974f7e0b9935a685494fb024",
     "generation": 95,
-    "reason": "Capture by-value record parameter call traits from complete Clang definitions"
+    "reason": "Capture call triviality of concrete record parameters and returns for L2 C++ ABI classification."
   },
   "resolver": {
     "files": {

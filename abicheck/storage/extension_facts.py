@@ -376,7 +376,7 @@ def sync_model_extension_facts(snap: Any) -> None:
     encode_noexcept_unobserved(snap)
     _sync_final_member_functions(snap)
     if _blocked_reason(snap, RECORD_CALL_TRAITS.section) is None:
-        traits = {}
+        traits: dict[str, bool] = {}
         seen = set()
         for record in snap.declarations.types:
             key = record.qualified_name or record.name
