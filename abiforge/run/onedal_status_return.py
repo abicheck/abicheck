@@ -43,7 +43,7 @@ def run(prefix, out):
     env.pop("LD_PRELOAD", None)
     exits = {
         mode: {"release": subprocess.run([client, mode], env=env).returncode}
-        for mode in ("compute", "table")
+        for mode in ("compute", "table", "virtual")
     }
     cli = [sys.executable, "-m", "abicheck"]
     for name, header in (
@@ -84,6 +84,7 @@ def run(prefix, out):
         api.write_text(
             '#include "services/error_handling.h"\nnamespace dm = daal::services::interface1;\n'
             'dm::Status observe_table(void*) asm("_ZN4daal15data_management10interface112NumericTable23allocateBasicStatisticsEv");\n'
+            'dm::Status observe_check(const void*,const void*,int) asm("_ZNK4daal10algorithms10covariance10interface15Input5checkEPKNS0_10interface19ParameterEi");\n'
             'dm::Status observe_compute(void*) asm("_ZN4daal10algorithms10interface113AlgorithmImplILNS_11ComputeModeE1EE14computeNoThrowEv");\n'
         )
         subprocess.run(

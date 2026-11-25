@@ -11,6 +11,12 @@
       "old": 0,
       "control": 0,
       "mutant": 42
+    },
+    "virtual": {
+      "release": 0,
+      "old": 0,
+      "control": 0,
+      "mutant": 42
     }
   },
   "checker": {

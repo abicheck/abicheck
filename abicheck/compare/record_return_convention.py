@@ -43,11 +43,13 @@ from ..model.declarations import Function
 from ..model.entities import RecordType, TypeField
 from ..model.semantic_ir import CanonicalEntity
 from ..model.semantic_ir_record_layout import entity_layout
+from ..model.snapshot import AbiSnapshot
 
 __all__ = [
     "record_return_convention_changes",
     "returned_by_value_records",
     "return_convention",
+    "attribute_return_exports",
     "member_class",
 ]
 
@@ -203,3 +205,31 @@ def _describe(conv: tuple[str, ...]) -> str:
     if conv[0] == "memory":
         return "memory (sret)"
     return "regs(" + ",".join(conv[1:]) + ")"
+
+
+def attribute_return_exports(changes: list[Change], old: AbiSnapshot) -> None:
+    """Attribute returning exports by resolved identity in the frozen client ABI."""
+    returns = [
+        c for c in changes if c.kind is ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED
+    ]
+    if returns:
+        from .export_names import default_export_names
+
+        exports = default_export_names(old) or set()
+        by_record: dict[str, set[str]] = {}
+        for fn in old.declarations.functions:
+            by_value = fn.return_by_value_fact
+            identities = fn.return_type_identities_fact
+            if (
+                fn.mangled in exports
+                and by_value is not None
+                and by_value.value is True
+                and identities is not None
+                and identities.is_present
+            ):
+                for identity in identities.value or ():
+                    by_record.setdefault(identity, set()).add(fn.mangled)
+        for change in returns:
+            change.affected_symbols = sorted(
+                by_record.get(change.qualified_name or change.symbol, ())
+            )

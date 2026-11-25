@@ -181,3 +181,41 @@ then observe the receiver argument under the original and mutated SDK
 declarations. Defaulting the copy constructor and destructor moves the
 eight-byte result from a hidden pointer to an integer register. The L2
 comparison checks this type-level change independently of the two client exits.
+
+### Three-release L2 and frozen-client matrix
+
+The baseline is Linux x86-64 oneDAL 2025.9.0. The minor and major candidates
+are 2025.11.0 and 2026.2.0. The major package supplies SONAME 4. Lookups in
+its successor provider measure export retention separately from whether an
+old executable can load.
+
+| Artifact | Measurement |
+| --- | --- |
+| `release-matrix.csv.gz` | 3,521 declaration/provider obligations checked against the dynamic exports of each released image. |
+| `status-impact.csv.gz` | Each SDK Status return's provider and virtual/nonvirtual declaration, joined to the L2 affected-symbol lists from both mutation directions and the unchanged control. The public CLI consumes a return-slot projection of the SDK ledger and the real core DSO. The three executable clients separately exercise actual method signatures. |
+| `virtual-slots.csv.gz`, `header-slots.csv` | Relocation targets in exported ELF vtables and byte offsets from the table symbol. Three unmatched methods have separate SDK pointer-to-member measurements relative to the vtable address point. Empty ELF cells convey lack of a unique observed relocation. |
+| `serialization-slots.json` | Frozen calls to both serialization methods through a secondary base in a derived fixture. Reordering and removal use the real SDK interface. |
+| `return-lowering.csv`, `shared-return-types.csv` | Clang IR for 225 remaining SDK return declarations and 52 concrete SharedPtr types exercised across a compiled return boundary with deleter counters. These type-level probes represent 185 exports. |
+| `option-returns.csv`, `release-clients.json` | Frozen clients import the 38 option getters and verify mask values on both minor releases. Additional real clients exercise heterogen table and exception returns, two collection getters with ownership mutants, virtual destruction and the exported string limit. |
+| `variant-loss.json` | Six individual export withdrawals compared against six independent ELF relocations and an unchanged fixture. |
+| `device-release-matrix.json` | Four old device clients on the OpenCL CPU and the standalone major-release loader control. GPU replay accepts `--selector level_zero:gpu` or `--selector opencl:gpu`. |
+
+Run from the repository root with the installed prefixes in `OLD`, `MINOR`,
+and `MAJOR` and a writable output directory `OUT`. The lowering campaign
+requires matching Clang 19 Python bindings and libclang (`LIBCLANG` can be
+set to the shared library). The device campaign requires a SYCL compiler and
+runtime.
+
+```sh
+python -m abiforge.run.onedal_release_matrix "$OLD" "$MINOR" "$MAJOR" "$OUT/matrix.csv"
+python -m abiforge.run.onedal_virtual_slots "$OLD" "$MINOR" "$MAJOR" "$OUT/slots.csv"
+python -m abiforge.run.onedal_status_return "$OLD" "$OUT/status"
+python -m abiforge.run.onedal_status_exports "$OLD" "$OUT/status" "$OUT/impact"
+python -m abiforge.run.onedal_serialization_slots "$OLD" "$OUT/serialization"
+python -m abiforge.run.onedal_return_lowering "$OLD" "$OUT/lowering"
+python -m abiforge.run.onedal_shared_return_types "$OLD" "$MINOR" "$OUT/shared"
+python -m abiforge.run.onedal_option_returns "$OLD" "$MINOR" "$MAJOR" "$OUT/options"
+python -m abiforge.run.onedal_release_clients "$OLD" "$MINOR" "$MAJOR" "$OUT/clients"
+python -m abiforge.run.onedal_variant_loss "$OLD" "$OUT/variants"
+python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR"
+```

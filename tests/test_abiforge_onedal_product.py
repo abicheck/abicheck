@@ -29,7 +29,7 @@ def test_product_receipts_cover_provider_matched_signatures():
     status = json.loads((product / "status-return-abi.json").read_text())
     assert status["client_exits"] == {
         name: {"release": 0, "old": 0, "control": 0, "mutant": 42}
-        for name in ("compute", "table")
+        for name in ("compute", "table", "virtual")
     }
     assert status["checker"]["control"]["verdict"] == "NO_CHANGE"
     assert status["checker"]["mutant"]["status_return"] == [
