@@ -705,7 +705,7 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
     def _boom(*a, **k):
         raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
 
-    sentinel = object()
+    sentinel = {"kind": "TranslationUnitDecl", "inner": []}
     monkeypatch.setattr(
         header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
     )
@@ -741,7 +741,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
             "/x/_detail.h:21:6: error: do not #include this internal header directly"
         )
 
-    sentinel = object()
+    sentinel = {"kind": "TranslationUnitDecl", "inner": []}
     monkeypatch.setattr(
         header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
     )

@@ -60,3 +60,34 @@ All 65 provider-matched `Result::get` overloads returning `data_management::Nume
 
 Run `bash ownership_campaign.sh OLD_PREFIX NEW_PREFIX > ownership-campaign.csv` here to reproduce ownership-campaign.csv.
 The C1 copy mutant yields exit 11 and the assignment mutant yields 12. Exit 13 checks the survivor after scope exit. Each passing run also checks that the NumericTablePtr deleter is called zero times before the final owner resets and exactly once afterwards, with a successful row read in between. The deleter holds the backing table alive. This counts the ownership callback and adds no exported-symbol mutation credit for the inline smart pointer.
+
+### ABIForge visitor permutations and released exports
+
+On x86-64 Linux, the visitor campaign uses the tree declarations at oneDAL
+commit `cb26da82f4672a7aad7e8d27be7d6b82fa1f300b`. A separately compiled
+old classification or regression client consumes both callbacks. Each variant
+permutes one declaration group while keeping all other declarations fixed.
+The campaign requires agreement on client behavior, L2 availability, verdict,
+and the exact moved field bit offsets or virtual slot positions.
+
+```sh
+ABICHECK_AST_FRONTEND=clang python -m abiforge.run.onedal_tree out/tree --source /path/to/oneDAL
+```
+
+The two identity controls and 28 nonidentity variants cover all single-group
+field and callback reorderings for these two visitors. The released-export
+check has a separate denominator. It compares GNU nm definitions against
+abicheck findings for each provider and symbol named by the product ledger.
+One likely-rename finding identifies a missing old name in the major transition.
+This check scores name availability only. Compare each of the four CPU DSOs
+with the public CLI, retaining the JSON reports, then run
+
+```sh
+python -m abiforge.run.onedal_exports "$OLD/lib" "$NEW/lib" \
+  research/onedal-coverage/product/ledger.csv.gz reports/*.json
+```
+
+Across the 2025.9.0 to 2025.11.0 transition all 3,344 provider-symbol pairs
+remained defined. Across 2025.9.0 to 2026.2.0, 1,277 disappeared. Both comparisons
+matched the independent symbol inventory for every pair. These measurements
+complement the mutation-witness counts in the product ledger.
