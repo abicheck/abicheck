@@ -45,3 +45,23 @@ def test_relocated_clang_version_banner(new_digest, new_target, comparable):
     else:
         with pytest.raises(ProfileMismatchError):
             check_contracts_comparable(old, new)
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        None,
+        "not json",
+        "{}",
+        '["gcc", "a", "b"]',
+        '["clang", "a"]',
+        '["clang", null, "b"]',
+        '["clang", "version", "version"]',
+        '["clang", "v\\nInstalledDir: relative", "version"]',
+        '["clang", "v\\nInstalledDir: /bin\\nTarget: other", "version"]',
+    ],
+)
+def test_incomplete_compiler_identity_cannot_prove_relocation(identity):
+    from abicheck.comparability_profile import _clang_version_without_install_dir
+
+    assert _clang_version_without_install_dir(identity) is None

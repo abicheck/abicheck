@@ -395,3 +395,32 @@ def test_a_non_bool_must_understand_decision_is_refused() -> None:
 
 def test_this_build_understands_exactly_its_catalog() -> None:
     assert wire_extensions.UNDERSTOOD_EXTENSIONS == EXTENSION_FACTS.names()
+
+
+def test_ambiguous_record_names_drop_call_traits_on_roundtrip():
+    snap = _snapshot()
+    snap.declarations.types[0].trivial_for_calls = True
+    snap.declarations.types.extend(
+        [
+            RecordType(name="T", kind="struct", trivial_for_calls=False),
+            RecordType(name="S", kind="struct", trivial_for_calls=False),
+        ]
+    )
+    restored = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
+    assert [(r.name, r.trivial_for_calls) for r in restored.declarations.types] == [
+        ("T", None),
+        ("T", None),
+        ("S", False),
+    ]
+
+
+@pytest.mark.parametrize("invalid", [[], {"T": 1}, {"T": "false"}])
+def test_invalid_record_call_trait_is_rejected(invalid):
+    snap = _snapshot()
+    snap.declarations.types[0].trivial_for_calls = True
+    document = json.loads(snapshot_to_json(snap))
+    document["sections"]["declarations"]["extensions"][
+        "abicheck.record_call_traits"
+    ] = invalid
+    with pytest.raises(SnapshotError, match="unreadable record call traits"):
+        snapshot_from_dict(document)

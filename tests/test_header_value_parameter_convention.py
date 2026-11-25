@@ -38,12 +38,15 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             + (" S& operator=(const S&);" if changed else "")
             + " };\n"
             "template<class U> struct Box { U item; }; using BoxR = Box<R>;\n"
+            "namespace api { struct Result { int x;"
+            + (" ~Result();" if changed else "")
+            + " }; } namespace abi = api; abi::Result make_result();\n"
             "static_assert(sizeof(BoxR) == sizeof(R));\n"
             'extern "C" { int templ(int, BoxR); int val(int, R); int ptr(R*); int ref(R&); int attr(T); int assign(S); }\n'
         )
         src = root / "api.cpp"
         src.write_text(
-            '#include "api.hpp"\nint templ(int i,BoxR b){return i+b.item.x;} int val(int i,R r){return i+r.x;} int ptr(R* r){return r->x;} '
+            '#include "api.hpp"\nabi::Result make_result(){return {};} int templ(int i,BoxR b){return i+b.item.x;} int val(int i,R r){return i+r.x;} int ptr(R* r){return r->x;} '
             "int ref(R& r){return r.x;} int attr(T t){return t.x;} int assign(S s){return s.x;}\n"
         )
         lib = root / "libapi.so"
@@ -87,5 +90,16 @@ def test_by_value_call_trait_survives_dump_compare(tmp_path, monkeypatch, backen
             (c["symbol"], c["old_value"], c["new_value"])
             for c in changes
             if c["kind"] == "value_abi_trait_changed"
+        ]
+        returns = [
+            c
+            for c in changes
+            if c["kind"] == "struct_return_convention_changed"
+            and c["symbol"] == "Result"
+        ]
+        assert [(c["old_value"], c["new_value"]) for c in returns] == [
+            ("regs(INTEGER)", "memory (sret)")
+            if operands == snapshots
+            else ("memory (sret)", "regs(INTEGER)")
         ]
         assert sorted(rows) == [("templ", before, after), ("val", before, after)]
