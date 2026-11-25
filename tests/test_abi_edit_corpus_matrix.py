@@ -71,6 +71,7 @@ from abiforge.run.tiers import (
     _PR,
     ATTRIBUTION_PR,
     BUILD_DATA_PR,
+    CXX_L2_PR,
     DEPENDENCY_PR,
     DIALECT_PR,
     FRAGMENTS_PR,
@@ -669,6 +670,7 @@ def test_pr_tier_guards_every_axis() -> None:
         + len(SOURCE_EVIDENCE_PR)
         + len(DEPENDENCY_PR)
         + len(ATTRIBUTION_PR)
+        + len(CXX_L2_PR)
         + len(FRAGMENTS_PR)
         + len(DIALECT_PR)
     )

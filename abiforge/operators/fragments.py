@@ -374,6 +374,22 @@ _UNION_OPS = (
         construct="union",
     ),
     _op(
+        "union_member_raises_alignment",
+        "ualign_add",
+        _u("ualign_add", _c(8), _U64),
+        "adding uint64_t beside char[8] raises the unpacked union alignment "
+        "from 1 to 8 without growing the union; its enclosing record grows",
+        construct="union",
+    ),
+    _op(
+        "union_member_lowers_alignment",
+        "ualign_remove",
+        _u("ualign_remove", _c(8)),
+        "removing the sole uint64_t lowers the unpacked union alignment "
+        "from 8 to 1 and moves both the union and the following word",
+        construct="union",
+    ),
+    _op(
         "union_member_removed_same_layout",
         "uremove",
         _u("uremove", _c(8), _U64),
@@ -391,6 +407,21 @@ _UNION_OPS = (
             construct="union",
         )
         for a, b in ((7, 8), (8, 9), (15, 16), (16, 17))
+    ),
+    *(
+        _op(
+            f"union_array_stride_{direction}",
+            fid,
+            (payload(fid, _c(n), _U64), envelope(fid, extent=3)),
+            "three embedded union elements multiply a change in element stride "
+            "at the trailing word; an extent change inside padding preserves its offset",
+            construct="union",
+        )
+        for direction, fid, n in (
+            ("grows", "ustride_grow", 9),
+            ("shrinks", "ustride_shrink", 8),
+            ("unchanged", "ustride_same", 8),
+        )
     ),
     _op(
         "union_char_only_extent_8_to_9",
