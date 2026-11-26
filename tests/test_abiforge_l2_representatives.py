@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Run the generated L2 witnesses against both public snapshot frontends."""
 
+import json
 import platform
 import shutil
 import sys
 
 import pytest
 
-from abiforge.run.l2_representatives import run
+from abiforge.run.l2_representatives import FAMILIES, run
 
 
 @pytest.mark.integration
@@ -20,6 +21,13 @@ def test_generated_representatives(tmp_path, frontend):
     if not shutil.which("clang++") or not shutil.which(frontend):
         pytest.skip(f"requires clang++ and {frontend}")
     run(tmp_path, "clang++", frontend)
+    receipt = json.loads((tmp_path / "receipt.json").read_text())
+    assert set(receipt) == {
+        f"{family}/{variant}"
+        for family, variants in FAMILIES.items()
+        for variant in ("old", *variants)
+    }
+    assert receipt["callback_return/change"]["verdict"] == "BREAKING"
 
 
 def test_verdict_gate_works_without_diagnostic_attribution():
@@ -66,7 +74,6 @@ def test_callback_alias_scope_and_indirect_controls():
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="glibc ELF binding trace")
 def test_duplicate_export_is_checked_per_loaded_provider(tmp_path):
-    import json
     import subprocess
 
     from abiforge.run.duplicate_provider import run as replay
