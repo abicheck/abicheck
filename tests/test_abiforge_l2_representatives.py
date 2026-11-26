@@ -61,3 +61,51 @@ def test_callback_alias_scope_and_indirect_controls():
     assert slots[0] == "ns::V" and slots[1] == "V"
     assert slots[2] not in types.traits and slots[3] not in types.traits
     assert types.arguments("Cycle", "") == {}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="glibc ELF binding trace")
+def test_duplicate_export_is_checked_per_loaded_provider(tmp_path):
+    import json
+    import subprocess
+
+    from abiforge.run.duplicate_provider import run as replay
+
+    if not shutil.which("cc") or not shutil.which("patchelf"):
+        pytest.skip("requires cc and patchelf")
+    if (
+        "--rename-dynamic-symbols"
+        not in subprocess.run(
+            ["patchelf", "--help"], capture_output=True, text=True
+        ).stderr
+    ):
+        pytest.skip("patchelf lacks symbol renaming")
+    libraries, clients = [], []
+    for target, value in (("cpu", 17), ("dpc", 29)):
+        library = tmp_path / f"lib{target}.so"
+        client = tmp_path / f"client_{target}"
+        src = tmp_path / f"{target}.c"
+        src.write_text(f"int shared(void) {{ return {value}; }}")
+        subprocess.run(
+            [
+                "cc",
+                "-shared",
+                "-fPIC",
+                src,
+                f"-Wl,-soname,{library.name}",
+                "-o",
+                library,
+            ],
+            check=True,
+        )
+        src.write_text(
+            f"int shared(void); int main(void) {{ return shared() != {value}; }}"
+        )
+        subprocess.run(["cc", src, library, "-o", client], check=True)
+        libraries.append(library)
+        clients.append(client)
+    dest = tmp_path / "result"
+    replay(*libraries, *clients, "shared", dest)
+    receipt = json.loads((dest / "receipt.json").read_text())
+    assert receipt["cases"]["withdrawal"]["libcpu.so"]["exit"] == 127
+    assert receipt["cases"]["withdrawal"]["libdpc.so"]["exit"] == 0

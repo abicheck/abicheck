@@ -14,12 +14,14 @@ from ..model.signature_token_scan import _split_top_level_commas
 from ..model.snapshot import AbiSnapshot
 from ..model.type_label import qualified_spelling
 from ..model.type_spelling_resolve import scope_of, split_components
+from ..model.vocabulary import AccessLevel
 from .call_axis_shadow import abi_of
 from .export_names import default_export_names
+from .record_return_convention import return_convention
 
 # Ordinary function pointers. A member pointer, a nested callback declarator
 # or a template containing a callback needs its own type evidence.
-_CALLBACK = re.compile(r"[^()<>&]+?\s*\(\s*\*\s*\)\s*\((.*)\)\s*(?:noexcept)?")
+_CALLBACK = re.compile(r"([^()<>&]+?)\s*\(\s*\*\s*\)\s*\((.*)\)\s*(?:noexcept)?")
 _CV = re.compile(
     r"^(?:(?:const|volatile|class|struct)\s+)+|(?:\s+(?:const|volatile))+$"
 )
@@ -34,6 +36,7 @@ class _CallbackTypes:
             self.traits[name] = (
                 record.trivial_for_calls if name not in self.traits else None
             )
+        self.records = {r.qualified_name or r.name: r for r in snap.declarations.types}
         self.names = self.traits.keys() | self.aliases.keys()
 
     def resolve(self, spelling: str, scope: str) -> tuple[str, str]:
@@ -63,10 +66,59 @@ class _CallbackTypes:
         match = _CALLBACK.fullmatch(signature)
         if not match:
             return {}
-        return {
+        slots = {
             i: self.resolve(arg, alias_scope)[0]
-            for i, arg in enumerate(_split_top_level_commas(match[1]))
+            for i, arg in enumerate(_split_top_level_commas(match[2]))
         }
+        result = self.resolve(match[1], alias_scope)[0]
+        if result in self.records:
+            slots[-1] = result
+        return slots
+
+    def slots(self, function: Function) -> dict[str, str]:
+        scope = scope_of(qualified_spelling(function.entity_id) or function.name)
+        slots = {}
+
+        def add(path: str, spelling: str, owner: str) -> None:
+            for index, name in self.arguments(spelling, owner).items():
+                suffix = "return" if index == -1 else f"p{index}"
+                slots[f"{path}.callback.{suffix}"] = name
+
+        endpoints = [
+            ("return", function.return_type, function.return_type_identities_fact)
+        ]
+        endpoints.extend(
+            (f"p{i}", p.type, p.type_identities_fact)
+            for i, p in enumerate(function.params)
+        )
+        for path, spelling, identities in endpoints:
+            add(path, spelling, scope)
+            if (
+                identities is None
+                or not identities.is_present
+                or len(identities.value or ()) != 1
+            ):
+                continue
+            owner = (identities.value or ())[0]
+            # Only direct record values, pointers and references expose this table.
+            direct = re.fullmatch(
+                r"([^*&#()\[\]<>]+?)\s*(?:[*&]\s*(?:const)?)?", spelling
+            )
+            if not direct or self.resolve(direct[1], scope)[0] != owner:
+                continue
+            record = self.records.get(owner)
+            if record:
+                for field in record.fields:
+                    if field.access != AccessLevel.PRIVATE:
+                        add(f"{path}.{field.name}", field.type, owner)
+        return slots
+
+    def direct_result(self, name: str) -> bool:
+        record = self.records[name]
+        if record.resolved_bases() or record.resolved_vtable():
+            return False
+        convention = return_convention(record.size_bits, record.fields)
+        return bool(convention and convention[0] == "regs")
 
 
 def callback_value_changes(
@@ -93,27 +145,27 @@ def callback_value_changes(
         a, b = old_functions[symbol], new_functions[symbol]
         if len(a.params) != len(b.params):
             continue
-        old_scope = scope_of(qualified_spelling(a.entity_id) or a.name)
-        new_scope = scope_of(qualified_spelling(b.entity_id) or b.name)
-        for i, (left, right) in enumerate(zip(a.params, b.params, strict=True)):
-            old_args = before.arguments(left.type, old_scope)
-            if not transitions.intersection(old_args.values()):
+        old_slots = before.slots(a)
+        if not transitions.intersection(old_slots.values()):
+            continue
+        new_slots = after.slots(b)
+        for slot, name in old_slots.items():
+            if name not in transitions or new_slots.get(slot) != name:
                 continue
-            new_args = after.arguments(right.type, new_scope)
-            for j, name in old_args.items():
-                if name not in transitions or new_args.get(j) != name:
-                    continue
-                slot = f"p{i}.callback.p{j}"
-                changes.append(
-                    make_change(
-                        ChangeKind.VALUE_ABI_TRAIT_CHANGED,
-                        symbol=symbol,
-                        entity_id=a.entity_id,
-                        old=f"{slot}:"
-                        + ("trivial" if before.traits[name] else "nontrivial"),
-                        new=f"{slot}:"
-                        + ("trivial" if after.traits[name] else "nontrivial"),
-                        description=f"Passing {name} by value changed for callback argument {j} of {a.name} parameter {i}",
-                    )
+            if slot.endswith(".return") and not (
+                before if before.traits[name] else after
+            ).direct_result(name):
+                continue
+            changes.append(
+                make_change(
+                    ChangeKind.VALUE_ABI_TRAIT_CHANGED,
+                    symbol=symbol,
+                    entity_id=a.entity_id,
+                    old=f"{slot}:"
+                    + ("trivial" if before.traits[name] else "nontrivial"),
+                    new=f"{slot}:"
+                    + ("trivial" if after.traits[name] else "nontrivial"),
+                    description=f"Passing {name} by value changed at {a.name} {slot}",
                 )
+            )
     return changes

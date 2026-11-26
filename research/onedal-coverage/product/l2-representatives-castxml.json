@@ -1,4 +1,111 @@
 {
+  "callback_return/old": {
+    "exits": [
+      0
+    ],
+    "callback_return": "i64"
+  },
+  "callback_return/change": {
+    "exits": [
+      1
+    ],
+    "callback_return": "sret",
+    "verdict": "BREAKING",
+    "kinds": [
+      "value_abi_trait_changed"
+    ],
+    "required_findings": [
+      [
+        "value_abi_trait_changed",
+        "dispatch",
+        "p0.callback.return:trivial",
+        "p0.callback.return:nontrivial"
+      ]
+    ]
+  },
+  "callback_large_return/old": {
+    "exits": [
+      0
+    ],
+    "callback_return": "sret"
+  },
+  "callback_large_return/change": {
+    "exits": [
+      0
+    ],
+    "callback_return": "sret",
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "callback_pointer_return/old": {
+    "exits": [
+      0
+    ],
+    "callback_return": "ptr"
+  },
+  "callback_pointer_return/change": {
+    "exits": [
+      0
+    ],
+    "callback_return": "ptr",
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "callback_table/old": {
+    "exits": [
+      17
+    ]
+  },
+  "callback_table/control": {
+    "exits": [
+      17
+    ],
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "callback_table/swap": {
+    "exits": [
+      19
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "type_field_offset_changed"
+    ],
+    "required_findings": [
+      [
+        "type_field_offset_changed",
+        "Table",
+        "0",
+        "64"
+      ],
+      [
+        "type_field_offset_changed",
+        "Table",
+        "64",
+        "0"
+      ]
+    ]
+  },
+  "callback_table/passing": {
+    "exits": [
+      23
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "value_abi_trait_changed"
+    ],
+    "required_findings": [
+      [
+        "value_abi_trait_changed",
+        "slots",
+        "return.second.callback.p0:nontrivial",
+        "return.second.callback.p0:trivial"
+      ]
+    ]
+  },
   "callback_value/old": {
     "exits": [
       0

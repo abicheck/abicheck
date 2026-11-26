@@ -183,7 +183,7 @@ These representatives cover the specified SysV AMD64 C++ decisions. ELF
 withdrawals, actual SYCL queue dependencies, and two-rank collectives have
 separate [oneDAL product witnesses](../research/onedal-coverage/product/README.md).
 
-The recorded Linux runs contain 15 comparisons per frontend, plus the five
+The recorded Linux runs contain 21 comparisons per frontend, plus the nine
 baselines. [Clang receipt](../research/onedal-coverage/product/l2-representatives-clang.json)
 and [CastXML receipt](../research/onedal-coverage/product/l2-representatives-castxml.json).
 
@@ -198,5 +198,27 @@ Two additional pairs exercise an exported callback registration signature.
 Removing Clang's `trivial_abi` attribute from a nontrivial record changes
 how an old callback receives the record by value. On SysV AMD64 the frozen
 client's exit changes from 0 to 1. Applying the same edit to the reference
-case preserves the client's result. The gate now checks 15 comparisons
-per frontend.
+case preserves the client's result.
+
+The return cases check the indirect call in LLVM IR and run the frozen
+callback. Removing the same attribute on a one-word return changes an
+integer-register result to a caller-provided buffer. Returning a pointer
+and returning a three-word record preserve their respective calling
+conventions. The table case calls the second of two named slots in a table
+returned by the library. Reordering them selects the first implementation.
+Changing only the second slot's value-passing ABI preserves both offsets and
+changes what that implementation reads. A body-only control preserves the
+result.
+
+Replay the duplicate-export experiment on glibc Linux with patchelf 0.19+
+and two frozen executables. Each client must run successfully with no
+arguments and import the shared symbol directly. Set LD_LIBRARY_PATH for
+any supporting dependencies. The runner copies both DSOs to private release
+directories, traces bindings in each client, and checks the top-level
+directory comparison verdict and CLI exit.
+
+```sh
+python -m abiforge.run.duplicate_provider "$DPC_DSO" "$CPU_DSO" "$DPC_CLIENT" "$CPU_CLIENT" "$SHARED_SYMBOL" "$OUT"
+```
+
+[Linux oneDAL 2025.9 CPU/DPC binding and release verdict](../research/onedal-coverage/product/duplicate-provider.json)

@@ -1,0 +1,29 @@
+{
+  "symbol": "_ZN6oneapi3dal2v15table25validate_input_dimensionsEll",
+  "cases": {
+    "control": {
+      "package_verdict": "COMPATIBLE",
+      "cli_exit": 0,
+      "libonedal_dpc.so.3": {
+        "exit": 0,
+        "binding": "libonedal_dpc.so.3"
+      },
+      "libonedal.so.3": {
+        "exit": 0,
+        "binding": "libonedal.so.3"
+      }
+    },
+    "withdrawal": {
+      "package_verdict": "BREAKING",
+      "cli_exit": 4,
+      "libonedal_dpc.so.3": {
+        "exit": 127,
+        "binding": null
+      },
+      "libonedal.so.3": {
+        "exit": 0,
+        "binding": "libonedal.so.3"
+      }
+    }
+  }
+}

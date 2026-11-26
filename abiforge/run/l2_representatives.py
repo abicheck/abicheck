@@ -15,6 +15,10 @@ from abiforge.operators import OP_BY_NAME
 
 # Each family has one baseline. Variants change one ABI-relevant condition.
 FAMILIES = {
+    "callback_return": ("change",),
+    "callback_large_return": ("change",),
+    "callback_pointer_return": ("change",),
+    "callback_table": ("control", "swap", "passing"),
     "callback_value": ("change",),
     "callback_reference": ("change",),
     "layout": ("control", "swap", "alignment"),
@@ -31,6 +35,54 @@ FAMILIES = {
 
 
 def sources(family, variant):
+    if family in {
+        "callback_return",
+        "callback_pointer_return",
+        "callback_large_return",
+    }:
+        attr = "[[clang::trivial_abi]]" if variant == "old" else ""
+        result = "V*" if family == "callback_pointer_return" else "V"
+        header = f'struct {attr} V {{ long value; ~V(); }}; using Make = {result} (*)(); extern "C" int dispatch(Make);'
+        if family == "callback_large_return":
+            header = header.replace("long value;", "long value, second, third;")
+        if family == "callback_pointer_return":
+            body = (
+                "V::~V() {} int dispatch(Make f) { return f()->value == 42 ? 0 : 1; }"
+            )
+            client = "return dispatch(+[]() -> V* { static V v{42}; return &v; });"
+        else:
+            body = """
+#include <new>
+#include <cstring>
+V::~V() {}
+int dispatch(Make f) {
+    alignas(V) unsigned char storage[sizeof(V)] = {};
+    V* result = new (storage) V(f());
+    long expected = 42;
+    int status = std::memcmp(storage, &expected, sizeof(expected)) != 0;
+    result->~V();
+    return status;
+}
+"""
+            client = "return dispatch(+[]() -> V { return V{42}; });"
+        return header, body, client
+    if family == "callback_table":
+        attr = "[[clang::trivial_abi]]" if variant == "passing" else ""
+        fields = (
+            "Slot second; First first;"
+            if variant == "swap"
+            else "First first; Slot second;"
+        )
+        header = f'struct {attr} V {{ long value; ~V(); }}; using Slot = int (*)(V); using First = int (*)(const V&); struct Table {{ {fields} }}; extern "C" const Table* slots();'
+        values = "right, left" if variant == "swap" else "left, right"
+        body = f"""V::~V() {{}}
+static int left(const V&) {{ return 19; }}
+static int right(V v) {{ return v.value == 42 ? 17 : 23; }}
+const Table* slots() {{ static const Table table = {{ {values} }}; return &table; }}
+static_assert(sizeof(Table) == 2 * sizeof(Slot), "two slots");"""
+        if variant == "control":
+            body = body.replace("return 19;", "return 18 + 1;")
+        return header, body, "return slots()->second(V{42});"
     if family in {"callback_value", "callback_reference"}:
         attr = "[[clang::trivial_abi]]" if variant == "old" else ""
         param = "V" if family == "callback_value" else "const V&"
@@ -148,9 +200,11 @@ def check_calls(ir, variant):
 
 
 def check_verdict(family, variant, verdict, code):
-    compatible = (
-        variant in {"control", "primary_override"} or family == "callback_reference"
-    )
+    compatible = variant in {"control", "primary_override"} or family in {
+        "callback_reference",
+        "callback_pointer_return",
+        "callback_large_return",
+    }
     valid = (
         (code == 0 and verdict in {"NO_CHANGE", "COMPATIBLE"})
         if compatible
@@ -207,6 +261,26 @@ def check_report(family, variant, data, code, verdict_only=False):
                 "p0.callback.p0:nontrivial",
             )
         },
+        ("callback_return", "change"): {
+            (
+                "value_abi_trait_changed",
+                "dispatch",
+                "p0.callback.return:trivial",
+                "p0.callback.return:nontrivial",
+            )
+        },
+        ("callback_table", "passing"): {
+            (
+                "value_abi_trait_changed",
+                "slots",
+                "return.second.callback.p0:nontrivial",
+                "return.second.callback.p0:trivial",
+            )
+        },
+        ("callback_table", "swap"): {
+            ("type_field_offset_changed", "Table", "0", "64"),
+            ("type_field_offset_changed", "Table", "64", "0"),
+        },
         ("layout", "swap"): offsets,
         ("layout", "alignment"): {
             ("type_alignment_changed", "point", "32", "64"),
@@ -248,7 +322,11 @@ def check_report(family, variant, data, code, verdict_only=False):
             "value_abi_trait_changed",
             "struct_return_convention_changed",
         }.intersection(kinds)
-    elif variant == "control" or family == "callback_reference":
+    elif variant == "control" or family in {
+        "callback_reference",
+        "callback_pointer_return",
+        "callback_large_return",
+    }:
         valid = data["verdict"] == "NO_CHANGE" and not kinds
     else:
         valid = True
@@ -306,6 +384,10 @@ def run(out, compiler, frontend, families=FAMILIES, verdict_only=False):
             expected = {
                 "callback_value": [int(variant == "change")],
                 "callback_reference": [0],
+                "callback_return": [int(variant == "change")],
+                "callback_pointer_return": [0],
+                "callback_large_return": [0],
+                "callback_table": [{"passing": 23, "swap": 19}.get(variant, 17)],
                 "layout": {"swap": [29, 4], "alignment": [8]}.get(variant, [17, 4]),
                 "calls": [34],
                 "virtual": {
@@ -326,6 +408,34 @@ def run(out, compiler, frontend, families=FAMILIES, verdict_only=False):
                     [*build, "-S", "-emit-llvm", src, "-o", "-"], text=True
                 )
                 row["signatures"] = check_calls(ir, variant)
+            if family in {
+                "callback_return",
+                "callback_pointer_return",
+                "callback_large_return",
+            }:
+                ir = subprocess.check_output(
+                    [*build, "-S", "-emit-llvm", src, "-o", "-"], text=True
+                )
+                calls = re.findall(
+                    r"\bcall (?:noundef )?(void|ptr|i64) %[-\w.]+\(([^\n]*)", ir
+                )
+                indirect = family == "callback_large_return" or (
+                    family == "callback_return" and variant == "change"
+                )
+                kind = (
+                    "void"
+                    if indirect
+                    else ("ptr" if family == "callback_pointer_return" else "i64")
+                )
+                if (
+                    len(calls) != 1
+                    or calls[0][0] != kind
+                    or ("sret(" in calls[0][1]) != indirect
+                ):
+                    raise ValueError(
+                        f"{family}/{variant}: unexpected callback lowering {calls}"
+                    )
+                row["callback_return"] = "sret" if indirect else kind
             snap = folder / "snapshot.json"
             subprocess.run(
                 [*cli, "dump", lib, "-H", api, "-o", snap],

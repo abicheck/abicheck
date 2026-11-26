@@ -87,6 +87,35 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
         and len(parts) >= 2
         and parts[-1] == "{ctor}"
     }
+
+    def target(type_id: str) -> Element | None:
+        el = by_id.get(type_id)
+        for _ in range(_MAX_DEPTH):
+            if el is None or el.tag not in _WRAPPER_TAGS:
+                return el
+            el = by_id.get(el.get("type", ""))
+        return None
+
+    def pointee(el: Element | None) -> Element | None:
+        if el is not None and el.tag in {"PointerType", "ReferenceType"}:
+            return target(el.get("type", ""))
+        return el
+
+    def callback(el: Element | None) -> bool:
+        fn_type = pointee(el)
+        return (
+            fn_type is not None
+            and fn_type.tag == "FunctionType"
+            and (
+                _by_value(by_id.get, fn_type.get("returns", ""), 0) is True
+                or any(
+                    arg.tag == "Argument"
+                    and _by_value(by_id.get, arg.get("type", ""), 0) is True
+                    for arg in fn_type
+                )
+            )
+        )
+
     for fn in root:
         if fn.tag not in (
             "Function",
@@ -106,32 +135,26 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
             and (fn.get("mangled") or fn.get("name")) not in exported
         ):
             continue
-        if _by_value(by_id.get, fn.get("returns", ""), 0) is True:
-            return True
-        for arg in fn:
-            if arg.tag != "Argument":
+        slots = [
+            fn.get("returns", ""),
+            *(arg.get("type", "") for arg in fn if arg.tag == "Argument"),
+        ]
+        for type_id in slots:
+            el = target(type_id)
+            if el is None:
                 continue
-            type_id = arg.get("type", "")
-            if _by_value(by_id.get, type_id, 0) is True:
+            if el.tag in _RECORD_TAGS or callback(el):
                 return True
-            target = by_id.get(type_id)
-            seen_pointer = False
-            for _ in range(_MAX_DEPTH):
-                if target is None:
-                    break
-                if target.tag == "FunctionType" and seen_pointer:
-                    if any(
-                        child.tag == "Argument"
-                        and _by_value(by_id.get, child.get("type", ""), 0) is True
-                        for child in target
+            record = pointee(el)
+            if record is not None and record.tag in _RECORD_TAGS:
+                for member in record.get("members", "").split():
+                    field = by_id.get(member)
+                    if (
+                        field is not None
+                        and field.tag == "Field"
+                        and callback(target(field.get("type", "")))
                     ):
                         return True
-                    break
-                if target.tag == "PointerType" and not seen_pointer:
-                    seen_pointer = True
-                elif target.tag not in _WRAPPER_TAGS:
-                    break
-                target = by_id.get(target.get("type", ""))
     return False
 
 
