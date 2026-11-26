@@ -192,6 +192,7 @@
     "abicheck/model/export_index.py(snapshot_export_names)": 56,
     "abicheck/model/extraction_scope.py(_both_from_headers)": 14,
     "abicheck/model/extraction_scope.py(compare_extraction_scopes)": 13,
+    "abicheck/model/extraction_scope.py(ownership_of)": 72,
     "abicheck/model/fact.py(Fact._make)": 853,
     "abicheck/model/fact.py(Fact.is_present)": 5694,
     "abicheck/model/fact.py(Fact.not_collected)": 1264,
@@ -246,7 +247,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4751,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4753,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 566,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.type_by_name)": 312,
@@ -271,6 +272,7 @@
     "abicheck/model/surface_facts.py(is_export_table_only_record)": 3976,
     "abicheck/model/surface_facts.py(is_header_declared)": 1856,
     "abicheck/model/surface_facts.py(is_public_export)": 612,
+    "abicheck/model/surface_facts.py(present_identities)": 2388,
     "abicheck/model/synthetic_key.py(is_synthetic_ctor_key)": 1458,
     "abicheck/model/synthetic_key.py(is_synthetic_dtor_key)": 1100,
     "abicheck/model/sysv_aggregate.py(_is_object_pointer)": 1,
@@ -292,7 +294,6 @@
     "abicheck/policy/analysis_assurance/_comparability.py(unverified_dimensions)": 14,
     "abicheck/policy/analysis_assurance/_export_read.py(recorded_export_reads)": 28,
     "abicheck/policy/binary_gate_marker.py(is_binary_gate_demoted)": 3408,
-    "abicheck/policy/captured_type_identities.py(present_identities)": 2388,
     "abicheck/policy/class_metadata_identity.py(_implicit_copy_assign_owner)": 204,
     "abicheck/policy/classification.py(apply_policy_file_overrides)": 28,
     "abicheck/policy/classification.py(effective_category)": 948,
@@ -321,5 +322,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 234736
+  "total": 234810
 }

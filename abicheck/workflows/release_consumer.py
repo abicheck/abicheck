@@ -74,7 +74,20 @@ def release_consumer_binding(
 
     before = imports(baseline.bindings_candidate, copies[0], baseline.candidate_graph)
     after = imports(result.bindings_candidate, copies[1], result.candidate_graph)
+    root_node = baseline.candidate_graph.nodes.get(str(copies[0]))
+    metadata = root_node.elf_metadata if root_node else None
     return {
+        "direct_references": None
+        if metadata is None
+        else [
+            {
+                "name": imp.name,
+                "binding": imp.binding.value,
+                "version": imp.version or None,
+                "provider": imp.version_soname or None,
+            }
+            for imp in metadata.imports
+        ],
         "client": str(copies[0].relative_to(old.resolve())),
         "loadability": result.loadability.value,
         "unresolved_dependencies": result.candidate_graph.unresolved,

@@ -146,6 +146,7 @@ def _change_row(
     byte-identical to before this parameter existed.
     """
     from ..compare.finding_identity import report_finding_id
+    from .l2_evidence import evidence_lines
 
     kind = getattr(c, "kind", None)
     relevance = getattr(c, "contract_relevance", None)
@@ -159,6 +160,10 @@ def _change_row(
         "description": getattr(c, "description", "") or "",
         "old_value": getattr(c, "old_value", None),
         "new_value": getattr(c, "new_value", None),
+        "l2_observations": evidence_lines(
+            getattr(c, "review_evidence", None),
+            getattr(c, "contract_reason_code", None),
+        ),
         "source_location": getattr(c, "source_location", None),
         "affected_symbols": list(affected) if affected else [],
         "caused_count": getattr(c, "caused_count", 0) or 0,

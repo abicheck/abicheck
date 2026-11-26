@@ -196,6 +196,12 @@ def encode_projection(projection: HeaderGraphAstProjection) -> str:
     )
 
 
+def _decode_type_edge(row: list[Any]) -> TypeEdge:
+    values = dict(zip(_TYPE_EDGE_FIELDS, row, strict=True))
+    values["argument_callees"] = tuple(values["argument_callees"])
+    return TypeEdge(**values)
+
+
 def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
     """*blob* as a projection, or ``None`` if this build cannot trust it.
 
@@ -220,7 +226,7 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
         return HeaderGraphAstProjection(
             type_files=dict(doc["type_files"]),
             entity_files=dict(doc["entity_files"]),
-            type_edges=[TypeEdge(*row) for row in doc["type_edges"]],
+            type_edges=[_decode_type_edge(row) for row in doc["type_edges"]],
             call_edges=[CallEdge(*row) for row in doc["call_edges"]],
             special_member_names=frozenset(doc["special_member_names"]),
             semantic_facts=_decode_semantic(doc["semantic_facts"]),

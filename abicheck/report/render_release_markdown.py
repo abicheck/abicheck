@@ -527,6 +527,13 @@ def finish_release_markdown(
             max_demangled=DEMANGLED_NAME_LIMIT,
             markdown=md_text,
         )
+    from .l2_evidence import dependency_changes
+
+    if changes := dependency_changes(library_results):
+        md += "\n## Dependency declaration changes\n"
+        for change in changes:
+            members = ", ".join(change["libraries"])
+            md += f"\n- {md_text(change['symbol'])}: {md_text(change['old_value'])} → {md_text(change['new_value'])} ({md_text(members)})\n"
     # The --follow-deps walk per member, from the scalar report's renderer.
     from .dependency_section import release_member_dependency_section
 

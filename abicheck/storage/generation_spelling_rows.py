@@ -12,10 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The audited per-generation spelling rows (ADR-062 D2).
-
-The corpus gate validates these reasons and the frozen snapshots exercise the migrations.
-"""
+"""Generation spelling migrations audited by the AST gate and frozen corpus (ADR-062 D2)."""
 
 from __future__ import annotations
 
@@ -24,6 +21,7 @@ from collections.abc import Mapping
 from .generation_spelling_types import GenerationSpellingChange
 
 __all__ = ["SPELLING_MIGRATIONS"]
+
 
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
@@ -795,6 +793,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "C++ record parameters gain a header-derived call-triviality fact. Older parameters retain unknown passing semantics. No spelling rewrite."
     ),
     96: GenerationSpellingChange(
-        "Clang records identities for nested fields and imported types. Source spellings are preserved."
+        "ELF consumers now record undefined symbol bindings and version requirements, "
+        "including references from relocatable objects. Stored symbol spellings need no rewrite."
     ),
+    97: GenerationSpellingChange("Record IDs and callback ABI; no rewrite."),
 }

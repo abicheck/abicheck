@@ -216,7 +216,10 @@ def release_finding_dicts(
     way the retired ``cli_scan_baseline._baseline_summary`` did, instead of a bare
     ``findings_truncated`` boolean that hides the shape of what was cut.
     """
+    from ..policy.gate_contribution import gate_contribution_for_change
+
     cap = None if uncapped else MAX_RELEASE_FINDINGS_PER_LIBRARY
+    kind_sets = effective_kind_sets(diff)
     findings: list[dict[str, object]] = []
     cut_kinds: list[str] = []
     for bucket_name, bucket_changes in release_display_buckets(diff, severity_config):
@@ -225,7 +228,7 @@ def release_finding_dicts(
                 bucket_changes,
                 show_only,
                 policy=diff.policy or "strict_abi",
-                kind_sets=effective_kind_sets(diff),
+                kind_sets=kind_sets,
                 policy_file=diff.policy_file,
             )
         if cap is None:
@@ -234,7 +237,22 @@ def release_finding_dicts(
             remaining = max(0, cap - len(findings))
             included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
         for c in included:
-            findings.append(release_finding_entry(c, bucket_name, diff.policy_file))
+            findings.append(
+                release_finding_entry(
+                    c,
+                    bucket_name,
+                    diff.policy_file,
+                    gate_contribution=gate_contribution_for_change(
+                        c,
+                        severity_config,
+                        policy=diff.policy,
+                        kind_sets=kind_sets,
+                        policy_file=diff.policy_file,
+                    )
+                    if c.review_evidence
+                    else 0,
+                )
+            )
         # Keep tallying excluded kinds across every remaining bucket (not
         # just the one that first hit the cap) -- see this function's own
         # "Returns" note above.
@@ -365,7 +383,11 @@ def project_release_library_results(
                 diff, severity_config, None, uncapped=uncapped
             )
             if findings:
+                from .l2_evidence import grouped_export_variants
+
                 entry["findings"] = findings
+                if variants := grouped_export_variants(findings):
+                    entry["removed_export_groups"] = variants
             # Release schema 2.7: the authoritative entity-by-operation count
             # of this complete, pre-view pool, kept when a `show=` view later
             # narrows `findings` (record before disposing).

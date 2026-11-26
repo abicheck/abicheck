@@ -937,13 +937,7 @@ def _exports_mode_decision(
     cannot be placed in the export domain at all, which is "incomplete
     root/graph evidence", not proof of exclusion.
     """
-    # Checked before this domain's own resolvability and identity gates,
-    # exactly as the `public` path checks its own trusted-by-construction
-    # families before its equivalents (Codex review, confirmed empirically):
-    # a `VISIBILITY_LEAK` carries the producer's synthetic
-    # `symbol="<visibility>"`, which resolves to `finding_identity`'s reduced
-    # tier, so the identity gate below stamped every one of them
-    # `UNKNOWN_UNRESOLVED`.
+    # Export-grounded aggregate findings can have synthetic display identities.
     if change.kind.value in _EXPORT_GROUNDED_KIND_NAMES:
         return _trusted_by_construction_decision()
 
@@ -953,17 +947,19 @@ def _exports_mode_decision(
             "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
         )
 
+    if (
+        change.kind
+        in {ChangeKind.FUNC_REMOVED_ELF_ONLY, ChangeKind.VAR_REMOVED_ELF_ONLY}
+        and change.symbol in auth.observed_elf_names
+    ):
+        return _export_root_decision()
     identity = resolve_change_identity(change)
     if identity.tier == IDENTITY_TIER_REDUCED:
         return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
 
     if _symbol_matches(change, auth.export_symbols, allow_tail_fallback=False):
         return _export_root_decision()
-    # An observed export no declaration accounted for is still an exported
-    # root -- this domain is defined by the export table, not by which
-    # entries the headers happen to explain. Without this, removing an
-    # undeclared export (an accidental one a consumer reaches via `dlsym`)
-    # was `UNKNOWN_UNRESOLVED` in the very domain whose evidence observed it.
+    # Unmatched exports still belong to the binary contract.
     if (change.symbol or "") in auth.unmatched_exports:
         return _export_root_decision()
 

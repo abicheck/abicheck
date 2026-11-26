@@ -399,7 +399,7 @@
     },
     {
       "path": "abicheck/contract_evaluation.py",
-      "baseline_lines": 1499,
+      "baseline_lines": 1495,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -520,7 +520,7 @@
     },
     {
       "path": "abicheck/diff_types.py",
-      "baseline_lines": 1444,
+      "baseline_lines": 1437,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -597,7 +597,7 @@
     },
     {
       "path": "abicheck/export_surface.py",
-      "baseline_lines": 1240,
+      "baseline_lines": 1236,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

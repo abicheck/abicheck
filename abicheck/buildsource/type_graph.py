@@ -131,6 +131,7 @@ class TypeEdge:
     #: changeable internal component. Informational like ``resolution``
     #: (``compare=False``).
     dst_tu_local: bool = field(default=False, compare=False)
+    argument_callees: tuple[str, ...] = ()
 
 
 def _node_file(node: dict[str, Any]) -> str:
@@ -159,13 +160,15 @@ def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
     never actually observe both roles from this producer no matter how
     ``add_edge`` itself was keyed.
     """
-    seen: set[tuple[str, str, str, str]] = set()
+    seen: dict[tuple[str, str, str, str], int] = {}
     out: list[TypeEdge] = []
     for e in edges:
         key = (e.src, e.dst, e.kind, e.role)
         if key not in seen:
-            seen.add(key)
+            seen[key] = len(out)
             out.append(e)
+        elif e.argument_callees:
+            out[seen[key]] = _merge_type_edges(out[seen[key]], e)
     return out
 
 
@@ -264,6 +267,8 @@ def augment_graph_with_types(
         edge_attrs: dict[str, Any] = {}
         if e.role:
             edge_attrs["role"] = e.role
+        if e.argument_callees:
+            edge_attrs["argument_callees"] = list(e.argument_callees)
         if e.resolution:
             edge_attrs["resolution"] = e.resolution
         graph.add_edge(
@@ -294,6 +299,10 @@ def _merge_type_edges(existing: TypeEdge, new: TypeEdge) -> TypeEdge:
     richer provenance the graph needs to mark the node ``defined_in_project``
     (Codex review).
     """
+    if new.argument_callees or existing.argument_callees:
+        callees = tuple(sorted(set(existing.argument_callees + new.argument_callees)))
+        existing = replace(existing, argument_callees=callees)
+        new = replace(new, argument_callees=callees)
     dst_file = existing.dst_file or new.dst_file
     # TU-local only when every TU that saw the edge says so: one TU resolving
     # the same spelling to an externally visible entity wins.

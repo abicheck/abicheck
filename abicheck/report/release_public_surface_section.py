@@ -298,8 +298,17 @@ def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> 
     return "\n".join(lines) + "\n"
 
 
-def _identity(finding: Mapping[str, object]) -> tuple[object, ...]:
-    return tuple(finding.get(name) for name in _FINDING_IDENTITY_FIELDS)
+def _identity(finding: Mapping[str, object], library: str) -> tuple[object, ...]:
+    key = tuple(finding.get(name) for name in _FINDING_IDENTITY_FIELDS)
+    evidence = finding.get("review_evidence")
+    if isinstance(evidence, dict):
+        sides = evidence.get("enum_declarations", {})
+        if "removed_exports" in evidence or any(
+            d["owner"].startswith("dependency:") for d in sides.values()
+        ):
+            # Keep concrete provider and dependency observations on the member.
+            return (*key, library)
+    return key
 
 
 @dataclass(frozen=True)
@@ -358,7 +367,7 @@ def dedupe_shared_member_findings(
         for finding in entry.get("findings") or ():
             if not isinstance(finding, Mapping):
                 continue
-            key = _identity(finding)
+            key = _identity(finding, library)
             occurrences.setdefault(key, []).append(library)
             representative.setdefault(key, finding)
 
@@ -406,7 +415,10 @@ def dedupe_shared_member_findings(
             kept = [
                 finding
                 for finding in current
-                if not (isinstance(finding, Mapping) and _identity(finding) in promoted)
+                if not (
+                    isinstance(finding, Mapping)
+                    and _identity(finding, library) in promoted
+                )
             ]
             removed = len(current) - len(kept)
             if removed:

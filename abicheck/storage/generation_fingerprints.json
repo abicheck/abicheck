@@ -30,7 +30,7 @@
       "abicheck/extract/castxml_header_compat.py": "8d754cf6c1f15ad1b219c2bdccfa32171d34c364728c5c1a9b34d7ab79d48cf6",
       "abicheck/extract/compile_header_inputs.py": "38655d35c5309694ebf12be60e5e4fcd3fa5c8ea7eb8a73a9b4ab2fcf46338b9",
       "abicheck/extract/compiler_driver.py": "fd1aab0b3aefd3583f11cd68a5043917fabd5611c00fdf20c384a8471536a877",
-      "abicheck/extract/consumer_imports.py": "6c40a6e5ac51b0777b89b59031c6321b22fe9e3e7ff7672ee78faaa514a28593",
+      "abicheck/extract/consumer_imports.py": "6d7a279d8c6f409389e2a51d69246832361ae6cea79369f3f097f7893d0e8709",
       "abicheck/extract/cpp20_header_prep.py": "bfc43b5382a9e60e83a022979b25e91dce311813b06b592ede31e099889228fe",
       "abicheck/extract/cxx_digit_separator.py": "04956886d39b50304096a99c11b434fa7f3edd648efb3a3be3cb8b6d12480bfd",
       "abicheck/extract/debug_artifact.py": "e93c500a1bbaf795abc74d91487f038f3ca6337c1243f3a33b4af2850f41e058",
@@ -101,7 +101,7 @@
       "abicheck/extract/headers/castxml/backend.py": "d2fc15d69d1774d91d7c54584025c568af44c3d563cfa03645e66172a1b3ae5a",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "fd89604776ce6c48a39e3fd66763e5a73115ca4d23c616e47b6eea9359e768ed",
-      "abicheck/extract/headers/castxml/clang_semantics_join.py": "e19c9156d53b37e1a7c31c99e5150e82e819c1c26e450833c971ff34bc0c02bd",
+      "abicheck/extract/headers/castxml/clang_semantics_join.py": "e689ffc5ea55390a7c314e59135138780f280615b09e0a69a31f7cefc123b46b",
       "abicheck/extract/headers/castxml/context.py": "9825e80628d568a0ed79a67046aba2b4ecc1ec79c27f32d63ba724c57249e9f2",
       "abicheck/extract/headers/castxml/cxx_header_evidence.py": "1480218726fc8db4dd5aa7bb925920f1427b6571f74dcc8b43a5657d87eedc9c",
       "abicheck/extract/headers/castxml/data_size.py": "f896227368519c1946f5b72b58164d6a6aaf5a7cde74df464ca5f56bc9e15226",
@@ -121,7 +121,7 @@
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "eb0d6119475ceff657e89702641a66d20baf28e8fef130f73c4238a42482bf47",
-      "abicheck/extract/headers/castxml/return_by_value.py": "d48f1df1ebc2c35a2cac15ce0e70b406d881384f7937868d648ab9a337516d9d",
+      "abicheck/extract/headers/castxml/return_by_value.py": "77b054dbdaa89fcd622dc099f8c62562597ce937c767a3866b959602b43e6605",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "6a6165a4a12369bcc795ade8c25b1ba00472448921ccc375d96f2052a4b20d84",
-    "generation": 96,
-    "reason": "Resolve imported record identities and nested return layouts"
+    "fingerprint": "c5e68b092aa2ec40d6b61933911b8a5266875030d1896fd875af575917f61d1f",
+    "generation": 97,
+    "reason": "Resolve nested and imported record identities and collect record call traits for callback boundaries"
   },
   "resolver": {
     "files": {
@@ -322,11 +322,11 @@
       "abicheck/buildsource/template_graph.py": "57c5248820c2ade147850c9cb92a281087213b6d3b7420620ecbbdeef6a26756",
       "abicheck/buildsource/template_graph_fold.py": "630006aa35ad1a6dc2e3797b662e857aee790e94acee759331478993f5ffad03",
       "abicheck/buildsource/template_graph_value_decls.py": "d50b5cd979744d4ecb4ae2ad859faf99689d6af50d0e0d0a24d867f99a83931c",
-      "abicheck/buildsource/type_graph.py": "e836e687fe95d52f6483a70893cff385b8d175284e6f5bebadaa2b805b7387c5",
-      "abicheck/buildsource/type_graph_index.py": "456fd36d7d326e2001855f1768bdadee49ab738a9c515f57f557bc5e5b693ced"
+      "abicheck/buildsource/type_graph.py": "7f9b20e7762f67eeedd598989d0cfd7abce20763526cf2246b5d9068083985d9",
+      "abicheck/buildsource/type_graph_index.py": "20142a0ef7bcae6c923406c6ee41b933f20e1d1dda851ec5704d8d2d4119ae7c"
     },
-    "fingerprint": "7fccc5162aea494e5b5b1edf53379de93d0a8f0c712d9677a940b9d235e11f5c",
-    "generation": 16,
-    "reason": "Clang source replay 0.15 selects and replays the DPC++ host invocation"
+    "fingerprint": "227ecf0712f22299380e55a441242039f78a286b248d64b8c7482c1f6d8d67dd",
+    "generation": 17,
+    "reason": "bumped to 17 for a semantic change"
   }
 }

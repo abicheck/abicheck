@@ -119,6 +119,13 @@ _N = Role.NO_FACT_EFFECT
 
 
 INVENTORY: tuple[ToolLookup, ...] = (
+    ToolLookup(
+        id="control-object-linker",
+        role=Role.INPUT_ACQUISITION,
+        sites=("which:abicheck/workflows/control_link.py:'ld'",),
+        # The default-install fixture exercises ld both present and absent.
+        without="The explicitly requested control link reports unavailable.",
+    ),
     # --- optional enrichment -------------------------------------------------
     ToolLookup(
         id="clang-layout-tool",

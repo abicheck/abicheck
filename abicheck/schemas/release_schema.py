@@ -339,4 +339,5 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       release document embeds unchanged; a pre-3.2 consumer reads nothing
 #:       differently.
 #: - ``3.3`` adds optional consumer_binding for a specified old ELF client.
-RELEASE_SCHEMA_VERSION = "3.3"
+#: - ``3.4`` adds per-member export evidence and grouped dependency declaration changes.
+RELEASE_SCHEMA_VERSION = "3.4"
