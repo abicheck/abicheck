@@ -121,7 +121,7 @@
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "eb0d6119475ceff657e89702641a66d20baf28e8fef130f73c4238a42482bf47",
-      "abicheck/extract/headers/castxml/return_by_value.py": "251b218f31686bc2a5281f347e39a3a6fbd510cd7512744c6a02c25124bd1805",
+      "abicheck/extract/headers/castxml/return_by_value.py": "70f8622d8a7868a3d5c1eae377312dac0db6033636431292d6c9242cb00db097",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
@@ -159,7 +159,7 @@
       "abicheck/extract/headers/clang/pointer_depth.py": "88afcca3b65a1a95f6cea563085af926b45e5ed2d8e1bdd74b9332a129b07441",
       "abicheck/extract/headers/clang/qualifiers.py": "8fe5b0760eec5c2c83842d147a9734275693a5ab6167bcbf2b30a73a30f39c40",
       "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
-      "abicheck/extract/headers/clang/records.py": "c595ad7ff033d6734726c30a854b78ca309bc5dee6f6f6ab1458e648faf91273",
+      "abicheck/extract/headers/clang/records.py": "63bfa902c6d453ec1bad9b2476f34d128b2e0cda855abf7dd311ff4ad02fd15e",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
       "abicheck/extract/headers/clang/return_type.py": "40e53585fb537acbad76708d77137764625e2c3ee381529bb57aeb12629b389a",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "41527cba17f297de084020858a9c2af042276f22721ad14e153007f97d285e47",
+    "fingerprint": "2383e3f9c5a642497d4d2323b4a5d4580673d24af1360325bb80d1c912496a1d",
     "generation": 97,
-    "reason": "Resolve record identities and callback ABI facts; avoid the secondary AST for incomplete and memory-only standalone returns"
+    "reason": "Preserve call-slot trait extraction and avoid redundant joins for incomplete results"
   },
   "resolver": {
     "files": {

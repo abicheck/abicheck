@@ -344,7 +344,7 @@ def test_function_key_does_not_need_a_mangled_name() -> None:
     ],
 )
 def test_call_traits_join_only_when_the_slot_can_use_it(layout, argument, needs_traits):
-    from xml.etree.ElementTree import fromstring
+    from defusedxml.ElementTree import fromstring
 
     from abicheck.extract.headers.castxml.return_by_value import (
         has_exported_record_argument,

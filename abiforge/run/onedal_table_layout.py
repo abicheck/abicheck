@@ -90,6 +90,34 @@ def check_layout(old, out, enum_name, variants, frontend):
     return findings
 
 
+def expected_layout(findings, variants, enum_name, first, second, rows):
+    if findings["old"] != {"verdict": "NO_CHANGE", "members": [], "exit": 0}:
+        return False
+    if findings["extend"] != {"verdict": "COMPATIBLE", "members": [], "exit": 0}:
+        return False
+    if findings["swap"] != {
+        "verdict": "BREAKING",
+        "members": sorted(f"{enum_name}::{member}" for member in (first, second)),
+        "exit": 4,
+    }:
+        return False
+    if "narrow" in variants and findings["narrow"] != {
+        "verdict": "BREAKING",
+        "exit": 4,
+        "members": [],
+        "layout_changes": {
+            "enum_underlying_size_changed": ["4", "1"],
+            "type_size_changed": ["64", "16"],
+            "type_alignment_changed": ["32", "8"],
+            "type_field_offset_changed": ["32", "8"],
+        },
+    }:
+        return False
+    return all(
+        r["exit"] == (42 if r["provider"] in ("swap", "narrow") else 0) for r in rows
+    )
+
+
 def run(old, minor, compiler, out, selector, enum_name="data_layout", frontend="clang"):
     out.mkdir(parents=True, exist_ok=True)
     original = (old / "include" / HEADER).read_text()
@@ -230,31 +258,7 @@ def run(old, minor, compiler, out, selector, enum_name="data_layout", frontend="
     if enum_name == "sparse_indexing":
         receipt["frontend"] = frontend
     (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-    if findings["old"] != {"verdict": "NO_CHANGE", "members": [], "exit": 0}:
-        return False
-    if findings["extend"] != {"verdict": "COMPATIBLE", "members": [], "exit": 0}:
-        return False
-    if findings["swap"] != {
-        "verdict": "BREAKING",
-        "members": sorted(f"{enum_name}::{member}" for member in (first, second)),
-        "exit": 4,
-    }:
-        return False
-    if "narrow" in variants and findings["narrow"] != {
-        "verdict": "BREAKING",
-        "exit": 4,
-        "members": [],
-        "layout_changes": {
-            "enum_underlying_size_changed": ["4", "1"],
-            "type_size_changed": ["64", "16"],
-            "type_alignment_changed": ["32", "8"],
-            "type_field_offset_changed": ["32", "8"],
-        },
-    }:
-        return False
-    return all(
-        r["exit"] == (42 if r["provider"] in ("swap", "narrow") else 0) for r in rows
-    )
+    return expected_layout(findings, variants, enum_name, first, second, rows)
 
 
 if __name__ == "__main__":

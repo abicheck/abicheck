@@ -37,9 +37,7 @@ def client_env(client, image, lib):
     }
 
 
-def run(sdk, minor, clients, out, surface_path, selection=None):
-    surface = json.loads(surface_path.read_text())
-    targets = surface["sdk_inventory"]["client_imports_outside_sdk"]
+def select_targets(targets, selection):
     witnesses = {}
     if selection:
         subset = {}
@@ -52,6 +50,31 @@ def run(sdk, minor, clients, out, surface_path, selection=None):
         if not subset:
             raise ValueError("empty witness selection")
         targets = subset
+    return targets, witnesses
+
+
+def check_controls(provider, target, image, used, controls):
+    for control in controls:
+        target.symlink_to(control / provider)
+        for client in {c for c, _ in used.values()}:
+            env = client_env(client, image, control)
+            trace = subprocess.check_output(["ldd", "-r", client], env=env, text=True)
+            if "undefined symbol:" in trace or f"{provider} => {target} (" not in trace:
+                raise ValueError(f"{client}: baseline provider was not selected")
+            subprocess.run(
+                command(client),
+                env=env,
+                check=True,
+                timeout=120,
+                stdout=subprocess.DEVNULL,
+            )
+        target.unlink()
+
+
+def run(sdk, minor, clients, out, surface_path, selection=None):
+    surface = json.loads(surface_path.read_text())
+    targets = surface["sdk_inventory"]["client_imports_outside_sdk"]
+    targets, witnesses = select_targets(targets, selection)
     lib = sdk.resolve() / "lib"
     out.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -78,28 +101,9 @@ def run(sdk, minor, clients, out, surface_path, selection=None):
                 if symbol not in symbol_names(client, imports=True):
                     raise ValueError(f"{label} no longer imports {symbol}")
                 used[symbol] = client, label
-            for control in (lib, minor.resolve() / "lib"):
-                target.symlink_to(control / provider)
-                for client in {c for c, _ in used.values()}:
-                    env = client_env(client, image, control)
-                    trace = subprocess.check_output(
-                        ["ldd", "-r", client], env=env, text=True
-                    )
-                    if (
-                        "undefined symbol:" in trace
-                        or f"{provider} => {target} (" not in trace
-                    ):
-                        raise ValueError(
-                            f"{client}: baseline provider was not selected"
-                        )
-                    subprocess.run(
-                        command(client),
-                        env=env,
-                        check=True,
-                        timeout=120,
-                        stdout=subprocess.DEVNULL,
-                    )
-                target.unlink()
+            check_controls(
+                provider, target, image, used, (lib, minor.resolve() / "lib")
+            )
             mapping = image / "renames"
             aliases = {name: "abiforge_withdrawn_" + name for name in names}
 

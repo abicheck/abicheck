@@ -44,6 +44,40 @@ def ast(compiler, include, source, selector, extra):
             raise ValueError(f"incomplete compiler AST for {selector}")
 
 
+def visit(node, include, files, found, inherited, names, record=None):
+    loc = node.get("loc", {})
+    loc = loc.get("spellingLoc", loc)
+    filename = loc.get("file", inherited)
+    symbol = node.get("mangledName")
+    if (
+        record
+        and node.get("kind") == "CXXRecordDecl"
+        and node.get("completeDefinition")
+        and node.get("name") == record[1]
+    ):
+        symbol = record[0]
+    if symbol in names and filename and Path(filename).is_relative_to(include):
+        path = Path(filename)
+        if path not in files:
+            files[path] = path.read_bytes()
+        offset = loc.get("offset")
+        if offset is not None:
+            token = files[path][offset : offset + loc["tokLen"]].decode()
+            if (
+                token == node.get("name")
+                or node.get("name", "").startswith(token + "<")
+                or (token == "operator" and node.get("name", "").startswith("operator"))
+            ):
+                found[symbol] = {
+                    "header": str(path.relative_to(include)),
+                    "line": files[path].count(b"\n", 0, offset) + 1,
+                    "declaration": node["name"],
+                    "type": node.get("type", {}).get("qualType", node["kind"]),
+                }
+    for child in node.get("inner", []):
+        visit(child, include, files, found, filename, names, record)
+
+
 def run(sdk, compiler, out, mpi_include):
     include = sdk.resolve() / "include"
     targets = json.loads((PRODUCT / "export-surface.json").read_text())[
@@ -51,42 +85,6 @@ def run(sdk, compiler, out, mpi_include):
     ]["client_imports_outside_sdk"]
     found = {}
     files = {}
-
-    def visit(node, inherited, names, record=None):
-        loc = node.get("loc", {})
-        loc = loc.get("spellingLoc", loc)
-        filename = loc.get("file", inherited)
-        symbol = node.get("mangledName")
-        if (
-            record
-            and node.get("kind") == "CXXRecordDecl"
-            and node.get("completeDefinition")
-            and node.get("name") == record[1]
-        ):
-            symbol = record[0]
-        if symbol in names and filename and Path(filename).is_relative_to(include):
-            path = Path(filename)
-            if path not in files:
-                files[path] = path.read_bytes()
-            offset = loc.get("offset")
-            if offset is not None:
-                token = files[path][offset : offset + loc["tokLen"]].decode()
-                if (
-                    token == node.get("name")
-                    or node.get("name", "").startswith(token + "<")
-                    or (
-                        token == "operator"
-                        and node.get("name", "").startswith("operator")
-                    )
-                ):
-                    found[symbol] = {
-                        "header": str(path.relative_to(include)),
-                        "line": files[path].count(b"\n", 0, offset) + 1,
-                        "declaration": node["name"],
-                        "type": node.get("type", {}).get("qualType", node["kind"]),
-                    }
-        for child in node.get("inner", []):
-            visit(child, filename, names, record)
 
     rows = {}
     for provider, names in targets.items():
@@ -101,7 +99,7 @@ def run(sdk, compiler, out, mpi_include):
             for tree in ast(
                 compiler, include, source, "SerializableKeyValueCollection", []
             ):
-                visit(tree, "", names)
+                visit(tree, include, files, found, "", names)
             for symbol in sorted(names):
                 if symbol.startswith(("_ZTI", "_ZTV")):
                     owner = (
@@ -110,7 +108,15 @@ def run(sdk, compiler, out, mpi_include):
                         .split(" for ")[1]
                     )
                     for tree in ast(compiler, include, source, owner, []):
-                        visit(tree, "", names, (symbol, owner.split("::")[-1]))
+                        visit(
+                            tree,
+                            include,
+                            files,
+                            found,
+                            "",
+                            names,
+                            (symbol, owner.split("::")[-1]),
+                        )
         else:
             device = "_dpc" in provider
             clients = ["layout", "sparse_indexing"]
@@ -132,7 +138,7 @@ def run(sdk, compiler, out, mpi_include):
                 else []
             )
             for tree in ast(compiler, include, source, "oneapi::dal", extra):
-                visit(tree, "", names)
+                visit(tree, include, files, found, "", names)
         rows[provider] = dict(sorted(found.items()))
         print(provider, len(found), "/", len(names), flush=True)
         for missing in sorted(names - found.keys()):

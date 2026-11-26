@@ -34,38 +34,40 @@ FAMILIES = {
 }
 
 
+def callback_return_sources(family, variant):
+    attr = "[[clang::trivial_abi]]" if variant == "old" else ""
+    result = "V*" if family == "callback_pointer_return" else "V"
+    header = f'struct {attr} V {{ long value; ~V(); }}; using Make = {result} (*)(); extern "C" int dispatch(Make);'
+    if family == "callback_large_return":
+        header = header.replace("long value;", "long value, second, third;")
+    if family == "callback_pointer_return":
+        body = "V::~V() {} int dispatch(Make f) { return f()->value == 42 ? 0 : 1; }"
+        client = "return dispatch(+[]() -> V* { static V v{42}; return &v; });"
+    else:
+        body = """
+    #include <new>
+    #include <cstring>
+    V::~V() {}
+    int dispatch(Make f) {
+        alignas(V) unsigned char storage[sizeof(V)] = {};
+        V* result = new (storage) V(f());
+        long expected = 42;
+        int status = std::memcmp(storage, &expected, sizeof(expected)) != 0;
+        result->~V();
+        return status;
+    }
+    """
+        client = "return dispatch(+[]() -> V { return V{42}; });"
+    return header, body, client
+
+
 def sources(family, variant):
     if family in {
         "callback_return",
         "callback_pointer_return",
         "callback_large_return",
     }:
-        attr = "[[clang::trivial_abi]]" if variant == "old" else ""
-        result = "V*" if family == "callback_pointer_return" else "V"
-        header = f'struct {attr} V {{ long value; ~V(); }}; using Make = {result} (*)(); extern "C" int dispatch(Make);'
-        if family == "callback_large_return":
-            header = header.replace("long value;", "long value, second, third;")
-        if family == "callback_pointer_return":
-            body = (
-                "V::~V() {} int dispatch(Make f) { return f()->value == 42 ? 0 : 1; }"
-            )
-            client = "return dispatch(+[]() -> V* { static V v{42}; return &v; });"
-        else:
-            body = """
-#include <new>
-#include <cstring>
-V::~V() {}
-int dispatch(Make f) {
-    alignas(V) unsigned char storage[sizeof(V)] = {};
-    V* result = new (storage) V(f());
-    long expected = 42;
-    int status = std::memcmp(storage, &expected, sizeof(expected)) != 0;
-    result->~V();
-    return status;
-}
-"""
-            client = "return dispatch(+[]() -> V { return V{42}; });"
-        return header, body, client
+        return callback_return_sources(family, variant)
     if family == "callback_table":
         attr = "[[clang::trivial_abi]]" if variant == "passing" else ""
         fields = (

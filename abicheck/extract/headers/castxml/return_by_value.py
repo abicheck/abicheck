@@ -74,12 +74,10 @@ def _by_value(
     return None
 
 
-def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
-    """Whether the exported call or one of its callbacks passes a record by value."""
-    by_id = {el.get("id"): el for el in root if el.get("id")}
+def _constructor_owners(exported: frozenset[str]) -> set[str]:
     from ....model.mangled_name import itanium_scope_components
 
-    constructor_owners = {
+    return {
         parts[-2].split("<", 1)[0]
         for name in exported
         if name.startswith("_Z") and any(code in name for code in ("C1", "C2", "C3"))
@@ -87,6 +85,12 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
         and len(parts) >= 2
         and parts[-1] == "{ctor}"
     }
+
+
+def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
+    """Whether the exported call or one of its callbacks passes a record by value."""
+    by_id = {el.get("id"): el for el in root if el.get("id")}
+    constructor_owners = _constructor_owners(exported)
 
     def target(type_id: str) -> Element | None:
         el = by_id.get(type_id)

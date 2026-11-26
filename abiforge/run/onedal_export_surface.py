@@ -82,6 +82,20 @@ def sdk_inventory_coverage(directory, images, observed=None, ledger=None):
     return result
 
 
+def client_observations(clients):
+    observations = defaultdict(set)
+    client_labels = {c: f"{c.parent.name}/{c.name}" for c in clients}
+    for client in clients:
+        dynamic = subprocess.check_output(["readelf", "-d", client], text=True)
+        needed = re.findall(r"\(NEEDED\).*?\[(.*?)\]", dynamic)
+        for symbol in symbol_names(client, imports=True):
+            for provider in needed:
+                observations[provider, symbol.replace("@@", "@")].add(
+                    client_labels[client]
+                )
+    return observations, client_labels
+
+
 def measure(
     prefix,
     candidates,
@@ -95,16 +109,7 @@ def measure(
     # The current SDK ledgers identify the providers by their baseline SONAME.
     if not {provider for provider, _ in evidence} <= baseline.keys():
         raise ValueError("baseline image does not supply the SDK ledger providers")
-    observations = defaultdict(set)
-    client_labels = {c: f"{c.parent.name}/{c.name}" for c in clients}
-    for client in clients:
-        dynamic = subprocess.check_output(["readelf", "-d", client], text=True)
-        needed = re.findall(r"\(NEEDED\).*?\[(.*?)\]", dynamic)
-        for symbol in symbol_names(client, imports=True):
-            for provider in needed:
-                observations[provider, symbol.replace("@@", "@")].add(
-                    client_labels[client]
-                )
+    observations, client_labels = client_observations(clients)
     sdk_names = {name for _, name in evidence}
     providers = {}
     observed = {}

@@ -142,12 +142,8 @@ def parse_types(
         node = entry.node
         if is_builtin_file(entry.file):
             continue
-        name = str(node.get("name", ""))
-        if not name:
-            name = anon_names.get(str(node.get("id", "")), "")
-            if not name:
-                continue  # a truly anonymous record (e.g. an inline union member)
-        if name.startswith("__"):
+        name = str(node.get("name", "")) or anon_names.get(str(node.get("id", "")), "")
+        if not name or name.startswith("__"):
             continue
         identity = "::".join([*entry.scope, name]) if entry.scope else name
         if (msg := clang_deprecated_message(node)) is not None:  # most recent wins
