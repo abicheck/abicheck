@@ -183,6 +183,20 @@ These representatives cover the specified SysV AMD64 C++ decisions. ELF
 withdrawals, actual SYCL queue dependencies, and two-rank collectives have
 separate [oneDAL product witnesses](../research/onedal-coverage/product/README.md).
 
-The recorded Linux runs contain 13 comparisons per frontend, plus the three
+The recorded Linux runs contain 15 comparisons per frontend, plus the five
 baselines. [Clang receipt](../research/onedal-coverage/product/l2-representatives-clang.json)
 and [CastXML receipt](../research/onedal-coverage/product/l2-representatives-castxml.json).
+
+For the release verdict gate run
+`python -m abiforge.run.l2_representatives OUT --frontend castxml --verdict-only`
+(or select `clang`). This checks each generated binary pair with the compiler
+or frozen-client witness, then requires the public verdict and CLI exit code
+to agree. A risk warning fails the gate for a known binary incompatibility.
+Omit `--verdict-only` to check diagnostic attribution too.
+
+Two additional pairs exercise an exported callback registration signature.
+Removing Clang's `trivial_abi` attribute from a nontrivial record changes
+how an old callback receives the record by value. On SysV AMD64 the frozen
+client's exit changes from 0 to 1. Applying the same edit to the reference
+case preserves the client's result. The gate now checks 15 comparisons
+per frontend.

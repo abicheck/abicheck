@@ -75,7 +75,7 @@ def _by_value(
 
 
 def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
-    """Whether an exported declaration has a record parameter passed by value."""
+    """Whether the exported call or one of its callbacks passes a record by value."""
     by_id = {el.get("id"): el for el in root if el.get("id")}
     from ....model.mangled_name import itanium_scope_components
 
@@ -106,11 +106,32 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
             and (fn.get("mangled") or fn.get("name")) not in exported
         ):
             continue
+        if _by_value(by_id.get, fn.get("returns", ""), 0) is True:
+            return True
         for arg in fn:
             if arg.tag != "Argument":
                 continue
-            if _by_value(by_id.get, arg.get("type", ""), 0) is True:
+            type_id = arg.get("type", "")
+            if _by_value(by_id.get, type_id, 0) is True:
                 return True
+            target = by_id.get(type_id)
+            seen_pointer = False
+            for _ in range(_MAX_DEPTH):
+                if target is None:
+                    break
+                if target.tag == "FunctionType" and seen_pointer:
+                    if any(
+                        child.tag == "Argument"
+                        and _by_value(by_id.get, child.get("type", ""), 0) is True
+                        for child in target
+                    ):
+                        return True
+                    break
+                if target.tag == "PointerType" and not seen_pointer:
+                    seen_pointer = True
+                elif target.tag not in _WRAPPER_TAGS:
+                    break
+                target = by_id.get(target.get("type", ""))
     return False
 
 

@@ -15,6 +15,8 @@ from abiforge.operators import OP_BY_NAME
 
 # Each family has one baseline. Variants change one ABI-relevant condition.
 FAMILIES = {
+    "callback_value": ("change",),
+    "callback_reference": ("change",),
     "layout": ("control", "swap", "alignment"),
     "calls": ("control", "assignment", "nontrivial", "register_class"),
     "virtual": (
@@ -29,6 +31,13 @@ FAMILIES = {
 
 
 def sources(family, variant):
+    if family in {"callback_value", "callback_reference"}:
+        attr = "[[clang::trivial_abi]]" if variant == "old" else ""
+        param = "V" if family == "callback_value" else "const V&"
+        header = f'struct {attr} V {{ long value; ~V(); }}; using Visit = long (*)({param}); extern "C" long dispatch(Visit);'
+        body = "V::~V() {} long dispatch(Visit f) { return f(V{42}); }"
+        client = f"return dispatch(+[]({param} x) -> long {{ return x.value == 42 ? 0 : 1; }});"
+        return header, body, client
     if family == "layout":
         roles = C_SEED.roles
         if variant == "swap":
@@ -138,7 +147,25 @@ def check_calls(ir, variant):
     return observed
 
 
-def check_report(family, variant, data, code):
+def check_verdict(family, variant, verdict, code):
+    compatible = (
+        variant in {"control", "primary_override"} or family == "callback_reference"
+    )
+    valid = (
+        (code == 0 and verdict in {"NO_CHANGE", "COMPATIBLE"})
+        if compatible
+        else (code == 4 and verdict == "BREAKING")
+    )
+    if not valid:
+        raise ValueError(
+            f"{family}/{variant}: expected {'compatible' if compatible else 'breaking'} verdict, got {verdict} (exit {code})"
+        )
+
+
+def check_report(family, variant, data, code, verdict_only=False):
+    check_verdict(family, variant, data["verdict"], code)
+    if verdict_only:
+        return {"verdict": data["verdict"]}
     changes = data["changes"]
     kinds = sorted({c["kind"] for c in changes})
     row = dict(verdict=data["verdict"], kinds=kinds)
@@ -172,6 +199,14 @@ def check_report(family, variant, data, code):
     first, second = "_ZN5Right5firstEv", "_ZN5Right6secondEv"
     original = f"{first}, {second}"
     required = {
+        ("callback_value", "change"): {
+            (
+                "value_abi_trait_changed",
+                "dispatch",
+                "p0.callback.p0:trivial",
+                "p0.callback.p0:nontrivial",
+            )
+        },
         ("layout", "swap"): offsets,
         ("layout", "alignment"): {
             ("type_alignment_changed", "point", "32", "64"),
@@ -213,22 +248,16 @@ def check_report(family, variant, data, code):
             "value_abi_trait_changed",
             "struct_return_convention_changed",
         }.intersection(kinds)
-    elif variant == "control":
+    elif variant == "control" or family == "callback_reference":
         valid = data["verdict"] == "NO_CHANGE" and not kinds
-    elif variant == "primary_override":
-        valid = data["verdict"] in {
-            "NO_CHANGE",
-            "COMPATIBLE",
-            "COMPATIBLE_WITH_RISK",
-        }
     else:
-        valid = code == 4 and data["verdict"] == "BREAKING"
+        valid = True
     if not valid:
         raise ValueError(f"{family}/{variant}: {row}")
     return row
 
 
-def run(out, compiler, frontend, families=FAMILIES):
+def run(out, compiler, frontend, families=FAMILIES, verdict_only=False):
     if (sys.platform, platform.machine()) != ("linux", "x86_64"):
         raise ValueError("the calling convention oracle requires Linux x86-64")
     out = out.resolve()
@@ -249,6 +278,8 @@ def run(out, compiler, frontend, families=FAMILIES):
             src.write_text('#include "api.hpp"\n' + body)
             lib = folder / "librep.so"
             build = [compiler, "-std=c++17", "-Wno-return-type-c-linkage"]
+            if family.startswith("callback_"):
+                build.append("-fno-exceptions")
             subprocess.run(
                 [*build, "-shared", "-fPIC", "-s", src, "-o", lib], check=True
             )
@@ -273,6 +304,8 @@ def run(out, compiler, frontend, families=FAMILIES):
                 for args in workloads
             ]
             expected = {
+                "callback_value": [int(variant == "change")],
+                "callback_reference": [0],
                 "layout": {"swap": [29, 4], "alignment": [8]}.get(variant, [17, 4]),
                 "calls": [34],
                 "virtual": {
@@ -315,7 +348,9 @@ def run(out, compiler, frontend, families=FAMILIES):
                     capture_output=True,
                 )
                 data = json.loads(report.read_text())
-                row.update(check_report(family, variant, data, proc.returncode))
+                row.update(
+                    check_report(family, variant, data, proc.returncode, verdict_only)
+                )
             receipts[f"{family}/{variant}"] = row
     receipt.write_text(json.dumps(receipts, indent=2) + "\n")
 
@@ -331,5 +366,16 @@ if __name__ == "__main__":
         action="append",
         help="run only this family (repeatable)",
     )
+    parser.add_argument(
+        "--verdict-only",
+        action="store_true",
+        help="check the public verdict and exit code independently of diagnostic attribution",
+    )
     args = parser.parse_args()
-    run(args.out, args.compiler, args.frontend, args.family or FAMILIES)
+    run(
+        args.out,
+        args.compiler,
+        args.frontend,
+        args.family or FAMILIES,
+        args.verdict_only,
+    )

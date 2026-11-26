@@ -22,6 +22,7 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from .compare import export_transition as _export_transition
+from .compare.callback_value_convention import callback_value_changes
 from .compare.constants import constant_index_pair, diff_constants
 from .compare.declaration_facts import (
     access_changes,
@@ -636,6 +637,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             )
 
     changes.extend(value_parameter_changes(old, new, old_all, new_all))
+    changes.extend(callback_value_changes(old, new, old_all, new_all))
     changes.extend(_detect_newly_deleted_functions(old_all, new_all, old, new))
 
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions

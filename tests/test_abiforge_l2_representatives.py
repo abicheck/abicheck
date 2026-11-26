@@ -20,3 +20,44 @@ def test_generated_representatives(tmp_path, frontend):
     if not shutil.which("clang++") or not shutil.which(frontend):
         pytest.skip(f"requires clang++ and {frontend}")
     run(tmp_path, "clang++", frontend)
+
+
+def test_verdict_gate_works_without_diagnostic_attribution():
+    from abiforge.run.l2_representatives import check_report
+
+    assert check_report(
+        "callback_value", "change", {"verdict": "BREAKING"}, 4, True
+    ) == {"verdict": "BREAKING"}
+    for verdict, code in (
+        ("COMPATIBLE_WITH_RISK", 0),
+        ("BREAKING", 1),
+        ("NO_CHANGE", 0),
+    ):
+        with pytest.raises(ValueError):
+            check_report("callback_value", "change", {"verdict": verdict}, code, True)
+    with pytest.raises(ValueError):
+        check_report("callback_reference", "change", {"verdict": "BREAKING"}, 4, True)
+
+
+def test_callback_alias_scope_and_indirect_controls():
+    from types import SimpleNamespace
+
+    from abicheck.compare.callback_value_convention import _CallbackTypes
+
+    records = [
+        SimpleNamespace(name="V", qualified_name=name, trivial_for_calls=True)
+        for name in ("V", "ns::V")
+    ]
+    declarations = SimpleNamespace(
+        types=records,
+        typedefs_qualified={
+            "ns::Visit": "long (*)(const V, ::V, V*, const V&)",
+            "api::Alias": "ns::Visit",
+            "Cycle": "Cycle",
+        },
+    )
+    types = _CallbackTypes(SimpleNamespace(declarations=declarations))
+    slots = types.arguments("Alias", "api")
+    assert slots[0] == "ns::V" and slots[1] == "V"
+    assert slots[2] not in types.traits and slots[3] not in types.traits
+    assert types.arguments("Cycle", "") == {}

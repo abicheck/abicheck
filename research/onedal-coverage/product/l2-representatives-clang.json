@@ -1,4 +1,39 @@
 {
+  "callback_value/old": {
+    "exits": [
+      0
+    ]
+  },
+  "callback_value/change": {
+    "exits": [
+      1
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "value_abi_trait_changed"
+    ],
+    "required_findings": [
+      [
+        "value_abi_trait_changed",
+        "dispatch",
+        "p0.callback.p0:trivial",
+        "p0.callback.p0:nontrivial"
+      ]
+    ]
+  },
+  "callback_reference/old": {
+    "exits": [
+      0
+    ]
+  },
+  "callback_reference/change": {
+    "exits": [
+      0
+    ],
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
   "layout/old": {
     "exits": [
       17,

@@ -439,7 +439,8 @@ def join_clang_semantics(
     # baseline of a requires-clause added later is modelled: any template
     # (abbreviated ones included) counts, not only a constrained one.
     wants_concepts = cxx and (concept_header_scan(headers) or _spells_template(headers))
-    # Only a by-value record parameter needs Clang's call-triviality fact.
+    # Exported record returns, parameters and typed callback arguments need
+    # Clang's call-triviality facts even without a template or noexcept clause.
     from .return_by_value import has_exported_record_argument
 
     wants_traits = cxx and has_exported_record_argument(root, exported_symbols)
