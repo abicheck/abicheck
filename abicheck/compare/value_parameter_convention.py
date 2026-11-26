@@ -7,12 +7,14 @@ from ..diff_helpers import make_change
 from ..model.call_interface import SYSV_AMD64
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.declaration_store import Declarations
 from ..model.declarations import Function
 from ..model.dwarf_calling_conventions import named_convention
 from ..model.snapshot import AbiSnapshot
 from ..model.special_member_identity import resolve_special_member_linker_names
 from ..model.synthetic_key import is_synthetic_ctor_key
 from .call_axis_shadow import abi_of
+from .callback_value_convention import callback_value_changes
 from .export_names import default_export_names
 
 
@@ -121,3 +123,16 @@ def _with_constructor_params(
             if symbol in exports and not getattr(result.get(symbol), "params", None):
                 result[symbol] = constructors[index]
     return result
+
+
+def call_boundary_changes(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_functions: dict[str, Function],
+    new_functions: dict[str, Function],
+    old_decls: Declarations,
+) -> list[Change]:
+    changes = value_parameter_changes(old, new, old_functions, new_functions)
+    if any(record.trivial_for_calls is not None for record in old_decls.types):
+        changes.extend(callback_value_changes(old, new, old_functions, new_functions))
+    return changes

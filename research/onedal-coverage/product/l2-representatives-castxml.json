@@ -1,0 +1,615 @@
+{
+  "callback_return/old": {
+    "exits": [
+      0
+    ],
+    "callback_return": "i64"
+  },
+  "callback_return/change": {
+    "exits": [
+      1
+    ],
+    "callback_return": "sret",
+    "verdict": "BREAKING",
+    "kinds": [
+      "value_abi_trait_changed"
+    ],
+    "required_findings": [
+      [
+        "value_abi_trait_changed",
+        "dispatch",
+        "p0.callback.return:trivial",
+        "p0.callback.return:nontrivial"
+      ]
+    ]
+  },
+  "callback_large_return/old": {
+    "exits": [
+      0
+    ],
+    "callback_return": "sret"
+  },
+  "callback_large_return/change": {
+    "exits": [
+      0
+    ],
+    "callback_return": "sret",
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "callback_pointer_return/old": {
+    "exits": [
+      0
+    ],
+    "callback_return": "ptr"
+  },
+  "callback_pointer_return/change": {
+    "exits": [
+      0
+    ],
+    "callback_return": "ptr",
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "callback_table/old": {
+    "exits": [
+      17
+    ]
+  },
+  "callback_table/control": {
+    "exits": [
+      17
+    ],
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "callback_table/swap": {
+    "exits": [
+      19
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "type_field_offset_changed"
+    ],
+    "required_findings": [
+      [
+        "type_field_offset_changed",
+        "Table",
+        "0",
+        "64"
+      ],
+      [
+        "type_field_offset_changed",
+        "Table",
+        "64",
+        "0"
+      ]
+    ]
+  },
+  "callback_table/passing": {
+    "exits": [
+      23
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "value_abi_trait_changed"
+    ],
+    "required_findings": [
+      [
+        "value_abi_trait_changed",
+        "slots",
+        "return.second.callback.p0:nontrivial",
+        "return.second.callback.p0:trivial"
+      ]
+    ]
+  },
+  "callback_value/old": {
+    "exits": [
+      0
+    ]
+  },
+  "callback_value/change": {
+    "exits": [
+      1
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "value_abi_trait_changed"
+    ],
+    "required_findings": [
+      [
+        "value_abi_trait_changed",
+        "dispatch",
+        "p0.callback.p0:trivial",
+        "p0.callback.p0:nontrivial"
+      ]
+    ]
+  },
+  "callback_reference/old": {
+    "exits": [
+      0
+    ]
+  },
+  "callback_reference/change": {
+    "exits": [
+      0
+    ],
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "layout/old": {
+    "exits": [
+      17,
+      4
+    ]
+  },
+  "layout/control": {
+    "exits": [
+      17,
+      4
+    ],
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "layout/swap": {
+    "exits": [
+      29,
+      4
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "type_field_offset_changed"
+    ],
+    "required_findings": [
+      [
+        "type_field_offset_changed",
+        "point",
+        "0",
+        "32"
+      ],
+      [
+        "type_field_offset_changed",
+        "point",
+        "32",
+        "0"
+      ]
+    ]
+  },
+  "layout/alignment": {
+    "exits": [
+      8
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "type_alignment_changed",
+      "type_field_offset_changed",
+      "type_size_changed"
+    ],
+    "required_findings": [
+      [
+        "type_alignment_changed",
+        "point",
+        "32",
+        "64"
+      ],
+      [
+        "type_field_offset_changed",
+        "envelope",
+        "32",
+        "64"
+      ]
+    ]
+  },
+  "calls/old": {
+    "exits": [
+      34
+    ],
+    "signatures": {
+      "_Z9tv_resultv": [
+        "i32",
+        [],
+        false
+      ],
+      "_Z6tv_get2Tv": [
+        "i32",
+        [
+          "i32"
+        ],
+        false
+      ],
+      "_Z7tv_lateid2Tv": [
+        "void",
+        [
+          "ptr",
+          "i32",
+          "double",
+          "i32"
+        ],
+        true
+      ],
+      "_Z10tv_pointerP2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z12tv_referenceR2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z5lanesv": [
+        "{ double, i64 }",
+        [],
+        false
+      ]
+    }
+  },
+  "calls/control": {
+    "exits": [
+      34
+    ],
+    "signatures": {
+      "_Z9tv_resultv": [
+        "i32",
+        [],
+        false
+      ],
+      "_Z6tv_get2Tv": [
+        "i32",
+        [
+          "i32"
+        ],
+        false
+      ],
+      "_Z7tv_lateid2Tv": [
+        "void",
+        [
+          "ptr",
+          "i32",
+          "double",
+          "i32"
+        ],
+        true
+      ],
+      "_Z10tv_pointerP2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z12tv_referenceR2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z5lanesv": [
+        "{ double, i64 }",
+        [],
+        false
+      ]
+    },
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "calls/assignment": {
+    "exits": [
+      34
+    ],
+    "signatures": {
+      "_Z9tv_resultv": [
+        "i32",
+        [],
+        false
+      ],
+      "_Z6tv_get2Tv": [
+        "i32",
+        [
+          "i32"
+        ],
+        false
+      ],
+      "_Z7tv_lateid2Tv": [
+        "void",
+        [
+          "ptr",
+          "i32",
+          "double",
+          "i32"
+        ],
+        true
+      ],
+      "_Z10tv_pointerP2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z12tv_referenceR2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z5lanesv": [
+        "{ double, i64 }",
+        [],
+        false
+      ]
+    },
+    "verdict": "BREAKING",
+    "kinds": [
+      "inline_function_removed",
+      "public_surface_shrank",
+      "trivially_copyable_lost"
+    ],
+    "required_findings": []
+  },
+  "calls/nontrivial": {
+    "exits": [
+      34
+    ],
+    "signatures": {
+      "_Z9tv_resultv": [
+        "void",
+        [
+          "ptr"
+        ],
+        true
+      ],
+      "_Z6tv_get2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z7tv_lateid2Tv": [
+        "void",
+        [
+          "ptr",
+          "i32",
+          "double",
+          "ptr"
+        ],
+        true
+      ],
+      "_Z10tv_pointerP2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z12tv_referenceR2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z5lanesv": [
+        "{ double, i64 }",
+        [],
+        false
+      ]
+    },
+    "verdict": "BREAKING",
+    "kinds": [
+      "func_added_elf_only",
+      "func_lost_inline",
+      "inline_function_removed",
+      "public_surface_shrank",
+      "struct_return_convention_changed",
+      "trivially_copyable_lost",
+      "value_abi_trait_changed"
+    ],
+    "required_findings": [
+      [
+        "struct_return_convention_changed",
+        "Tv",
+        "regs(INTEGER)",
+        "memory (sret)"
+      ]
+    ]
+  },
+  "calls/register_class": {
+    "exits": [
+      34
+    ],
+    "signatures": {
+      "_Z9tv_resultv": [
+        "i32",
+        [],
+        false
+      ],
+      "_Z6tv_get2Tv": [
+        "i32",
+        [
+          "i32"
+        ],
+        false
+      ],
+      "_Z7tv_lateid2Tv": [
+        "void",
+        [
+          "ptr",
+          "i32",
+          "double",
+          "i32"
+        ],
+        true
+      ],
+      "_Z10tv_pointerP2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z12tv_referenceR2Tv": [
+        "i32",
+        [
+          "ptr"
+        ],
+        false
+      ],
+      "_Z5lanesv": [
+        "{ i64, i64 }",
+        [],
+        false
+      ]
+    },
+    "verdict": "BREAKING",
+    "kinds": [
+      "struct_return_convention_changed",
+      "type_field_type_changed"
+    ],
+    "required_findings": [
+      [
+        "struct_return_convention_changed",
+        "Lane",
+        "regs(SSE,INTEGER)",
+        "regs(INTEGER,INTEGER)"
+      ]
+    ]
+  },
+  "virtual/old": {
+    "exits": [
+      17,
+      18,
+      41
+    ]
+  },
+  "virtual/control": {
+    "exits": [
+      17,
+      18,
+      41
+    ],
+    "verdict": "NO_CHANGE",
+    "kinds": [],
+    "required_findings": []
+  },
+  "virtual/insert": {
+    "exits": [
+      19,
+      17,
+      41
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "func_added",
+      "public_surface_grew",
+      "type_vtable_changed",
+      "vtable_slot_count_changed"
+    ],
+    "required_findings": [
+      [
+        "type_vtable_changed",
+        "Right",
+        "_ZN5Right5firstEv, _ZN5Right6secondEv",
+        "_ZN5Right5extraEv, _ZN5Right5firstEv, _ZN5Right6secondEv"
+      ]
+    ]
+  },
+  "virtual/swap": {
+    "exits": [
+      18,
+      17,
+      41
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "type_vtable_changed"
+    ],
+    "required_findings": [
+      [
+        "type_vtable_changed",
+        "Right",
+        "_ZN5Right5firstEv, _ZN5Right6secondEv",
+        "_ZN5Right6secondEv, _ZN5Right5firstEv"
+      ]
+    ]
+  },
+  "virtual/primary_override": {
+    "exits": [
+      17,
+      18,
+      29
+    ],
+    "verdict": "COMPATIBLE",
+    "kinds": [
+      "func_added",
+      "public_surface_grew"
+    ],
+    "required_findings": [
+      [
+        "func_added",
+        "_ZN4Both3padEv",
+        null,
+        "pad"
+      ]
+    ]
+  },
+  "virtual/override": {
+    "exits": [
+      29,
+      18,
+      41
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "func_added",
+      "public_surface_grew",
+      "vtable_slot_count_changed"
+    ],
+    "required_findings": [
+      [
+        "vtable_slot_count_changed",
+        "_ZTV4Both",
+        "64",
+        "72"
+      ]
+    ]
+  },
+  "virtual/move_base": {
+    "exits": [
+      41
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "base_class_offset_changed",
+      "base_class_position_changed",
+      "type_vtable_changed"
+    ],
+    "required_findings": [
+      [
+        "base_class_offset_changed",
+        "Both",
+        "0",
+        "128"
+      ],
+      [
+        "base_class_offset_changed",
+        "Both",
+        "128",
+        "0"
+      ]
+    ]
+  }
+}

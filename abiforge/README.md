@@ -154,3 +154,71 @@ with the snapshot cache enabled. The fixtures exercise the exported loader
 interface only.
 
 Run both integration tests with `ABIFORGE_ONEDAL_PREFIX="$PWD/sdk" pytest -m integration tests/test_abiforge_sycl_campaigns.py`.
+
+### oneDAL-relevant L2 representatives on Linux x86-64
+
+Run `python -m abiforge.run.l2_representatives OUT --frontend clang` or
+select `castxml`. Repeat `--family layout`, `--family calls`, or
+`--family virtual` to restrict the run. Use a separate output directory per
+frontend. The generator writes C++ sources, one frozen executable per family,
+stripped DSOs, public CLI snapshots and comparisons, and a checked JSON
+receipt. Clang supplies the LLVM call signatures independently of either
+header frontend. The regular corpus's `struct_swap_fields` and
+`by_value_struct_became_nontrivial` operators supply the corresponding edits.
+
+| Representative | Independent observation and fault distinguished |
+| --- | --- |
+| Equal-width field swap | A frozen reader returns 29 instead of 17. Both field offsets reverse and the record stays eight bytes. |
+| Stronger alignment | The same eight-byte record begins at byte 8 instead of 4 inside an enclosing record. The client queries the provider's offset without passing it an under-aligned object. |
+| Nontrivial destructor | A four-byte value moves from a register to an indirect argument and from a register return to a hidden result pointer. The checker must attribute exactly the two changed argument positions and the one affected return. |
+| Register class at constant size | A 16-byte result changes from floating-point plus integer registers to two integer registers. Both versions still return directly. |
+| Late argument with an existing hidden result | The same edit affects the third source parameter after an integer and a floating-point parameter. The compiler still emits a separate leading result pointer. |
+| Pointer, reference and assignment controls | Frozen pointer/reference calls keep returning 34 in total. User-provided copy assignment alone leaves all five LLVM call signatures stable. Other properties such as trivial copyability can still change. |
+| Insert and reorder virtual slots | The two frozen calls through the secondary base return 19/17 after insertion and 18/17 after a swap. Checking only vtable growth would miss the swap. |
+| Override in the primary or secondary base | Each frozen call reads the derived object's payload. The primary override reuses its slot. The secondary override also adds a primary entry, growing this complete vtable from 64 to 72 bytes. |
+| Reorder polymorphic bases | The old client's baked-in base adjustment reaches the other subobject and reads 41 instead of 17. Both base offsets must change in the checker report. |
+| Implementation-only controls | One per family checks the frozen workload and requires an empty ABI diff. |
+
+These representatives cover the specified SysV AMD64 C++ decisions. ELF
+withdrawals, actual SYCL queue dependencies, and two-rank collectives have
+separate [oneDAL product witnesses](../research/onedal-coverage/product/README.md).
+
+The recorded Linux runs contain 21 comparisons per frontend, plus the nine
+baselines. [Clang receipt](../research/onedal-coverage/product/l2-representatives-clang.json)
+and [CastXML receipt](../research/onedal-coverage/product/l2-representatives-castxml.json).
+
+For the release verdict gate run
+`python -m abiforge.run.l2_representatives OUT --frontend castxml --verdict-only`
+(or select `clang`). This checks each generated binary pair with the compiler
+or frozen-client witness, then requires the public verdict and CLI exit code
+to agree. A risk warning fails the gate for a known binary incompatibility.
+Omit `--verdict-only` to check diagnostic attribution too.
+
+Two additional pairs exercise an exported callback registration signature.
+Removing Clang's `trivial_abi` attribute from a nontrivial record changes
+how an old callback receives the record by value. On SysV AMD64 the frozen
+client's exit changes from 0 to 1. Applying the same edit to the reference
+case preserves the client's result.
+
+The return cases check the indirect call in LLVM IR and run the frozen
+callback. Removing the same attribute on a one-word return changes an
+integer-register result to a caller-provided buffer. Returning a pointer
+and returning a three-word record preserve their respective calling
+conventions. The table case calls the second of two named slots in a table
+returned by the library. Reordering them selects the first implementation.
+Changing only the second slot's value-passing ABI preserves both offsets and
+changes what that implementation reads. A body-only control preserves the
+result.
+
+Replay the duplicate-export experiment on glibc Linux with patchelf 0.19+
+and two frozen executables. Each client must run successfully with no
+arguments and import the shared symbol directly. Set LD_LIBRARY_PATH for
+any supporting dependencies. The runner copies both DSOs to private release
+directories, traces bindings in each client, and checks the top-level
+directory comparison verdict and CLI exit.
+
+```sh
+python -m abiforge.run.duplicate_provider "$DPC_DSO" "$CPU_DSO" "$DPC_CLIENT" "$CPU_CLIENT" "$SHARED_SYMBOL" "$OUT"
+```
+
+[Linux oneDAL 2025.9 CPU/DPC binding and release verdict](../research/onedal-coverage/product/duplicate-provider.json)

@@ -14,6 +14,7 @@ parser.add_argument('prefix', type=Path)
 parser.add_argument('out', type=Path)
 parser.add_argument('clients', nargs='*', type=Path)
 parser.add_argument('--source', type=Path, help='also allow the oneDAL source tree and its IDE dispatcher context')
+parser.add_argument('--all-providers', action='store_true', help='join host-parsed SDK declarations to all installed CPU and DPC SONAMEs')
 parser.add_argument('--extended', action='store_true', help='inventory protected declarations and provider-matched exported variables')
 parser.add_argument('--include', action='append', type=Path, default=[], help='optional SDK include root, repeatable')
 parser.add_argument('--legacy-umbrella', action='store_true', help='parse legacy headers after daal.h')
@@ -37,8 +38,11 @@ clients = defaultdict(set)
 def symbols(path, flag):
     lines = subprocess.check_output(['nm','-D',flag,str(path)],text=True).splitlines()
     return {line.split()[-1].split('@')[0] for line in lines if line.split()}
-for lib in sorted((prefix/'lib').glob('libonedal*.so.3')):
-    if '_dpc' not in lib.name:
+for lib in sorted((prefix/'lib').glob('libonedal*.so.*')):
+    # Use the runtime SONAME, excluding unversioned links and fully versioned aliases.
+    if not lib.name.split('.so.')[-1].isdigit():
+        continue
+    if options.all_providers or '_dpc' not in lib.name:
         for sym in symbols(lib,'--defined-only'):
             providers[sym].add(lib.name)
 for binary in options.clients:

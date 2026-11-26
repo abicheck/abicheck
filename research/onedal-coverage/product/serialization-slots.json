@@ -38,5 +38,18 @@
       "type_vtable_changed",
       "vtable_slot_count_changed"
     ]
+  },
+  "insert": {
+    "method_exits": [
+      23,
+      21
+    ],
+    "verdict": "BREAKING",
+    "kinds": [
+      "func_added",
+      "public_not_exported",
+      "type_vtable_changed",
+      "vtable_slot_count_changed"
+    ]
   }
 }

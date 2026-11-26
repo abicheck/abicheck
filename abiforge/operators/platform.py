@@ -820,11 +820,12 @@ _CXX = (
     _xa(
         "by_value_struct_became_nontrivial",
         ("xa.tv",),
-        _decl(
-            "xa.tv",
-            "struct Tv { int a; ~Tv(); };\nint tv_get(Tv t);",
-            "Tv::~Tv() {}\nint tv_get(Tv t) { return t.a + 1; }",
-        ),
+        lambda roles: {
+            "xa.tv": (
+                roles["xa.tv"][0].replace("int a;", "int a; ~Tv();", 1),
+                "Tv::~Tv() {}\n" + roles["xa.tv"][1],
+            )
+        },
         "a user-provided destructor makes Tv non-trivial for calls: it is now "
         "passed by invisible reference, where old callers pass it in a register",
         expected=frozenset({"VALUE_ABI_TRAIT_CHANGED"}),

@@ -171,6 +171,11 @@ class TypeIdentityIndex:
         self.namespace_ids: dict[str, str] = {}
         self.namespace_aliases: dict[str, str] = {}
         self._namespaces(root, ())
+        self.type_ids = {
+            e.node["id"]: "::".join((*e.scope, e.node["name"]))
+            for e in (*records, *enums, *aliases)
+            if e.node.get("id") and e.node.get("name")
+        }
         self._usings(root, ())
         self.memo: dict[tuple[str, tuple[str, ...]], Fact[tuple[str, ...]]] = {}
 
@@ -202,6 +207,14 @@ class TypeIdentityIndex:
             )
             if target:
                 self.namespace_aliases["::".join((*scope, node["name"]))] = target
+        if node.get("kind") == "UsingShadowDecl":
+            ref = node.get("target", {})
+            target = self.type_ids.get(ref.get("id"))
+            if target and ref.get("name"):
+                key = "::".join((*scope, ref["name"]))
+                if key != target:
+                    self.aliases[key] = "::" + target
+                    self.known.add(key)
         if node.get("kind") == "UsingDirectiveDecl":
             target = node.get("nominatedNamespace", {})
             name = self.namespace_ids.get(target.get("id", ""))
@@ -211,6 +224,7 @@ class TypeIdentityIndex:
             if isinstance(child, dict) and child.get("kind") in (
                 "NamespaceDecl",
                 "TranslationUnitDecl",
+                "UsingShadowDecl",
                 "UsingDirectiveDecl",
                 "NamespaceAliasDecl",
                 "LinkageSpecDecl",

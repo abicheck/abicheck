@@ -1,0 +1,386 @@
+{
+  "libonedal.so.3": {
+    "_ZN6oneapi3dal2v113homogen_table9init_implINS0_6detail2v119default_host_policyEEEvRKT_llRKNS0_2v25arrayIhEERKNS1_9data_typeENS1_11data_layoutE": {
+      "header": "oneapi/dal/table/homogen.hpp",
+      "line": 269,
+      "declaration": "init_impl",
+      "type": "void (const oneapi::dal::detail::v1::default_host_policy &, std::int64_t, std::int64_t, const dal::array<byte_t> &, const data_type &, data_layout)"
+    },
+    "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_2v25arrayIhEERKNS4_IlEESA_lRKNS1_9data_typeENS1_15sparse_indexingE": {
+      "header": "oneapi/dal/table/csr.hpp",
+      "line": 400,
+      "declaration": "init_impl",
+      "type": "void (const dal::array<byte_t> &, const dal::array<std::int64_t> &, const dal::array<std::int64_t> &, std::int64_t, const data_type &, sparse_indexing)"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages27row_offsets_pointer_is_nullEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 131,
+      "declaration": "row_offsets_pointer_is_null",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages35array_does_not_contain_mutable_dataEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 65,
+      "declaration": "array_does_not_contain_mutable_data",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages42object_does_not_provide_read_access_to_csrEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 135,
+      "declaration": "object_does_not_provide_read_access_to_csr",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages43object_does_not_provide_read_access_to_rowsEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 121,
+      "declaration": "object_does_not_provide_read_access_to_rows",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_11table_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 27,
+      "declaration": "get_pull_rows_iface_impl",
+      "type": "pull_rows_iface *(table_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v129get_pull_csr_block_iface_implEPNS2_11table_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 29,
+      "declaration": "get_pull_csr_block_iface_impl",
+      "type": "pull_csr_block_iface *(table_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v14freeERKNS2_19default_host_policyEPv": {
+      "header": "oneapi/dal/detail/memory_impl_host.hpp",
+      "line": 29,
+      "declaration": "free",
+      "type": "void (const default_host_policy &, void *)"
+    },
+    "_ZN6oneapi3dal6detail2v16mallocERKNS2_19default_host_policyEm": {
+      "header": "oneapi/dal/detail/memory_impl_host.hpp",
+      "line": 27,
+      "declaration": "malloc",
+      "type": "void *(const default_host_policy &, std::size_t)"
+    },
+    "_ZN6oneapi3dal6detail2v220integer_overflow_opsIlE18check_mul_overflowERKlS6_": {
+      "header": "oneapi/dal/detail/common.hpp",
+      "line": 389,
+      "declaration": "check_mul_overflow",
+      "type": "long (const long &, const long &)"
+    }
+  },
+  "libonedal_core.so.3": {
+    "_ZNK4daal15data_management10interface130SerializableKeyValueCollectionINS1_18SerializationIfaceEE19getSerializationTagEv": {
+      "header": "dal/data_management/data/data_serialize.h",
+      "line": 143,
+      "declaration": "getSerializationTag",
+      "type": "int () const"
+    },
+    "_ZTIN4daal10algorithms10covariance10interface113PartialResultE": {
+      "header": "dal/algorithms/covariance/covariance_types.h",
+      "line": 182,
+      "declaration": "PartialResult",
+      "type": "CXXRecordDecl"
+    },
+    "_ZTVN4daal10algorithms10covariance10interface113PartialResultE": {
+      "header": "dal/algorithms/covariance/covariance_types.h",
+      "line": 182,
+      "declaration": "PartialResult",
+      "type": "CXXRecordDecl"
+    },
+    "_ZTVN4daal10algorithms3pca9transform10interface15InputE": {
+      "header": "dal/algorithms/pca/transform/pca_transform_types.h",
+      "line": 109,
+      "declaration": "Input",
+      "type": "CXXRecordDecl"
+    }
+  },
+  "libonedal_dpc.so.3": {
+    "_ZN6oneapi3dal2v113homogen_table9init_implINS0_6detail2v120data_parallel_policyEEEvRKT_llRKNS0_2v25arrayIhEERKNS1_9data_typeENS1_11data_layoutE": {
+      "header": "oneapi/dal/table/homogen.hpp",
+      "line": 269,
+      "declaration": "init_impl",
+      "type": "void (const oneapi::dal::detail::v1::data_parallel_policy &, std::int64_t, std::int64_t, const dal::array<byte_t> &, const data_type &, data_layout)"
+    },
+    "_ZN6oneapi3dal2v19csr_table18get_non_zero_countERN4sycl3_V15queueElPKlRKSt6vectorINS4_5eventESaISA_EE": {
+      "header": "oneapi/dal/table/csr.hpp",
+      "line": 376,
+      "declaration": "get_non_zero_count",
+      "type": "std::int64_t (sycl::queue &, const std::int64_t, const std::int64_t *, const std::vector<sycl::event> &)"
+    },
+    "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_2v25arrayIhEERKNS4_IlEESA_lRKNS1_9data_typeENS1_15sparse_indexingE": {
+      "header": "oneapi/dal/table/csr.hpp",
+      "line": 400,
+      "declaration": "init_impl",
+      "type": "void (const dal::array<byte_t> &, const dal::array<std::int64_t> &, const dal::array<std::int64_t> &, std::int64_t, const data_type &, sparse_indexing)"
+    },
+    "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_6detail2v120data_parallel_policyERKNS0_2v25arrayIhEERKNS9_IlEESF_lRKNS1_9data_typeENS1_15sparse_indexingERKSt6vectorIN4sycl3_V15eventESaISN_EE": {
+      "header": "oneapi/dal/table/csr.hpp",
+      "line": 408,
+      "declaration": "init_impl",
+      "type": "void (const detail::data_parallel_policy &, const dal::array<byte_t> &, const dal::array<std::int64_t> &, const dal::array<std::int64_t> &, std::int64_t, const data_type &, sparse_indexing, const std::vector<sycl::event> &)"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages10invalid_opEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 331,
+      "declaration": "invalid_op",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages12invalid_rootEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 335,
+      "declaration": "invalid_root",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages13invalid_countEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 333,
+      "declaration": "invalid_count",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages14invalid_bufferEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 332,
+      "declaration": "invalid_buffer",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages16invalid_mpi_commEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 334,
+      "declaration": "invalid_mpi_comm",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages17invalid_data_typeEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 330,
+      "declaration": "invalid_data_type",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages17unknown_mpi_errorEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 336,
+      "declaration": "unknown_mpi_error",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages33integral_type_conversion_overflowEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 69,
+      "declaration": "integral_type_conversion_overflow",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages34integral_type_conversion_underflowEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 70,
+      "declaration": "integral_type_conversion_underflow",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages35array_does_not_contain_mutable_dataEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 65,
+      "declaration": "array_does_not_contain_mutable_data",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages42object_does_not_provide_read_access_to_csrEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 135,
+      "declaration": "object_does_not_provide_read_access_to_csr",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages43object_does_not_provide_read_access_to_rowsEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 121,
+      "declaration": "object_does_not_provide_read_access_to_rows",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages44object_does_not_provide_write_access_to_rowsEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 122,
+      "declaration": "object_does_not_provide_write_access_to_rows",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages46object_does_not_provide_read_access_to_columnsEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 123,
+      "declaration": "object_does_not_provide_read_access_to_columns",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v114error_messages47object_does_not_provide_write_access_to_columnsEv": {
+      "header": "oneapi/dal/detail/error_messages.hpp",
+      "line": 124,
+      "declaration": "object_does_not_provide_write_access_to_columns",
+      "type": "const char *() noexcept"
+    },
+    "_ZN6oneapi3dal6detail2v120data_parallel_policy9init_implERKN4sycl3_V15queueE": {
+      "header": "oneapi/dal/detail/policy.hpp",
+      "line": 109,
+      "declaration": "init_impl",
+      "type": "void (const sycl::queue &)"
+    },
+    "_ZN6oneapi3dal6detail2v121homogen_table_builderC1Ev": {
+      "header": "oneapi/dal/table/detail/table_builder.hpp",
+      "line": 48,
+      "declaration": "homogen_table_builder",
+      "type": "void ()"
+    },
+    "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_11table_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 27,
+      "declaration": "get_pull_rows_iface_impl",
+      "type": "pull_rows_iface *(table_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_19table_builder_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 31,
+      "declaration": "get_pull_rows_iface_impl",
+      "type": "pull_rows_iface *(table_builder_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v124get_push_rows_iface_implEPNS2_19table_builder_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 32,
+      "declaration": "get_push_rows_iface_impl",
+      "type": "push_rows_iface *(table_builder_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v125is_known_usm_pointer_typeERKNS2_20data_parallel_policyEPKv": {
+      "header": "oneapi/dal/detail/memory_impl_dpc.hpp",
+      "line": 44,
+      "declaration": "is_known_usm_pointer_type",
+      "type": "bool (const data_parallel_policy &, const void *)"
+    },
+    "_ZN6oneapi3dal6detail2v126get_pull_column_iface_implEPNS2_11table_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 28,
+      "declaration": "get_pull_column_iface_impl",
+      "type": "pull_column_iface *(table_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v126get_pull_column_iface_implEPNS2_19table_builder_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 33,
+      "declaration": "get_pull_column_iface_impl",
+      "type": "pull_column_iface *(table_builder_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v126get_push_column_iface_implEPNS2_19table_builder_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 34,
+      "declaration": "get_push_column_iface_impl",
+      "type": "push_column_iface *(table_builder_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v129get_pull_csr_block_iface_implEPNS2_11table_ifaceE": {
+      "header": "oneapi/dal/table/detail/table_utils.hpp",
+      "line": 29,
+      "declaration": "get_pull_csr_block_iface_impl",
+      "type": "pull_csr_block_iface *(table_iface *)"
+    },
+    "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl10allgathervERN4sycl3_V15queueEPKhlPhPKlSC_RKNS0_2v19data_typeERKSt6vectorINS5_5eventESaISI_EE": {
+      "header": "oneapi/dal/detail/communicator.hpp",
+      "line": 56,
+      "declaration": "allgatherv",
+      "type": "spmd::request_iface *(sycl::queue &, const byte_t *, std::int64_t, byte_t *, const std::int64_t *, const std::int64_t *, const data_type &, const std::vector<sycl::event> &)"
+    },
+    "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl16sendrecv_replaceERN4sycl3_V15queueEPhlRKNS0_2v19data_typeEllRKSt6vectorINS5_5eventESaISE_EE": {
+      "header": "oneapi/dal/detail/communicator.hpp",
+      "line": 71,
+      "declaration": "sendrecv_replace",
+      "type": "spmd::request_iface *(sycl::queue &, byte_t *, std::int64_t, const data_type &, std::int64_t, std::int64_t, const std::vector<sycl::event> &)"
+    },
+    "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl5bcastERN4sycl3_V15queueEPhlRKNS0_2v19data_typeERKSt6vectorINS5_5eventESaISE_EEl": {
+      "header": "oneapi/dal/detail/communicator.hpp",
+      "line": 49,
+      "declaration": "bcast",
+      "type": "spmd::request_iface *(sycl::queue &, byte_t *, std::int64_t, const data_type &, const std::vector<sycl::event> &, std::int64_t)"
+    },
+    "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl9allreduceERN4sycl3_V15queueEPKhPhlRKNS0_2v19data_typeERKNS0_7preview4spmd2v19reduce_opERKSt6vectorINS5_5eventESaISM_EE": {
+      "header": "oneapi/dal/detail/communicator.hpp",
+      "line": 64,
+      "declaration": "allreduce",
+      "type": "spmd::request_iface *(sycl::queue &, const byte_t *, byte_t *, std::int64_t, const data_type &, const spmd::reduce_op &, const std::vector<sycl::event> &)"
+    },
+    "_ZN6oneapi3dal6detail2v14freeERKNS2_19default_host_policyEPv": {
+      "header": "oneapi/dal/detail/memory_impl_host.hpp",
+      "line": 29,
+      "declaration": "free",
+      "type": "void (const default_host_policy &, void *)"
+    },
+    "_ZN6oneapi3dal6detail2v14freeERKNS2_20data_parallel_policyEPv": {
+      "header": "oneapi/dal/detail/memory_impl_dpc.hpp",
+      "line": 27,
+      "declaration": "free",
+      "type": "void (const data_parallel_policy &, void *)"
+    },
+    "_ZN6oneapi3dal6detail2v16mallocERKNS2_19default_host_policyEm": {
+      "header": "oneapi/dal/detail/memory_impl_host.hpp",
+      "line": 27,
+      "declaration": "malloc",
+      "type": "void *(const default_host_policy &, std::size_t)"
+    },
+    "_ZN6oneapi3dal6detail2v16mallocERKNS2_20data_parallel_policyEmRKN4sycl3_V13usm5allocE": {
+      "header": "oneapi/dal/detail/memory_impl_dpc.hpp",
+      "line": 26,
+      "declaration": "malloc",
+      "type": "void *(const data_parallel_policy &, std::size_t, const sycl::usm::alloc &)"
+    },
+    "_ZN6oneapi3dal6detail2v16memcpyERKNS2_19default_host_policyEPvPKvl": {
+      "header": "oneapi/dal/detail/memory_impl_host.hpp",
+      "line": 34,
+      "declaration": "memcpy",
+      "type": "void (const default_host_policy &, void *, const void *, std::int64_t)"
+    },
+    "_ZN6oneapi3dal6detail2v16memcpyERKNS2_20data_parallel_policyEPvPKvl": {
+      "header": "oneapi/dal/detail/memory_impl_dpc.hpp",
+      "line": 32,
+      "declaration": "memcpy",
+      "type": "void (const data_parallel_policy &, void *, const void *, std::int64_t)"
+    },
+    "_ZN6oneapi3dal6detail2v218chunked_array_base14set_chunk_implElNS2_10array_implIhEE": {
+      "header": "oneapi/dal/detail/chunked_array_impl.hpp",
+      "line": 144,
+      "declaration": "set_chunk_impl",
+      "type": "void (std::int64_t, array_impl_t)"
+    },
+    "_ZN6oneapi3dal6detail2v218chunked_array_base15make_array_implEl": {
+      "header": "oneapi/dal/detail/chunked_array_impl.hpp",
+      "line": 202,
+      "declaration": "make_array_impl",
+      "type": "impl_ptr_t (std::int64_t)"
+    },
+    "_ZN6oneapi3dal6detail2v220integer_overflow_opsIlE18check_mul_overflowERKlS6_": {
+      "header": "oneapi/dal/detail/common.hpp",
+      "line": 389,
+      "declaration": "check_mul_overflow",
+      "type": "long (const long &, const long &)"
+    },
+    "_ZNK6oneapi3dal3csv6detail2v119read_ops_dispatcherINS0_2v15tableEfNS0_6detail2v120data_parallel_policyEJEEclERKS9_RKNS3_16data_source_baseERKNS1_2v19read_argsIS6_EE": {
+      "header": "oneapi/dal/io/csv/detail/read_ops.hpp",
+      "line": 62,
+      "declaration": "operator()",
+      "type": "table (const dal::detail::data_parallel_policy &, const data_source_base &, const dal::csv::read_args<table> &) const"
+    },
+    "_ZNK6oneapi3dal6detail2v218chunked_array_base12flatten_implINS1_2v120data_parallel_policyENS5_23data_parallel_allocatorIhEEEENS2_10array_implIhEERKT_RKT0_": {
+      "header": "oneapi/dal/detail/chunked_array_impl.hpp",
+      "line": 136,
+      "declaration": "flatten_impl",
+      "type": "array_impl_t (const oneapi::dal::detail::v1::data_parallel_policy &, const oneapi::dal::detail::v1::data_parallel_allocator<unsigned char> &) const"
+    },
+    "_ZNK6oneapi3dal6detail2v218chunked_array_base13get_data_implINS1_2v120data_parallel_policyENS5_23data_parallel_allocatorIPKhEEEENS2_10array_implIS9_EERKT_RKT0_": {
+      "header": "oneapi/dal/detail/chunked_array_impl.hpp",
+      "line": 130,
+      "declaration": "get_data_impl",
+      "type": "array_impl<const byte_t *> (const oneapi::dal::detail::v1::data_parallel_policy &, const oneapi::dal::detail::v1::data_parallel_allocator<const unsigned char *> &) const"
+    },
+    "_ZNK6oneapi3dal6detail2v218chunked_array_base15get_chunk_countEv": {
+      "header": "oneapi/dal/detail/chunked_array_impl.hpp",
+      "line": 53,
+      "declaration": "get_chunk_count",
+      "type": "std::int64_t () const noexcept"
+    },
+    "_ZNK6oneapi3dal6detail2v218chunked_array_base8validateEv": {
+      "header": "oneapi/dal/detail/chunked_array_impl.hpp",
+      "line": 51,
+      "declaration": "validate",
+      "type": "bool () const noexcept"
+    },
+    "_ZNK6oneapi3dal7preview4spmd2v112communicatorINS2_20device_memory_access2v13usmEE27wait_for_exception_handlingEv": {
+      "header": "oneapi/dal/spmd/communicator.hpp",
+      "line": 514,
+      "declaration": "wait_for_exception_handling",
+      "type": "void () const"
+    }
+  }
+}

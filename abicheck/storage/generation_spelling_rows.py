@@ -796,4 +796,5 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "ELF consumers now record undefined symbol bindings and version requirements, "
         "including references from relocatable objects. Stored symbol spellings need no rewrite."
     ),
+    97: GenerationSpellingChange("Record IDs and callback ABI; no rewrite."),
 }

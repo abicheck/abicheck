@@ -458,6 +458,18 @@ class _Renderer:
             return Fact.present(found)
         return Fact.not_collected()
 
+    def field_identities(self, text: str) -> Fact[tuple[str, ...]] | None:
+        if self.fe is Frontend.CASTXML:
+            return self.identities(text)
+        found = self._found(text)
+        if (
+            len(found) == 1
+            and found[0] in self.records
+            and not any(mark in text for mark in "*&[<")
+        ):
+            return Fact.present(found)
+        return None
+
     def identities(self, text: str) -> Fact[tuple[str, ...]] | None:
         if self.fe is not Frontend.CASTXML or not text:
             return None
@@ -506,7 +518,9 @@ class _Renderer:
                         and (qual, f.name) in self.canonical_fields
                     ),
                 ),
-                type_identities_fact=self.identities(f.type),
+                type_identities_fact=None
+                if in_instance
+                else self.field_identities(f.type),
             )
             for f in rec.fields
         ]

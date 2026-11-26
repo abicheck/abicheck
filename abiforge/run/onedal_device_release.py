@@ -6,17 +6,34 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
 
-def run(old, new, compiler, out, selector="opencl:cpu", major=None):
+def run(old, new, compiler, out, selector="opencl:cpu", major=None, mpi=False):
     out.mkdir(parents=True, exist_ok=True)
     data = out / "data.csv"
     data.write_text("7,8\n")
     probes = Path(__file__).resolve().parents[2] / "research/onedal-sycl-usm"
     results = []
-    for name in ("event", "buffer", "csr", "ownership"):
+    clients = ["event", "buffer", "csr", "ownership", "dependency"]
+    if mpi:
+        clients.append("spmd")
+    for name in clients:
+        mpi_flags = []
+        command = []
+        if name == "spmd":
+            command = ["mpiexec", "-n", "2"]
+            for phase in ("compile", "link"):
+                mpi_flags.extend(
+                    shlex.split(
+                        subprocess.check_output(
+                            ["mpicxx", f"--showme:{phase}"], text=True
+                        )
+                    )
+                )
+
         client = out / name
         subprocess.run(
             [
@@ -32,6 +49,7 @@ def run(old, new, compiler, out, selector="opencl:cpu", major=None):
                     f"-l:libonedal{x}.so.3"
                     for x in ("_dpc", "_parameters_dpc", "_core", "_thread")
                 ),
+                *mpi_flags,
                 "-o",
                 client,
             ],
@@ -61,7 +79,7 @@ def run(old, new, compiler, out, selector="opencl:cpu", major=None):
             if not providers:
                 raise ValueError(f"{client}: no oneDAL providers in loader trace")
             result = subprocess.run(
-                [client, data], env=env, capture_output=True, text=True
+                [*command, client, data], env=env, capture_output=True, text=True
             )
             matches = result.returncode == 0
             if name == "event":
@@ -69,6 +87,8 @@ def run(old, new, compiler, out, selector="opencl:cpu", major=None):
                     f"{allocation} 256/256"
                     for allocation in ("shared", "host", "device")
                 }
+            if name == "dependency":
+                matches &= result.stdout.strip() == "42"
             results.append(
                 dict(
                     client=name,
@@ -125,6 +145,11 @@ if __name__ == "__main__":
         type=Path,
         help="also check the frozen client against a standalone major release",
     )
+    parser.add_argument(
+        "--mpi",
+        action="store_true",
+        help="also replay the two-rank Open MPI communicator client",
+    )
     args = parser.parse_args()
     raise SystemExit(
         not run(
@@ -134,5 +159,6 @@ if __name__ == "__main__":
             args.out.resolve(),
             args.selector,
             args.major.resolve() if args.major else None,
+            mpi=args.mpi,
         )
     )

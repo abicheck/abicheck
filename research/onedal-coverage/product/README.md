@@ -115,7 +115,9 @@ Clang IR records the calling sequence. A frozen GCC client passes a tagged
 pointer through each real SDK entry point to a stripped observation adapter.
 It exits 0 for both controls and 41 for every mismatched argument.
 The public checker independently compares libonedal_core with the respective
-headers and identifies argument zero on each symbol.
+headers and identifies argument zero on each symbol. The merged ledgers contain
+49 source argument obligations across positions zero through seven. Only the six
+position-zero declarations match an exported provider.
 
 [table-accessors.csv](table-accessors.csv) selects one named table, index or
 model member per additional access path. [table-ownership.csv](table-ownership.csv)
@@ -154,6 +156,122 @@ KX k.h, unixODBC 2.3.11 and libclang 19. This inventory covers the selected
 Linux CPU preprocessing configuration. Each supported macro configuration,
 target ABI and template instantiation needs its own evidence.
 
+### ELF export coverage and next targets
+
+The three Linux x86-64 packages each ship six oneDAL DSOs. In 2025.9 they
+define 22,428 (SONAME, dynamic name) pairs and 18,619 distinct names. The two
+SDK ledgers match 3,517 pairs (15.7%) and 3,516 distinct names (18.9%).
+These denominators include backend internals, template instantiations, RTTI
+and vtables. Inlined operations, record layouts, calling conventions and
+kernel execution each need their own witnesses. A matched name alone measures
+symbol identity. Combining these ledgers with the fresh all-provider scan yields
+3,517 distinct names and 3,667 provider/name pairs (16.4%). The legacy ledger also records independent edit witnesses
+for 197 provider/name pairs. Later campaigns record additional mutation
+evidence separately. Joining the exact 947 L2 Status names, the 197 ledger
+edit witnesses and four real minor-release withdrawals gives **1,144 distinct
+exports with at least one named change witness** after deduplication. This is
+a lower bound of 6.1% of names, or 5.1% of provider/name pairs. Each witness
+covers a particular change. This bound excludes probes without an exact
+symbol join.
+
+| 2025.9 provider | Defined names | SDK ledger pairs | Fresh host SDK scan, all providers | Imports matched in 12 frozen clients |
+| --- | ---: | ---: | ---: | ---: |
+| Host | 3,670 | 148 | 148 | 57 |
+| Core | 13,352 | 3,367 | 3,367 | 30 |
+| DPC | 4,872 | 0 | 149 | 59 |
+| Parameters (host) | 99 | 2 | 1 | 0 |
+| Parameters (DPC) | 152 | 0 | 1 | 0 |
+| Thread | 283 | 0 | 0 | 0 |
+
+Import counts join undefined client symbols to matching exports in directly
+needed DSOs. They measure candidate bindings and can include unused call paths.
+The DPC library exports 148 names also recorded against the host provider.
+The report keeps provider identities separate. All 3,516 distinct baseline SDK
+names survive in 2025.11. Its own SDK scan matched 3,521 of 18,626 distinct
+names. In 2026.2, 2,178 survive by spelling in a package
+with new SONAMEs. A fresh host-header scan of 2026.2 matched 2,188 of its 12,082 distinct names
+(18.1%) and 2,345 of 15,742 provider/name pairs. The installed-header scans
+parsed 535 of 541 roots for 2025.9 and 426 of 432 for 2026.2. Both skipped six
+CPU parameter headers requiring the source-tree backend dispatcher. [Machine-readable counts and missing client imports](export-surface.json)
+
+The frozen-client compiler pass located the SDK declarations for the remaining
+48 DPC, 11 host and four core imports in 2025.9. Together with the first-pass
+ledger this binds all 59 observed DPC imports. For RTTI and vtable objects the
+entry points to the defining class. These counts measure provider/name pairs.
+The withdrawal runner uses one mutation rule across them. It checks the old
+client's relocation, runs its normal workload, and compares the withdrawn ELF
+exports with the public checker. The real minor-release losses have a separate
+[four-relocation experiment](minor-dpc-withdrawals.json).
+Normal execution failed in 44 withdrawals. The other 19 were visible during
+eager relocation checks and the selected workload still exited successfully.
+Grouping by Itanium entity, relocation kind and observed process exit yields
+five distinct combinations on x86-64. One representative per combination
+suffices to replay these observed outcomes. The selection does not measure
+calling-convention or device coverage.
+[Compiler locations](import-declarations.json) · [Withdrawal results](import-withdrawals.json) · [Five replay cases](withdrawal-scenarios.json)
+
+The 2026.2 host inventory with the source dispatcher parsed all 432 roots and
+matched 2,189 distinct exported names. Each of the six CPU parameter headers
+contributed declarations. With the same roots, enabling
+`ONEDAL_DATA_PARALLEL` added 61 public host-side callable signatures,
+including `table::get_queue()` and the two-argument SYCL communicator factory.
+Runtime evidence for the parameters/thread providers and replay on a physical
+Level Zero GPU remain open. [Major-release measurements](2026.2/)
+
+Reproduce the ELF survey with the prefixes, optional SDK include directories
+and frozen executables used by the campaigns below. The first-pass inventory
+parses the installed SDK in host C++ mode and joins its names to every DSO,
+including both DPC providers.
+
+```sh
+for sdk in "$OLD" "$MINOR" "$MAJOR"; do
+  python research/onedal-coverage/product/inventory.py "$sdk" "$OUT/inventory-$(basename "$sdk")" \
+    --extended --legacy-umbrella --all-providers --include "$ARROW_INCLUDE" \
+    --include "$KDB_INCLUDE" --include "$ODBC_INCLUDE" --include "$ODBC_PLATFORM_INCLUDE"
+done
+python -m abiforge.run.onedal_export_surface "$OLD" --candidate "$MINOR" --candidate "$MAJOR" \
+  --baseline-inventory "$OUT/inventory-$(basename "$OLD")" \
+  --candidate-inventory "$MINOR" "$OUT/inventory-$(basename "$MINOR")" \
+  --candidate-inventory "$MAJOR" "$OUT/inventory-$(basename "$MAJOR")" \
+  --client "$OUT/clients/release_client" --client "$OUT/options/client" \
+  --client "$OUT/table-layout/host" --client "$OUT/table-layout/sycl" \
+  --client "$OUT/sparse-indexing-clang/host" --client "$OUT/sparse-indexing-clang/sycl" \
+  --client "$OUT/device/event" --client "$OUT/device/buffer" --client "$OUT/device/csr" \
+  --client "$OUT/device/ownership" --client "$OUT/device/dependency" --client "$OUT/device/spmd" \
+  --status-report "$OUT/original-castxml/old-mutant.json" --out "$OUT/export-surface.json"
+```
+
+Replay the compiler join and the release-client mutations with DPC++ 2025.2,
+Open MPI, and patchelf with `--rename-dynamic-symbols` support. Supply the
+ELF survey generated above so its executable labels match the output tree.
+
+```sh
+python -m abiforge.run.onedal_import_declarations "$OLD" "$ICPX" "$MPI_INCLUDE" "$OUT/import-declarations.json"
+python -m abiforge.run.onedal_import_withdrawals "$OLD" "$MINOR" "$OUT" "$OUT/withdrawals" --surface "$OUT/export-surface.json"
+python -m abiforge.run.onedal_withdrawal_scenarios "$OUT/withdrawals/receipt.json" "$OUT" "$OUT/scenarios.json"
+python -m abiforge.run.onedal_import_withdrawals "$OLD" "$MINOR" "$OUT" "$OUT/representatives" --surface "$OUT/export-surface.json" --selection "$OUT/scenarios.json"
+```
+
+For the major SDK scan, use oneDAL source commit
+`480788c54a09ddd3dbc7cc9bc76d2ee4ea350020` (tag `2026.2.0`).
+The include view below selects the installed oneDAL headers and lets the
+compiler supply its matching SYCL runtime headers.
+
+```bash
+python research/onedal-coverage/product/inventory.py "$MAJOR" "$OUT/major" \
+  --source "$ONEDAL_SOURCE" --extended --legacy-umbrella --all-providers \
+  --include "$ARROW_INCLUDE" --include "$KDB_INCLUDE" --include "$ODBC_INCLUDE" --include "$ODBC_PLATFORM_INCLUDE"
+view="$OUT/major-headers"
+mkdir -p "$view/oneapi"
+ln -s "$MAJOR/include/dal" "$MAJOR/include/daal.h" "$view/"
+ln -s "$MAJOR/include/oneapi/dal" "$MAJOR/include/oneapi/dal.hpp" "$view/oneapi/"
+mapfile -t roots < "$OUT/major/roots.txt"
+python research/onedal-sycl-usm/inventory.py "$ICPX" "$view" "${roots[@]}" \
+  --extra-flag=-D__ONEDAL_IDE_MODE__ --extra-flag="-I$ONEDAL_SOURCE/cpp" \
+  --extra-flag="-I$view/dal" --extra-flag="-I$ARROW_INCLUDE" \
+  --extra-flag=-include --extra-flag=arrow/array.h > "$OUT/major/sycl.tsv"
+```
+
 ### Device release replay
 
 DPC++ 2025.2.0 and Intel OpenCL CPU on a Xeon Platinum 8573C ran the seven
@@ -163,6 +281,7 @@ CPU ICD configured.
 
 ```sh
 python -m abiforge.run.onedal_sycl out/queue --prefix "$OLD" --compiler "$ICPX"
+python -m abiforge.run.onedal_table_layout "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/table-layout"
 python -m abiforge.run.onedal_device_release "$OLD" "$NEW" "$ICPX" out/device
 ```
 
@@ -193,12 +312,17 @@ old executable can load.
 | --- | --- |
 | `release-matrix.csv.gz` | 3,521 declaration/provider obligations checked against the dynamic exports of each released image. |
 | `status-impact.csv.gz` | Each SDK Status return's provider and virtual/nonvirtual declaration, joined to the L2 affected-symbol lists from both mutation directions and the unchanged control. The public CLI consumes a return-slot projection of the SDK ledger and the real core DSO. The three executable clients separately exercise actual method signatures. |
+| `status-original-headers.json` | Original SDK headers and stripped core ELF. Both frontends cover all 795 ledger exports in both directions. Explicit SDK instantiation declarations materialize the 38 exported member specializations that Clang previously omitted. A separate compiler witness checks all 38 actual calls for the hidden return pointer transition, using access-control relaxation to exercise internal member templates. Both frontends attribute the same 947 names. |
 | `virtual-slots.csv.gz`, `header-slots.csv` | Relocation targets in exported ELF vtables and byte offsets from the table symbol. Three unmatched methods have separate SDK pointer-to-member measurements relative to the vtable address point. Empty ELF cells convey lack of a unique observed relocation. |
-| `serialization-slots.json` | Frozen calls to both serialization methods through a secondary base in a derived fixture. Reordering and removal use the real SDK interface. |
+| `serialization-slots.json` | Frozen calls to both serialization methods through a secondary base in a derived fixture. Inserting a method before the first dispatch changes the two client exits from 21/22 to 23/21. The checker also detects reordering and removal. |
 | `return-lowering.csv`, `shared-return-types.csv` | Clang IR for 225 remaining SDK return declarations and 52 concrete SharedPtr types exercised across a compiled return boundary with deleter counters. These type-level probes represent 185 exports. |
 | `option-returns.csv`, `release-clients.json` | Frozen clients import the 38 option getters and verify mask values on both minor releases. Additional real clients exercise heterogen table and exception returns, two collection getters with ownership mutants, virtual destruction and the exported string limit. |
 | `variant-loss.json` | Six individual export withdrawals compared against six independent ELF relocations and an unchanged fixture. |
-| `device-release-matrix.json` | Four old device clients on the OpenCL CPU and the standalone major-release loader control. GPU replay accepts `--selector level_zero:gpu` or `--selector opencl:gpu`. |
+| `sparse-indexing-clang.json`, `sparse-indexing-castxml.json` | Frozen host and SYCL CSR accessors pull two rows, including an empty row. The fixture provider writes the requested indexing into a shared C++ record. Swapping the enum values or narrowing its storage changes both column indices and row offsets. |
+| `table-layout.json` | Frozen host and SYCL clients read a converted row slice from a column-major table on both minor releases. A separate fixture DSO compiled against reordered SDK enum members supplies the layout value. Both clients observe the corresponding row-major sequence. Appending an enumerator preserves the original observations. |
+| `device-release-matrix.json` | Frozen clients on the OpenCL CPU, including a cross-queue host-task dependency, and a standalone major-release loader control. The optional two-rank Open MPI run checks typed and byte-buffer collectives through the SYCL communicator. GPU replay accepts `--selector level_zero:gpu` or `--selector opencl:gpu`. |
+
+The minor release adds exported vtables for optimization_solver BatchIface and kmeans init BatchBase in libonedal_core. Both tables are 88 bytes in 2025.11. Their observed relocations at offsets 32 and 40 target checkComputeParams and checkResult respectively. All previously observed cells retain their targets.
 
 Run from the repository root with the installed prefixes in `OLD`, `MINOR`,
 and `MAJOR` and a writable output directory `OUT`. The lowering campaign
@@ -210,12 +334,21 @@ runtime.
 python -m abiforge.run.onedal_release_matrix "$OLD" "$MINOR" "$MAJOR" "$OUT/matrix.csv"
 python -m abiforge.run.onedal_virtual_slots "$OLD" "$MINOR" "$MAJOR" "$OUT/slots.csv"
 python -m abiforge.run.onedal_status_return "$OLD" "$OUT/status"
+python -m abiforge.run.onedal_status_member_templates "$OLD" "$MINOR" "$OUT/status" "$OUT/member-templates"
+python -m abiforge.run.onedal_minor_withdrawals "$OLD" "$MINOR" "$OUT/minor-withdrawals"
 python -m abiforge.run.onedal_status_exports "$OLD" "$OUT/status" "$OUT/impact"
+for backend in clang castxml; do
+  python -m abiforge.run.onedal_status_exports "$OLD" "$OUT/status" "$OUT/original-$backend" --original-headers --backend "$backend"
+done
 python -m abiforge.run.onedal_serialization_slots "$OLD" "$OUT/serialization"
 python -m abiforge.run.onedal_return_lowering "$OLD" "$OUT/lowering"
 python -m abiforge.run.onedal_shared_return_types "$OLD" "$MINOR" "$OUT/shared"
 python -m abiforge.run.onedal_option_returns "$OLD" "$MINOR" "$MAJOR" "$OUT/options"
 python -m abiforge.run.onedal_release_clients "$OLD" "$MINOR" "$MAJOR" "$OUT/clients"
 python -m abiforge.run.onedal_variant_loss "$OLD" "$OUT/variants"
-python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR"
+python -m abiforge.run.onedal_table_layout "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/table-layout"
+for frontend in clang castxml; do
+  python -m abiforge.run.onedal_table_layout "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/sparse-indexing-$frontend" --enum sparse_indexing --frontend "$frontend"
+done
+python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR" --mpi
 ```

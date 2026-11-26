@@ -332,3 +332,28 @@ def test_function_key_does_not_need_a_mangled_name() -> None:
     assert got[function_decl_key("ns", "count", 1, False)] is False
     assert function_decl_key("ns::S", "g", 1, False) not in got  # overloads disagree
     assert function_decl_key("ns::S", "~S", 0, False) == ""
+
+
+@pytest.mark.parametrize(
+    ("layout", "argument", "needs_traits"),
+    [
+        ('incomplete="1"', False, False),
+        ('size="192"', False, False),
+        ('size="64"', False, True),
+        ('size="192"', True, True),
+    ],
+)
+def test_call_traits_join_only_when_the_slot_can_use_it(layout, argument, needs_traits):
+    from defusedxml.ElementTree import fromstring
+
+    from abicheck.extract.headers.castxml.return_by_value import (
+        has_exported_record_argument,
+    )
+
+    root = fromstring(
+        f'<CastXML><Struct id="r" {layout}/><FundamentalType id="v" name="void"/>'
+        f'<Function name="api" returns="{("v" if argument else "r")}">'
+        + ('<Argument type="r"/>' if argument else "")
+        + "</Function></CastXML>"
+    )
+    assert has_exported_record_argument(root, frozenset({"api"})) is needs_traits

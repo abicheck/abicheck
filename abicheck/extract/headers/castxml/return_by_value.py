@@ -74,12 +74,10 @@ def _by_value(
     return None
 
 
-def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
-    """Whether an exported declaration has a record parameter passed by value."""
-    by_id = {el.get("id"): el for el in root if el.get("id")}
+def _constructor_owners(exported: frozenset[str]) -> set[str]:
     from ....model.mangled_name import itanium_scope_components
 
-    constructor_owners = {
+    return {
         parts[-2].split("<", 1)[0]
         for name in exported
         if name.startswith("_Z") and any(code in name for code in ("C1", "C2", "C3"))
@@ -87,6 +85,41 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
         and len(parts) >= 2
         and parts[-1] == "{ctor}"
     }
+
+
+def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
+    """Whether the exported call or one of its callbacks passes a record by value."""
+    by_id = {el.get("id"): el for el in root if el.get("id")}
+    constructor_owners = _constructor_owners(exported)
+
+    def target(type_id: str) -> Element | None:
+        el = by_id.get(type_id)
+        for _ in range(_MAX_DEPTH):
+            if el is None or el.tag not in _WRAPPER_TAGS:
+                return el
+            el = by_id.get(el.get("type", ""))
+        return None
+
+    def pointee(el: Element | None) -> Element | None:
+        if el is not None and el.tag in {"PointerType", "ReferenceType"}:
+            return target(el.get("type", ""))
+        return el
+
+    def callback(el: Element | None) -> bool:
+        fn_type = pointee(el)
+        return (
+            fn_type is not None
+            and fn_type.tag == "FunctionType"
+            and (
+                _by_value(by_id.get, fn_type.get("returns", ""), 0) is True
+                or any(
+                    arg.tag == "Argument"
+                    and _by_value(by_id.get, arg.get("type", ""), 0) is True
+                    for arg in fn_type
+                )
+            )
+        )
+
     for fn in root:
         if fn.tag not in (
             "Function",
@@ -106,11 +139,34 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
             and (fn.get("mangled") or fn.get("name")) not in exported
         ):
             continue
-        for arg in fn:
-            if arg.tag != "Argument":
-                continue
-            if _by_value(by_id.get, arg.get("type", ""), 0) is True:
+        result = target(fn.get("returns", ""))
+        # The return classifier needs a complete layout to establish a
+        # register return. A large or incomplete result cannot gain that
+        # evidence from the call-trait sidecar alone.
+        if (
+            result is not None
+            and result.tag in _RECORD_TAGS
+            and result.get("incomplete") != "1"
+        ):
+            size = result.get("size")
+            if size is None or int(size) <= 128:
                 return True
+        slots = [target(arg.get("type", "")) for arg in fn if arg.tag == "Argument"]
+        if any(el is not None and el.tag in _RECORD_TAGS for el in slots):
+            return True
+        for el in [result, *slots]:
+            if callback(el):
+                return True
+            record = pointee(el)
+            if record is not None and record.tag in _RECORD_TAGS:
+                for member in record.get("members", "").split():
+                    field = by_id.get(member)
+                    if (
+                        field is not None
+                        and field.tag == "Field"
+                        and callback(target(field.get("type", "")))
+                    ):
+                        return True
     return False
 
 

@@ -101,5 +101,39 @@
         ]
       }
     }
+  },
+  "positions": {
+    "0": {
+      "declarations": 27,
+      "exported": 6
+    },
+    "1": {
+      "declarations": 8,
+      "exported": 0
+    },
+    "3": {
+      "declarations": 5,
+      "exported": 0
+    },
+    "5": {
+      "declarations": 3,
+      "exported": 0
+    },
+    "2": {
+      "declarations": 1,
+      "exported": 0
+    },
+    "4": {
+      "declarations": 3,
+      "exported": 0
+    },
+    "7": {
+      "declarations": 1,
+      "exported": 0
+    },
+    "6": {
+      "declarations": 1,
+      "exported": 0
+    }
   }
 }

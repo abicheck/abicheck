@@ -1,0 +1,569 @@
+{
+  "baseline": "dal-2025.9.0",
+  "clients": [
+    "csr-width-confirm/host",
+    "csr-width-confirm/sycl",
+    "dal-options/client",
+    "dal-release-clients/release_client",
+    "layout-expanded/host",
+    "layout-expanded/sycl",
+    "layout-mpi-verified/buffer",
+    "layout-mpi-verified/csr",
+    "layout-mpi-verified/dependency",
+    "layout-mpi-verified/event",
+    "layout-mpi-verified/ownership",
+    "layout-mpi-verified/spmd"
+  ],
+  "unique_names": 18619,
+  "unique_sdk_matches": 3516,
+  "providers": {
+    "libonedal.so.3": {
+      "exports": 3670,
+      "sdk": 148,
+      "sdk_name_any_provider": 148,
+      "ledger_import": 7,
+      "ledger_edit": 0,
+      "client_import": 57,
+      "imports_outside_sdk": {
+        "_ZN6oneapi3dal2v113homogen_table9init_implINS0_6detail2v119default_host_policyEEEvRKT_llRKNS0_2v25arrayIhEERKNS1_9data_typeENS1_11data_layoutE": [
+          "layout-expanded/host"
+        ],
+        "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_2v25arrayIhEERKNS4_IlEESA_lRKNS1_9data_typeENS1_15sparse_indexingE": [
+          "csr-width-confirm/host"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages27row_offsets_pointer_is_nullEv": [
+          "csr-width-confirm/host"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages35array_does_not_contain_mutable_dataEv": [
+          "dal-options/client"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages42object_does_not_provide_read_access_to_csrEv": [
+          "csr-width-confirm/host"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages43object_does_not_provide_read_access_to_rowsEv": [
+          "layout-expanded/host"
+        ],
+        "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_11table_ifaceE": [
+          "layout-expanded/host"
+        ],
+        "_ZN6oneapi3dal6detail2v129get_pull_csr_block_iface_implEPNS2_11table_ifaceE": [
+          "csr-width-confirm/host"
+        ],
+        "_ZN6oneapi3dal6detail2v14freeERKNS2_19default_host_policyEPv": [
+          "dal-options/client"
+        ],
+        "_ZN6oneapi3dal6detail2v16mallocERKNS2_19default_host_policyEm": [
+          "dal-options/client"
+        ],
+        "_ZN6oneapi3dal6detail2v220integer_overflow_opsIlE18check_mul_overflowERKlS6_": [
+          "layout-expanded/host"
+        ]
+      }
+    },
+    "libonedal_core.so.3": {
+      "exports": 13352,
+      "sdk": 3367,
+      "sdk_name_any_provider": 3367,
+      "ledger_import": 76,
+      "ledger_edit": 197,
+      "client_import": 30,
+      "imports_outside_sdk": {
+        "_ZNK4daal15data_management10interface130SerializableKeyValueCollectionINS1_18SerializationIfaceEE19getSerializationTagEv": [
+          "dal-release-clients/release_client"
+        ],
+        "_ZTIN4daal10algorithms10covariance10interface113PartialResultE": [
+          "dal-release-clients/release_client"
+        ],
+        "_ZTVN4daal10algorithms10covariance10interface113PartialResultE": [
+          "dal-release-clients/release_client"
+        ],
+        "_ZTVN4daal10algorithms3pca9transform10interface15InputE": [
+          "dal-release-clients/release_client"
+        ]
+      }
+    },
+    "libonedal_dpc.so.3": {
+      "exports": 4872,
+      "sdk": 0,
+      "sdk_name_any_provider": 148,
+      "ledger_import": 0,
+      "ledger_edit": 0,
+      "client_import": 59,
+      "imports_outside_sdk": {
+        "_ZN6oneapi3dal10covariance6detail12get_means_idEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal10covariance6detail17get_cor_matrix_idEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal10covariance6detail17get_cov_matrix_idEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal17linear_regression6detail16get_intercept_idEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal17linear_regression6detail19get_coefficients_idEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal2v113homogen_table9init_implINS0_6detail2v120data_parallel_policyEEEvRKT_llRKNS0_2v25arrayIhEERKNS1_9data_typeENS1_11data_layoutE": [
+          "layout-expanded/sycl",
+          "layout-mpi-verified/dependency",
+          "layout-mpi-verified/event",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal2v15table25validate_input_dimensionsEll": [
+          "csr-width-confirm/sycl",
+          "layout-expanded/sycl",
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/dependency",
+          "layout-mpi-verified/event",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal2v15tableC2Ev": [
+          "csr-width-confirm/sycl",
+          "layout-expanded/sycl",
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/dependency",
+          "layout-mpi-verified/event",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal2v19csr_table18get_non_zero_countERN4sycl3_V15queueElPKlRKSt6vectorINS4_5eventESaISA_EE": [
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_2v25arrayIhEERKNS4_IlEESA_lRKNS1_9data_typeENS1_15sparse_indexingE": [
+          "csr-width-confirm/sycl"
+        ],
+        "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_6detail2v120data_parallel_policyERKNS0_2v25arrayIhEERKNS9_IlEESF_lRKNS1_9data_typeENS1_15sparse_indexingERKSt6vectorIN4sycl3_V15eventESaISN_EE": [
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal3csv2v19read_argsINS0_2v15tableEEC1Ev": [
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal3csv6detail2v116data_source_baseC2EPKc": [
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages10invalid_opEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages12invalid_rootEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages13invalid_countEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages14invalid_bufferEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages16invalid_mpi_commEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages17invalid_data_typeEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages17unknown_mpi_errorEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages33integral_type_conversion_overflowEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages34integral_type_conversion_underflowEv": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages35array_does_not_contain_mutable_dataEv": [
+          "layout-expanded/sycl",
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/ownership",
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages42object_does_not_provide_read_access_to_csrEv": [
+          "csr-width-confirm/sycl",
+          "layout-mpi-verified/csr"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages43object_does_not_provide_read_access_to_rowsEv": [
+          "layout-expanded/sycl",
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/event",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages44object_does_not_provide_write_access_to_rowsEv": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages46object_does_not_provide_read_access_to_columnsEv": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v114error_messages47object_does_not_provide_write_access_to_columnsEv": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v120data_parallel_policy9init_implERKN4sycl3_V15queueE": [
+          "csr-width-confirm/sycl",
+          "layout-expanded/sycl",
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/dependency",
+          "layout-mpi-verified/event",
+          "layout-mpi-verified/ownership",
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v121homogen_table_builderC1Ev": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_11table_ifaceE": [
+          "layout-expanded/sycl",
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/event",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_19table_builder_ifaceE": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v124get_push_rows_iface_implEPNS2_19table_builder_ifaceE": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v125is_known_usm_pointer_typeERKNS2_20data_parallel_policyEPKv": [
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/ownership",
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v126get_pull_column_iface_implEPNS2_11table_ifaceE": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v126get_pull_column_iface_implEPNS2_19table_builder_ifaceE": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v126get_push_column_iface_implEPNS2_19table_builder_ifaceE": [
+          "layout-mpi-verified/buffer"
+        ],
+        "_ZN6oneapi3dal6detail2v129get_pull_csr_block_iface_implEPNS2_11table_ifaceE": [
+          "csr-width-confirm/sycl",
+          "layout-mpi-verified/csr"
+        ],
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl10allgathervERN4sycl3_V15queueEPKhlPhPKlSC_RKNS0_2v19data_typeERKSt6vectorINS5_5eventESaISI_EE": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl16sendrecv_replaceERN4sycl3_V15queueEPhlRKNS0_2v19data_typeEllRKSt6vectorINS5_5eventESaISE_EE": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl5bcastERN4sycl3_V15queueEPhlRKNS0_2v19data_typeERKSt6vectorINS5_5eventESaISE_EEl": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl9allreduceERN4sycl3_V15queueEPKhPhlRKNS0_2v19data_typeERKNS0_7preview4spmd2v19reduce_opERKSt6vectorINS5_5eventESaISM_EE": [
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v14freeERKNS2_19default_host_policyEPv": [
+          "layout-mpi-verified/ownership",
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v14freeERKNS2_20data_parallel_policyEPv": [
+          "layout-expanded/sycl",
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/ownership",
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v16mallocERKNS2_19default_host_policyEm": [
+          "layout-mpi-verified/ownership",
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v16mallocERKNS2_20data_parallel_policyEmRKN4sycl3_V13usm5allocE": [
+          "layout-expanded/sycl",
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/csr",
+          "layout-mpi-verified/ownership",
+          "layout-mpi-verified/spmd"
+        ],
+        "_ZN6oneapi3dal6detail2v16memcpyERKNS2_19default_host_policyEPvPKvl": [
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal6detail2v16memcpyERKNS2_20data_parallel_policyEPvPKvl": [
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal6detail2v218chunked_array_base14set_chunk_implElNS2_10array_implIhEE": [
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal6detail2v218chunked_array_base15make_array_implEl": [
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZN6oneapi3dal6detail2v220integer_overflow_opsIlE18check_mul_overflowERKlS6_": [
+          "layout-expanded/sycl",
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/dependency",
+          "layout-mpi-verified/event",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal2v113homogen_table8get_dataEv": [
+          "layout-mpi-verified/dependency",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal2v19csr_table18get_non_zero_countEv": [
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal3csv6detail2v119read_ops_dispatcherINS0_2v15tableEfNS0_6detail2v120data_parallel_policyEJEEclERKS9_RKNS3_16data_source_baseERKNS1_2v19read_argsIS6_EE": [
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base12flatten_implINS1_2v120data_parallel_policyENS5_23data_parallel_allocatorIhEEEENS2_10array_implIhEERKT_RKT0_": [
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base13get_data_implINS1_2v120data_parallel_policyENS5_23data_parallel_allocatorIPKhEEEENS2_10array_implIS9_EERKT_RKT0_": [
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base15get_chunk_countEv": [
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base8validateEv": [
+          "layout-mpi-verified/buffer",
+          "layout-mpi-verified/ownership"
+        ],
+        "_ZNK6oneapi3dal7preview4spmd2v112communicatorINS2_20device_memory_access2v13usmEE27wait_for_exception_handlingEv": [
+          "layout-mpi-verified/spmd"
+        ]
+      }
+    },
+    "libonedal_parameters.so.3": {
+      "exports": 99,
+      "sdk": 2,
+      "sdk_name_any_provider": 2,
+      "ledger_import": 0,
+      "ledger_edit": 0,
+      "client_import": 0,
+      "imports_outside_sdk": {}
+    },
+    "libonedal_parameters_dpc.so.3": {
+      "exports": 152,
+      "sdk": 0,
+      "sdk_name_any_provider": 2,
+      "ledger_import": 0,
+      "ledger_edit": 0,
+      "client_import": 0,
+      "imports_outside_sdk": {}
+    },
+    "libonedal_thread.so.3": {
+      "exports": 283,
+      "sdk": 0,
+      "sdk_name_any_provider": 0,
+      "ledger_import": 0,
+      "ledger_edit": 0,
+      "client_import": 0,
+      "imports_outside_sdk": {}
+    }
+  },
+  "releases": {
+    "dal-2025.11.0": {
+      "exports": 22442,
+      "unique_names": 18626,
+      "baseline_sdk_names_present": 3516,
+      "provider_changes": {
+        "libonedal.so.3": {
+          "removed": 0,
+          "added": 2
+        },
+        "libonedal_core.so.3": {
+          "removed": 0,
+          "added": 7
+        },
+        "libonedal_dpc.so.3": {
+          "removed": 4,
+          "added": 4
+        },
+        "libonedal_parameters.so.3": {
+          "removed": 0,
+          "added": 3
+        },
+        "libonedal_parameters_dpc.so.3": {
+          "removed": 0,
+          "added": 2
+        },
+        "libonedal_thread.so.3": {
+          "removed": 0,
+          "added": 0
+        }
+      },
+      "sdk_inventory": {
+        "roots": 541,
+        "unparsed": [
+          "oneapi/dal/algo/covariance/parameters/cpu/compute_parameters.hpp",
+          "oneapi/dal/algo/decision_forest/parameters/cpu/infer_parameters.hpp",
+          "oneapi/dal/algo/decision_forest/parameters/cpu/train_parameters.hpp",
+          "oneapi/dal/algo/linear_regression/parameters/cpu/train_parameters.hpp",
+          "oneapi/dal/algo/logistic_regression/parameters/cpu/train_parameters.hpp",
+          "oneapi/dal/algo/pca/parameters/cpu/train_parameters.hpp"
+        ],
+        "unique_names": 3521,
+        "provider_pairs": {
+          "libonedal.so.3": 148,
+          "libonedal_core.so.3": 3372,
+          "libonedal_dpc.so.3": 149,
+          "libonedal_parameters.so.3": 1,
+          "libonedal_parameters_dpc.so.3": 1,
+          "libonedal_thread.so.3": 0
+        }
+      }
+    },
+    "dal-2026.2.0": {
+      "exports": 15742,
+      "unique_names": 12082,
+      "baseline_sdk_names_present": 2178,
+      "provider_changes": {
+        "libonedal.so.3": {
+          "removed": 339,
+          "added": 258
+        },
+        "libonedal_core.so.3": {
+          "removed": 8105,
+          "added": 1915
+        },
+        "libonedal_dpc.so.3": {
+          "removed": 784,
+          "added": 408
+        },
+        "libonedal_parameters.so.3": {
+          "removed": 21,
+          "added": 3
+        },
+        "libonedal_parameters_dpc.so.3": {
+          "removed": 30,
+          "added": 2
+        },
+        "libonedal_thread.so.3": {
+          "removed": 11,
+          "added": 18
+        }
+      },
+      "sdk_inventory": {
+        "roots": 432,
+        "unparsed": [
+          "oneapi/dal/algo/covariance/parameters/cpu/compute_parameters.hpp",
+          "oneapi/dal/algo/decision_forest/parameters/cpu/infer_parameters.hpp",
+          "oneapi/dal/algo/decision_forest/parameters/cpu/train_parameters.hpp",
+          "oneapi/dal/algo/linear_regression/parameters/cpu/train_parameters.hpp",
+          "oneapi/dal/algo/logistic_regression/parameters/cpu/train_parameters.hpp",
+          "oneapi/dal/algo/pca/parameters/cpu/train_parameters.hpp"
+        ],
+        "unique_names": 2188,
+        "provider_pairs": {
+          "libonedal.so.4": 157,
+          "libonedal_core.so.4": 2031,
+          "libonedal_dpc.so.4": 157,
+          "libonedal_parameters.so.4": 0,
+          "libonedal_parameters_dpc.so.4": 0,
+          "libonedal_thread.so.4": 0
+        }
+      }
+    }
+  },
+  "sdk_inventory": {
+    "roots": 541,
+    "unparsed": [
+      "oneapi/dal/algo/covariance/parameters/cpu/compute_parameters.hpp",
+      "oneapi/dal/algo/decision_forest/parameters/cpu/infer_parameters.hpp",
+      "oneapi/dal/algo/decision_forest/parameters/cpu/train_parameters.hpp",
+      "oneapi/dal/algo/linear_regression/parameters/cpu/train_parameters.hpp",
+      "oneapi/dal/algo/logistic_regression/parameters/cpu/train_parameters.hpp",
+      "oneapi/dal/algo/pca/parameters/cpu/train_parameters.hpp"
+    ],
+    "unique_names": 3516,
+    "provider_pairs": {
+      "libonedal.so.3": 148,
+      "libonedal_core.so.3": 3367,
+      "libonedal_dpc.so.3": 149,
+      "libonedal_parameters.so.3": 1,
+      "libonedal_parameters_dpc.so.3": 1,
+      "libonedal_thread.so.3": 0
+    },
+    "combined_unique_names": 3517,
+    "combined_provider_pairs": {
+      "libonedal.so.3": 148,
+      "libonedal_core.so.3": 3367,
+      "libonedal_dpc.so.3": 149,
+      "libonedal_parameters.so.3": 2,
+      "libonedal_parameters_dpc.so.3": 1,
+      "libonedal_thread.so.3": 0
+    },
+    "client_imports_outside_sdk": {
+      "libonedal.so.3": [
+        "_ZN6oneapi3dal2v113homogen_table9init_implINS0_6detail2v119default_host_policyEEEvRKT_llRKNS0_2v25arrayIhEERKNS1_9data_typeENS1_11data_layoutE",
+        "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_2v25arrayIhEERKNS4_IlEESA_lRKNS1_9data_typeENS1_15sparse_indexingE",
+        "_ZN6oneapi3dal6detail2v114error_messages27row_offsets_pointer_is_nullEv",
+        "_ZN6oneapi3dal6detail2v114error_messages35array_does_not_contain_mutable_dataEv",
+        "_ZN6oneapi3dal6detail2v114error_messages42object_does_not_provide_read_access_to_csrEv",
+        "_ZN6oneapi3dal6detail2v114error_messages43object_does_not_provide_read_access_to_rowsEv",
+        "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_11table_ifaceE",
+        "_ZN6oneapi3dal6detail2v129get_pull_csr_block_iface_implEPNS2_11table_ifaceE",
+        "_ZN6oneapi3dal6detail2v14freeERKNS2_19default_host_policyEPv",
+        "_ZN6oneapi3dal6detail2v16mallocERKNS2_19default_host_policyEm",
+        "_ZN6oneapi3dal6detail2v220integer_overflow_opsIlE18check_mul_overflowERKlS6_"
+      ],
+      "libonedal_core.so.3": [
+        "_ZNK4daal15data_management10interface130SerializableKeyValueCollectionINS1_18SerializationIfaceEE19getSerializationTagEv",
+        "_ZTIN4daal10algorithms10covariance10interface113PartialResultE",
+        "_ZTVN4daal10algorithms10covariance10interface113PartialResultE",
+        "_ZTVN4daal10algorithms3pca9transform10interface15InputE"
+      ],
+      "libonedal_dpc.so.3": [
+        "_ZN6oneapi3dal2v113homogen_table9init_implINS0_6detail2v120data_parallel_policyEEEvRKT_llRKNS0_2v25arrayIhEERKNS1_9data_typeENS1_11data_layoutE",
+        "_ZN6oneapi3dal2v19csr_table18get_non_zero_countERN4sycl3_V15queueElPKlRKSt6vectorINS4_5eventESaISA_EE",
+        "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_2v25arrayIhEERKNS4_IlEESA_lRKNS1_9data_typeENS1_15sparse_indexingE",
+        "_ZN6oneapi3dal2v19csr_table9init_implERKNS0_6detail2v120data_parallel_policyERKNS0_2v25arrayIhEERKNS9_IlEESF_lRKNS1_9data_typeENS1_15sparse_indexingERKSt6vectorIN4sycl3_V15eventESaISN_EE",
+        "_ZN6oneapi3dal6detail2v114error_messages10invalid_opEv",
+        "_ZN6oneapi3dal6detail2v114error_messages12invalid_rootEv",
+        "_ZN6oneapi3dal6detail2v114error_messages13invalid_countEv",
+        "_ZN6oneapi3dal6detail2v114error_messages14invalid_bufferEv",
+        "_ZN6oneapi3dal6detail2v114error_messages16invalid_mpi_commEv",
+        "_ZN6oneapi3dal6detail2v114error_messages17invalid_data_typeEv",
+        "_ZN6oneapi3dal6detail2v114error_messages17unknown_mpi_errorEv",
+        "_ZN6oneapi3dal6detail2v114error_messages33integral_type_conversion_overflowEv",
+        "_ZN6oneapi3dal6detail2v114error_messages34integral_type_conversion_underflowEv",
+        "_ZN6oneapi3dal6detail2v114error_messages35array_does_not_contain_mutable_dataEv",
+        "_ZN6oneapi3dal6detail2v114error_messages42object_does_not_provide_read_access_to_csrEv",
+        "_ZN6oneapi3dal6detail2v114error_messages43object_does_not_provide_read_access_to_rowsEv",
+        "_ZN6oneapi3dal6detail2v114error_messages44object_does_not_provide_write_access_to_rowsEv",
+        "_ZN6oneapi3dal6detail2v114error_messages46object_does_not_provide_read_access_to_columnsEv",
+        "_ZN6oneapi3dal6detail2v114error_messages47object_does_not_provide_write_access_to_columnsEv",
+        "_ZN6oneapi3dal6detail2v120data_parallel_policy9init_implERKN4sycl3_V15queueE",
+        "_ZN6oneapi3dal6detail2v121homogen_table_builderC1Ev",
+        "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_11table_ifaceE",
+        "_ZN6oneapi3dal6detail2v124get_pull_rows_iface_implEPNS2_19table_builder_ifaceE",
+        "_ZN6oneapi3dal6detail2v124get_push_rows_iface_implEPNS2_19table_builder_ifaceE",
+        "_ZN6oneapi3dal6detail2v125is_known_usm_pointer_typeERKNS2_20data_parallel_policyEPKv",
+        "_ZN6oneapi3dal6detail2v126get_pull_column_iface_implEPNS2_11table_ifaceE",
+        "_ZN6oneapi3dal6detail2v126get_pull_column_iface_implEPNS2_19table_builder_ifaceE",
+        "_ZN6oneapi3dal6detail2v126get_push_column_iface_implEPNS2_19table_builder_ifaceE",
+        "_ZN6oneapi3dal6detail2v129get_pull_csr_block_iface_implEPNS2_11table_ifaceE",
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl10allgathervERN4sycl3_V15queueEPKhlPhPKlSC_RKNS0_2v19data_typeERKSt6vectorINS5_5eventESaISI_EE",
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl16sendrecv_replaceERN4sycl3_V15queueEPhlRKNS0_2v19data_typeEllRKSt6vectorINS5_5eventESaISE_EE",
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl5bcastERN4sycl3_V15queueEPhlRKNS0_2v19data_typeERKSt6vectorINS5_5eventESaISE_EEl",
+        "_ZN6oneapi3dal6detail2v131spmd_communicator_via_host_impl9allreduceERN4sycl3_V15queueEPKhPhlRKNS0_2v19data_typeERKNS0_7preview4spmd2v19reduce_opERKSt6vectorINS5_5eventESaISM_EE",
+        "_ZN6oneapi3dal6detail2v14freeERKNS2_19default_host_policyEPv",
+        "_ZN6oneapi3dal6detail2v14freeERKNS2_20data_parallel_policyEPv",
+        "_ZN6oneapi3dal6detail2v16mallocERKNS2_19default_host_policyEm",
+        "_ZN6oneapi3dal6detail2v16mallocERKNS2_20data_parallel_policyEmRKN4sycl3_V13usm5allocE",
+        "_ZN6oneapi3dal6detail2v16memcpyERKNS2_19default_host_policyEPvPKvl",
+        "_ZN6oneapi3dal6detail2v16memcpyERKNS2_20data_parallel_policyEPvPKvl",
+        "_ZN6oneapi3dal6detail2v218chunked_array_base14set_chunk_implElNS2_10array_implIhEE",
+        "_ZN6oneapi3dal6detail2v218chunked_array_base15make_array_implEl",
+        "_ZN6oneapi3dal6detail2v220integer_overflow_opsIlE18check_mul_overflowERKlS6_",
+        "_ZNK6oneapi3dal3csv6detail2v119read_ops_dispatcherINS0_2v15tableEfNS0_6detail2v120data_parallel_policyEJEEclERKS9_RKNS3_16data_source_baseERKNS1_2v19read_argsIS6_EE",
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base12flatten_implINS1_2v120data_parallel_policyENS5_23data_parallel_allocatorIhEEEENS2_10array_implIhEERKT_RKT0_",
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base13get_data_implINS1_2v120data_parallel_policyENS5_23data_parallel_allocatorIPKhEEEENS2_10array_implIS9_EERKT_RKT0_",
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base15get_chunk_countEv",
+        "_ZNK6oneapi3dal6detail2v218chunked_array_base8validateEv",
+        "_ZNK6oneapi3dal7preview4spmd2v112communicatorINS2_20device_memory_access2v13usmEE27wait_for_exception_handlingEv"
+      ],
+      "libonedal_parameters.so.3": [],
+      "libonedal_parameters_dpc.so.3": [],
+      "libonedal_thread.so.3": []
+    }
+  },
+  "witnessed_lower_bound": {
+    "status_l2": 947,
+    "provider_pairs": 1144,
+    "distinct_names": 1144
+  }
+}

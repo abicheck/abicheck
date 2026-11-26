@@ -87,6 +87,8 @@ class RecordLayoutIndex:
     # Record spellings some declared function returns by value.
     returned_by_value: frozenset[str] = frozenset()
 
+    records_by_name: dict[str, RecordType] = field(default_factory=dict)
+
     def entity_for(self, record: RecordType) -> CanonicalEntity | None:
         occ_id = self.by_record.get(id(record))
         if occ_id is not None:
@@ -127,8 +129,18 @@ def record_layout_index(
     else:
         projected = records
         ir, order = legacy_record_occurrences(projected)
+    by_name: dict[str, RecordType] = {}
+    duplicates: set[str] = set()
+    for record in records:
+        key = record.qualified_name or record.name
+        if key in by_name:
+            duplicates.add(key)
+        by_name[key] = record
+    for key in duplicates:
+        del by_name[key]
     return RecordLayoutIndex(
         index=SemanticIRIndex(ir),
+        records_by_name=by_name,
         ir=ir,
         by_record={id(r): occ for r, occ in zip(projected, order)},
         lp64_x86_64=(

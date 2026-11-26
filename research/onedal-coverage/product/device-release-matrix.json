@@ -150,5 +150,81 @@
     "exit": 127,
     "missing_soname": "libonedal_dpc.so.3",
     "matches": true
+  },
+  {
+    "client": "dependency",
+    "package": "dal-2025.9.0",
+    "device_selector": "opencl:cpu",
+    "providers": {
+      "libonedal_dpc.so.3": "/tmp/dal-2025.9.0/lib/libonedal_dpc.so.3",
+      "libonedal_parameters_dpc.so.3": "/tmp/dal-2025.9.0/lib/libonedal_parameters_dpc.so.3",
+      "libonedal_core.so.3": "/tmp/dal-2025.9.0/lib/libonedal_core.so.3",
+      "libonedal_thread.so.3": "/tmp/dal-2025.9.0/lib/libonedal_thread.so.3"
+    },
+    "exit": 0,
+    "stdout": "42",
+    "stderr": "",
+    "matches": true
+  },
+  {
+    "client": "dependency",
+    "package": "dal-2025.11.0",
+    "device_selector": "opencl:cpu",
+    "providers": {
+      "libonedal_dpc.so.3": "/tmp/dal-2025.11.0/lib/libonedal_dpc.so.3",
+      "libonedal_parameters_dpc.so.3": "/tmp/dal-2025.11.0/lib/libonedal_parameters_dpc.so.3",
+      "libonedal_core.so.3": "/tmp/dal-2025.11.0/lib/libonedal_core.so.3",
+      "libonedal_thread.so.3": "/tmp/dal-2025.11.0/lib/libonedal_thread.so.3"
+    },
+    "exit": 0,
+    "stdout": "42",
+    "stderr": "",
+    "matches": true
+  },
+  {
+    "client": "dependency",
+    "package": "dal-2026.2.0",
+    "device_selector": "opencl:cpu",
+    "exit": 127,
+    "missing_soname": "libonedal_dpc.so.3",
+    "matches": true
+  },
+  {
+    "client": "spmd",
+    "package": "dal-2025.9.0",
+    "device_selector": "opencl:cpu",
+    "providers": {
+      "libonedal_dpc.so.3": "/tmp/dal-2025.9.0/lib/libonedal_dpc.so.3",
+      "libonedal_parameters_dpc.so.3": "/tmp/dal-2025.9.0/lib/libonedal_parameters_dpc.so.3",
+      "libonedal_core.so.3": "/tmp/dal-2025.9.0/lib/libonedal_core.so.3",
+      "libonedal_thread.so.3": "/tmp/dal-2025.9.0/lib/libonedal_thread.so.3"
+    },
+    "exit": 0,
+    "stdout": "",
+    "stderr": "",
+    "matches": true
+  },
+  {
+    "client": "spmd",
+    "package": "dal-2025.11.0",
+    "device_selector": "opencl:cpu",
+    "providers": {
+      "libonedal_dpc.so.3": "/tmp/dal-2025.11.0/lib/libonedal_dpc.so.3",
+      "libonedal_parameters_dpc.so.3": "/tmp/dal-2025.11.0/lib/libonedal_parameters_dpc.so.3",
+      "libonedal_core.so.3": "/tmp/dal-2025.11.0/lib/libonedal_core.so.3",
+      "libonedal_thread.so.3": "/tmp/dal-2025.11.0/lib/libonedal_thread.so.3"
+    },
+    "exit": 0,
+    "stdout": "",
+    "stderr": "",
+    "matches": true
+  },
+  {
+    "client": "spmd",
+    "package": "dal-2026.2.0",
+    "device_selector": "opencl:cpu",
+    "exit": 127,
+    "missing_soname": "libonedal_dpc.so.3",
+    "matches": true
   }
 ]

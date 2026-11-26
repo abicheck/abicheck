@@ -1240,8 +1240,14 @@ _XA_ROLES: dict[str, RoleText] = {
         "std::string s_make(int n) { return std::string((std::size_t)n, 'x'); }",
     ),
     "xa.tv": (
-        "struct Tv { int a; };\nint tv_get(Tv t);",
-        "int tv_get(Tv t) { return t.a + 1; }",
+        "struct Tv { int a; };\nint tv_get(Tv t);\n"
+        "struct TvBig { long words[3]; };\n"
+        "Tv tv_result(); TvBig tv_late(int, double, Tv);\n"
+        "int tv_pointer(Tv*); int tv_reference(Tv&);",
+        "int tv_get(Tv t) { return t.a + 1; }\n"
+        "Tv tv_result() { Tv t = {17}; return t; }\n"
+        "TvBig tv_late(int i, double d, Tv t) { TvBig b = {{i,(long)d,t.a}}; return b; }\n"
+        "int tv_pointer(Tv* t) { return t->a; } int tv_reference(Tv& t) { return t.a; }",
     ),
     "xa.leak": (
         "namespace lib {\nnamespace detail { struct Impl { int a; }; }\n"
