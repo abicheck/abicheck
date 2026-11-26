@@ -192,7 +192,6 @@
     "abicheck/model/export_index.py(snapshot_export_names)": 56,
     "abicheck/model/extraction_scope.py(_both_from_headers)": 14,
     "abicheck/model/extraction_scope.py(compare_extraction_scopes)": 13,
-    "abicheck/model/extraction_scope.py(ownership_of)": 72,
     "abicheck/model/fact.py(Fact._make)": 853,
     "abicheck/model/fact.py(Fact.is_present)": 5694,
     "abicheck/model/fact.py(Fact.not_collected)": 1264,
@@ -322,5 +321,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 234810
+  "total": 234738
 }
