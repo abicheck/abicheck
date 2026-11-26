@@ -79,9 +79,12 @@ def evidence_lines(evidence: object, contract_reason: object = None) -> list[str
                 lines.append(
                     "Public inline argument to exported function: " + " → ".join(path)
                 )
+            for path in decl.get("public_exported_signatures", ()):
+                lines.append("Exported function signature: " + " → ".join(path))
         if not any(
             d["public_field_paths"]
             or d["public_inline_arguments"]
+            or d.get("public_exported_signatures")
             or d["public_target"]
             for d in declarations.values()
         ):

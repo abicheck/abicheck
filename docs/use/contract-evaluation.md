@@ -75,9 +75,10 @@ dropping it.
 
 Under `--contract public`, a changed enumerator declared by a dependency
 requires a public ABI path or a commitment such as `scope.public_symbols`.
-The report records paths through fields in public types or through public
-inline functions that pass the enumerator to an exported function. When
-available evidence cannot establish a path or commitment, the finding reads
+The report records baseline paths through fields in public types, exported
+function signatures, or public inline functions that pass the enumerator
+to an exported function. When the evidence cannot establish a baseline
+path or an explicit commitment, the finding reads
 `UNKNOWN_UNRESOLVED` with `gate_contribution: 0`. The coverage ledger records
 the remaining uncertainty.
 

@@ -6,12 +6,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from abicheck.model.change_catalog.kinds import ChangeKind
+from abicheck.model.ownership_rules import is_dependency_owner
+
 from ..contract_relevance_types import ContractAssurance, ContractRelevance
-from ..model.change_catalog.kinds import ChangeKind
-from ..model.ownership_rules import is_dependency_owner
 
 if TYPE_CHECKING:
-    from ..model.change import Change
+    from abicheck.model.change import Change
 
 
 DEPENDENCY_ENUM_PATH_UNRESOLVED = "dependency_enum_public_path_unresolved"
@@ -38,13 +39,15 @@ def dependency_enum_public_decision(
     ]
     if not any(is_dependency_owner(decl.get("owner")) for decl in declarations):
         return None
-    exposed = any(
-        decl.get("public_target") is True
-        or decl.get("public_field_paths")
-        or decl.get("public_inline_arguments")
-        for decl in declarations
-    )
-    if exposed:
+    # Both kinds modify an existing value, so ADR-049 D4 requires old-side
+    # evidence even when a new public path appears in the candidate.
+    old = sides.get("old")
+    if isinstance(old, dict) and (
+        old.get("public_target") is True
+        or old.get("public_field_paths")
+        or old.get("public_inline_arguments")
+        or old.get("public_exported_signatures")
+    ):
         return (
             ContractRelevance.IN_CONTRACT,
             "public_root_membership",
