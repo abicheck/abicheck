@@ -10,25 +10,57 @@ import sys
 import pytest
 
 from abicheck.checker import compare
+from abicheck.contract_relevance_types import ContractRelevance
+from abicheck.contract_replay import reevaluate_from_evidence
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
     EnumType,
     Fact,
+    Function,
+    Param,
     RecordType,
     TypeField,
 )
+from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.extraction_scope import EntityOwnership
+from abicheck.report.diff_report import to_json
 from abicheck.report.l2_evidence import dependency_changes
+from abicheck.serialization import load_snapshot, save_snapshot
 from tests._abicheck_subprocess import abicheck_command
 
 
-@pytest.mark.parametrize("exposed", [False, True])
-def test_dependency_enumerator_observed_by_two_libraries(exposed):
-    def snapshot(value):
+@pytest.mark.parametrize("member", ["LastKnownDataLessPropKind", "active"])
+@pytest.mark.parametrize(
+    ("old_path", "new_path", "contract", "forced", "relevance", "contribution"),
+    [
+        (None, None, "public", False, ContractRelevance.UNKNOWN_UNRESOLVED, 0),
+        ("field", "field", "public", False, ContractRelevance.IN_CONTRACT, 4),
+        ("field", None, "public", False, ContractRelevance.IN_CONTRACT, 4),
+        (None, "field", "public", False, ContractRelevance.UNKNOWN_UNRESOLVED, 0),
+        ("parameter", "parameter", "public", False, ContractRelevance.IN_CONTRACT, 4),
+        ("return", None, "public", False, ContractRelevance.IN_CONTRACT, 4),
+        (None, "parameter", "public", False, ContractRelevance.UNKNOWN_UNRESOLVED, 0),
+        (
+            "unexported",
+            "return",
+            "public",
+            False,
+            ContractRelevance.UNKNOWN_UNRESOLVED,
+            0,
+        ),
+        ("private", "return", "public", False, ContractRelevance.UNKNOWN_UNRESOLVED, 0),
+        (None, None, "public", True, ContractRelevance.IN_CONTRACT, 4),
+        (None, None, "all", False, ContractRelevance.IN_CONTRACT, 4),
+    ],
+)
+def test_dependency_enumerator_observed_by_two_libraries(
+    tmp_path, member, old_path, new_path, contract, forced, relevance, contribution
+):
+    def snapshot(value, path):
         enum = EnumType(
             "Mode",
-            [EnumMember("last", value)],
+            [EnumMember(member, value)],
             qualified_name="dep::Mode",
             source_header="include/dep/mode.hpp",
         )
@@ -38,25 +70,60 @@ def test_dependency_enumerator_observed_by_two_libraries(exposed):
         record = RecordType(
             "Api",
             kind="struct",
-            fields=[TypeField("mode", "dep::Mode")] if exposed else [],
+            fields=[TypeField("mode", "dep::Mode")] if path == "field" else [],
         )
         record.ownership_fact = Fact.present(
             EntityOwnership("target", "public", "api-root")
         )
+        function = Function(
+            "api",
+            "api",
+            "dep::Mode" if path in {"return", "unexported", "private"} else "void",
+            params=[Param("mode", "dep::Mode")] if path == "parameter" else [],
+        )
+        function.ownership_fact = Fact.present(
+            EntityOwnership(
+                "target", "private" if path == "private" else "public", "api-root"
+            )
+        )
         return AbiSnapshot(
-            "libapi.so", str(value), enums=[enum], types=[record], from_headers=True
+            "libapi.so",
+            str(value),
+            enums=[enum],
+            types=[record],
+            functions=[function],
+            elf=ElfMetadata(symbols=[] if path == "unexported" else [ElfSymbol("api")]),
+            from_headers=True,
         )
 
-    change = next(
-        c
-        for c in compare(snapshot(21), snapshot(22)).changes
-        if c.symbol.endswith("::last")
+    snapshot_path = tmp_path / "new.json"
+    save_snapshot(snapshot(22, new_path), snapshot_path)
+    comparison = compare(
+        snapshot(21, old_path),
+        load_snapshot(snapshot_path),
+        contract_evaluation=True,
+        contract_mode=contract,
+        force_public_symbols={f"Mode::{member}"} if forced else None,
     )
+    change = next(c for c in comparison.changes if c.symbol == f"Mode::{member}")
+    assert change.contract_relevance is relevance
+    report = json.loads(to_json(comparison))
+    [finding] = [c for c in report["changes"] if c["symbol"] == change.symbol]
+    assert finding["gate_contribution"] == contribution
+    if not forced:
+        [replayed] = reevaluate_from_evidence(
+            comparison.contract_context, [change]
+        ).values()
+        assert replayed.relevance is relevance
     evidence = change.review_evidence
     decl = evidence["enum_declarations"]["old"]
     assert decl["owner"] == "dependency:dep"
     assert decl["public_field_paths"] == (
-        [["Api", "mode", "dep::Mode"]] if exposed else []
+        [["Api", "mode", "dep::Mode"]] if old_path == "field" else []
+    )
+    slots = {"parameter": "parameter 1", "return": "return"}
+    assert decl["public_exported_signatures"] == (
+        [["api", slots[old_path], "dep::Mode"]] if old_path in slots else []
     )
     finding = dict(
         symbol=change.symbol,
@@ -230,7 +297,7 @@ def test_release_groups_dependency_header_across_two_real_libraries(tmp_path):
         root = tmp_path / side
         write(
             root / "vendor/mode.hpp",
-            f"namespace dep {{ enum Mode {{ last = {value} }}; }}",
+            f"namespace dep {{ enum Mode {{ LastKnownDataLessPropKind = {value} }}; }}",
         )
         write(
             root / "include/api.hpp",
@@ -264,7 +331,7 @@ def test_release_groups_dependency_header_across_two_real_libraries(tmp_path):
             "-H",
             "new=new/include/api.hpp",
             "--contract",
-            "all",
+            "public",
             "-o",
             "json=report.json",
         ),
@@ -272,9 +339,104 @@ def test_release_groups_dependency_header_across_two_real_libraries(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert run.returncode in (0, 4), run.stderr
+    assert run.returncode == 1, run.stderr
     document = json.loads((tmp_path / "report.json").read_text())
+    for library in document["libraries"]:
+        [finding] = library["findings"]
+        assert finding["contract_relevance"] == "UNKNOWN_UNRESOLVED"
+        assert finding["gate_contribution"] == 0
     [dependency] = document["dependency_changes"]
     assert dependency["libraries"] == ["libcpu.so", "libgpu.so"]
     assert (dependency["old_value"], dependency["new_value"]) == ("21", "22")
     assert dependency["declarations"]["old"]["owner"] == "dependency:vendor"
+
+    pair = subprocess.run(
+        abicheck_command(
+            "compare",
+            "old/lib/libgpu.so",
+            "new/lib/libgpu.so",
+            "-H",
+            "old=old/include/api.hpp",
+            "-H",
+            "new=new/include/api.hpp",
+            "--contract",
+            "public",
+            "-o",
+            "json=public.json",
+            "-o",
+            "markdown=public.md",
+        ),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert pair.returncode == 1, pair.stderr
+    public = json.loads((tmp_path / "public.json").read_text())
+    [change] = [
+        c
+        for c in public["changes"]
+        if c["symbol"].endswith("::LastKnownDataLessPropKind")
+    ]
+    assert change["contract_relevance"] == "UNKNOWN_UNRESOLVED"
+    assert change["contract_reason_code"] == "dependency_enum_public_path_unresolved"
+    assert change["gate_contribution"] == 0
+    assert public["contract_coverage_exit_contribution"] == 1
+    assert (
+        "do not establish a product ABI dependency"
+        in (tmp_path / "public.md").read_text()
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="uses ELF shared libraries")
+def test_dependency_enum_in_exported_signature_gates(tmp_path):
+    for side, value in (("old", 21), ("new", 22)):
+        root = tmp_path / side
+        (root / "vendor").mkdir(parents=True)
+        (root / "include").mkdir()
+        (root / "vendor/mode.hpp").write_text(
+            f"namespace dep {{ enum Mode {{ active = {value} }}; }}"
+        )
+        (root / "include/api.hpp").write_text(
+            '#include "../vendor/mode.hpp"\nextern "C" dep::Mode api(dep::Mode mode);'
+        )
+        source = root / "api.cc"
+        source.write_text(
+            '#include "include/api.hpp"\ndep::Mode api(dep::Mode mode){return mode;}'
+        )
+        subprocess.run(
+            ["g++", "-shared", "-fPIC", str(source), "-o", str(root / "libapi.so")],
+            check=True,
+        )
+    (tmp_path / ".abicheck.yml").write_text(
+        "scope:\n  dependencies:\n    - name: vendor\n      header_roots: [old/vendor, new/vendor]\n"
+    )
+
+    result = subprocess.run(
+        abicheck_command(
+            "compare",
+            "old/libapi.so",
+            "new/libapi.so",
+            "-H",
+            "old=old/include/api.hpp",
+            "-H",
+            "new=new/include/api.hpp",
+            "--contract",
+            "public",
+            "-o",
+            "json=report.json",
+            "-o",
+            "markdown=report.md",
+        ),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads((tmp_path / "report.json").read_text())
+    [finding] = [c for c in report["changes"] if c["symbol"].endswith("::active")]
+    assert finding["contract_relevance"] == "IN_CONTRACT"
+    assert finding["gate_contribution"] == result.returncode == 4
+    assert finding["review_evidence"]["enum_declarations"]["old"][
+        "public_exported_signatures"
+    ] == [["api", "return", "dep::Mode"], ["api", "parameter 1", "dep::Mode"]]
+    assert "Exported function signature" in (tmp_path / "report.md").read_text()

@@ -7,6 +7,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from ..model.ownership_rules import is_dependency_owner
+
 
 def evidence_lines(evidence: object, contract_reason: object = None) -> list[str]:
     if not isinstance(evidence, dict):
@@ -77,9 +79,12 @@ def evidence_lines(evidence: object, contract_reason: object = None) -> list[str
                 lines.append(
                     "Public inline argument to exported function: " + " → ".join(path)
                 )
+            for path in decl.get("public_exported_signatures", ()):
+                lines.append("Exported function signature: " + " → ".join(path))
         if not any(
             d["public_field_paths"]
             or d["public_inline_arguments"]
+            or d.get("public_exported_signatures")
             or d["public_target"]
             for d in declarations.values()
         ):
@@ -122,7 +127,7 @@ def dependency_changes(libraries: Iterable[Mapping[str, Any]]) -> list[dict[str,
             evidence = finding.get("review_evidence") or {}
             sides = evidence.get("enum_declarations")
             if not sides or not all(
-                d["owner"].startswith("dependency:") for d in sides.values()
+                is_dependency_owner(d["owner"]) for d in sides.values()
             ):
                 continue
             identity = tuple(

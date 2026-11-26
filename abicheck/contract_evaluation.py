@@ -75,6 +75,7 @@ from .policy.class_metadata_identity import (
 )
 from .policy.classification import ADDITION_KINDS
 from .policy.contract_closed_domain import closed_domain_decision
+from .policy.dependency_enum_contract import dependency_enum_public_decision
 from .policy.finding_type_candidates import (
     qualified_type_candidates as _qualified_type_candidates,
     type_candidates as _type_candidates,
@@ -1346,17 +1347,10 @@ def evaluate_change_contract_relevance(
     if pipeline_decision is not None:
         return pipeline_decision
 
-    # ADR-049 D4: "If the authoritative side is unresolved, evidence from
-    # the other side cannot manufacture confidence." Checking the
-    # *authoritative* side specifically (not "either side" -- a prior
-    # version of this gate used `surf_old.resolvable or surf_new.resolvable`,
-    # which let an unrelated resolvable *non*-authoritative side substitute
-    # for the authoritative one) -- e.g. a `FUNC_REMOVED` finding is proven
-    # by the *old* side alone (the function existed and was public there;
-    # the new side's own header availability is irrelevant to that fact),
-    # so only the old side's resolvability matters for it; a `FUNC_ADDED`
-    # finding is the mirror image, judged by the new side alone (Codex
-    # review, fresh evidence).
+    if enum_decision := dependency_enum_public_decision(change):
+        return ContractEvaluationDecision(*enum_decision)
+
+    # ADR-049 D4: only the authoritative side can establish resolvability.
     auth = _authoritative_surface(change, surf_old, surf_new)
     if not auth.resolvable:
         return _unresolved_decision(

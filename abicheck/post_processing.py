@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .policy.dependency_enum_contract import dependency_enum_public_decision
 from .policy.disposition_ledger import Disposition
 from .policy.finding_disposition.pipeline import (
     merge_late_findings,
@@ -366,16 +367,15 @@ class FilterNonPublicSurface:
             ctx.scope_fell_back = True
             return changes
         force_public = ctx.force_public_symbols
-        # Compute the old∪new surface universes once for the whole pass; doing
-        # this per change is O(findings × surface) and makes large comparisons
-        # quadratic.
+        # Reuse the surface unions across findings to avoid quadratic work.
         unions = surface_unions(surf_old, surf_new)
         warm_demangling = demangle_batch_on_first_need(changes)
         kept: list[Change] = []
         for c in changes:
-            # Widening overlay (ADR-024 §D6): a user-guaranteed public symbol
-            # stays in-surface regardless of provenance/export classification.
-            if force_public and _change_matches_symbols(c, force_public):
+            # Keep explicit commitments and defer dependency enums to contract evaluation.
+            if (force_public and _change_matches_symbols(c, force_public)) or (
+                ctx.contract_evaluation and dependency_enum_public_decision(c)
+            ):
                 kept.append(c)
                 continue
             in_surface, reason = classify_change_surface(

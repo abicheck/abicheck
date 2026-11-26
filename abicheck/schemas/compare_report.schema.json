@@ -4075,7 +4075,7 @@
             "object",
             "null"
           ],
-          "description": "Schema 5.1 structured transition evidence for human explanations; it does not affect finding identity, compatibility, or gating.",
+          "description": "Schema 5.1 structured transition evidence for human explanations. Enum exposure paths can inform public contract relevance. Finding identity is independent of this evidence.",
           "additionalProperties": true
         },
         "severity": {

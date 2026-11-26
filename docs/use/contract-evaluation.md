@@ -73,6 +73,15 @@ headline summary, and SARIF annotates an excluded finding with a
 `contractRelevance` property (severity `note`, not `error`) rather than
 dropping it.
 
+Under `--contract public`, a changed enumerator declared by a dependency
+requires a public ABI path or a commitment such as `scope.public_symbols`.
+The report records baseline paths through fields in public types, exported
+function signatures, or public inline functions that pass the enumerator
+to an exported function. When the evidence cannot establish a baseline
+path or an explicit commitment, the finding reads
+`UNKNOWN_UNRESOLVED` with `gate_contribution: 0`. The coverage ledger records
+the remaining uncertainty.
+
 ## Accepting incomplete evidence deliberately
 
 If a domain's evidence is *known* to be incomplete for some legs of your

@@ -910,8 +910,7 @@ def compare(
         paths.
     """
     # ADR-049 D7: an explicit contract domain outranks the legacy scope
-    # flag. Header-origin demotion *is* the `public` domain's question, so
-    # under `all` or `exports` it must not run ahead of the evaluator: it
+    # flag. Header-origin demotion must not run before `all` or `exports`: it
     # would move findings to the out-of-surface ledger before the stage that
     # owns the decision ever classified them, and a `--contract all` run
     # would silently drop an internal break that `--no-scope-public-headers`
@@ -990,6 +989,7 @@ def compare(
             force_public_symbols=force_public_symbols,
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
+            contract_evaluation=contract_evaluation,
         ),
         ledger=ledger,
         absent_baseline=absent_baseline(new.library) if old is None else None,

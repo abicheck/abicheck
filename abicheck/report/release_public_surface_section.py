@@ -47,6 +47,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..model.ownership_rules import is_dependency_owner
 from ..policy.release_contract_reconciliation import (
     ReleaseReconciliation,
     SideReconciliation,
@@ -304,7 +305,7 @@ def _identity(finding: Mapping[str, object], library: str) -> tuple[object, ...]
     if isinstance(evidence, dict):
         sides = evidence.get("enum_declarations", {})
         if "removed_exports" in evidence or any(
-            d["owner"].startswith("dependency:") for d in sides.values()
+            is_dependency_owner(d["owner"]) for d in sides.values()
         ):
             # Keep concrete provider and dependency observations on the member.
             return (*key, library)

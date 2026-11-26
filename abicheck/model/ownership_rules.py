@@ -42,6 +42,7 @@ __all__ = [
     "OwnershipRequest",
     "OwnershipRules",
     "dependency_owner",
+    "is_dependency_owner",
 ]
 
 OWNER_TARGET = "target"
@@ -62,6 +63,11 @@ CONTRACT_EXTERNAL = "external"
 def dependency_owner(name: str) -> str:
     """The owner spelling for declarations of the dependency *name*."""
     return f"{_DEPENDENCY_PREFIX}{name}"
+
+
+def is_dependency_owner(owner: object) -> bool:
+    """Whether an owner token identifies a dependency."""
+    return isinstance(owner, str) and owner.startswith(_DEPENDENCY_PREFIX)
 
 
 @dataclass(frozen=True)

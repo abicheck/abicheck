@@ -67,6 +67,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_disposition_transitions.py",
                 "tests/test_state_guards_phase5.py",
                 "tests/test_header_extraction_limitations.py",
+                "tests/test_l2_observations.py",
             ),
         ),
         Family(

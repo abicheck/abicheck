@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -14,10 +15,26 @@ if TYPE_CHECKING:
     from ..model.elf_facts import ElfImport
 
 
-from ..model.extraction_scope import ownership_of
-from ..model.surface_facts import bound_export_spelling, present_identities
+from abicheck.model.availability import FactStatus
+from abicheck.model.export_index import snapshot_export_names
+from abicheck.model.extraction_scope import ownership_of
+from abicheck.model.ownership_rules import is_dependency_owner
+from abicheck.model.surface_facts import (
+    bound_export_spelling,
+    is_export_confirmed_absent,
+    present_identities,
+)
+from abicheck.model.vocabulary import AccessLevel
 
 EnumPaths = dict[str, list[list[str]]]
+
+
+@dataclass(frozen=True)
+class EnumExposure:
+    fields: EnumPaths
+    inline_arguments: EnumPaths
+    exported_signatures: EnumPaths
+
 
 _EXPORT_LOSS_KINDS = frozenset(
     {
@@ -66,12 +83,52 @@ def _public_target(decl: object) -> bool:
     return bool(owner and owner.owner == "target" and owner.contract == "public")
 
 
-def enum_paths(snapshot: AbiSnapshot) -> tuple[EnumPaths, EnumPaths]:
+def _exported_signature_paths(
+    snapshot: AbiSnapshot, spellings: dict[str, str], dependency_enums: set[str]
+) -> EnumPaths:
+    paths: EnumPaths = defaultdict(list)
+    if not dependency_enums or not (exports := snapshot_export_names(snapshot)):
+        return paths
+    for fn in snapshot.declarations.functions:
+        if (
+            not _public_target(fn)
+            or fn.access is AccessLevel.PRIVATE
+            or is_export_confirmed_absent(fn)
+        ):
+            continue
+        export = bound_export_spelling(fn) or fn.mangled
+        if export not in exports:
+            continue
+        slots = [("return", fn.return_type, fn.return_type_identities_fact)]
+        slots.extend(
+            (f"parameter {position}", param.type, param.type_identities_fact)
+            for position, param in enumerate(fn.params, 1)
+        )
+        for slot, spelling, fact in slots:
+            identities = present_identities(fact)
+            if fact is None or fact.status is not FactStatus.PRESENT:
+                # Match a bare spelling only in a global function. Qualified
+                # spellings and captured identities also work in namespaces.
+                if ("::" in spelling or "::" not in fn.name) and (
+                    name := spellings.get(spelling)
+                ):
+                    identities = (name,)
+            for identity in identities:
+                if identity in dependency_enums:
+                    paths[identity].append([export, slot, identity])
+    return paths
+
+
+def enum_paths(snapshot: AbiSnapshot) -> EnumExposure:
     fields: EnumPaths = defaultdict(list)
     declarations = snapshot.declarations
     spellings = {}
+    dependency_enums = set()
     for enum in declarations.enums:
         name = enum.qualified_name or enum.name
+        owner = ownership_of(enum)
+        if owner and is_dependency_owner(owner.owner):
+            dependency_enums.add(name)
         for spelling in (name, f"::{name}", f"enum {name}", f"enum ::{name}"):
             spellings[spelling] = name
     for record in declarations.types:
@@ -86,15 +143,18 @@ def enum_paths(snapshot: AbiSnapshot) -> tuple[EnumPaths, EnumPaths]:
                 fields[identity].append(
                     [record.qualified_name or record.name, member.name, identity]
                 )
-    return fields, public_enum_arguments(snapshot)
+    return EnumExposure(
+        fields,
+        public_enum_arguments(snapshot),
+        _exported_signature_paths(snapshot, spellings, dependency_enums),
+    )
 
 
 def enum_declaration(
-    enum: EnumType, member_name: str, paths: tuple[EnumPaths, EnumPaths]
+    enum: EnumType, member_name: str, paths: EnumExposure
 ) -> dict[str, object]:
     owner = ownership_of(enum)
     name = enum.qualified_name or enum.name
-    fields, arguments = paths
     return {
         "name": name,
         "header": enum.source_header,
@@ -104,8 +164,11 @@ def enum_declaration(
             owner and owner.owner == "target" and owner.contract == "public"
         ),
         "ownership_rule": owner.rule_id if owner else None,
-        "public_field_paths": fields.get(name, []),
-        "public_inline_arguments": arguments.get(f"{name}::{member_name}", []),
+        "public_field_paths": paths.fields.get(name, []),
+        "public_inline_arguments": paths.inline_arguments.get(
+            f"{name}::{member_name}", []
+        ),
+        "public_exported_signatures": paths.exported_signatures.get(name, []),
     }
 
 
@@ -221,7 +284,7 @@ def enum_value_change(
     member: str,
     old_members: dict[str, int],
     new_members: dict[str, int],
-    paths: tuple[tuple[EnumPaths, EnumPaths], tuple[EnumPaths, EnumPaths]],
+    paths: tuple[EnumExposure, EnumExposure],
 ) -> Change:
     from ..diff_helpers import make_change
     from ..model.change_catalog.kinds import ChangeKind
