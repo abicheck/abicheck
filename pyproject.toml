@@ -393,7 +393,8 @@ also_copy = [
     # Real repository inputs that tests read directly, not just directories.
     "repo_facts.json",
     "research/onedal-coverage/product",
-    "research/onedal-sycl-usm/inventory.tsv",
+    # mutmut copies individual files without creating their parent directories.
+    "research/onedal-sycl-usm",
     # tests/test_adr061_gap_b_facades.py::test_public_root_surfaces_matches_
     # the_reviewed_exception_set reads the real architecture/modules.yaml
     # directly (it's checking the reviewed public_root_surfaces exception
