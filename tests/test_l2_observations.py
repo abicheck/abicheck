@@ -235,7 +235,7 @@ def test_hidden_inline_and_control_object(tmp_path):
 def test_public_inline_passes_exact_enumerator_to_exported_function():
     from abicheck.buildsource.type_graph import augment_graph_with_types
     from abicheck.buildsource.type_graph_walk import parse_clang_ast_types
-    from abicheck.compare.l2_evidence import public_enum_arguments
+    from abicheck.compare.l2_evidence import enum_paths
     from abicheck.model import Function
     from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
     from abicheck.model.source_graph import SourceGraphSummary
@@ -282,7 +282,7 @@ def test_public_inline_passes_exact_enumerator_to_exported_function():
         elf=ElfMetadata(symbols=[ElfSymbol("set_mode")]),
     )
     snap.surface_graph = graph
-    assert public_enum_arguments(snap)["dep::Mode::last"] == [
+    assert enum_paths(snap).inline_arguments["dep::Mode::last"] == [
         ["apply", "dep::Mode::last", "set_mode"]
     ]
 
@@ -381,10 +381,9 @@ def test_release_groups_dependency_header_across_two_real_libraries(tmp_path):
     assert change["contract_reason_code"] == "dependency_enum_public_path_unresolved"
     assert change["gate_contribution"] == 0
     assert public["contract_coverage_exit_contribution"] == 1
-    assert (
-        "do not establish a product ABI dependency"
-        in (tmp_path / "public.md").read_text()
-    )
+    assert "do not establish a product ABI dependency" in (
+        tmp_path / "public.md"
+    ).read_text(encoding="utf-8")
 
 
 @pytest.mark.integration

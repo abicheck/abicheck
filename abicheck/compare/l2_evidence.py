@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot, EnumType, Function, Variable
     from ..model.change import Change
     from ..model.elf_facts import ElfImport
+    from ..model.extraction_scope import EntityOwnership
 
 
 from abicheck.model.availability import FactStatus
@@ -34,6 +36,7 @@ class EnumExposure:
     fields: EnumPaths
     inline_arguments: EnumPaths
     exported_signatures: EnumPaths
+    ownership: dict[str, EntityOwnership | None]
 
 
 _EXPORT_LOSS_KINDS = frozenset(
@@ -51,7 +54,9 @@ _EXPORT_LOSS_KINDS = frozenset(
 )
 
 
-def public_enum_arguments(snapshot: AbiSnapshot) -> EnumPaths:
+def public_enum_arguments(
+    snapshot: AbiSnapshot, is_public: Callable[[Function], bool]
+) -> EnumPaths:
     from ..evidence_depth import resolve_l5_source_graph
     from ..model.graph_identity import decl_node_identity
 
@@ -64,7 +69,7 @@ def public_enum_arguments(snapshot: AbiSnapshot) -> EnumPaths:
     callers = {
         fn.mangled: fn.name
         for fn in snapshot.declarations.functions
-        if fn.is_inline and _public_target(fn)
+        if fn.is_inline and is_public(fn)
     }
     for edge in graph.edges:
         if edge.kind != "DECL_REFERENCES_DECL" or edge.role != "enum_argument":
@@ -84,14 +89,17 @@ def _public_target(decl: object) -> bool:
 
 
 def _exported_signature_paths(
-    snapshot: AbiSnapshot, spellings: dict[str, str], dependency_enums: set[str]
+    snapshot: AbiSnapshot,
+    spellings: dict[str, str],
+    dependency_enums: set[str],
+    is_public: Callable[[Function], bool],
 ) -> EnumPaths:
     paths: EnumPaths = defaultdict(list)
     if not dependency_enums or not (exports := snapshot_export_names(snapshot)):
         return paths
     for fn in snapshot.declarations.functions:
         if (
-            not _public_target(fn)
+            not is_public(fn)
             or fn.access is AccessLevel.PRIVATE
             or is_export_confirmed_absent(fn)
         ):
@@ -124,9 +132,19 @@ def enum_paths(snapshot: AbiSnapshot) -> EnumExposure:
     declarations = snapshot.declarations
     spellings = {}
     dependency_enums = set()
+    ownership: dict[str, EntityOwnership | None] = {}
+    public_by_id: dict[int, bool] = {}
+
+    def is_public(fn: Function) -> bool:
+        key = id(fn)
+        if key not in public_by_id:
+            public_by_id[key] = _public_target(fn)
+        return public_by_id[key]
+
     for enum in declarations.enums:
         name = enum.qualified_name or enum.name
         owner = ownership_of(enum)
+        ownership[name] = owner
         if owner and is_dependency_owner(owner.owner):
             dependency_enums.add(name)
         for spelling in (name, f"::{name}", f"enum {name}", f"enum ::{name}"):
@@ -145,16 +163,24 @@ def enum_paths(snapshot: AbiSnapshot) -> EnumExposure:
                 )
     return EnumExposure(
         fields,
-        public_enum_arguments(snapshot),
-        _exported_signature_paths(snapshot, spellings, dependency_enums),
+        public_enum_arguments(snapshot, is_public),
+        _exported_signature_paths(snapshot, spellings, dependency_enums, is_public),
+        ownership,
     )
+
+
+def enum_path_pair(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[EnumExposure, EnumExposure]:
+    old_paths = enum_paths(old)
+    return old_paths, old_paths if old is new else enum_paths(new)
 
 
 def enum_declaration(
     enum: EnumType, member_name: str, paths: EnumExposure
 ) -> dict[str, object]:
-    owner = ownership_of(enum)
     name = enum.qualified_name or enum.name
+    owner = paths.ownership.get(name)
     return {
         "name": name,
         "header": enum.source_header,

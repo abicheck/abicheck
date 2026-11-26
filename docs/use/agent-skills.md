@@ -22,9 +22,9 @@ Someone who has never heard of abicheck can ask "will this change break
 existing consumers?" and get a workflow that reaches for abicheck as its
 deterministic verification engine.
 
-> **Requires abicheck 0.6.0 or later, below 0.8.0, to run.** The skills
+> **Requires abicheck 0.6.0 or later, below 0.10.0, to run.** The skills
 > check the installed abicheck version against their own declared range —
-> `>=0.6.0,<0.8.0` — and refuse to run
+> `>=0.6.0,<0.10.0` — and refuse to run
 > rather than fail partway through, since several commands/options they
 > drive postdate 0.5.0 (see "Prerequisites" below). The check runs
 > `abicheck --version` — the executable actually on `PATH` when the skill

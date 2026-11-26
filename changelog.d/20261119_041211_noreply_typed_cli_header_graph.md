@@ -1,3 +1,0 @@
-### Fixed
-
-- **A name-only C++ runtime match no longer clears a PE or Mach-O finding out of contract** — a removed symbol whose name is a `std::`, `__gnu_cxx::` or `__cxxabiv1::` runtime name is excluded from the contract only when a snapshot carries a symbol table to bind it. A PE or Mach-O target has none, so the finding keeps gating at partial assurance, with its reason recorded as `toolchain_runtime_name_unbound` in the disposition ledger. The `rebuild_optimized` `cxx_stdlib` cell on Windows reads `BREAKING` again instead of `COMPATIBLE` (ADR-089 A8). ELF behaviour, including the field-report statics that no table lists, is unchanged.

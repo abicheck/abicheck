@@ -68,11 +68,12 @@ def test_prefilter_never_changes_the_result(name):
 
 
 _TEMPLATE_HEADER = """
+template <class T> struct TestAllocator {};
 namespace n {
 template <class, class> struct A;
 template <class X, class Y> struct A;
 template <class T, class U = T> struct A { T t; U u; };
-template <class T, int N = 3, template <class> class C = std::allocator> struct B {};
+template <class T, int N = 3, template <class> class C = TestAllocator> struct B {};
 template <class T> struct Outer { template <class V, class W = V> struct Inner {}; };
 A<int> a; Outer<char>::Inner<long> i;
 }
@@ -94,7 +95,7 @@ def template_ast():
             "-ast-dump=json",
             "-",
         ],
-        input="#include <memory>\n" + _TEMPLATE_HEADER,
+        input=_TEMPLATE_HEADER,
         capture_output=True,
         text=True,
         check=True,

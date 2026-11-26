@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,8 @@ void free_s(S *s) { free(s); }
 
 
 def _compile_so(tmp_path: Path) -> tuple[Path, Path]:
+    if sys.platform == "win32":
+        pytest.skip("this fixture builds a Linux ELF shared object")
     if shutil.which("gcc") is None:
         pytest.skip("gcc not installed")
     header = tmp_path / "lib.h"
@@ -121,6 +124,8 @@ void take_rref(RRef x) { x = 2; }
 
 
 def _compile_cxx_so(tmp_path: Path) -> tuple[Path, Path]:
+    if sys.platform == "win32":
+        pytest.skip("this fixture builds a Linux ELF shared object")
     if shutil.which("g++") is None:
         pytest.skip("g++ not installed")
     header = tmp_path / "lib.h"

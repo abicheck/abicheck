@@ -149,9 +149,17 @@ jobs:
           persist-credentials: false
       - name: Install free-threaded CPython 3.15 from conda-forge
         run: |
-          curl -Ls -o "$RUNNER_TEMP/micromamba" \
-            "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-linux-64"
-          echo "${MICROMAMBA_SHA256}  $RUNNER_TEMP/micromamba" | sha256sum -c -
+          # Retry both failed HTTP downloads and successful responses with invalid bytes.
+          for attempt in 1 2 3; do
+            if curl --fail --silent --show-error --location --max-time 120 \
+              --output "$RUNNER_TEMP/micromamba" \
+              "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-linux-64" &&
+              echo "${MICROMAMBA_SHA256}  $RUNNER_TEMP/micromamba" | sha256sum -c -; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep "$((attempt * 2))"
+          done
           chmod +x "$RUNNER_TEMP/micromamba"
           export MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba"
           "$RUNNER_TEMP/micromamba" create -y -q -p "$RUNNER_TEMP/py315t" \

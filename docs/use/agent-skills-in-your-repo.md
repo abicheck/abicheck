@@ -78,7 +78,7 @@ cloud agents won't have the skills unless their setup script installs them.
 
 The skills drive the abicheck CLI through the shell; they do not bundle it.
 Each skill checks `abicheck --version` against its declared range (currently
-`>=0.6.0,<0.8.0`) and declines to run rather than failing halfway.
+`>=0.6.0,<0.10.0`) and declines to run rather than failing halfway.
 
 - **Developers:** add `abicheck` to your dev requirements, or document
   `pipx install abicheck` in `CONTRIBUTING.md`. Pin a version inside the
@@ -87,7 +87,7 @@ Each skill checks `abicheck --version` against its declared range (currently
   `pixi install` provides it.
 - **Cloud agents** (Claude Code on the web, Copilot coding agent, Codex
   cloud): install it in the environment's setup script or session-start
-  hook, e.g. `pip install "abicheck>=0.6,<0.7"`. An agent that has the skill
+  hook, e.g. `pip install "abicheck>=0.6,<0.10"`. An agent that has the skill
   but not the CLI will correctly refuse to give a verdict — which is safe,
   but not useful.
 - **Header-level analysis** uses `castxml` by default; installing clang

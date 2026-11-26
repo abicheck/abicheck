@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -455,7 +456,10 @@ _ORACLE_RECORDS = {
 }
 
 
-@pytest.mark.skipif(shutil.which("clang++") is None, reason="needs clang++")
+@pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("clang++") is None,
+    reason="needs a clang++ toolchain with a compatible C++ standard library",
+)
 def test_probe_layout_matches_compiled_sizeof_offsetof(tmp_path: Path) -> None:
     """Every size/offset the parser reports equals what a compiled program
     measures with sizeof/offsetof (an oracle outside the parser)."""
@@ -586,7 +590,10 @@ def _measure(tmp_path: Path, lang: str, src_lines: list[str]) -> list[str]:
     ).stdout.splitlines()
 
 
-@pytest.mark.skipif(shutil.which("clang") is None, reason="needs clang")
+@pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("clang") is None,
+    reason="needs clang and a compatible C++ standard library",
+)
 def test_new_shapes_match_compiled_sizeof_offsetof_and_base_casts(
     tmp_path: Path,
 ) -> None:

@@ -217,7 +217,9 @@ def test_controls_are_required_absences() -> None:
 )
 def test_unmodelled_configs_are_not_guessed(flags, reason) -> None:
     op = OP_BY_NAME["bitfield_width_16_to_17"]
-    why = op.requires(default_config("c", GCC).with_(flags=flags))
+    why = op.requires(
+        default_config("c", GCC).with_(platform=("linux", "elf"), flags=flags)
+    )
     assert why is not None and reason in why
     msvc = Toolchain("msvc", 19, "cl", "cl")
     assert "gcc and clang" in op.requires(default_config("c", msvc))

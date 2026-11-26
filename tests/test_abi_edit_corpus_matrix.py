@@ -92,7 +92,10 @@ MSVC = Toolchain("msvc", 19, "cl", "cl")
 
 
 def _cfg(lang: str = "c", **kw: object) -> Config:
-    return replace(default_config(lang, GCC), **kw)  # type: ignore[arg-type]
+    # These expectations model the SysV/Linux ABI, not whichever platform is
+    # running the test. Keep the corpus oracle deterministic on Windows/macOS.
+    platform = kw.pop("platform", ("linux", "elf"))
+    return replace(default_config(lang, GCC), platform=platform, **kw)  # type: ignore[arg-type]
 
 
 # --- fast: configuration model ----------------------------------------------
