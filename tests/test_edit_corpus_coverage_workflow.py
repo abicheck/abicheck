@@ -27,6 +27,11 @@ from tests._workflow_exec import (
 
 pytestmark = pytest.mark.skipif(not have_bash(), reason="needs a real bash")
 
+_NEEDS_POSIX_PROCESS_TOOLS = pytest.mark.skipif(
+    shutil.which("nice") is None or shutil.which("setsid") is None,
+    reason="the integration workflow's test command uses nice and setsid",
+)
+
 _WF = "integration.yml"
 _FLOOR = find_run_step(_WF, "edit-corpus-coverage", "Check the PR-tier floor")
 _SHARD_REPORT = find_run_step(_WF, "integration", "Edit corpus coverage (Linux)")
@@ -57,6 +62,7 @@ def _stub_bsd_wc(bindir: Path) -> None:
 
 @pytest.mark.parametrize("shard", ["1", "2", "3"])
 @pytest.mark.parametrize("test_rc", [0, 1, 3], ids=["pass", "fail", "error"])
+@_NEEDS_POSIX_PROCESS_TOOLS
 def test_a_returned_test_command_leaves_its_marker(
     tmp_path: Path, shard: str, test_rc: int
 ) -> None:

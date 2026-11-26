@@ -101,10 +101,11 @@ def test_abicc_constant_change_is_not_an_incompatibility() -> None:
 
 def test_abicc_input_descriptor_is_not_an_output_report() -> None:
     """The input descriptor and the output report are different XML formats."""
-    desc = abicc.descriptor("1.0", [Path("/x/a.h")], [Path("/x/liba.so")], "-std=c17")
+    header, library = Path("/x/a.h"), Path("/x/liba.so")
+    desc = abicc.descriptor("1.0", [header], [library], "-std=c17")
     assert (
-        "<headers>\n/x/a.h\n</headers>" in desc
-        and "<libs>\n/x/liba.so\n</libs>" in desc
+        f"<headers>\n{header}\n</headers>" in desc
+        and f"<libs>\n{library}\n</libs>" in desc
     )
     with pytest.raises(ValueError):
         abicc.parse(f"<descriptor>{desc}</descriptor>")

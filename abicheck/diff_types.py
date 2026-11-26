@@ -1126,7 +1126,13 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             elif new_members[mname] != mval:
                 if argument_paths is None:
-                    argument_paths = enum_paths(old), enum_paths(new)
+                    old_paths = enum_paths(old)
+                    # Reuse the one exposure for a self-comparison. The
+                    # snapshots share every declaration, so rebuilding the
+                    # public-function index would repeat ownership analysis
+                    # without adding evidence.
+                    new_paths = old_paths if old is new else enum_paths(new)
+                    argument_paths = old_paths, new_paths
                 changes.append(
                     enum_value_change(
                         e_old, e_new, mname, old_members, new_members, argument_paths

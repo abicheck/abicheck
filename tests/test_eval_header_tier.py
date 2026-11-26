@@ -9,6 +9,7 @@ fallback are pinned without network.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -115,8 +116,12 @@ def test_resolve_side_umbrella_includes_and_deps(monkeypatch, tmp_path):
     res = ht.resolve_side(entry, "new")
     inc = str(tmp_path / "tbb-devel" / "include")
     assert res["package"] == "tbb-devel"
-    assert res["headers"] == [inc + "/oneapi/tbb.h"]
-    assert res["includes"] == [inc, inc + "/oneapi", str(tmp_path / "absl" / "include")]
+    assert res["headers"] == [os.path.join(inc, "oneapi", "tbb.h")]
+    assert res["includes"] == [
+        inc,
+        os.path.join(inc, "oneapi"),
+        str(tmp_path / "absl" / "include"),
+    ]
 
 
 def test_resolve_side_dep_include_is_relative_to_package_root(monkeypatch, tmp_path):
@@ -148,7 +153,10 @@ def test_resolve_side_dep_include_is_relative_to_package_root(monkeypatch, tmp_p
     }
     res = ht.resolve_side(entry, "old")
     root = str(tmp_path / "root-glib-1")
-    assert res["includes"][1:] == [root + "/lib/x", root + "/lib/y"]
+    assert res["includes"][1:] == [
+        os.path.join(root, "lib", "x"),
+        os.path.join(root, "lib", "y"),
+    ]
     assert seen == [("glib", "1")]
 
 

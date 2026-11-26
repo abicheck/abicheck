@@ -128,14 +128,16 @@ def test_new_required_argument_excludes_old_arity(default_added):
 
 
 @pytest.mark.parametrize("directory,removed", [("feature", True), ("other", False)])
-def test_withdrawal_needs_same_include_relative_header(directory, removed):
+def test_withdrawal_needs_same_include_relative_header(tmp_path, directory, removed):
+    old_include = tmp_path / "old" / "include"
+    new_include = tmp_path / "new" / "include"
     before = snap(
-        pattern("int", header="/old/include/feature/api.hpp"),
-        pattern("queue&", header="/old/include/feature/api.hpp"),
+        pattern("int", header=str(old_include / "feature" / "api.hpp")),
+        pattern("queue&", header=str(old_include / "feature" / "api.hpp")),
     )
-    after = snap(pattern("int", header=f"/new/include/{directory}/api.hpp"))
-    before.ast_compile_args = ("-I/old/include",)
-    after.ast_compile_args = ("-I", "/new/include")
+    after = snap(pattern("int", header=str(new_include / directory / "api.hpp")))
+    before.ast_compile_args = ("-I", str(old_include))
+    after.ast_compile_args = ("-I", str(new_include))
     assert bool(lost_header_overloads(before, after, [])) == removed
 
 

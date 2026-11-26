@@ -1,3 +1,0 @@
-### Fixed
-
-- **Abiforge's stripped-headers ground truth no longer expects a build-flag layout change to be visible** — `-fpack-struct` changes no header text and no binary symbol, so a `{B,H}` cell cannot observe it; an edit now declares its carrier evidence (`EditOp.carrier`, DWARF or build data), and the `rebuild_pack_struct` expectation is unobservable at `{B,H}`. A `-O2` rebuild may now read `COMPATIBLE_WITH_RISK` only when an independent `nm` fact confirms the lost `__stack_chk_fail` import (`BinaryLicence`); without the fact the strict `COMPATIBLE` ceiling still holds. Test-harness only: no `abicheck` checker behaviour changed.

@@ -43,7 +43,7 @@ changed paths, runs the pinned evidence level, and compares in one step
 `old-library` as the baseline):
 
 ```yaml
-- uses: abicheck/abicheck@v0.8.0
+- uses: abicheck/abicheck@v0.9.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so

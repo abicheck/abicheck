@@ -22,6 +22,39 @@ They are consolidated into a concise release summary when a version ships.
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.9.0'></a>
+## [0.9.0]
+
+### Header analysis and public ABI
+
+- CastXML 0.8.0 is supported and pinned as the default wheel for pip installs.
+- L2 analysis detects withdrawn public overloads and default arguments, and
+  better distinguishes C++ aggregate calling-convention changes from
+  source-only declaration changes. The oneDAL fixtures cover SDK headers,
+  virtual dispatch, by-value aggregates, and SYCL interfaces.
+- A dependency enum value change requires evidence that it reaches the
+  public ABI, or an explicit public commitment, to gate as an ABI break.
+  Without that evidence it remains visible as `UNKNOWN_UNRESOLVED`;
+  contract coverage policy can still gate on missing evidence.
+
+### Evidence and reporting
+
+- Reports explain removed ELF exports using exact symbol variants, version
+  and definition binding. Consumer manifests can identify shipped clients
+  and request a link check for a control object.
+- Release summaries group shared dependency enum changes and show public
+  fields and observed inline call arguments that consume the enumerator.
+- Compare reports include the experimental calling-interface evidence axis
+  for parameter and return changes without changing the gate based on that
+  axis alone.
+
+### Upgrading
+
+- Update the package and GitHub Action pins together after `v0.9.0` is
+  published. Check existing baselines, report consumers, and CI policy
+  against a representative old/new pair, especially if the policy relies
+  on dependency enum findings or declaration-only scans.
+
 ## [0.8.0] — 2026-11-07
 
 ### One option vocabulary (breaking)
