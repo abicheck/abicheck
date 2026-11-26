@@ -25,7 +25,7 @@ from .compare.enum_additions import added_enum_changes
 from .compare.enum_underlying import enum_underlying_size_detector
 from .compare.fact_gate import both_facts_present
 from .compare.field_addition import new_field_change_kind
-from .compare.l2_evidence import enum_paths, enum_value_change
+from .compare.l2_evidence import enum_path_pair, enum_value_change
 from .compare.live_member_scopes import removal_unconfirmed
 from .compare.public_surface import (
     reconciled_function_surfaces,
@@ -1126,13 +1126,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             elif new_members[mname] != mval:
                 if argument_paths is None:
-                    old_paths = enum_paths(old)
-                    # Reuse the one exposure for a self-comparison. The
-                    # snapshots share every declaration, so rebuilding the
-                    # public-function index would repeat ownership analysis
-                    # without adding evidence.
-                    new_paths = old_paths if old is new else enum_paths(new)
-                    argument_paths = old_paths, new_paths
+                    argument_paths = enum_path_pair(old, new)
                 changes.append(
                     enum_value_change(
                         e_old, e_new, mname, old_members, new_members, argument_paths
