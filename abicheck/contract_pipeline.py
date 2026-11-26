@@ -83,6 +83,7 @@ from .policy.contract_dependency_origin import (
     exclude_unreachable_dependency_findings,
 )
 from .policy.contract_toolchain_origin import exclude_toolchain_runtime_findings
+from .policy.dependency_enum_contract import DEPENDENCY_ENUM_PATH_UNRESOLVED
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -302,7 +303,8 @@ class ContractEvaluationStage:
         idx = [
             i
             for i, d in enumerate(decisions)
-            if unresolved_default_fallback_applies(
+            if d.reason_code != DEPENDENCY_ENUM_PATH_UNRESOLVED
+            and unresolved_default_fallback_applies(
                 self.mode, self.mode_provenance, d.relevance
             )
         ]

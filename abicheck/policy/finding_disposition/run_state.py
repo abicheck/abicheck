@@ -63,6 +63,7 @@ class DispositionRules:
     force_public_symbols: frozenset[str] = frozenset()
     collapse_versioned_symbols: bool = False
     public_surface_allowlist: frozenset[str] | None = None
+    contract_evaluation: bool = False
 
     @classmethod
     def from_policy_file(
@@ -74,6 +75,7 @@ class DispositionRules:
         force_public_symbols: set[str] | frozenset[str] | None = None,
         collapse_versioned_symbols: bool = False,
         public_surface_allowlist: set[str] | frozenset[str] | None = None,
+        contract_evaluation: bool = False,
     ) -> DispositionRules:
         """The rules ``compare()`` applies: the policy file's namespace
         conventions plus the run's own suppression and scope switches."""
@@ -90,6 +92,7 @@ class DispositionRules:
             internal_namespaces=internal_namespaces(policy_file) or None,
             experimental_namespaces=experimental_namespaces(policy_file) or None,
             scope_to_public_surface=scope_to_public_surface,
+            contract_evaluation=contract_evaluation,
             force_public_symbols=frozenset(force_public_symbols or ()),
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=frozenset(public_surface_allowlist)
@@ -204,6 +207,7 @@ class PipelineContext:
     #: ``DeduplicateCrossDetector``). Owned by this run, so it lives exactly as
     #: long as the pipeline does; see ``compare.identity_memo.IdentityMemo``.
     identity_memo: IdentityMemo = field(default_factory=IdentityMemo)
+    contract_evaluation: bool = False
 
     @property
     def scope_resolved(self) -> bool:
@@ -270,6 +274,7 @@ class PipelineContext:
             internal_namespaces=rules.internal_namespaces,
             experimental_namespaces=rules.experimental_namespaces,
             scope_to_public_surface=rules.scope_to_public_surface,
+            contract_evaluation=rules.contract_evaluation,
             force_public_symbols=set(rules.force_public_symbols),
             collapse_versioned_symbols=rules.collapse_versioned_symbols,
             public_surface_allowlist=set(rules.public_surface_allowlist)

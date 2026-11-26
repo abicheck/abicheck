@@ -459,7 +459,10 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "own break was 6 findings. A finding raised on a record follows the "
             "record's presence: judged on the side that declares it when only "
             "one does, internal on both when both do, so a record a release "
-            "starts (or stops) naming publicly keeps its leak in contract."
+            "starts (or stops) naming publicly keeps its leak in contract. "
+            "For a changed enumerator, a dependency header establishes ownership. "
+            "Without a public ABI path or explicit commitment, relevance "
+            "remains unresolved and the finding contributes zero to the ABI gate."
         ),
         fixed_by=(1775, 1813, 1819),
         seed_tests=(
@@ -469,6 +472,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_header_dependency_internals_integration.py",
             "tests/test_dwarf_dependency_scope_integration.py",
             "tests/test_dependency_record_leak_integration.py",
+            "tests/test_l2_observations.py",
         ),
         public_surfaces=("cli",),
         axes={

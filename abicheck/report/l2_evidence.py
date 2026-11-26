@@ -7,6 +7,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from ..model.ownership_rules import is_dependency_owner
+
 
 def evidence_lines(evidence: object, contract_reason: object = None) -> list[str]:
     if not isinstance(evidence, dict):
@@ -122,7 +124,7 @@ def dependency_changes(libraries: Iterable[Mapping[str, Any]]) -> list[dict[str,
             evidence = finding.get("review_evidence") or {}
             sides = evidence.get("enum_declarations")
             if not sides or not all(
-                d["owner"].startswith("dependency:") for d in sides.values()
+                is_dependency_owner(d["owner"]) for d in sides.values()
             ):
                 continue
             identity = tuple(

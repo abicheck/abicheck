@@ -297,6 +297,9 @@ def _render_not_evaluated_lines(d: Mapping[str, Any] | None) -> list[str]:
     for entry in shown:
         lines.append(_render_change_row_oneline(entry["row"]))
         lines.append(clip(f"  > Contract: {entry['label']}{entry['suffix']}"))
+        lines.extend(
+            f"  > {md_text(obs)}" for obs in entry["row"].get("l2_observations", ())
+        )
     if (more := more_line(hidden, "changes")) is not None:
         lines.append(more)
     lines.append("")

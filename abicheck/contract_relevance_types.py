@@ -298,6 +298,10 @@ CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
             "export it. The finding is not excluded: its relevance stands and "
             "its assurance is partial, so it keeps gating."
         ),
+        "dependency_enum_public_path_unresolved": (
+            "The enumerator is declared in a dependency, and the available "
+            "declarations do not establish a path to the product's public ABI."
+        ),
         "dependency_internal_unreachable": (
             "The entity is declared in a dependency (a header-only or vendored "
             "library outside the library's own declarations, or a toolchain "

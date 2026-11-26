@@ -76,6 +76,7 @@ from .contract_relevance_types import (
 )
 from .model.change import Change
 from .policy import contract_graph_encoding as _enc
+from .policy.dependency_enum_contract import dependency_enum_public_decision
 
 
 def load_replayable_context(ctx: PersistedContractContext) -> PersistedContractContext:
@@ -654,14 +655,12 @@ def _reevaluate_one(
             assurance=ContractAssurance.COMPLETE,
             evidence_refs=refs,
         )
+    if mode is ContractMode.PUBLIC and change.surface_exclusion_reason is None:
+        if enum_decision := dependency_enum_public_decision(change):
+            other_side = "new" if side == "old" else "old"
+            return ReplayDecision(*enum_decision, (*refs, *domain.refs(other_side)))
     if not domain.domain_is_available(side):
-        # The root provider itself reported it never observed this domain --
-        # the persisted counterpart of the live evaluator's `not
-        # auth.resolvable` branch, which returns exactly this. Checked after
-        # the graph rather than instead of it, because a provider can record
-        # an unusable search and still have attached the declarations and
-        # graph it collected on the way to that conclusion (see
-        # `domain_is_available`).
+        # Declared graph nodes can coexist with an unavailable root search.
         return ReplayDecision(
             relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
             reason_code="required_evidence_incomplete",

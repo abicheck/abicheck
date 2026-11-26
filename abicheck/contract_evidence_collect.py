@@ -114,6 +114,7 @@ from .policy.contract_graph_encoding import (
     alias_node as _alias_node,
     name_node as _name_node,
 )
+from .policy.dependency_enum_contract import DEPENDENCY_ENUM_PATH_UNRESOLVED
 from .policy.public_surface_index import (
     PublicSurface,
     _index_surface_types,
@@ -1000,24 +1001,15 @@ def collect_contract_evidence(
 # --------------------------------------------------------------------------
 
 
-#: Reason codes whose decision genuinely rests on *both* sides' evidence,
-#: keyed by the domain that produced them. Only the ``public`` domain has
-#: one: ``classify_change_surface`` runs a membership classification against
-#: ``surface_unions(surf_old, surf_new)``, so both header providers really
-#: were consulted.
-#:
-#: ``exports`` deliberately has none. ``_exports_mode_decision`` selects one
-#: :class:`~abicheck.export_surface.ExportSurface` by ADR-049 D4's side rule
-#: and decides from it alone -- so citing the other side would claim a
-#: decision rests on evidence it never read, and would be actively
-#: misleading when that side's provider is unavailable (an exported removal
-#: is conclusive from the old table even if the new one failed to parse;
-#: Codex review, fresh evidence). Every other reason -- an unresolvable
-#: surface, an ambiguous identity, a terminal exclusion already recorded on
-#: the finding -- is settled by the authoritative side alone in both domains.
+#: Public closure and dependency-enum decisions consult both sides. Export
+#: relevance uses the authoritative side's binary evidence (ADR-049 D4).
 _TWO_SIDED_REASONS_BY_MODE: Mapping[ContractMode, frozenset[str]] = {
     ContractMode.PUBLIC: frozenset(
-        {"public_root_membership", "closed_domain_no_commitment"}
+        {
+            "public_root_membership",
+            "closed_domain_no_commitment",
+            DEPENDENCY_ENUM_PATH_UNRESOLVED,
+        }
     ),
     ContractMode.EXPORTS: frozenset(),
     ContractMode.ALL: frozenset(),
