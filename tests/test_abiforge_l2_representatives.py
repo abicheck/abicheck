@@ -42,7 +42,7 @@ def test_verdict_gate_works_without_diagnostic_attribution():
 def test_callback_alias_scope_and_indirect_controls():
     from types import SimpleNamespace
 
-    from abicheck.compare.callback_value_convention import _CallbackTypes
+    from abicheck.model.callback_type_index import CallbackTypeIndex
 
     records = [
         SimpleNamespace(name="V", qualified_name=name, trivial_for_calls=True)
@@ -56,7 +56,7 @@ def test_callback_alias_scope_and_indirect_controls():
             "Cycle": "Cycle",
         },
     )
-    types = _CallbackTypes(SimpleNamespace(declarations=declarations))
+    types = CallbackTypeIndex(SimpleNamespace(declarations=declarations))
     slots = types.arguments("Alias", "api")
     assert slots[0] == "ns::V" and slots[1] == "V"
     assert slots[2] not in types.traits and slots[3] not in types.traits

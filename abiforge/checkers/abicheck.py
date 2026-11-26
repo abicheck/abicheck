@@ -454,3 +454,19 @@ def observable_at(kind_name: str) -> tuple[ObservableSpec, ...] | None:
         )
         for obs in meta.observable_at
     )
+
+
+def record_return_exports(path: Path, exports: set[str], record_name: str) -> set[str]:
+    """Read compiler-confirmed by-value returns from a stored checker snapshot."""
+    from abicheck.serialization import load_snapshot
+
+    return {
+        f.mangled
+        for f in load_snapshot(path).declarations.functions
+        if f.mangled in exports
+        and f.return_by_value_fact is not None
+        and f.return_by_value_fact.value is True
+        and f.return_type_identities_fact is not None
+        and f.return_type_identities_fact.is_present
+        and record_name in (f.return_type_identities_fact.value or ())
+    }

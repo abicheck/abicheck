@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from abicheck.serialization import load_snapshot
+from abiforge.checkers.abicheck import record_return_exports
 
 from .onedal_exports import symbols
 from .onedal_release_matrix import PRODUCT, obligations
@@ -99,18 +99,11 @@ def verify_snapshots(binary, out, expected, original_headers, members):
         expected_by_side[name] = set(expected)
         if original_headers:
             exports = symbols(binary)
-            snapshot = load_snapshot(out / name / "snapshot.json.gz")
-            declared = {
-                f.mangled
-                for f in snapshot.declarations.functions
-                if f.mangled in exports
-                and f.return_by_value_fact is not None
-                and f.return_by_value_fact.value is True
-                and f.return_type_identities_fact is not None
-                and f.return_type_identities_fact.is_present
-                and "daal::services::interface1::Status"
-                in (f.return_type_identities_fact.value or ())
-            }
+            declared = record_return_exports(
+                out / name / "snapshot.json.gz",
+                exports,
+                "daal::services::interface1::Status",
+            )
             if set(members) - declared:
                 raise ValueError(
                     f"{name}: missing compiler-witnessed member specializations"
@@ -118,7 +111,6 @@ def verify_snapshots(binary, out, expected, original_headers, members):
             if not expected_by_side[name] <= declared:
                 raise ValueError(f"{name}: missing ledger Status declarations")
             expected_by_side[name] = declared
-            del snapshot
     receipt = {}
     observed = {}
     for left, right in (("old", "mutant"), ("mutant", "old"), ("old", "old")):

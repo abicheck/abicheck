@@ -121,7 +121,7 @@
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "eb0d6119475ceff657e89702641a66d20baf28e8fef130f73c4238a42482bf47",
-      "abicheck/extract/headers/castxml/return_by_value.py": "77b054dbdaa89fcd622dc099f8c62562597ce937c767a3866b959602b43e6605",
+      "abicheck/extract/headers/castxml/return_by_value.py": "251b218f31686bc2a5281f347e39a3a6fbd510cd7512744c6a02c25124bd1805",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "c5e68b092aa2ec40d6b61933911b8a5266875030d1896fd875af575917f61d1f",
+    "fingerprint": "41527cba17f297de084020858a9c2af042276f22721ad14e153007f97d285e47",
     "generation": 97,
-    "reason": "Resolve nested and imported record identities and collect record call traits for callback boundaries"
+    "reason": "Resolve record identities and callback ABI facts; avoid the secondary AST for incomplete and memory-only standalone returns"
   },
   "resolver": {
     "files": {

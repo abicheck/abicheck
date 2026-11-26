@@ -135,15 +135,23 @@ def has_exported_record_argument(root: Any, exported: frozenset[str]) -> bool:
             and (fn.get("mangled") or fn.get("name")) not in exported
         ):
             continue
-        slots = [
-            fn.get("returns", ""),
-            *(arg.get("type", "") for arg in fn if arg.tag == "Argument"),
-        ]
-        for type_id in slots:
-            el = target(type_id)
-            if el is None:
-                continue
-            if el.tag in _RECORD_TAGS or callback(el):
+        result = target(fn.get("returns", ""))
+        # The return classifier needs a complete layout to establish a
+        # register return. A large or incomplete result cannot gain that
+        # evidence from the call-trait sidecar alone.
+        if (
+            result is not None
+            and result.tag in _RECORD_TAGS
+            and result.get("incomplete") != "1"
+        ):
+            size = result.get("size")
+            if size is None or int(size) <= 128:
+                return True
+        slots = [target(arg.get("type", "")) for arg in fn if arg.tag == "Argument"]
+        if any(el is not None and el.tag in _RECORD_TAGS for el in slots):
+            return True
+        for el in [result, *slots]:
+            if callback(el):
                 return True
             record = pointee(el)
             if record is not None and record.tag in _RECORD_TAGS:
