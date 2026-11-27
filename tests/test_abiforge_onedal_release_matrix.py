@@ -366,3 +366,21 @@ def test_major_dispatcher_and_sycl_inventory():
     before = set(original.read_text().splitlines()[1:])
     after = set((folder / "sycl.tsv").read_text().splitlines()[1:])
     assert before < after and len(after) == 61
+
+
+def test_candidate_only_and_parallel_major_providers_are_counted():
+    from abiforge.run.onedal_export_surface import provider_changes
+
+    old = {"libonedal.so.3": {"shared", "old"}, "libonedal_core.so.3": {"core"}}
+    new = {
+        "libonedal.so.3": {"shared"},
+        "libonedal.so.4": {"shared", "new"},
+        "libonedal_core.so.4": {"core"},
+        "libonedal_dpc.so.4": {"shared"},
+    }
+    assert provider_changes(old, new) == {
+        "libonedal.so.3": {"removed": 1, "added": 0},
+        "libonedal.so.4": {"removed": 0, "added": 2},
+        "libonedal_core.so.3": {"removed": 0, "added": 0},
+        "libonedal_dpc.so.4": {"removed": 0, "added": 1},
+    }

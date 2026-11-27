@@ -352,3 +352,36 @@ for frontend in clang castxml; do
 done
 python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR" --mpi
 ```
+
+### Closing the remaining Linux ELF coverage gaps
+
+The 2025.9 export inventory contains 22,428 SONAME/symbol pairs and 18,619
+distinct names. The combined SDK inventories match 3,517 distinct names.
+The independently witnessed lower bound is 1,144 names. Track these three
+populations separately as coverage grows.
+
+1. Inventory every provider in each candidate. Pair equal SONAMEs first and
+   match a major-version successor only when the remaining family has one
+   provider on each side. Count additions from candidate-only DSOs. These
+   counts measure symbol presence across releases.
+2. Resolve the six unparsed SDK roots and classify unmatched exports by
+   provider and declaration or compiler-generated role. Keep unresolved
+   entries visible with their reason and package version.
+3. Group public obligations by calling convention, object layout, dispatch,
+   ownership and device boundary. For each new group, compile a frozen
+   consumer, record its provider binding and run it on an unchanged release,
+   a breaking mutation and a compatible control.
+4. Compare the same artifacts with Clang and CastXML, checking attribution,
+   verdict and exit code independently. Publish per-provider totals for
+   witnessed, unresolved and environment-dependent obligations on each replay.
+
+Run the independent export extraction check for all three pinned packages:
+
+```sh
+python -m abiforge.run.onedal_elf_extraction "$OLD" "$MINOR" "$MAJOR" --out "$OUT/elf-extraction.json"
+```
+
+The checked-in receipt compares every name in GNU nm's defined dynamic
+symbol list with the ELF reader, keyed by SONAME and symbol version.
+There were zero missing or unexpected names in all six providers per release:
+22,428 pairs in 2025.9, 22,442 in 2025.11 and 15,742 in 2026.2.
