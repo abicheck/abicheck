@@ -59,6 +59,8 @@ def test_table_matches_the_installed_producer(
     driver = _driver(family, version)
     if shutil.which(driver) is None:
         pytest.skip(f"{driver} is not installed")
+    if shutil.which("readelf") is None:
+        pytest.skip("readelf is required for the ELF DWARF oracle")
     assert _records_deleted(driver, tmp_path) is measured
 
 

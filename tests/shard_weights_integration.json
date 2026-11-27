@@ -2,7 +2,8 @@
  "comment": "Per-file seconds steering `pytest --shard` balance only; regenerate with `python -m tests.pytest_shards update-weights`.",
  "files": {
   "tests/parity/test_preprocessor_facts_behavior.py": 0.22,
-  "tests/test_abi_edit_corpus.py": 2029.63,
+  "tests/test_abi_edit_corpus.py": 1443.0,
+  "tests/test_abi_edit_corpus_second.py": 1443.0,
   "tests/test_abi_edit_corpus_matrix.py": 323.83,
   "tests/test_abi_retype_lanes.py": 242.73,
   "tests/test_abiforge_binary_licence.py": 2.18,

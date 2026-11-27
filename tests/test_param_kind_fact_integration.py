@@ -61,8 +61,8 @@ void free_s(S *s) { free(s); }
 
 
 def _compile_so(tmp_path: Path) -> tuple[Path, Path]:
-    if sys.platform == "win32":
-        pytest.skip("this fixture builds a Linux ELF shared object")
+    if not sys.platform.startswith("linux"):
+        pytest.skip("this oracle requires a Linux ELF shared object")
     if shutil.which("gcc") is None:
         pytest.skip("gcc not installed")
     header = tmp_path / "lib.h"
@@ -153,6 +153,9 @@ class TestTypedefWrappedParamKindAgreesAcrossProducers:
     IDENTICAL, unchanged declaration manufactured ``FUNC_PARAMS_CHANGED``
     for every typedef'd reference/rvalue-reference parameter."""
 
+    @pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="requires ELF DWARF"
+    )
     def test_castxml_vs_dwarf_typedef_reference_no_change(self, tmp_path: Path) -> None:
         if shutil.which("castxml") is None:
             pytest.skip("castxml not installed")

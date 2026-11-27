@@ -851,7 +851,7 @@ class TestUnitTestsPerPlatformTimeout:
     def _matrix_operating_systems(cls) -> set[str]:
         """Every OS the matrix really runs, base rows plus `include:` rows."""
         matrix = cls._unit_tests_job()["strategy"]["matrix"]
-        systems = set(matrix["os"])
+        systems = set(matrix.get("os", []))
         for extra in matrix.get("include", []):
             systems.add(extra["os"])
         return systems

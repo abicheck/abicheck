@@ -280,9 +280,7 @@ def _skip_wrong_width(seed, config) -> None:
             pytest.skip(width)
 
 
-@pytest.mark.integration
-@pytest.mark.parametrize("op,seed,compiler,backend", CELLS)
-def test_edit_produces_declared_ground_truth(
+def _assert_edit_ground_truth(
     op, seed, compiler, backend, baseline_cache: BaselineCache, corpus_root: Path
 ) -> None:
     config = _as_config(seed, compiler).with_(header_backend=backend)
@@ -344,6 +342,14 @@ def test_edit_produces_declared_ground_truth(
         f"kinds={sorted(outcome.kinds)} problems={list(outcome.failures)} "
         f"(why: {op.why})"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("op,seed,compiler,backend", CELLS[::2])
+def test_edit_produces_declared_ground_truth(
+    op, seed, compiler, backend, baseline_cache: BaselineCache, corpus_root: Path
+) -> None:
+    _assert_edit_ground_truth(op, seed, compiler, backend, baseline_cache, corpus_root)
 
 
 @pytest.mark.integration
