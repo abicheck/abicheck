@@ -1,0 +1,74 @@
+{
+  "2025.11.0/onedal.3.dll": {
+    "exports": 4916,
+    "missing": [],
+    "sha256": "0fd863b0e194c2d59f61e0795990aea0e492cd871e9dd2050d124dacb51a4461",
+    "unexpected": []
+  },
+  "2025.11.0/onedal_core.3.dll": {
+    "exports": 20261,
+    "missing": [],
+    "sha256": "381898636f66e34444b292ff43922c67670935987bd54fabe866ad7eb98e1ebc",
+    "unexpected": []
+  },
+  "2025.11.0/onedal_dpc.3.dll": {
+    "exports": 8122,
+    "missing": [],
+    "sha256": "ed059118194d3ddb8f4c3860b2c686f0211b81f307e6fe97d8f8efe93c07ad71",
+    "unexpected": []
+  },
+  "2025.11.0/onedal_thread.3.dll": {
+    "exports": 77,
+    "missing": [],
+    "sha256": "67cd37f252c066c6f3cb658f9aef4dd1889add88ee27c8d789822c808fa37501",
+    "unexpected": []
+  },
+  "2025.9.0/onedal.3.dll": {
+    "exports": 4916,
+    "missing": [],
+    "sha256": "6970b1fa6a5ee1dd07f46f44580e74a25ea2f0b25d1480e76dc73415ce6da89e",
+    "unexpected": []
+  },
+  "2025.9.0/onedal_core.3.dll": {
+    "exports": 20260,
+    "missing": [],
+    "sha256": "c207ebe4b55d412dde5302583b8b288b587dc5f47988b897e7208dc8a6012366",
+    "unexpected": []
+  },
+  "2025.9.0/onedal_dpc.3.dll": {
+    "exports": 8122,
+    "missing": [],
+    "sha256": "f631ab22542c155abc1fba46e3a9b531c2692b0fb96e4668679903e61b0a24b2",
+    "unexpected": []
+  },
+  "2025.9.0/onedal_thread.3.dll": {
+    "exports": 77,
+    "missing": [],
+    "sha256": "0c2043399af3717ab3e7f42e27979abf9cd906bc480c134b9c7c7039775fdf9e",
+    "unexpected": []
+  },
+  "2026.2.0/onedal.4.dll": {
+    "exports": 5010,
+    "missing": [],
+    "sha256": "2f3af4217c1453f56f4af30bfab4f2274f98b69d5716a6052a24ba12a94fff1c",
+    "unexpected": []
+  },
+  "2026.2.0/onedal_core.4.dll": {
+    "exports": 14211,
+    "missing": [],
+    "sha256": "440cd8812bd9b6205a958a8c2544c6d0e32179739d5231815c94965ee10e9ed4",
+    "unexpected": []
+  },
+  "2026.2.0/onedal_dpc.4.dll": {
+    "exports": 6454,
+    "missing": [],
+    "sha256": "0a7e839df66f007966c40cdf8dd97568330b92503b0b2051cac6ad9b622689c3",
+    "unexpected": []
+  },
+  "2026.2.0/onedal_thread.4.dll": {
+    "exports": 77,
+    "missing": [],
+    "sha256": "6fedf90401ea195e120881152de9b774afe40d0b2b6cf19fc380814e0258231a",
+    "unexpected": []
+  }
+}

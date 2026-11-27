@@ -42,6 +42,27 @@ REFUSED = "REFUSED"
 PUBLIC_DUMP_ENV = "ABICHECK_EDIT_CORPUS_PUBLIC_DUMP"
 
 
+def elf_export_names(path: Path) -> tuple[str, set[str]]:
+    """The reader's SONAME and versioned dynamic exports."""
+    from abicheck.elf_metadata import parse_elf_metadata
+
+    metadata = parse_elf_metadata(path)
+    names = set()
+    for symbol in metadata.symbols:
+        name = symbol.name
+        if symbol.version:
+            name += ("@@" if symbol.is_default else "@") + symbol.version
+        names.add(name)
+    return metadata.soname, names
+
+
+def pe_export_names(path: Path) -> list[tuple[str, int]]:
+    """Return name and ordinal together, retaining aliases and nameless exports."""
+    from abicheck.pe_metadata import parse_pe_metadata
+
+    return [(entry.name, entry.ordinal) for entry in parse_pe_metadata(path).exports]
+
+
 def snapshot(
     so: Path,
     headers: Sequence[Path],

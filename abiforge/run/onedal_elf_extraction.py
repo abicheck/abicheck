@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from abicheck.elf_metadata import parse_elf_metadata
+from abiforge.checkers.abicheck import elf_export_names
 
 from .onedal_export_surface import surface
 
@@ -14,15 +14,9 @@ def audit(prefix):
     providers = surface(prefix)
     result = {}
     for path in sorted({p.resolve() for p in (prefix / "lib").glob("libonedal*.so*")}):
-        metadata = parse_elf_metadata(path)
-        expected = providers[metadata.soname]
-        actual = set()
-        for symbol in metadata.symbols:
-            name = symbol.name
-            if symbol.version:
-                name += ("@@" if symbol.is_default else "@") + symbol.version
-            actual.add(name)
-        result[metadata.soname] = {
+        soname, actual = elf_export_names(path)
+        expected = providers[soname]
+        result[soname] = {
             "exports": len(expected),
             "missing": sorted(expected - actual),
             "unexpected": sorted(actual - expected),

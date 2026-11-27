@@ -88,8 +88,30 @@ def _parse_pe_exports(pe: Any, meta: PeMetadata) -> None:
     """Populate *meta.exports* from the PE export directory."""
     if not hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
         return
+    # Limit aggregate retained spelling bytes as well as each individual read.
+    remaining_name_bytes = 64 * 1024 * 1024
     for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
-        name = exp.name.decode("utf-8", errors="replace") if exp.name else ""
+        raw = exp.name or b""
+        if len(raw) == pefile.MAX_SYMBOL_NAME_LENGTH:
+            start = exp.name_offset
+            # A decorated C++ name can exceed pefile's 512-byte prefix.
+            # Bound the scan to the containing section and a 64 KiB spelling.
+            section = pe.get_section_by_rva(pe.get_rva_from_offset(start))
+            limit = min(len(pe.__data__), start + (1 << 16))
+            if section is not None:
+                limit = min(limit, section.PointerToRawData + section.SizeOfRawData)
+            end = pe.__data__.find(b"\0", start, limit)
+            if end < 0:
+                note_export_read_failure(
+                    "PE export name has no terminator within the read bound"
+                )
+                continue
+            raw = pe.__data__[start:end]
+        remaining_name_bytes -= len(raw)
+        if remaining_name_bytes < 0:
+            note_export_read_failure("PE export names exceed the aggregate read bound")
+            break
+        name = raw.decode("utf-8", errors="replace")
         forwarder = ""
         sym_type = PeSymbolType.EXPORTED
 
@@ -247,6 +269,8 @@ def _note_truncated_image(pe: Any) -> None:
 def _parse(dll_path: Path) -> PeMetadata:
     """Parse PE metadata from *dll_path* using pefile."""
     with open_pe(dll_path) as pe:
+        # PE name ordinals index the export address table with a 16-bit word.
+        pe.max_symbol_exports = 1 << 16
         pe.parse_data_directories(
             directories=[
                 pefile.DIRECTORY_ENTRY[key]

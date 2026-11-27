@@ -458,3 +458,40 @@ supporting dynamic symbol renaming.
 ```sh
 python -m abiforge.run.onedal_exception_abi "$OLD" "$MINOR" --out "$OUT/exception-abi.json"
 ```
+
+### Windows x86-64 export identities
+
+The Windows receipt covers four DLLs per release (CPU, core, DPC and thread).
+The builds are conda-forge win-64 dal 2025.9.0 hbcdf7a0_51, 2025.11.0
+hbcdf7a0_17, and 2026.2.0 h5461014_300 with its matching dal-gpu build.
+The receipt pins each DLL's SHA-256. Place the DLLs under directories named
+for their release and run:
+
+```sh
+python -m abiforge.run.onedal_pe_exports "$ROOT"/*/onedal*.dll --out "$OUT/pe-exports.json"
+```
+
+LLVM 19 and the PE reader agree on all 92,503 decorated-name/ordinal pairs.
+In the 2025.9 core DLL alone, extraction recovers 20,260 exports (previously
+11,741 entries, including misclassified ordinal-only entries). Names in the
+CPU and DPC DLLs reach 2,905 bytes. The public CLI on the two minor DPC DLLs
+reports four removed and four added exports and exits 4. In the core DLL, one added name shifts the ordinals of 3,780 retained names.
+The default checker treats named exports as name-bound. This measurement
+compares on-disk export identities. It does not execute Windows or GPU code.
+
+### Frozen upstream CPU examples
+
+Run against the upstream 2025.9.0 tag and the two installed minor SDKs.
+The Jaccard application also requires the oneTBB development headers and
+library. Use `--tbb-include` and `--tbb-library` for a non-default installation.
+
+```sh
+python research/onedal-coverage/product/cpu_examples.py "$SOURCE" "$OLD" "$MINOR" --out "$OUT/cpu-examples.csv"
+```
+
+All 60 oneAPI and 170 DAAL examples built against 2025.9 exited zero on
+both releases with eager binding. Initial stdout matched byte-for-byte on
+206. Of the other 24, six varied in repeat runs of at least one release.
+For the remaining 18, rebuilding against 2025.11 reproduced the frozen
+client's 2025.11 output in every case. The CSV records the observations on
+this host; nondeterministic algorithms can produce different digests on replay.

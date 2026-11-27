@@ -239,7 +239,7 @@
       "abicheck/pdb_model.py": "c42cf25e4e3bd4d098575989cec9de94ab9795e171dde08e7b9a93d155a7ebe8",
       "abicheck/pdb_parser.py": "cfcb071ded9843b10834a236b6d61ca2db9522fb6d18d535a0f3861cb8a6caf6",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
-      "abicheck/pe_metadata.py": "179d05863acd9039f6dddfcf07e121475f03feeec6ba6512afc9e94875105c7e",
+      "abicheck/pe_metadata.py": "5fb51af4f41051da083ce3c79101b338c0e110f262cc559492603b6317a86fbe",
       "abicheck/sycl_metadata.py": "6a718f9630264440046c91c782d1e0b8f353ffb4680cd45155e7d87213d09965",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
     },
-    "fingerprint": "2383e3f9c5a642497d4d2323b4a5d4580673d24af1360325bb80d1c912496a1d",
-    "generation": 97,
-    "reason": "Preserve call-slot trait extraction and avoid redundant joins for incomplete results"
+    "fingerprint": "fde8497899cee39e279b11b86c2b798834c9ded184492c73e14a5a1102f677a7",
+    "generation": 98,
+    "reason": "bumped to 98 for a semantic change"
   },
   "resolver": {
     "files": {

@@ -797,4 +797,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "including references from relocatable objects. Stored symbol spellings need no rewrite."
     ),
     97: GenerationSpellingChange("Record IDs and callback ABI; no rewrite."),
+    98: GenerationSpellingChange(
+        "Large PE export tables and full decorated names. Truncated names and missing "
+        "ordinals cannot be reconstructed from old snapshots; re-dump the DLL."
+    ),
 }
