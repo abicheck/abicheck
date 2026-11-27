@@ -184,6 +184,8 @@ jobs:
         # Allow it to finish while preserving time for logs and artifacts.
         timeout-minutes: 47
         env:
+          # Only PRs use the representative default-corpus matrix.
+          ABICHECK_EDIT_CORPUS_SAMPLE: ${{ github.event_name == 'pull_request' }}
           # Linux's ELF integration count is known (~900), so it gets a real
           # floor; the step's own default is the host-agnostic '1'. Each shard
           # runs about half, still far above it.
@@ -263,6 +265,8 @@ jobs:
       - name: Integration tests (macOS/Windows)
         if: (success() || failure()) && runner.os != 'Linux'
         env:
+          # Only PRs use the representative default-corpus matrix.
+          ABICHECK_EDIT_CORPUS_SAMPLE: ${{ github.event_name == 'pull_request' }}
           ABICHECK_DURATIONS_JSON: integration-durations-platform.json
           # The Mach-O/PE subset counts are not pinned, so the step default
           # "> 0" floor catches a missing toolchain without platform guesswork.
