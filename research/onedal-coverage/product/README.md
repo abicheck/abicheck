@@ -442,3 +442,19 @@ patchelf --rename-dynamic-symbols "$OUT/renames" --output "$OUT/libonedal.so.3" 
 LD_BIND_NOW=1 LD_LIBRARY_PATH="$OUT:$lib" "$OUT/client"  # expected exit 127
 abicheck compare "$lib/libonedal.so.3" "$OUT/libonedal.so.3" -o "json=$OUT/report.json"  # expected exit 4
 ```
+
+### Exception handling across shared libraries
+
+Build a thrower and a separate catcher once against 2025.9. The thrower
+constructs eleven concrete SDK exception types. The catcher handles each
+through both the oneDAL and standard exception bases, checks the cross-cast
+and compares the messages. Both frozen artifacts run on 2025.9 and 2025.11.
+For each class, the thrower imports two objects from the real CPU DSO,
+the typeinfo and the vtable. The runner withdraws each object individually
+in a fresh copy of that DSO and checks the missing spelling in both the
+loader diagnostic and the CLI report. Run with GCC and a patchelf version
+supporting dynamic symbol renaming.
+
+```sh
+python -m abiforge.run.onedal_exception_abi "$OLD" "$MINOR" --out "$OUT/exception-abi.json"
+```

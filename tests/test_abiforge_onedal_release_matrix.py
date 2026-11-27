@@ -424,3 +424,36 @@ def test_export_import_receipts_account_for_each_release_provider():
             )
             assert linked["without_import"] == local
             assert linked["matched_imports"] == row["exports"] - len(local)
+
+
+def test_exception_withdrawals_cover_each_typeinfo_and_vtable():
+    receipt = json.loads((PRODUCT / "exception-abi.json").read_text())
+    assert receipt["controls"] == {"dal-2025.9.0": 0, "dal-2025.11.0": 0}
+    classes = {
+        "invalid_argument",
+        "uninitialized_optional_result",
+        "domain_error",
+        "out_of_range",
+        "unimplemented",
+        "unsupported_device",
+        "range_error",
+        "internal_error",
+        "system_error",
+        "host_bad_alloc",
+        "device_bad_alloc",
+    }
+    expected = {
+        f"_ZT{kind}N6oneapi3dal2v1{len(name)}{name}E"
+        for name in classes
+        for kind in ("I", "V")
+    }
+    rows = receipt["withdrawals"]
+    assert len(rows) == len(expected)
+    assert {row["symbol"] for row in rows} == expected
+    for row in rows:
+        assert (row["loader_exit"], row["cli_exit"], row["verdict"]) == (
+            127,
+            4,
+            "BREAKING",
+        )
+        assert row["kinds"] == ["var_removed_elf_only"]
