@@ -116,7 +116,9 @@ def test_resolve_side_umbrella_includes_and_deps(monkeypatch, tmp_path):
     res = ht.resolve_side(entry, "new")
     inc = str(tmp_path / "tbb-devel" / "include")
     assert res["package"] == "tbb-devel"
-    assert res["headers"] == [os.path.join(inc, "oneapi", "tbb.h")]
+    assert list(map(os.path.normpath, res["headers"])) == [
+        os.path.join(inc, "oneapi", "tbb.h")
+    ]
     assert res["includes"] == [
         inc,
         os.path.join(inc, "oneapi"),
@@ -153,7 +155,7 @@ def test_resolve_side_dep_include_is_relative_to_package_root(monkeypatch, tmp_p
     }
     res = ht.resolve_side(entry, "old")
     root = str(tmp_path / "root-glib-1")
-    assert res["includes"][1:] == [
+    assert list(map(os.path.normpath, res["includes"][1:])) == [
         os.path.join(root, "lib", "x"),
         os.path.join(root, "lib", "y"),
     ]
