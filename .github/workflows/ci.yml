@@ -583,7 +583,7 @@ jobs:
           SHARD_ARG: ${{ matrix.shard-arg }}
         shell: bash
         run: |
-          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow and not repo_scan" ${SHARD_ARG:+"$SHARD_ARG"} -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}${{ matrix.artifact-suffix }}.xml
+          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow and not repo_scan and not platform_independent_matrix" ${SHARD_ARG:+"$SHARD_ARG"} -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}${{ matrix.artifact-suffix }}.xml
       - name: Upload JUnit test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

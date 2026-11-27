@@ -36,6 +36,8 @@ from abiforge.model.space import (
 )
 from abiforge.operators import OP_BY_NAME, OPERATORS
 
+pytestmark = pytest.mark.platform_independent_matrix
+
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 LAYOUT_TABLE = (
     Path(__file__).resolve().parents[1] / "formal" / "lean" / "layout_table.json"
