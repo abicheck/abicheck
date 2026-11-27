@@ -385,3 +385,17 @@ The checked-in receipt compares every name in GNU nm's defined dynamic
 symbol list with the ELF reader, keyed by SONAME and symbol version.
 There were zero missing or unexpected names in all six providers per release:
 22,428 pairs in 2025.9, 22,442 in 2025.11 and 15,742 in 2026.2.
+
+For link-time coverage, run the following on Linux x86-64 with GCC and GNU ld:
+
+```sh
+python -m abiforge.run.onedal_export_imports "$OLD" "$MINOR" "$MAJOR" --out "$OUT/export-imports.json"
+```
+
+One consumer DSO per provider contains address references to every defined
+dynamic symbol. Link with undefined references forbidden in the consumer
+and inspect its dynamic imports. Of 60,612 input pairs across three releases,
+60,603 produced matching imports. GNU ld defined the three boundary symbols
+`__bss_start`, `_edata` and `_end` in each thread-library consumer itself.
+These probes exercise link-time address references. Runtime calls, object
+layout and ownership require typed consumers.

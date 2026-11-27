@@ -384,3 +384,38 @@ def test_candidate_only_and_parallel_major_providers_are_counted():
         "libonedal_core.so.3": {"removed": 0, "added": 0},
         "libonedal_dpc.so.4": {"removed": 0, "added": 1},
     }
+
+
+def test_export_import_receipts_account_for_each_release_provider():
+    extraction = json.loads((PRODUCT / "elf-extraction.json").read_text())
+    imports = json.loads((PRODUCT / "export-imports.json").read_text())
+    inventory = json.loads((PRODUCT / "export-surface.json").read_text())
+    assert (
+        extraction.keys()
+        == imports.keys()
+        == {inventory["baseline"], *inventory["releases"]}
+    )
+    for release, providers in extraction.items():
+        assert providers.keys() == imports[release].keys()
+        expected_count = (
+            sum(row["exports"] for row in inventory["providers"].values())
+            if release == inventory["baseline"]
+            else inventory["releases"][release]["exports"]
+        )
+        assert sum(row["exports"] for row in providers.values()) == expected_count
+        for name, row in providers.items():
+            linked = imports[release][name]
+            assert (
+                row["missing"]
+                == row["unexpected"]
+                == linked["unexpected_imports"]
+                == []
+            )
+            assert row["exports"] == linked["exports"]
+            local = (
+                ["__bss_start", "_edata", "_end"]
+                if name.startswith("libonedal_thread.so.")
+                else []
+            )
+            assert linked["without_import"] == local
+            assert linked["matched_imports"] == row["exports"] - len(local)
