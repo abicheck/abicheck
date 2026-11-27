@@ -511,7 +511,8 @@ jobs:
     # (not just matching-the-multiplier margin) over the ~65m14s+
     # observed here -- the run was still executing when killed, so the
     # true completion time is unknown and at least this high.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 45 }}
+    # macOS reached only 77% at the old 45-minute cap (run 45934134431).
+    timeout-minutes: 90
     permissions:
       contents: read
     strategy:
