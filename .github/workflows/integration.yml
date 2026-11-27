@@ -263,6 +263,7 @@ jobs:
       - name: Integration tests (macOS/Windows)
         if: (success() || failure()) && runner.os != 'Linux'
         env:
+          ABICHECK_DURATIONS_JSON: integration-durations-platform.json
           # The Mach-O/PE subset counts are not pinned, so the step default
           # "> 0" floor catches a missing toolchain without platform guesswork.
           # `-v` names each test as it finishes: verify.py streams it, so a
@@ -273,6 +274,13 @@ jobs:
           # not on the CPU.
           PYTEST_ADDOPTS: -n ${{ runner.os == 'Windows' && '8' || 'auto' }} --dist worksteal -v
         run: python scripts/verify.py --profile full --only integration --require-complete
+      - name: Upload platform integration durations
+        if: always() && runner.os != 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: integration-durations-${{ runner.os }}
+          path: integration-durations-platform.json
+          if-no-files-found: ignore
       - name: Native PE/Mach-O compare workflows
         # Formerly the `cross-platform-e2e` job. Apple clang -> .dylib,
         # MinGW gcc -> .dll, then `abicheck compare` on them.

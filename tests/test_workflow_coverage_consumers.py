@@ -93,6 +93,9 @@ def _matrix_combinations(job: dict[str, Any]) -> list[dict[str, Any]]:
         for k, v in matrix.items()
         if k not in ("include", "exclude") and isinstance(v, list)
     ]
+    if not keys and matrix.get("include"):
+        return [dict(entry) for entry in matrix["include"] if isinstance(entry, dict)]
+
     combos = [
         dict(zip(keys, values, strict=True))
         for values in itertools.product(*(matrix[k] for k in keys))
@@ -342,8 +345,8 @@ class TestMatrixExpansionFollowsGitHub:
         assert combos == [{"os": "b", "cov": True}]
 
     def test_the_real_unit_tests_matrices_expand_to_their_legs(self) -> None:
-        """The live matrices: three canonical coverage shards, and the two
-        other-OS legs -- each leg is where a producer/consumer pair is
+        """The live matrices: three canonical coverage shards, and three
+        other-OS matrix cells -- each leg is where a producer/consumer pair is
         checked, so a mis-expansion would silently skip one."""
         doc = _yaml_fast.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
         shards = _matrix_combinations(doc["jobs"]["unit-tests"])
@@ -353,9 +356,10 @@ class TestMatrixExpansionFollowsGitHub:
             ("3.14", 3),
         ]
         other = _matrix_combinations(doc["jobs"]["unit-tests-other-os"])
-        assert [(c["os"], c["python-version"]) for c in other] == [
-            ("windows-latest", "3.14"),
-            ("macos-latest", "3.14"),
+        assert [(c["os"], c["python-version"], c["shard-arg"]) for c in other] == [
+            ("windows-latest", "3.14", ""),
+            ("macos-latest", "3.14", "--shard=1/2"),
+            ("macos-latest", "3.14", "--shard=2/2"),
         ]
 
 
