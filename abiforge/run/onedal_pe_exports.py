@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Compare oneDAL Windows DLL export names and ordinals with llvm-readobj."""
+"""Compare oneDAL Windows DLL export names and ordinals with objdump."""
 
 import argparse
 import hashlib
@@ -13,16 +13,34 @@ from abiforge.checkers.abicheck import pe_export_names
 
 
 def audit(path, reader):
-    output = subprocess.check_output([reader, "--coff-exports", path], text=True)
+    output = subprocess.check_output([reader, "-p", path], text=True, errors="replace")
+    addresses = set()
     expected = Counter()
-    for block in re.findall(r"^Export \{\n(.*?)^\}", output, re.MULTILINE | re.DOTALL):
-        ordinal = re.search(r"^  Ordinal: (\d+)$", block, re.MULTILINE)
-        name = re.search(r"^  Name: (.*)$", block, re.MULTILINE)
-        if not ordinal or not name:
-            raise ValueError(f"invalid COFF export record in {path}")
-        expected[name[1], int(ordinal[1])] += 1
-    if not expected:
-        raise ValueError(f"no COFF export records in {path}")
+    named = set()
+    base = None
+    section = None
+    for line in output.splitlines():
+        if line.startswith("Export Address Table -- Ordinal Base "):
+            base = int(line.split()[-1])
+            section = "addresses"
+        elif line.startswith("[Ordinal/Name Pointer] Table"):
+            section = "names"
+        elif section == "addresses":
+            entry = re.match(r"\s*\[\s*\d+\] \+base\[\s*(\d+)\] ([0-9a-fA-F]+) ", line)
+            if entry and int(entry[2], 16):
+                addresses.add(int(entry[1]))
+        elif section == "names":
+            if not line.strip():
+                break
+            entry = re.match(r"\s*\[\s*(\d+)\] (?:\+base\[\s*\d+\]\s+\w+ )?(.+)$", line)
+            if entry and base is not None:
+                ordinal = base + int(entry[1])
+                named.add(ordinal)
+                expected[entry[2], ordinal] += 1
+    if section != "names" or not addresses or not named <= addresses:
+        raise ValueError(f"invalid COFF export tables in {path}")
+    for ordinal in addresses - named:
+        expected["", ordinal] += 1
     observed = Counter(pe_export_names(path))
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -37,7 +55,7 @@ def audit(path, reader):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dll", nargs="+", type=Path)
-    parser.add_argument("--reader", default="llvm-readobj")
+    parser.add_argument("--reader", default="objdump")
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
     results = {}

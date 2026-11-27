@@ -28,6 +28,10 @@ def build(source, sdk, root, exe, tbb_include, tbb_library):
         if tbb_include:
             headers.append(tbb_include)
         libraries.append(tbb_library)
+        if not tbb_library.startswith("-"):
+            libraries.extend(
+                ["-Xlinker", "-rpath", "-Xlinker", Path(tbb_library).resolve().parent]
+            )
     subprocess.run(
         [
             "g++",
@@ -56,11 +60,22 @@ def run(exe, sdk, cwd):
     return hashlib.sha256(result.stdout).hexdigest()
 
 
-def measure(args, work):
+def inventory(root):
+    result = {}
+    for family in ("oneapi", "daal"):
+        directory = root / "examples" / family / "cpp/source"
+        sources = sorted(directory.glob("*/*.cpp"))
+        if not sources:
+            raise ValueError(f"no C++ examples in {directory}")
+        result[family] = sources
+    return result
+
+
+def measure(args, work, sources):
     for family in ("oneapi", "daal"):
         cpp = args.source / "examples" / family / "cpp"
         cwd = cpp if family == "daal" else args.source
-        for source in sorted((cpp / "source").glob("*/*.cpp")):
+        for source in sources[family]:
             exe = work / "client"
             build(
                 source, args.old, args.source, exe, args.tbb_include, args.tbb_library
@@ -105,6 +120,7 @@ if __name__ == "__main__":
     args.source, args.old, args.minor = (
         p.resolve() for p in (args.source, args.old, args.minor)
     )
+    sources = inventory(args.source)
     with tempfile.TemporaryDirectory() as tmp, args.out.open("w", newline="") as stream:
         writer = csv.writer(stream, lineterminator="\n")
         writer.writerow(
@@ -119,4 +135,4 @@ if __name__ == "__main__":
                 "2025.11_native_rebuild_stdout_sha256",
             ]
         )
-        writer.writerows(measure(args, Path(tmp)))
+        writer.writerows(measure(args, Path(tmp), sources))

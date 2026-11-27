@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .onedal_export_surface import surface
+from .onedal_export_surface import surface, validate_release_labels
 
 
 def audit(prefix, runtime, lookup):
@@ -51,6 +51,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    validate_release_labels(p for p, _ in args.release)
     with tempfile.TemporaryDirectory() as tmp:
         lookup = Path(tmp) / "lookup"
         source = (

@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .onedal_export_surface import symbol_names
+from .onedal_export_surface import symbol_names, validate_release_labels
 
 
 def link_imports(provider, directory):
@@ -55,6 +55,7 @@ if __name__ == "__main__":
     parser.add_argument("prefix", nargs="+", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    validate_release_labels(args.prefix)
     with tempfile.TemporaryDirectory() as temp:
         reports = {p.name: audit(p, Path(temp)) for p in args.prefix}
     args.out.write_text(json.dumps(reports, sort_keys=True, indent=2) + "\n")

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from abiforge.checkers.abicheck import elf_export_names
 
-from .onedal_export_surface import surface
+from .onedal_export_surface import surface, validate_release_labels
 
 
 def audit(prefix):
@@ -29,6 +29,7 @@ if __name__ == "__main__":
     parser.add_argument("prefix", nargs="+", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    validate_release_labels(args.prefix)
     reports = {prefix.name: audit(prefix) for prefix in args.prefix}
     args.out.write_text(json.dumps(reports, indent=2, sort_keys=True) + "\n")
     raise SystemExit(

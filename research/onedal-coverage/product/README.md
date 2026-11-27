@@ -471,7 +471,7 @@ for their release and run:
 python -m abiforge.run.onedal_pe_exports "$ROOT"/*/onedal*.dll --out "$OUT/pe-exports.json"
 ```
 
-LLVM 19 and the PE reader agree on all 92,503 decorated-name/ordinal pairs.
+The audit uses GNU objdump to read the export address and name pointer tables independently. GNU objdump, LLVM 19 and the PE reader agree on all 92,503 decorated-name/ordinal pairs.
 In the 2025.9 core DLL alone, extraction recovers 20,260 exports (previously
 11,741 entries, including misclassified ordinal-only entries). Names in the
 CPU and DPC DLLs reach 2,905 bytes. The public CLI on the two minor DPC DLLs

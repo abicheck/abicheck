@@ -13,6 +13,14 @@ from pathlib import Path
 from .onedal_release_matrix import PRODUCT
 
 
+def validate_release_labels(prefixes):
+    labels = set()
+    for prefix in prefixes:
+        if prefix.name in labels:
+            raise ValueError(f"duplicate release label: {prefix.name}")
+        labels.add(prefix.name)
+
+
 def symbol_names(path, *, imports=False):
     flag = "--undefined-only" if imports else "--defined-only"
     output = subprocess.check_output(["nm", "-D", "-P", flag, path], text=True)
