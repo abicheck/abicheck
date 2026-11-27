@@ -96,6 +96,10 @@ def _is_known_cell(op, seed, compiler, backend):
     return known_mismatch(op.name, seed.name, config) is not None
 
 
+# GCC can predefine __CET__, making this edit observable only with Clang.
+_COMPILER_SENSITIVE_OPERATORS = frozenset({"cet_enabled"})
+
+
 def _pr_cells():
     """Keep one reference run per seed/edit and every backend per operator."""
     seen = set()
@@ -103,6 +107,8 @@ def _pr_cells():
     for cell in CELLS:
         op, seed, compiler, backend = cell.values
         keys = [("tools", op.name, backend)]
+        if op.name in _COMPILER_SENSITIVE_OPERATORS:
+            keys.append(("compiler-sensitive", op.name, seed.name, compiler, backend))
         if backend == "castxml":
             keys.append(("reference", op.name, seed.name))
         if _is_known_cell(op, seed, compiler, backend) or any(
@@ -139,6 +145,9 @@ def test_pr_sample_retains_reference_backends_and_known_cells() -> None:
 
     assert tools(selected) == tools(full)
     assert reference(selected) == reference(full)
+    assert {_cell_id(*cell) for cell in selected if cell[0].name == "cet_enabled"} == {
+        _cell_id(*cell) for cell in full if cell[0].name == "cet_enabled"
+    }
     assert {
         _cell_id(op, seed, compiler, backend)
         for op, seed, compiler, backend in selected
