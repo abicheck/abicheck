@@ -389,6 +389,11 @@ def test_candidate_only_and_parallel_major_providers_are_counted():
 def test_export_import_receipts_account_for_each_release_provider():
     extraction = json.loads((PRODUCT / "elf-extraction.json").read_text())
     imports = json.loads((PRODUCT / "export-imports.json").read_text())
+    lookup = json.loads((PRODUCT / "export-lookup.json").read_text())
+    assert lookup == {
+        release: {name: row["exports"] for name, row in providers.items()}
+        for release, providers in extraction.items()
+    }
     inventory = json.loads((PRODUCT / "export-surface.json").read_text())
     assert (
         extraction.keys()

@@ -399,3 +399,19 @@ and inspect its dynamic imports. Of 60,612 input pairs across three releases,
 `__bss_start`, `_edata` and `_end` in each thread-library consumer itself.
 These probes exercise link-time address references. Runtime calls, object
 layout and ownership require typed consumers.
+
+Finally, verify live addresses with the Intel 2025.3.2 SYCL runtime for
+the minor releases and 2026.2.0 for the major (including its pinned MKL
+dependencies). This replay opens the target with eager binding in a fresh
+process for each DSO. For every binutils export it checks that dlsym succeeds
+and dladdr identifies the requested provider by filesystem identity.
+
+```sh
+python -m abiforge.run.onedal_export_lookup \
+  --release "$OLD" "$RUNTIME_2025/lib" --release "$MINOR" "$RUNTIME_2025/lib" \
+  --release "$MAJOR" "$RUNTIME_2026/lib" --out "$OUT/export-lookup.json"
+```
+
+All 60,612 lookups resolved to the requested provider, including the linker
+boundary symbols under handle-specific lookup. A successful lookup establishes
+address ownership. It does not invoke the exported function.
