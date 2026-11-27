@@ -16,8 +16,10 @@ and listed in ``docs/contribute/known-gaps.md``.
 from __future__ import annotations
 
 import dataclasses
+import os
 import shutil
 import sys
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,7 @@ from abiforge.run.harness import (
     COMPILERS,
     BaselineCache,
     _as_config,
+    label_toolchain,
     run_operator,
 )
 from abiforge.run.toolchains import (
@@ -81,6 +84,80 @@ CELLS = [
     for compiler in COMPILERS
     for backend in HEADER_BACKENDS
 ]
+
+
+@cache
+def _sample_config(lang, compiler, backend):
+    return default_config(lang, label_toolchain(compiler)).with_(header_backend=backend)
+
+
+def _is_known_cell(op, seed, compiler, backend):
+    config = _sample_config(seed.lang, compiler, backend)
+    return known_mismatch(op.name, seed.name, config) is not None
+
+
+# GCC can predefine __CET__, making this edit observable only with Clang.
+_COMPILER_SENSITIVE_OPERATORS = frozenset({"cet_enabled"})
+
+
+def _pr_cells():
+    """Keep one reference run per seed/edit and every backend per operator."""
+    seen = set()
+    selected = []
+    for cell in CELLS:
+        op, seed, compiler, backend = cell.values
+        keys = [("tools", op.name, backend)]
+        if op.name in _COMPILER_SENSITIVE_OPERATORS:
+            keys.append(("compiler-sensitive", op.name, seed.name, compiler, backend))
+        if backend == "castxml":
+            keys.append(("reference", op.name, seed.name))
+        if _is_known_cell(op, seed, compiler, backend) or any(
+            key not in seen for key in keys
+        ):
+            selected.append(cell)
+            seen.update(keys)
+    return selected
+
+
+def selected_cells(offset: int):
+    # Local, main and manual runs retain the original full matrix.
+    cells = _pr_cells() if os.getenv("ABICHECK_EDIT_CORPUS_SAMPLE") == "true" else CELLS
+    # Split after selection, so sparse picks do not starve one shard.
+    return cells[offset::2]
+
+
+def test_pr_sample_retains_reference_backends_and_known_cells() -> None:
+    selected = [cell.values for cell in _pr_cells()]
+    full = [cell.values for cell in CELLS]
+    assert 0 < len(selected) < len(full)
+    for cells in (selected, full):
+        assert len(cells) == len({_cell_id(*cell) for cell in cells})
+
+    def tools(cells):
+        return {(op.name, backend) for op, seed, compiler, backend in cells}
+
+    def reference(cells):
+        return {
+            (op.name, seed.name)
+            for op, seed, _, backend in cells
+            if backend == "castxml"
+        }
+
+    assert tools(selected) == tools(full)
+    assert reference(selected) == reference(full)
+    assert {_cell_id(*cell) for cell in selected if cell[0].name == "cet_enabled"} == {
+        _cell_id(*cell) for cell in full if cell[0].name == "cet_enabled"
+    }
+    assert {
+        _cell_id(op, seed, compiler, backend)
+        for op, seed, compiler, backend in selected
+        if _is_known_cell(op, seed, compiler, backend)
+    } == {
+        _cell_id(op, seed, compiler, backend)
+        for op, seed, compiler, backend in full
+        if _is_known_cell(op, seed, compiler, backend)
+    }
+
 
 SMOKE_CELLS = {
     ("struct_append_field", "c_core", "gcc"),
@@ -345,7 +422,7 @@ def _assert_edit_ground_truth(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("op,seed,compiler,backend", CELLS[::2])
+@pytest.mark.parametrize("op,seed,compiler,backend", selected_cells(0))
 def test_edit_produces_declared_ground_truth(
     op, seed, compiler, backend, baseline_cache: BaselineCache, corpus_root: Path
 ) -> None:
