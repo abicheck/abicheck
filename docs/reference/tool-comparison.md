@@ -5,39 +5,12 @@ This document explains how each ABI checking tool works, what it measured on the
 
 > **Note:** abicheck's exact, up-to-date change-kind count is tracked in the
 > [Change Kind Reference](change-kinds.md).
-> The `examples/` catalog currently has **197 cases** (`catalog/ground_truth.json`
-> is the source of truth — see `examples/README.md`). Two benchmarks run against it:
->
-> - A **pinned 74-case cross-tool subset** (`case01`-`case73` + `case26b`),
->   frozen so accuracy numbers stay reproducible release to release. See
->   [Pinned vendor benchmark summary](#pinned-vendor-benchmark-summary-2026-07-18-74-case-subset)
->   (marked historical, superseded by the full-catalog benchmark below).
-> - A **full-catalog sweep** scoring every case, with SKIP/ERROR/TIMEOUT counted
->   as misses. See [Full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases).
->
-> **Which denominator is which.** Of the 197 catalog cases, **159** are
-> compilable `v1`/`v2` shared-library (`.so`) pairs that abidiff/ABICC can also
-> run against — abicheck's own competitor benchmark builds and scores these
-> through the normal build → dump → compare pipeline. The remaining **38**
-> don't fit that shape (10 single-artifact audit/cross-source checks, 15
-> build-source-pack (L3-L5) replays, 6 committed snapshot-pair fixtures, 5
-> multi-library bundle directories, 1 kernel-BTF blob, 1 Python stub-pair) and
-> have no abidiff/ABICC equivalent, so they're scored by abicheck alone through
-> [dedicated test lanes](#current-scan-quality-snapshot) instead of the
-> tool-vs-tool tables. This split is derived directly from each case's `mode`/
-> `bundle`/`fixtures`/`skip` fields in `ground_truth.json` (the same fields
-> `scripts/benchmark_comparison.py`'s `_try_special_case()` routes on), so it
-> stays accurate as the catalog grows — recompute it with:
-> ```bash
-> python3 -c "
-> import json
-> v = json.load(open('catalog/ground_truth.json'))['verdicts']
-> special = sum(1 for e in v.values() if e.get('mode') == 'audit' or e.get('skip')
->               or e.get('bundle') is True or e.get('category') == 'bundle'
->               or e.get('mode') in ('snapshot-pair', 'reconcile')
->               or e.get('fixtures') == ['old.json', 'new.json'] or e.get('stub_pair'))
-> print(f'{len(v)} total, {len(v) - special} .so-pair, {special} dedicated-lane')"
-> ```
+> The [example catalog](examples/index.md) grows between benchmark runs.
+> The [74-case comparison](#pinned-vendor-benchmark-summary-2026-07-18-74-case-subset)
+> used a frozen subset. The [193-case comparison](#full-catalog-benchmark-2026-07-18-all-193-cases)
+> scored the entire July 18 catalog, counting skips, errors and timeouts as misses.
+> The [rule-family analysis](#rule-family-accuracy-160-demonstrated-rule-families)
+> used a later 197-case catalog. Each table retains its original denominator.
 
 > **Why the tools disagree.** The accuracy gaps below are mostly an *evidence*
 > story: each tool sees a different subset of the binary/debug/header inputs. For
@@ -45,6 +18,20 @@ This document explains how each ABI checking tool works, what it measured on the
 > [Evidence & Detectability](../learn/evidence-and-detectability.md).
 
 ---
+
+## Measurements beyond the example catalog
+
+The [oneDAL CPU inventory](https://github.com/abicheck/abicheck/blob/main/research/onedal-coverage/product/README.md)
+maps installed headers to exports, old-client imports and controlled edits on Linux x86-64.
+Of 16,528 candidate rows, 209 have a linked mutation witness. That fraction measures
+how much of the inventory has direct experimental evidence. To interpret a particular
+finding, check the old client's observed behavior and the inputs supplied to the checker.
+
+The [C and C++ dialect experiments](https://github.com/abicheck/abicheck/blob/main/research/standard-space/README.md)
+measure layout, argument placement and old-client behavior under specified compiler modes.
+For example, one C++ aggregate interface worked across all 49 ordered dialect pairs,
+while a callback using `noexcept` lost its old mangled name across C++14 → C++17.
+The experiments record checker findings separately from these compiler and runtime observations.
 
 ## Current scan-quality snapshot
 
@@ -59,7 +46,7 @@ interpretation rather than a second manual snapshot.
 
 | Scan | Scope | Execution | Result | Quality signal |
 |------|:-----:|-----------|--------|----------------|
-| Catalog metadata | 197 ground-truth entries | `catalog/ground_truth.json` + `tests/test_evidence_tiers.py` | 159 binary competitor `.so` lanes + 38 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; split recomputed directly from `ground_truth.json`'s `mode`/`bundle`/`fixtures`/`skip` fields (see the "Which denominator is which" note above) |
+| Catalog metadata | All registered cases | `catalog/ground_truth.json` + `tests/test_evidence_tiers.py` | Expected verdicts and evidence requirements | Single source of truth for examples, verdicts, expected kinds, and minimum evidence |
 | Build/autodiscovery | catalog integration suite | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
 | Full example proof matrix | catalog cases | `skills-src/evaluation/validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
 | Default/debug verdicts | catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Single-library debug lane; dedicated non-`.so` cases skip here by design; XFAIL is not green full-matrix scope |
@@ -68,7 +55,7 @@ interpretation rather than a second manual snapshot.
 | Release headers | catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Reduced-evidence informational lane; false-positive guard passed |
 | Stripped headers | catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Reduced-evidence informational lane; known signal-loss rows remain visible there |
 | Build/source proof | fixed 10-case proof set | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Blocking fixed-set proof: every expected result must be present and `PASS` |
-| Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below | Competitor `.so` lane only; the 38 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
+| Binary competitor scan | Buildable shared-library pairs | ABICC and libabigail in the tool modes described below | [Dated benchmark results](#full-catalog-benchmark-2026-07-18-all-193-cases) | Dedicated audit, snapshot and bundle workflows exercise other input shapes |
 | Scan-depth matrix | not independently re-run this pass | `abicheck compare OLD NEW --depth {binary,headers,build,source}`, once per depth per target | see prior methodology note below | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
 
 The volatile catalog-lane status is intentionally maintained in the canonical

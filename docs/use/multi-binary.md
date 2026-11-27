@@ -54,6 +54,22 @@ Per-library findings are unchanged — the bundle layer only **adds**
 cross-library findings; it never hides them. The aggregate `verdict`
 becomes the worst of `bundle_verdict` and the per-library worst.
 
+## Check an old ELF client in both release directories
+
+Place a byte-identical copy of the old executable at the same relative path
+in both deployment trees. Pass the path under the old tree:
+
+```bash
+abicheck compare old/ new/ --used-by old/bin/client -o json=release.json
+```
+
+Read `consumer_binding.loadability` alongside the release verdict. The
+`imports` entries show the old and new provider for each symbol and version,
+and `unresolved_dependencies` lists missing dependencies. A removed export
+can break the release contract even when this client still resolves it through
+another shipped library. Repeat `--used-by` for additional clients. This
+models ELF loading from directory inputs and does not execute the clients.
+
 ## Bundle findings answer a different question than public-surface findings
 
 A `bundle_*` kind answers *"does the shipped bundle still work end-to-end"*

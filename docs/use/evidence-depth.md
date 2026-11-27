@@ -22,54 +22,10 @@ takes the `--depth`/`--since`/`--changed-path`/`--sources`/`--build-info`
 inputs directly. `abicheck dump INPUT --depth …` pins the same dial when you
 are capturing a reusable snapshot instead of comparing.
 
-!!! warning "`scan` has been retired"
-    0.6 retired `scan` as a second analysis product — it duplicated `compare`
-    (with/without a stored baseline). Its removal was a **hard removal with
-    no deprecation window**: `abicheck scan` now exits `64`
-    with `No such command`, naming `compare`/`compare --no-baseline` in the
-    error. This page describes `compare` (and `dump`) only; a handful of
-    passages below still explain `scan`'s own historical behavior for
-    context, clearly marked as such.
-
-**No capability on this page is still `scan`-only.** Gating a specific
-cross-source check is `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>:`
-`break` or `warn`; for `compare --no-baseline` the audit gate also needs a
-`--severity-preset` other than `info-only`. The former `--crosscheck KEY=error`
-promotion was removed outright.
-
-Two earlier gaps are both gone, for opposite reasons.
-**The single-build audit** closed on 2026-09-09/10: `compare --no-baseline`
-reproduces the audit's findings, and the paragraph below says what it now
-takes. **Risk-driven `auto` depth** was *retired* rather than mirrored --
-see the next paragraph.
-
-**§3 row 28 is closed**: `compare` now shares `scan`/`dump`'s fail-loud
-evidence-contract floor — a *pinned* `--depth build`/`--depth source` that
-the collected evidence doesn't reach exits `7` (`exit.reasons:
-["evidence_contract_error"]`) on `compare` too, verified live. See the
-warning below for the one remaining difference between the three commands
-(what each writes when it fires).
-
-`--budget` no longer belongs on that list: `compare` gained its own
-`--budget` wall-clock guard — exit `5` on overflow applies
-to both commands now. Neither does risk-driven `auto` depth, which was
-**retired** rather than mirrored: omitting `--depth` on `scan` now resolves to the fixed
-`headers` rung, exactly the default omitting it on `compare` always gave.
-`scan --build-target` was retired the same way, and `dump --build-target`
-was later retired outright too (a hard usage error, exit 64) — put root
-target(s) in `.abicheck.yml`'s `build.targets` instead, the only route left
-for either command.
-
-The retired `scan ARTIFACT [OPTIONS]` command used to take the scanned
-binary/snapshot as a **positional** argument (not a flag), with `--against
-OLD` naming the previous dump/library/directory/package to compare against
-and omitting it meaning a one-build audit. `compare --no-baseline
-CANDIDATE` is that audit's replacement: it reproduces the audit's findings
-in full, takes `--depth`/`--sources`/`--build-info`/`--contract`/
-`--dry-run`, and was pinned against `scan` — at least every check `scan`
-reported, counted per finding kind — on all eleven G20 audit fixtures by
-`tests/parity/test_no_baseline_audit_corpus_parity.py` before `scan` was
-deleted.
+For a single-build audit, use `abicheck compare --no-baseline CANDIDATE`.
+Configure individual findings with `policy.overrides` in `.abicheck.yml`.
+To gate the audit, select a `--severity-preset` other than `info-only`.
+For build-target selection, set `build.targets` in the configuration file.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -94,9 +50,7 @@ deleted.
   and always resolves to `source-target` internally, collecting everything
   the supplied evidence reaches. Pin `--depth` explicitly whenever you want a
   specific rung regardless of what other inputs are present, rather than
-  relying on this inference. (Legacy `scan`'s own unpinned default resolves
-  to the fixed `headers` rung; it used to score the risk of the changed
-  paths and sometimes escalate, which 0.6 retired.)
+  relying on this inference.
 - **When `--depth source` actually replays source, it always analyses
   *something* real, never a zero-TU no-op**: with a
   `--since`/`--changed-path` seed it replays the *changed* TUs; without one
@@ -108,31 +62,14 @@ deleted.
   `--depth source` never reaches L4 replay in the first place — a *pinned*
   `--depth source` in that state fails loud (see the warning above), never
   silently exiting on a shallow verdict.
-- A single-build, no-baseline audit is `compare --no-baseline CANDIDATE`
- , or legacy `scan CANDIDATE` with no `--against`. There is no
-  separate `--audit` flag on either. A pinned depth is a contract on the
-  `--no-baseline` path too: `compare --no-baseline CANDIDATE --depth build`
-  with no `--sources`/`--build-info` exits `7`, same as the two-sided form
-  (verified live, both spellings).
+- A single-build audit uses `compare --no-baseline CANDIDATE`. The same
+  evidence requirement applies when you pin a build or source depth.
 
-!!! warning "A pinned depth is a contract (fail-loud) — all three commands"
-    Pinning a deep depth (`--depth build|source`) with **no source input**
-    (`--sources`/`--build-info`), or with input that doesn't actually reach
-    the requested depth, is a hard evidence-contract error on `scan`,
-    `dump`, and `compare` alike — not a silent shallow run. They differ only
-    in what each one *writes* when it fires:
-
-    - **`scan`** exits `7`, its own dedicated evidence-contract exit code.
-    - **`dump`** raises `DumpDepthNotSatisfiedError`
-      (`cli_dump_helpers.check_requested_depth_satisfied`) and exits `1` —
-      **no snapshot is written**.
-    - **`compare`** exits `7` too (`exit.reasons:
-      ["evidence_contract_error"]`, folded through the same `ExitDecision`
-      precedence rule `scan` uses) — but it still writes a full report, with
-      the top-level `verdict` left at whatever the (unaffected)
-      compatibility comparison produced. Check `exit`, not `verdict`, to
-      detect this on `compare` — see [Exit
-      Codes](../reference/exit-codes.md) for the same caveat on `--abi3-floor`'s
+!!! warning "When the requested build or source depth cannot be reached"
+    `dump` exits with code 1 and writes no snapshot. A live `compare`
+    writes its report and exits with code 7. Check `exit.reasons` for
+    `evidence_contract_error`. The compatibility verdict still describes
+    the changes the comparison could establish. See [Exit Codes](../reference/exit-codes.md).
 
     **This floor applies to `compare` only when at least one side is a live
     extraction** (a binary/package operand, not a pre-existing
@@ -269,7 +206,7 @@ matches your goal, then supply the input named in column 3.
 | Goal (use case) | `--depth` | Input you must provide | How to obtain it | If the input is missing |
 |---|---|---|---|---|
 | Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `binary` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
-| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **file or directory** + a C/C++ frontend | `-H include/` or `-H include/foo.h` on `compare`/`dump` (both establish the boundary identically; legacy `scan` instead takes `--public-header-dir DIRECTORY`, directory-only); `castxml` **or** `clang` on `PATH` | with no `-H` at all, there is no public-header set → provenance/cross-checks stay dormant |
+| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **file or directory** + a C/C++ frontend | `-H include/` or `-H include/foo.h` on `compare`/`dump`; `castxml` **or** `clang` on `PATH` | with no `-H` at all, there is no public-header set → provenance/cross-checks stay dormant |
 | Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info` | L3 `not_collected`; the scan advises the exact remedy |
 | Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
 | Full-library source replay (an amortized release baseline) | `source` (unseeded — no `--since`/`--changed-path`) | as above, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
@@ -472,11 +409,9 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   `--sources new=.` already given (as above) `compare` would still infer
   `source-target` from that input rather than `headers`; the pin exists for
   reproducibility, not because omitting it would fall back to `headers`
-  here. On `scan`, omitting `--depth` *does* now mean `headers` — it infers
-  nothing from `--sources`, and no longer escalates from a diff seed.
-- **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
-  break. `--budget` overflow (exit `5`) applies to both `compare` and `scan`
-  — see [Exit Codes](../reference/exit-codes.md).
+  here.
+- If the comparison exceeds its time budget, it exits with code 5.
+  See [Exit Codes](../reference/exit-codes.md).
 - `--depth source` folds the L5 reachability **edges scoped to the changed TUs**
   for cross-symbol impact in the report. The *whole-library* reachability graph
   is an internal level (`GRAPH`, D6) with no user-facing `--depth` rung.
@@ -494,18 +429,12 @@ abicheck compare --no-baseline libfoo.so -H include/
 
 The findings land under `findings[]` — `changes[]` stays empty and `verdict`
 stays `null`, because an audit reports no addition, removal, or
-compatibility verdict. Legacy `abicheck scan CANDIDATE` (no
-`--against`) still runs the same checks; the audit is pinned to report at
-least as many findings of every kind across all eleven G20 audit fixtures
-below by `tests/parity/test_no_baseline_audit_corpus_parity.py`.
+compatibility verdict.
 
-`--sources`/`--build-info`/`--depth` work on the `--no-baseline` path too,
-so the L3/L4-dependent checks further down this section no longer need
-`scan`. By default a hygiene finding never gates CI; migrating a
-`scan`-based **gating** job needs exactly one addition —
-`--set severity.preset=default` (or `strict`) — to keep gating on a
-`BREAKING`/`API_BREAK`-classified finding (exit `3`, the orthogonal
-audit-gate axis, never `2`/`4`); a non-gating job needs no change. See
+Supply `--sources` or `--build-info` to run checks that need build or
+source evidence. By default, audit findings are informational. To gate
+on findings, use `--severity-preset default` or `strict`. An audit gate
+failure contributes exit code 3. See
 [Scenario S5](../integration/scenarios/single-build-audit.md) for the full
 CLI account.
 
@@ -565,15 +494,10 @@ abicheck compare old/libfoo.abi.json new/libfoo.so --depth binary
 
 ### Estimate before you spend — `--dry-run`
 
-L4 cost scales with C++ template depth, so on a heavy library project the per-TU
+L4 cost scales with C++ template depth, so on a heavy library, preview the per-TU
 replay cost first. `--dry-run` resolves and validates the invocation (depth,
 scope, tool availability) and prints the projected per-layer cost for *this*
-project without comparing anything or writing output. On `scan`, exits 0 for a
-resolvable preview; an invalid invocation or an unsatisfiable requested depth
-still exits nonzero, the same as the real run would (`scan`'s evidence-contract
-floor, see the warning above). **`compare --dry-run` does not preview its own
-real run's floor** (verified live, still true even now that `compare`'s
-real-run floor is closed — see the warning above): `compare --dry-run --depth
+project without comparing anything or writing output. A two-sided `compare --dry-run --depth
 source` with no build/source evidence resolvable still exits `0` and simply
 reports `0 TU(s)` for the L3/L4/L5 rows, where the equivalent real run would
 now exit `7`. Don't trust a clean `--dry-run` as proof the real run will
@@ -588,8 +512,7 @@ previews an *audit-only* run, and unlike two-sided `compare --dry-run` it
 **does** preview its own real run's floor: against a live candidate, a
 pinned `--depth build`/`--depth source` with no `--sources`/`--build-info`
 resolvable blocks the preview rather than reporting a clean plan (see
-[Scenario S5](../integration/scenarios/single-build-audit.md)). Legacy
-`scan --sources . --depth source --dry-run` still works too.
+[Scenario S5](../integration/scenarios/single-build-audit.md)).
 
 ### Release baseline — unseeded `source`
 
@@ -622,29 +545,13 @@ abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
 
 ### Omitting `--depth` — `auto`, and why it is not risk-driven any more
 
-Omitting `--depth` on `scan` resolves `auto` to the fixed `headers` rung —
-the same default `compare` has always used. Through 2026-09-09 it read a
-*risk score* over the changed paths and escalated on its own; 0.6 retired that, along with the `--risk-rules`
-profile that configured it.
-
-> **This can hide findings a previous run reported.** A seeded scan whose
-> changed paths scored high used to escalate to `build`/`source` by itself,
-> so an unpinned run could report build- or source-only findings. It no
-> longer does. If a `scan` step relied on that escalation, **pin
-> `--depth source` (or `build`) explicitly** — that was always the advice for
-> a reproducible CI depth, and it is now the only way to ask for those
-> layers. This is the documented breaking change the amendment accepted: a
-> depth that is fixed and legible beats one that silently varied with the
-> diff.
+With `compare`, supplying source or build inputs selects the corresponding
+depth automatically. Pin the depth in CI when missing inputs should fail
+the run. For example:
 
 ```bash
-abicheck compare old.so new.so -H include/ --depth source --since origin/main
+abicheck compare old.so new.so -H include/ --sources new=. --depth source --since origin/main
 ```
-
-Omitting `--depth` is likewise never a risk-based choice on `compare`: with
-`--sources`/`--build-info` given it infers `source`/`build` from them (see
-[above](#what-input-each-depth-needs-and-how-to-get-it)); only with neither
-does it bottom out at `headers`.
 
 The `--since`/`--changed-path` seed still matters, on both commands, for a
 different axis: it scopes a `--depth source` replay to the changed TUs
@@ -658,7 +565,7 @@ On `compare` **with no `--depth` pinned**, this is never reported as
 "failed" — the run states the depth it **actually reached** and, for each
 disabled check, the input or tool to add. (This best-effort behavior does
 not apply once `--depth build|source` is *pinned* and the evidence can't
-reach it: `scan` and `compare` both fail loud there — exit `7` — and `dump`
+reach it: live `compare` exits `7` and `dump`
 raises `DumpDepthNotSatisfiedError` and exits `1` with no snapshot written;
 see the warning above. `compare` is the one exception that still prints a
 coverage block alongside its exit `7`, since it writes a report either way.)

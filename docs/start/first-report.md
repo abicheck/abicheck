@@ -13,7 +13,7 @@ generated: false
 
 ## Output formats
 
-`abicheck compare` prints `markdown` by default; pass `-o json=-` for
+`abicheck compare` prints a terminal report for a library pair by default. Pass `-o json=-` for
 machine-readable output (CI logic, agents), or `-o sarif=...`/`html`/`junit`
 for Code Scanning, standalone reports, or CI test dashboards respectively:
 
@@ -45,6 +45,17 @@ this order:
 
 Skipping straight to step 4 is how a run that compared nothing gets read as
 a clean bill of health.
+
+When a DWARF-only run finds a public record declaration but cannot find
+its definition, inspect the assurance details before accepting a clean
+result. The scanner could see the type name while lacking the layout or
+virtual slots needed to compare it. Supply matching debug information or
+the old and new public headers and repeat the check.
+
+A changed value in a dependency enum can appear as `UNKNOWN_UNRESOLVED`.
+Look for evidence that the value reaches the public ABI, such as a public
+field or an observed inline call argument. An explicit public commitment
+also affects classification. A contract policy can gate on gaps in that evidence.
 
 ### A compact worked example
 
