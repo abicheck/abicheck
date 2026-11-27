@@ -53,6 +53,7 @@ nav:
       - 'Worked Example: Real Library': start/real-world-example.md
       - 'Checking a Conda-Forge Package': start/scanning-conda-packages.md
       - Upgrading to 0.6: start/upgrading-to-0.6.md
+      - Upgrading to 0.9: start/upgrading-to-0.9.md
       - Upgrading to 0.8: start/upgrading-to-0.8.md
     - Everyday Use:
       - CLI Usage: use/cli-usage.md
@@ -311,6 +312,7 @@ nav:
       - Writing Documentation: contribute/documentation.md
       - ABI/API Failure Taxonomy: contribute/abi-api-failure-taxonomy.md
       - Testing: contribute/testing.md
+      - ABIForge: contribute/abiforge.md
       - Detector Impact Contract: contribute/detector-impact-contract.md
       - Use-Case Impact: contribute/use-case-impact.md
       - Customer Journey Map: contribute/cjm.md
