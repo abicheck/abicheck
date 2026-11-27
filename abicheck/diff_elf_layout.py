@@ -76,6 +76,7 @@ from __future__ import annotations
 import re
 from collections.abc import Collection
 
+from .compare.platform_export_delta import both_export_tables_read
 from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
@@ -376,6 +377,22 @@ def _diff_thunks(
             )
         )
 
+    # Some providers export only the adjustment entry point. Losing its
+    # entire family then has no plain method removal or offset drift to report.
+    standalone = {
+        base for base in old_t.keys() - new_t.keys() if "_Z" + base not in old_syms
+    }
+    if standalone and old.elf is not None and both_export_tables_read(old, new, "elf"):
+        for name in sorted(old_syms):
+            parsed = _parse_thunk(name)
+            if parsed and parsed[0] in standalone:
+                changes.append(
+                    make_change(
+                        ChangeKind.FUNC_REMOVED_ELF_ONLY,
+                        symbol=name,
+                        description=f"exported adjustment thunk removed: {name}",
+                    )
+                )
     return changes
 
 

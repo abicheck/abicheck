@@ -134,6 +134,33 @@ class TestThunkSetChanged:
         r = compare(old, new)
         assert ChangeKind.VTABLE_THUNK_SET_CHANGED in _kinds(r)
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "_ZThn8_N6oneapi3dal2v111range_errorD1Ev",
+            "_ZTv0_12_N1D1fEv",
+            "_ZTch0_h8_N1D5cloneEv",
+        ],
+    )
+    def test_standalone_thunk_withdrawal_breaks_old_import(self, name):
+        old = _snap(_sym(name), _sym("anchor"))
+        new = _snap(_sym("anchor"))
+        result = compare(old, new)
+        assert result.verdict == Verdict.BREAKING
+        assert [(c.kind, c.symbol) for c in result.changes if c.symbol == name] == [
+            (ChangeKind.FUNC_REMOVED_ELF_ONLY, name)
+        ]
+        assert ChangeKind.FUNC_REMOVED_ELF_ONLY not in _kinds(compare(old, old))
+
+    def test_partial_export_table_does_not_prove_thunk_withdrawal(self):
+        from abicheck.model.export_read import ExportReadState
+
+        old = _snap(_sym("_ZThn8_N1D1fEv"))
+        new = _snap(_sym("anchor"))
+        assert new.elf is not None
+        new.elf.export_read = ExportReadState.PARTIAL
+        assert ChangeKind.FUNC_REMOVED_ELF_ONLY not in _kinds(compare(old, new))
+
     def test_no_set_change_when_method_absent_on_a_side(self):
         # If the plain method symbol is not present on both sides, the thunk
         # add/remove is part of a normal symbol add/remove, not a set change.

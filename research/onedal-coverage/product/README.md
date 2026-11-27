@@ -415,3 +415,30 @@ python -m abiforge.run.onedal_export_lookup \
 All 60,612 lookups resolved to the requested provider, including the linker
 boundary symbols under handle-specific lookup. A successful lookup establishes
 address ownership. It does not invoke the exported function.
+
+### Standalone adjustment thunk withdrawal
+
+Of the 887 adjustment thunks exported by the 2025.9 DSOs, 282 have no
+exported plain target in the same DSO (32 CPU, 218 core and 32 DPC).
+For example, the CPU DSO exports `_ZThn8_N6oneapi3dal2v111range_errorD1Ev`.
+A frozen PIE referencing its address links and starts against the old package.
+After renaming only this symbol in the CPU DSO with patchelf, the same PIE
+exits 127 and the loader identifies the exact missing name. ABIcheck previously
+returned UNCONFIRMED (1). It now reports `func_removed_elf_only` for that
+linker name and returns BREAKING (4). A change to an offset within a surviving
+thunk family continues to use the existing vtable offset finding.
+
+To replay on Linux x86-64, set OLD to the 2025.9 prefix and OUT to a fresh
+writable directory. The client holds the address without invoking the destructor.
+
+```sh
+lib="$OLD/lib"
+sym=_ZThn8_N6oneapi3dal2v111range_errorD1Ev
+printf 'extern "C" char target[] asm("%s"); void *volatile ref=target; int main(){return ref==nullptr;}\n' "$sym" > "$OUT/client.cpp"
+g++ -fPIC -pie "$OUT/client.cpp" -Wl,--no-as-needed "$lib"/libonedal{,_parameters,_core,_thread}.so.3 -Wl,--allow-shlib-undefined -o "$OUT/client"
+LD_BIND_NOW=1 LD_LIBRARY_PATH="$lib" "$OUT/client"
+printf '%s abiforge_withdrawn\n' "$sym" > "$OUT/renames"
+patchelf --rename-dynamic-symbols "$OUT/renames" --output "$OUT/libonedal.so.3" "$lib/libonedal.so.3"
+LD_BIND_NOW=1 LD_LIBRARY_PATH="$OUT:$lib" "$OUT/client"  # expected exit 127
+abicheck compare "$lib/libonedal.so.3" "$OUT/libonedal.so.3" -o "json=$OUT/report.json"  # expected exit 4
+```
