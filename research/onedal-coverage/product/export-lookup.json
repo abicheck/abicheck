@@ -1,0 +1,26 @@
+{
+  "dal-2025.11.0": {
+    "libonedal.so.3": 3672,
+    "libonedal_core.so.3": 13359,
+    "libonedal_dpc.so.3": 4872,
+    "libonedal_parameters.so.3": 102,
+    "libonedal_parameters_dpc.so.3": 154,
+    "libonedal_thread.so.3": 283
+  },
+  "dal-2025.9.0": {
+    "libonedal.so.3": 3670,
+    "libonedal_core.so.3": 13352,
+    "libonedal_dpc.so.3": 4872,
+    "libonedal_parameters.so.3": 99,
+    "libonedal_parameters_dpc.so.3": 152,
+    "libonedal_thread.so.3": 283
+  },
+  "dal-2026.2.0": {
+    "libonedal.so.4": 3589,
+    "libonedal_core.so.4": 7162,
+    "libonedal_dpc.so.4": 4496,
+    "libonedal_parameters.so.4": 81,
+    "libonedal_parameters_dpc.so.4": 124,
+    "libonedal_thread.so.4": 290
+  }
+}

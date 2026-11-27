@@ -1,0 +1,128 @@
+{
+  "dal-2025.11.0": {
+    "libonedal.so.3": {
+      "exports": 3672,
+      "matched_imports": 3672,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_core.so.3": {
+      "exports": 13359,
+      "matched_imports": 13359,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_dpc.so.3": {
+      "exports": 4872,
+      "matched_imports": 4872,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_parameters.so.3": {
+      "exports": 102,
+      "matched_imports": 102,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_parameters_dpc.so.3": {
+      "exports": 154,
+      "matched_imports": 154,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_thread.so.3": {
+      "exports": 283,
+      "matched_imports": 280,
+      "unexpected_imports": [],
+      "without_import": [
+        "__bss_start",
+        "_edata",
+        "_end"
+      ]
+    }
+  },
+  "dal-2025.9.0": {
+    "libonedal.so.3": {
+      "exports": 3670,
+      "matched_imports": 3670,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_core.so.3": {
+      "exports": 13352,
+      "matched_imports": 13352,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_dpc.so.3": {
+      "exports": 4872,
+      "matched_imports": 4872,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_parameters.so.3": {
+      "exports": 99,
+      "matched_imports": 99,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_parameters_dpc.so.3": {
+      "exports": 152,
+      "matched_imports": 152,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_thread.so.3": {
+      "exports": 283,
+      "matched_imports": 280,
+      "unexpected_imports": [],
+      "without_import": [
+        "__bss_start",
+        "_edata",
+        "_end"
+      ]
+    }
+  },
+  "dal-2026.2.0": {
+    "libonedal.so.4": {
+      "exports": 3589,
+      "matched_imports": 3589,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_core.so.4": {
+      "exports": 7162,
+      "matched_imports": 7162,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_dpc.so.4": {
+      "exports": 4496,
+      "matched_imports": 4496,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_parameters.so.4": {
+      "exports": 81,
+      "matched_imports": 81,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_parameters_dpc.so.4": {
+      "exports": 124,
+      "matched_imports": 124,
+      "unexpected_imports": [],
+      "without_import": []
+    },
+    "libonedal_thread.so.4": {
+      "exports": 290,
+      "matched_imports": 287,
+      "unexpected_imports": [],
+      "without_import": [
+        "__bss_start",
+        "_edata",
+        "_end"
+      ]
+    }
+  }
+}

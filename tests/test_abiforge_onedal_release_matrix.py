@@ -366,3 +366,94 @@ def test_major_dispatcher_and_sycl_inventory():
     before = set(original.read_text().splitlines()[1:])
     after = set((folder / "sycl.tsv").read_text().splitlines()[1:])
     assert before < after and len(after) == 61
+
+
+def test_candidate_only_and_parallel_major_providers_are_counted():
+    from abiforge.run.onedal_export_surface import provider_changes
+
+    old = {"libonedal.so.3": {"shared", "old"}, "libonedal_core.so.3": {"core"}}
+    new = {
+        "libonedal.so.3": {"shared"},
+        "libonedal.so.4": {"shared", "new"},
+        "libonedal_core.so.4": {"core"},
+        "libonedal_dpc.so.4": {"shared"},
+    }
+    assert provider_changes(old, new) == {
+        "libonedal.so.3": {"removed": 1, "added": 0},
+        "libonedal.so.4": {"removed": 0, "added": 2},
+        "libonedal_core.so.3": {"removed": 0, "added": 0},
+        "libonedal_dpc.so.4": {"removed": 0, "added": 1},
+    }
+
+
+def test_export_import_receipts_account_for_each_release_provider():
+    extraction = json.loads((PRODUCT / "elf-extraction.json").read_text())
+    imports = json.loads((PRODUCT / "export-imports.json").read_text())
+    lookup = json.loads((PRODUCT / "export-lookup.json").read_text())
+    assert lookup == {
+        release: {name: row["exports"] for name, row in providers.items()}
+        for release, providers in extraction.items()
+    }
+    inventory = json.loads((PRODUCT / "export-surface.json").read_text())
+    assert (
+        extraction.keys()
+        == imports.keys()
+        == {inventory["baseline"], *inventory["releases"]}
+    )
+    for release, providers in extraction.items():
+        assert providers.keys() == imports[release].keys()
+        expected_count = (
+            sum(row["exports"] for row in inventory["providers"].values())
+            if release == inventory["baseline"]
+            else inventory["releases"][release]["exports"]
+        )
+        assert sum(row["exports"] for row in providers.values()) == expected_count
+        for name, row in providers.items():
+            linked = imports[release][name]
+            assert (
+                row["missing"]
+                == row["unexpected"]
+                == linked["unexpected_imports"]
+                == []
+            )
+            assert row["exports"] == linked["exports"]
+            local = (
+                ["__bss_start", "_edata", "_end"]
+                if name.startswith("libonedal_thread.so.")
+                else []
+            )
+            assert linked["without_import"] == local
+            assert linked["matched_imports"] == row["exports"] - len(local)
+
+
+def test_exception_withdrawals_cover_each_typeinfo_and_vtable():
+    receipt = json.loads((PRODUCT / "exception-abi.json").read_text())
+    assert receipt["controls"] == {"dal-2025.9.0": 0, "dal-2025.11.0": 0}
+    classes = {
+        "invalid_argument",
+        "uninitialized_optional_result",
+        "domain_error",
+        "out_of_range",
+        "unimplemented",
+        "unsupported_device",
+        "range_error",
+        "internal_error",
+        "system_error",
+        "host_bad_alloc",
+        "device_bad_alloc",
+    }
+    expected = {
+        f"_ZT{kind}N6oneapi3dal2v1{len(name)}{name}E"
+        for name in classes
+        for kind in ("I", "V")
+    }
+    rows = receipt["withdrawals"]
+    assert len(rows) == len(expected)
+    assert {row["symbol"] for row in rows} == expected
+    for row in rows:
+        assert (row["loader_exit"], row["cli_exit"], row["verdict"]) == (
+            127,
+            4,
+            "BREAKING",
+        )
+        assert row["kinds"] == ["var_removed_elf_only"]

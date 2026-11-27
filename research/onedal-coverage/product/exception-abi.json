@@ -1,0 +1,206 @@
+{
+  "controls": {
+    "dal-2025.9.0": 0,
+    "dal-2025.11.0": 0
+  },
+  "withdrawals": [
+    {
+      "symbol": "_ZTIN6oneapi3dal2v111range_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v112domain_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v112out_of_rangeE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v112system_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v113unimplementedE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v114host_bad_allocE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v114internal_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v116device_bad_allocE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v116invalid_argumentE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v118unsupported_deviceE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTIN6oneapi3dal2v129uninitialized_optional_resultE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v111range_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v112domain_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v112out_of_rangeE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v112system_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v113unimplementedE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v114host_bad_allocE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v114internal_errorE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v116device_bad_allocE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v116invalid_argumentE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v118unsupported_deviceE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    },
+    {
+      "symbol": "_ZTVN6oneapi3dal2v129uninitialized_optional_resultE",
+      "loader_exit": 127,
+      "cli_exit": 4,
+      "verdict": "BREAKING",
+      "kinds": [
+        "var_removed_elf_only"
+      ]
+    }
+  ]
+}

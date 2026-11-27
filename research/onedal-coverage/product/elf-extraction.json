@@ -1,0 +1,98 @@
+{
+  "dal-2025.11.0": {
+    "libonedal.so.3": {
+      "exports": 3672,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_core.so.3": {
+      "exports": 13359,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_dpc.so.3": {
+      "exports": 4872,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_parameters.so.3": {
+      "exports": 102,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_parameters_dpc.so.3": {
+      "exports": 154,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_thread.so.3": {
+      "exports": 283,
+      "missing": [],
+      "unexpected": []
+    }
+  },
+  "dal-2025.9.0": {
+    "libonedal.so.3": {
+      "exports": 3670,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_core.so.3": {
+      "exports": 13352,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_dpc.so.3": {
+      "exports": 4872,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_parameters.so.3": {
+      "exports": 99,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_parameters_dpc.so.3": {
+      "exports": 152,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_thread.so.3": {
+      "exports": 283,
+      "missing": [],
+      "unexpected": []
+    }
+  },
+  "dal-2026.2.0": {
+    "libonedal.so.4": {
+      "exports": 3589,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_core.so.4": {
+      "exports": 7162,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_dpc.so.4": {
+      "exports": 4496,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_parameters.so.4": {
+      "exports": 81,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_parameters_dpc.so.4": {
+      "exports": 124,
+      "missing": [],
+      "unexpected": []
+    },
+    "libonedal_thread.so.4": {
+      "exports": 290,
+      "missing": [],
+      "unexpected": []
+    }
+  }
+}

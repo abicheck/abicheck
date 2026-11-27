@@ -140,6 +140,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "elf_deleted_fallback": frozenset({"func_deleted_elf_fallback"}),
         "elf_layout": frozenset(
             {
+                "func_removed_elf_only",
                 "rtti_inheritance_changed",
                 "vtable_slot_count_changed",
                 "vtable_thunk_offset_changed",

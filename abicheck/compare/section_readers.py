@@ -61,7 +61,7 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
     "dwarf_layout_coherence": frozenset(["layout", "provenance"]),
     "elf": frozenset(["binary", "debug", "declarations", "provenance"]),
     "elf_deleted_fallback": frozenset(["binary", "declarations", "layout"]),
-    "elf_layout": frozenset(["binary", "provenance"]),
+    "elf_layout": frozenset(["binary", "layout", "provenance"]),
     "elf_vtt_entries": frozenset(["binary"]),
     "enum_deprecated": frozenset(["binary", "declarations", "provenance"]),
     "enum_renames": frozenset(["binary", "declarations", "provenance"]),

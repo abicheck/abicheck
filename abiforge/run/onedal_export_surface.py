@@ -13,6 +13,14 @@ from pathlib import Path
 from .onedal_release_matrix import PRODUCT
 
 
+def validate_release_labels(prefixes):
+    labels = set()
+    for prefix in prefixes:
+        if prefix.name in labels:
+            raise ValueError(f"duplicate release label: {prefix.name}")
+        labels.add(prefix.name)
+
+
 def symbol_names(path, *, imports=False):
     flag = "--undefined-only" if imports else "--defined-only"
     output = subprocess.check_output(["nm", "-D", "-P", flag, path], text=True)
@@ -96,6 +104,28 @@ def client_observations(clients):
     return observations, client_labels
 
 
+def provider_changes(baseline, candidate):
+    """Compare exact SONAMEs first, then unambiguous major-version successors."""
+    pairs = {name: name for name in baseline.keys() & candidate.keys()}
+    old_families = defaultdict(list)
+    new_families = defaultdict(list)
+    for name in baseline.keys() - pairs.keys():
+        old_families[name.partition(".so")[0]].append(name)
+    for name in candidate.keys() - pairs.keys():
+        new_families[name.partition(".so")[0]].append(name)
+    for family, old in old_families.items():
+        new = new_families[family]
+        if len(old) == len(new) == 1:
+            pairs[old[0]] = new[0]
+    result = {}
+    for name, names in baseline.items():
+        current = candidate[pairs[name]] if name in pairs else set()
+        result[name] = {"removed": len(names - current), "added": len(current - names)}
+    for name in sorted(candidate.keys() - set(pairs.values())):
+        result[name] = {"removed": 0, "added": len(candidate[name])}
+    return result
+
+
 def measure(
     prefix,
     candidates,
@@ -150,7 +180,6 @@ def measure(
     releases = {}
     for candidate in candidates:
         images = surface(candidate)
-        by_stem = {name.split(".so.")[0]: names for name, names in images.items()}
         releases[candidate.name] = {
             "exports": sum(map(len, images.values())),
             "unique_names": len(set.union(*images.values())),
@@ -162,13 +191,7 @@ def measure(
                     if name.partition("@")[0] in sdk_names
                 }
             ),
-            "provider_changes": {
-                name: {
-                    "removed": len(names - by_stem.get(name.split(".so.")[0], set())),
-                    "added": len(by_stem.get(name.split(".so.")[0], set()) - names),
-                }
-                for name, names in baseline.items()
-            },
+            "provider_changes": provider_changes(baseline, images),
         }
         if inventories and candidate in inventories:
             releases[candidate.name]["sdk_inventory"] = sdk_inventory_coverage(

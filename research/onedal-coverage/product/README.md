@@ -352,3 +352,146 @@ for frontend in clang castxml; do
 done
 python -m abiforge.run.onedal_device_release "$OLD" "$MINOR" "$CXX_SYCL" "$OUT/device" --major "$MAJOR" --mpi
 ```
+
+### Closing the remaining Linux ELF coverage gaps
+
+The 2025.9 export inventory contains 22,428 SONAME/symbol pairs and 18,619
+distinct names. The combined SDK inventories match 3,517 distinct names.
+The independently witnessed lower bound is 1,144 names. Track these three
+populations separately as coverage grows.
+
+1. Inventory every provider in each candidate. Pair equal SONAMEs first and
+   match a major-version successor only when the remaining family has one
+   provider on each side. Count additions from candidate-only DSOs. These
+   counts measure symbol presence across releases.
+2. Resolve the six unparsed SDK roots and classify unmatched exports by
+   provider and declaration or compiler-generated role. Keep unresolved
+   entries visible with their reason and package version.
+3. Group public obligations by calling convention, object layout, dispatch,
+   ownership and device boundary. For each new group, compile a frozen
+   consumer, record its provider binding and run it on an unchanged release,
+   a breaking mutation and a compatible control.
+4. Compare the same artifacts with Clang and CastXML, checking attribution,
+   verdict and exit code independently. Publish per-provider totals for
+   witnessed, unresolved and environment-dependent obligations on each replay.
+
+Run the independent export extraction check for all three pinned packages:
+
+```sh
+python -m abiforge.run.onedal_elf_extraction "$OLD" "$MINOR" "$MAJOR" --out "$OUT/elf-extraction.json"
+```
+
+The checked-in receipt compares every name in GNU nm's defined dynamic
+symbol list with the ELF reader, keyed by SONAME and symbol version.
+There were zero missing or unexpected names in all six providers per release:
+22,428 pairs in 2025.9, 22,442 in 2025.11 and 15,742 in 2026.2.
+
+For link-time coverage, run the following on Linux x86-64 with GCC and GNU ld:
+
+```sh
+python -m abiforge.run.onedal_export_imports "$OLD" "$MINOR" "$MAJOR" --out "$OUT/export-imports.json"
+```
+
+One consumer DSO per provider contains address references to every defined
+dynamic symbol. Link with undefined references forbidden in the consumer
+and inspect its dynamic imports. Of 60,612 input pairs across three releases,
+60,603 produced matching imports. GNU ld defined the three boundary symbols
+`__bss_start`, `_edata` and `_end` in each thread-library consumer itself.
+These probes exercise link-time address references. Runtime calls, object
+layout and ownership require typed consumers.
+
+Finally, verify live addresses with the Intel 2025.3.2 SYCL runtime for
+the minor releases and 2026.2.0 for the major (including its pinned MKL
+dependencies). This replay opens the target with eager binding in a fresh
+process for each DSO. For every binutils export it checks that dlsym succeeds
+and dladdr identifies the requested provider by filesystem identity.
+
+```sh
+python -m abiforge.run.onedal_export_lookup \
+  --release "$OLD" "$RUNTIME_2025/lib" --release "$MINOR" "$RUNTIME_2025/lib" \
+  --release "$MAJOR" "$RUNTIME_2026/lib" --out "$OUT/export-lookup.json"
+```
+
+All 60,612 lookups resolved to the requested provider, including the linker
+boundary symbols under handle-specific lookup. A successful lookup establishes
+address ownership. It does not invoke the exported function.
+
+### Standalone adjustment thunk withdrawal
+
+Of the 887 adjustment thunks exported by the 2025.9 DSOs, 282 have no
+exported plain target in the same DSO (32 CPU, 218 core and 32 DPC).
+For example, the CPU DSO exports `_ZThn8_N6oneapi3dal2v111range_errorD1Ev`.
+A frozen PIE referencing its address links and starts against the old package.
+After renaming only this symbol in the CPU DSO with patchelf, the same PIE
+exits 127 and the loader identifies the exact missing name. ABIcheck previously
+returned UNCONFIRMED (1). It now reports `func_removed_elf_only` for that
+linker name and returns BREAKING (4). A change to an offset within a surviving
+thunk family continues to use the existing vtable offset finding.
+
+To replay on Linux x86-64, set OLD to the 2025.9 prefix and OUT to a fresh
+writable directory. The client holds the address without invoking the destructor.
+
+```sh
+lib="$OLD/lib"
+sym=_ZThn8_N6oneapi3dal2v111range_errorD1Ev
+printf 'extern "C" char target[] asm("%s"); void *volatile ref=target; int main(){return ref==nullptr;}\n' "$sym" > "$OUT/client.cpp"
+g++ -fPIC -pie "$OUT/client.cpp" -Wl,--no-as-needed "$lib"/libonedal{,_parameters,_core,_thread}.so.3 -Wl,--allow-shlib-undefined -o "$OUT/client"
+LD_BIND_NOW=1 LD_LIBRARY_PATH="$lib" "$OUT/client"
+printf '%s abiforge_withdrawn\n' "$sym" > "$OUT/renames"
+patchelf --rename-dynamic-symbols "$OUT/renames" --output "$OUT/libonedal.so.3" "$lib/libonedal.so.3"
+LD_BIND_NOW=1 LD_LIBRARY_PATH="$OUT:$lib" "$OUT/client"  # expected exit 127
+abicheck compare "$lib/libonedal.so.3" "$OUT/libonedal.so.3" -o "json=$OUT/report.json"  # expected exit 4
+```
+
+### Exception handling across shared libraries
+
+Build a thrower and a separate catcher once against 2025.9. The thrower
+constructs eleven concrete SDK exception types. The catcher handles each
+through both the oneDAL and standard exception bases, checks the cross-cast
+and compares the messages. Both frozen artifacts run on 2025.9 and 2025.11.
+For each class, the thrower imports two objects from the real CPU DSO,
+the typeinfo and the vtable. The runner withdraws each object individually
+in a fresh copy of that DSO and checks the missing spelling in both the
+loader diagnostic and the CLI report. Run with GCC and a patchelf version
+supporting dynamic symbol renaming.
+
+```sh
+python -m abiforge.run.onedal_exception_abi "$OLD" "$MINOR" --out "$OUT/exception-abi.json"
+```
+
+### Windows x86-64 export identities
+
+The Windows receipt covers four DLLs per release (CPU, core, DPC and thread).
+The builds are conda-forge win-64 dal 2025.9.0 hbcdf7a0_51, 2025.11.0
+hbcdf7a0_17, and 2026.2.0 h5461014_300 with its matching dal-gpu build.
+The receipt pins each DLL's SHA-256. Place the DLLs under directories named
+for their release and run:
+
+```sh
+python -m abiforge.run.onedal_pe_exports "$ROOT"/*/onedal*.dll --out "$OUT/pe-exports.json"
+```
+
+The audit uses GNU objdump to read the export address and name pointer tables independently. GNU objdump, LLVM 19 and the PE reader agree on all 92,503 decorated-name/ordinal pairs.
+In the 2025.9 core DLL alone, extraction recovers 20,260 exports (previously
+11,741 entries, including misclassified ordinal-only entries). Names in the
+CPU and DPC DLLs reach 2,905 bytes. The public CLI on the two minor DPC DLLs
+reports four removed and four added exports and exits 4. In the core DLL, one added name shifts the ordinals of 3,780 retained names.
+The default checker treats named exports as name-bound. This measurement
+compares on-disk export identities. It does not execute Windows or GPU code.
+
+### Frozen upstream CPU examples
+
+Run against the upstream 2025.9.0 tag and the two installed minor SDKs.
+The Jaccard application also requires the oneTBB development headers and
+library. Use `--tbb-include` and `--tbb-library` for a non-default installation.
+
+```sh
+python research/onedal-coverage/product/cpu_examples.py "$SOURCE" "$OLD" "$MINOR" --out "$OUT/cpu-examples.csv"
+```
+
+All 60 oneAPI and 170 DAAL examples built against 2025.9 exited zero on
+both releases with eager binding. Initial stdout matched byte-for-byte on
+206. Of the other 24, six varied in repeat runs of at least one release.
+For the remaining 18, rebuilding against 2025.11 reproduced the frozen
+client's 2025.11 output in every case. The CSV records the observations on
+this host; nondeterministic algorithms can produce different digests on replay.

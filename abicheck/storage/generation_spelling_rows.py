@@ -55,14 +55,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         (("AutoType", "auto"),),
     ),
     7: GenerationSpellingChange(
-        "never on main: an intermediate bump inside #1712's branch (clang "
-        "positional template defaults), folded into generation 9 by "
-        "c23a9ad57 -- no snapshot was ever stamped 7"
+        "Unshipped #1712 clang positional defaults; c23a9ad57 folded them into generation 9."
     ),
     8: GenerationSpellingChange(
-        "never on main: an intermediate bump inside #1712's branch (clang "
-        "dependent-member defaults), folded into generation 9 by c23a9ad57 "
-        "-- no snapshot was ever stamped 8"
+        "Unshipped #1712 clang dependent-member defaults; c23a9ad57 folded them into generation 9."
     ),
     9: GenerationSpellingChange(
         "c23a9ad57 (#1712): class-template parameter defaults recorded as a "
@@ -797,4 +793,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "including references from relocatable objects. Stored symbol spellings need no rewrite."
     ),
     97: GenerationSpellingChange("Record IDs and callback ABI; no rewrite."),
+    98: GenerationSpellingChange(
+        "Large PE export tables and full decorated names. Truncated names and missing "
+        "ordinals cannot be reconstructed from old snapshots; re-dump the DLL."
+    ),
 }
