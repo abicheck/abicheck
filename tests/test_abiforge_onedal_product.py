@@ -301,15 +301,16 @@ def test_hdbscan_export_coverage(hdbscan_binary):
 @pytest.mark.skipif(
     not os.getenv("ABIFORGE_ONEDAL_MPI"), reason="requires Open MPI development tools"
 )
-@pytest.mark.parametrize("target", ["OLD", "NEW"])
-def test_hdbscan_downgrade_report(tmp_path, hdbscan_binary, target):
+@pytest.mark.parametrize("target", ["MAJOR", "OLD", "NEW"])
+def test_hdbscan_consumer_report(tmp_path, hdbscan_binary, target):
     from abiforge.run.onedal_export_surface import symbol_names
 
     prefix = os.getenv(f"ABIFORGE_ONEDAL_{target}")
     if not prefix:
         pytest.skip("requires the target oneDAL CPU package")
     baseline = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]) / "lib/libonedal.so.4"
-    candidate = Path(prefix) / "lib/libonedal.so.3"
+    control = target == "MAJOR"
+    candidate = baseline if control else Path(prefix) / "lib/libonedal.so.3"
     clients = [hdbscan_binary(name) for name in (*HDBSCAN_CPU_CLIENTS, "hdbscan_spmd")]
     report = tmp_path / "report.json"
     compared = subprocess.run(
@@ -325,8 +326,10 @@ def test_hdbscan_downgrade_report(tmp_path, hdbscan_binary, target):
             f"json={report}",
         ]
     )
-    assert compared.returncode == 4
+    assert compared.returncode == (0 if control else 4)
     data = json.loads(report.read_text())
+    verdict = "COMPATIBLE" if control else "BREAKING"
+    assert data["verdict"] == verdict
     consumers = {row["app"]: row for row in data["used_by"]}
     assert consumers.keys() == {str(client) for client in clients}
     original_exports = symbol_names(baseline)
@@ -335,12 +338,12 @@ def test_hdbscan_downgrade_report(tmp_path, hdbscan_binary, target):
     for client in clients:
         consumer = consumers[str(client)]
         required = symbol_names(client, imports=True) & original_exports
-        assert consumer["verdict"] == "BREAKING"
+        assert consumer["verdict"] == verdict
         assert consumer["required_symbol_count"] == len(required)
         missing = set(consumer["missing_symbols"])
         assert missing == required - replacement_exports
         reported.update(name for name in missing if "hdbscan" in name)
-    assert len(reported) == 93
+    assert len(reported) == (0 if control else 93)
 
 
 @pytest.mark.integration

@@ -468,6 +468,9 @@ For each target, `abicheck compare --used-by` reports all eight consumers as
 breaking. Each consumer's missing-name list matches its imported baseline
 exports absent from the target, independently computed with GNU nm. Together
 the lists identify all 93 missing HDBSCAN names on each downgrade.
+The same-release control compares the original 2026.2 library against itself.
+All eight clients report compatible with zero missing symbols, and each
+required-symbol count matches the independently inspected ELF imports.
 GPU execution and successful distributed clustering remain unverified.
 
 The two downgrade comparisons include the clustering executable alongside the
