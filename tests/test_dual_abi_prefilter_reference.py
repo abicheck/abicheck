@@ -93,7 +93,15 @@ def _findings(old: AbiSnapshot, new: AbiSnapshot, monkeypatch, reference: bool):
     )
 
 
-@pytest.mark.parametrize("seed", _SEEDS)
+@pytest.mark.parametrize(
+    "seed",
+    [
+        seed
+        if seed in (0, 1, 2, 3)
+        else pytest.param(seed, marks=pytest.mark.platform_independent_matrix)
+        for seed in _SEEDS
+    ],
+)
 def test_prefilter_findings_equal_the_unfiltered_path(seed, monkeypatch):
     old, new = _generated_pair(seed)
     optimized = _findings(old, new, monkeypatch, reference=False)
@@ -101,6 +109,7 @@ def test_prefilter_findings_equal_the_unfiltered_path(seed, monkeypatch):
     assert optimized == reference
 
 
+@pytest.mark.platform_independent_matrix
 def test_generated_sets_exercise_both_detectors(monkeypatch):
     """Engagement: the equality above must not be vacuous. Across the seeds the
     generated sets produce both a dual-ABI flip finding and an ABI-tag finding,
