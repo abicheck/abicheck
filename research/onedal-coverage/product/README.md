@@ -415,8 +415,11 @@ the ownership client's exact missing-name set against both 2025 frontends.
 The descriptor client sets and reads back all 13 public HDBSCAN descriptor
 properties, including the two constructor parameters. It checks distinct values
 across the shared-library boundary for integer, double, Boolean, enum and
-result-option types. Of its 33 HDBSCAN imports, 21 are unique to this client.
-The three passing CPU clients together import 59/93 HDBSCAN names (63.4%).
+result-option types. Eight invalid values exercise the typed exception boundary.
+For each rejection, the client compares the exception text with the corresponding
+exported SDK diagnostic and verifies that the descriptor retains its prior settings.
+Of its 41 HDBSCAN imports, 29 are unique to this client, including the eight
+diagnostic helpers. The three CPU clients import 67/93 names in total (72.0%).
 
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.

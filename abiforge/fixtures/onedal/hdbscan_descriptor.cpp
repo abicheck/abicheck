@@ -1,7 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <string_view>
 #include <oneapi/dal/algo/hdbscan.hpp>
+#include <oneapi/dal/detail/error_messages.hpp>
 
 namespace hdb = oneapi::dal::hdbscan;
+
+template <typename Operation>
+bool rejects_value(const char* expected, Operation operation) {
+    try {
+        operation();
+    }
+    catch (const oneapi::dal::domain_error& error) {
+        return std::string_view(error.what()) == expected;
+    }
+    return false;
+}
 
 int main() {
     hdb::descriptor<> descriptor(9, 4);
@@ -17,6 +30,24 @@ int main() {
     descriptor.set_leaf_size(17);
     descriptor.set_distance_block_size(64);
     descriptor.set_result_options(options);
+
+    using messages = oneapi::dal::detail::error_messages;
+    if (!rejects_value(messages::hdbscan_min_cluster_size_lt_two(),
+                       [&] { descriptor.set_min_cluster_size(1); })) return 11;
+    if (!rejects_value(messages::hdbscan_min_samples_lt_one(),
+                       [&] { descriptor.set_min_samples(0); })) return 12;
+    if (!rejects_value(messages::hdbscan_minkowski_degree_leq_zero(),
+                       [&] { descriptor.set_degree(0); })) return 13;
+    if (!rejects_value(messages::hdbscan_cluster_selection_epsilon_lt_zero(),
+                       [&] { descriptor.set_cluster_selection_epsilon(-1); })) return 14;
+    if (!rejects_value(messages::hdbscan_max_cluster_size_lt_zero(),
+                       [&] { descriptor.set_max_cluster_size(-1); })) return 15;
+    if (!rejects_value(messages::hdbscan_alpha_leq_zero(),
+                       [&] { descriptor.set_alpha(0); })) return 16;
+    if (!rejects_value(messages::hdbscan_leaf_size_lt_one(),
+                       [&] { descriptor.set_leaf_size(0); })) return 17;
+    if (!rejects_value(messages::hdbscan_distance_block_size_lt_zero(),
+                       [&] { descriptor.set_distance_block_size(-1); })) return 18;
 
     if (descriptor.get_min_cluster_size() != 9 || descriptor.get_min_samples() != 4) return 1;
     if (descriptor.get_metric() != hdb::distance_metric::minkowski || descriptor.get_degree() != 3.5) return 2;
