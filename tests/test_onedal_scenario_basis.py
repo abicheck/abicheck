@@ -106,3 +106,15 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         r for r in pilots if r["key"] == "slots" and r["detail"] == "dwarf"
     )
     assert slots_dwarf["witness"] == "client exit 1, checker NO_CHANGE"
+
+    enums = [r for r in rows if r["scenario_contracts"] == "scoped enum"]
+    assert len(enums) == 44
+    assert (
+        {r["generic_mutations"] for r in enums if r["generic_mutations"]}
+        == {
+            "enum_class_append",
+            "enum_class_enumerator_values_swapped",
+            "enum_class_underlying_narrow",
+        }
+        <= OP_BY_NAME.keys()
+    )

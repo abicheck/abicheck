@@ -460,6 +460,72 @@ def visitor_receipts():
             raise ValueError(f"incomplete pilot observations: {path}")
 
 
+def enum_receipts():
+    changes = {
+        "old": ("", "NO_CHANGE", 0),
+        "extend": ("enum_class_append", "COMPATIBLE", 0),
+        "swap": ("enum_class_enumerator_values_swapped", "BREAKING", 42),
+        "narrow": ("enum_class_underlying_narrow", "BREAKING", 42),
+    }
+    for filename in (
+        "table-layout.json",
+        "sparse-indexing-clang.json",
+        "sparse-indexing-castxml.json",
+    ):
+        receipt = json.loads((PRODUCT / filename).read_text())
+        edits = set(changes)
+        if filename == "table-layout.json":
+            edits.remove("narrow")
+        expected = {
+            (mode, release, edit)
+            for mode in ("host", "sycl")
+            for release in ("dal-2025.9.0", "dal-2025.11.0")
+            for edit in edits
+        }
+        rows = receipt["clients"]
+        observed = {(r["mode"], r["package"], r["provider"]) for r in rows}
+        if (
+            observed != expected
+            or len(rows) != len(observed)
+            or receipt["checker"].keys() != edits
+        ):
+            raise ValueError(f"incomplete enum experiment: {filename}")
+        for edit in edits:
+            check = receipt["checker"][edit]
+            if check["verdict"] != changes[edit][1] or check["exit"] != (
+                4 if changes[edit][2] else 0
+            ):
+                raise ValueError(f"unexpected checker result: {filename}/{edit}")
+            if edit == "narrow" and check["layout_changes"][
+                "enum_underlying_size_changed"
+            ] != ["4", "1"]:
+                raise ValueError(f"unexpected enum width: {filename}")
+        for row in rows:
+            edit = row["provider"]
+            mutation, verdict, exit_code = changes[edit]
+            if row["exit"] != exit_code:
+                raise ValueError(
+                    f"unexpected enum client observation: {filename} {row}"
+                )
+            yield (
+                filename,
+                row["package"],
+                row["mode"],
+                receipt["selector"] if row["mode"] == "sycl" else "",
+                "",
+                "enum width and containing record"
+                if edit == "narrow"
+                else "enum numeric value",
+                edit,
+                "scoped enum",
+                mutation,
+                f"frozen client exit {exit_code}, checker {verdict}",
+                "paired package observation"
+                if exit_code
+                else "compatible client control",
+            )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -500,6 +566,7 @@ def main():
         *root_gap_receipts(),
         *serialization_slot_receipts(),
         *visitor_receipts(),
+        *enum_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

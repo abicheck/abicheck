@@ -114,3 +114,10 @@ preserves the individual checker lanes. With DWARF alone the visitor slot
 swap produced NO_CHANGE even though the frozen client failed. Identity,
 type-alias and added nonvirtual method cases retain their successful client
 outcomes as controls.
+
+The data-layout and sparse-indexing clients share a scoped-enum value swap
+and an append control. Sparse indexing also exercises a four-byte to one-byte
+underlying type change that shifts a field in the enclosing record. All
+three edits reuse existing enum operators. The crosswalk checks host and
+OpenCL CPU observations on both releases. The two sparse-indexing checker
+frontends describe the same client workloads.
