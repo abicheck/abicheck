@@ -255,6 +255,11 @@ class ElfMetadata:
     # drops loaders/tools that only support that style.
     hash_styles: frozenset[str] = field(default_factory=frozenset)
 
+    # Named direct bases whose VMI public flag could be read. Missing edges are unknown.
+    rtti_access: dict[str, dict[str, bool]] | None = field(
+        default=None, kw_only=True, metadata={"wire": False}
+    )
+
     # ── Itanium VTT entry targets ────────────────────────────────────────
     # ``{exported _ZTT symbol: one target per pointer-sized entry}``, read
     # from the dynamic relocations (extract/elf_vtt_entries.py). An entry is

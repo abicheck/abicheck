@@ -497,6 +497,23 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_ti = _sized_rtti(new, "_ZTI", skip_runtime=skip_runtime)
     for key in sorted(old_ti.keys() & new_ti.keys()):
         o_size, n_size = old_ti[key], new_ti[key]
+        sym = "_ZTI" + key
+        if old.elf and new.elf:
+            before = (old.elf.rtti_access or {}).get(sym, {})
+            after = (new.elf.rtti_access or {}).get(sym, {})
+            for base in sorted(before.keys() & after.keys()):
+                if before[base] and not after[base]:
+                    changes.append(
+                        make_change(
+                            ChangeKind.RTTI_INHERITANCE_CHANGED,
+                            symbol=sym,
+                            name=_class_name(sym),
+                            description=f"RTTI for {_class_name(sym)} marks its direct base {_class_name(base)} nonpublic. Existing cross-casts and base exception handlers can stop matching.",
+                            old="public",
+                            new="nonpublic",
+                            confidence=Confidence.HIGH,
+                        )
+                    )
         if o_size == n_size or _span_uncorroborated(old, new, "_ZTI" + key):
             continue
         sym = "_ZTI" + key

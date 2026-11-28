@@ -1,5 +1,6 @@
 """Frozen Itanium C++ consumer of a changed public base path."""
 
+import json
 import os
 import subprocess
 import sys
@@ -92,3 +93,38 @@ int main() {
         )
         assert output.splitlines() == expected
     assert export_sets[0] == export_sets[1] == export_sets[2]
+    if os.uname().machine == "x86_64":
+        for access in ("public", "protected", "private"):
+            root = tmp_path / access
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "abicheck",
+                    "dump",
+                    root / "libitem.so",
+                    "-o",
+                    root / "snap.json",
+                ],
+                check=True,
+            )
+        for access in ("protected", "private"):
+            report = tmp_path / f"{access}.json"
+            compared = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "abicheck",
+                    "compare",
+                    tmp_path / "public/snap.json",
+                    tmp_path / access / "snap.json",
+                    "-o",
+                    f"json={report}",
+                ]
+            )
+            assert compared.returncode == 4
+            rows = json.loads(report.read_text())["changes"]
+            assert [(row["kind"], row["symbol"]) for row in rows] == [
+                ("rtti_inheritance_changed", "_ZTI4Item")
+            ]
+            assert "Category" in rows[0]["description"]

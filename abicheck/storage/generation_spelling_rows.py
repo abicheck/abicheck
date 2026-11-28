@@ -796,4 +796,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "PE data-section exports now produce variables. Symbol spellings are unchanged; "
         "re-dump older DLLs to recover the entity kind."
     ),
+    100: GenerationSpellingChange(
+        "Named x86-64 ELF VMI base access. Older snapshots lack this optional fact. No spelling rewrite."
+    ),
 }

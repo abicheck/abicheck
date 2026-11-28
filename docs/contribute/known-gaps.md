@@ -314,16 +314,14 @@ current emitter, which is unchanged.
 
 #### Stripped ELF misses loss of a public C++ base path
 
-**OPEN.** A frozen consumer can lose both a cross-cast and a matching exception
-handler when one base of a multiply inherited class becomes nonpublic.
-`tests/test_base_access_runtime.py` builds three stripped libraries with the
-same dynamic export names and reads the Itanium RTTI public flag for the
-specific base directly from each loaded library. A public-to-protected or
-public-to-private comparison currently returns `UNCONFIRMED` with no changes
-in the headerless CLI. The public-to-public control returns `NO_CHANGE`.
-The header comparison already reports `base_class_access_narrowed`. The binary
-RTTI distinguishes public from nonpublic but cannot distinguish private from
-protected. A binary finding needs to preserve that distinction in its evidence.
+**PARTIAL.** On little-endian x86-64 ELF, the binary comparison detects loss
+of a public direct base in VMI RTTI when both objects identify the base through
+named absolute relocations. Relative relocations, hidden base identities and
+other architectures remain outside this detector. RTTI distinguishes public
+from nonpublic; the header comparison can distinguish private from protected.
+The frozen client in `tests/test_base_access_runtime.py` verifies cross-cast
+and exception-handler behavior with identical export names.
+
 
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
