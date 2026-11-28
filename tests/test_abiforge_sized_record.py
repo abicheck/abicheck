@@ -113,3 +113,41 @@ def test_dispatch_minimum_and_cleanup_owner(tmp_path):
             int(name != "control"),
             expected,
         )
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="uses the ELF dynamic loader")
+def test_buffer_capacity_and_stream_outcomes(tmp_path):
+    source = SOURCE.with_name("buffer_stream")
+    client = tmp_path / "client"
+    for variant, expected in (
+        ("control", 0),
+        ("ALWAYS_GROW", 1),
+        ("GROW_BORROWED", 2),
+        ("SHORT_IS_EOF", 12),
+        ("HIDE_ERROR", 8),
+    ):
+        directory = tmp_path / variant
+        directory.mkdir()
+        flags = [] if variant == "control" else [f"-D{variant}"]
+        subprocess.run(
+            [
+                "cc",
+                "-shared",
+                "-fPIC",
+                *flags,
+                source / "provider.c",
+                "-o",
+                directory / "libprobe.so",
+            ],
+            check=True,
+        )
+        if variant == "control":
+            subprocess.run(
+                ["cc", source / "client.c", "-L", directory, "-lprobe", "-o", client],
+                check=True,
+            )
+        run = subprocess.run(
+            [client], env={**os.environ, "LD_LIBRARY_PATH": str(directory)}, timeout=10
+        )
+        assert run.returncode == expected

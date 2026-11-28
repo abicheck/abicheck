@@ -15,7 +15,7 @@ from .type_label import qualified_spelling
 from .type_spelling_resolve import scope_of, split_components
 from .vocabulary import AccessLevel
 
-# Ordinary function pointers. A member pointer, a nested callback declarator
+# Ordinary function pointers. A member pointer
 # or a template containing a callback needs its own type evidence.
 _CALLBACK = re.compile(r"([^()<>&]+?)\s*\(\s*\*\s*\)\s*\((.*)\)\s*(?:noexcept)?")
 _CV = re.compile(
@@ -61,19 +61,19 @@ class CallbackTypeIndex:
             seen.add(name)
             spelling, scope = self.aliases[name], scope_of(name)
 
-    def arguments(self, spelling: str, scope: str) -> dict[int, str]:
+    def _callback_parts(self, spelling: str, scope: str) -> tuple[dict[int, str], str]:
         signature, alias_scope = self.resolve(spelling, scope)
         match = _CALLBACK.fullmatch(signature)
         if not match:
-            return {}
-        slots = {
-            i: self.resolve(arg, alias_scope)[0]
-            for i, arg in enumerate(_split_top_level_commas(match[2]))
-        }
-        result = self.resolve(match[1], alias_scope)[0]
-        if result in self.records:
-            slots[-1] = result
-        return slots
+            return {}, alias_scope
+        parts = dict(enumerate(_split_top_level_commas(match[2])))
+        if self.resolve(match[1], alias_scope)[0] in self.records:
+            parts[-1] = match[1]
+        return parts, alias_scope
+
+    def arguments(self, spelling: str, scope: str) -> dict[int, str]:
+        parts, owner = self._callback_parts(spelling, scope)
+        return {i: self.resolve(part, owner)[0] for i, part in parts.items()}
 
     def _direct_record(
         self,
@@ -101,9 +101,17 @@ class CallbackTypeIndex:
         slots = {}
 
         def add(path: str, spelling: str, owner: str) -> None:
-            for index, name in self.arguments(spelling, owner).items():
+            parts, outer_scope = self._callback_parts(spelling, owner)
+            for index, part in parts.items():
                 suffix = "return" if index == -1 else f"p{index}"
-                slots[f"{path}.callback.{suffix}", index == -1] = name
+                endpoint = f"{path}.callback.{suffix}"
+                name, _ = self.resolve(part, outer_scope)
+                slots[endpoint, index == -1] = name
+                # A registration callback may itself receive a typed callback.
+                if index >= 0 and "(" in name:
+                    for inner, value in self.arguments(part, outer_scope).items():
+                        leaf = "return" if inner == -1 else f"p{inner}"
+                        slots[f"{endpoint}.callback.{leaf}", inner == -1] = value
 
         endpoints = [
             ("return", function.return_type, function.return_type_identities_fact)

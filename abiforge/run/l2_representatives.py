@@ -20,6 +20,7 @@ FAMILIES = {
     "callback_pointer_return": ("change",),
     "callback_table": ("control", "swap", "passing"),
     "callback_interface": ("control", "passing"),
+    "nested_callback": ("control", "passing"),
     "callback_value": ("change",),
     "callback_reference": ("change",),
     "layout": ("control", "swap", "alignment"),
@@ -65,6 +66,30 @@ def callback_return_sources(family, variant):
 
 
 def sources(family, variant):
+    if family == "nested_callback":
+        attr = "" if variant == "passing" else "[[clang::trivial_abi]]"
+        header = f"""
+struct {attr} Value {{ long word; ~Value(); }};
+using Visit = int (*)(Value);
+struct Ops {{ int (*run)(Visit); }};
+struct Interface {{ const Ops* ops; }};
+extern "C" const Interface* interface() noexcept;
+"""
+        word = "40 + 2" if variant == "control" else "42"
+        body = f"""
+Value::~Value() {{}}
+static int run(Visit visit) {{ return visit(Value{{{word}}}); }}
+const Interface* interface() noexcept {{
+    static const Ops ops{{run}};
+    static const Interface api{{&ops}};
+    return &api;
+}}
+"""
+        return (
+            header,
+            body,
+            "return interface()->ops->run(+[](Value v) { return v.word != 42 ? 1 : 0; });",
+        )
     if family == "member_return":
         attr = "[[clang::trivial_abi]]" if variant == "register" else ""
         header = f"struct {attr} Value {{ long word; ~Value(); }}; struct Reader {{ Value read(); }}; void expect(Reader*);"
@@ -301,6 +326,14 @@ def check_report(family, variant, data, code, verdict_only=False):
                 "p0.callback.return:nontrivial",
             )
         },
+        ("nested_callback", "passing"): {
+            (
+                "value_abi_trait_changed",
+                "interface",
+                "return.ops.run.callback.p0.callback.p0:trivial",
+                "return.ops.run.callback.p0.callback.p0:nontrivial",
+            )
+        },
         ("callback_interface", "passing"): {
             (
                 "value_abi_trait_changed",
@@ -427,6 +460,7 @@ def run(out, compiler, frontend, families=FAMILIES, verdict_only=False):
                 "callback_return": [int(variant == "change")],
                 "callback_pointer_return": [0],
                 "callback_large_return": [0],
+                "nested_callback": [int(variant == "passing")],
                 "callback_interface": [23 if variant == "passing" else 17],
                 "callback_table": [{"passing": 23, "swap": 19}.get(variant, 17)],
                 "layout": {"swap": [29, 4], "alignment": [8]}.get(variant, [17, 4]),

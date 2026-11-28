@@ -23,10 +23,8 @@ so the sentinel safely exposes both incorrect access directions.
 
 ## Remaining evidence
 
-- Stable numeric error codes, versioned C++ namespaces and opaque handle
-  representation already have enum, symbol binding and layout mechanisms
-  in Forge. Product-specific old-client mutations for these contracts remain
-  unverified in this sweep.
+- Opaque handle representation has generic layout coverage. A mutation on
+  the SVS implementation with a frozen client remains unverified.
 - The callback table and cleanup experiments below now exercise the two
   behavioral contracts in Forge. The product evidence for these two cases is
   source inspection of StreamBuf::validate and svs_search_results_free.
@@ -50,6 +48,32 @@ and the nested callback parameter. Clang snapshots produced the same finding.
 This comparison needs call-triviality evidence on both sides. A CastXML scan
 that omits the optional Clang semantics pass can lack that evidence.
 
+The threadpool operations table accepts a callback as an argument of another
+callback. The generic nested_callback fixture keeps the exported function and
+both table layouts fixed while changing a record's by-value passing convention
+at the innermost call. The original client returned 0 with either compatible
+provider and 1 with the mutant. Before the fix, Clang snapshots produced
+COMPATIBLE_WITH_RISK from import changes. Both frontends now report BREAKING
+with value_abi_trait_changed at return.ops.run.callback.p0.callback.p0.
+The C++ record mutation tests the reusable callback shape found in the SVS
+C header; the actual SVS threadpool callback receives a pointer and an index.
+
+The buffer_stream fixture exercises two body-only contracts. Its allocation
+counter and pointer checks distinguish reuse at sufficient capacity, successful
+growth with contents preserved, and rejection of growth for borrowed storage.
+The stream client receives two chunks followed by a zero count, once with clean
+EOF and once with an error. Treating the first short read as EOF loses bytes;
+discarding the terminal error preserves the bytes but changes the status.
+The frozen client distinguishes all four independent mutations.
+
+Two isolated product mutations use the pinned upstream translation units.
+Changing SVS_ERROR_INVALID_ARGUMENT from 2 to 22 in the C header changes the
+result of svs_error_get_code(NULL) for the old client. ELF/DWARF comparison
+reports enum_member_value_changed on that enumerator. Rebuilding Status in
+inline namespace v1 withdraws its v0 helper symbols. The frozen client fails
+at symbol resolution (127); the checker reports func_removed on store_message
+and inline_namespace_moved. Both comparisons return BREAKING (4).
+
 Run the following with the project environment active and CastXML, clang++ and
 a C compiler on PATH. The product replay builds the upstream Status translation
 unit and isolates export withdrawal. The existing released-runtime profile
@@ -58,7 +82,8 @@ in scripts/l2_real_profiles.py remains the separate release-to-release test.
 ```sh
 python -m abiforge.run.l2_representatives /tmp/svs-l2 --frontend castxml \
   --family layout --family callback_table --family virtual \
-  --family member_return --family callback_return --family callback_interface
+  --family member_return --family callback_return --family callback_interface --family nested_callback
 pytest -q tests/test_abiforge_sized_record.py
 research/svs-coverage/replay.sh /path/to/ScalableVectorSearch
+research/svs-coverage/replay_identities.sh /path/to/ScalableVectorSearch /path/to/fmt-12.1.0
 ```
