@@ -128,3 +128,9 @@ bundle comparison: both the reachable move and the missing provider received
 a NO_CHANGE bundle verdict, although only the reachable move loaded. A
 separate duplicate-provider experiment withdraws one export and checks which
 library each of two clients actually binds. The sibling client still runs.
+
+The released exception client catches through two bases and cross-casts in
+both directions. Withdrawing an imported typeinfo object or vtable instead
+stops the loader before the handler runs. The 22 isolated withdrawals reuse
+the ELF data-object removal operator. The two successful release runs are
+controls for runtime type identity.

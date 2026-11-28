@@ -118,3 +118,12 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         }
         <= OP_BY_NAME.keys()
     )
+
+    exceptions = [r for r in rows if r["ledger"] == "exception-abi.json"]
+    withdrawals = [r for r in exceptions if r["generic_mutations"]]
+    assert len(exceptions) == 24 and len(withdrawals) == 22
+    assert (
+        {r["generic_mutations"] for r in withdrawals}
+        == {"object_removed"}
+        <= OP_BY_NAME.keys()
+    )

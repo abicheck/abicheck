@@ -600,6 +600,57 @@ def provider_receipts():
             )
 
 
+def exception_receipts():
+    filename = "exception-abi.json"
+    receipt = json.loads((PRODUCT / filename).read_text())
+    if receipt["controls"] != {"dal-2025.9.0": 0, "dal-2025.11.0": 0}:
+        raise ValueError("unexpected exception client controls")
+    for release in receipt["controls"]:
+        yield (
+            filename,
+            release,
+            "exception handling",
+            "cross-library throw",
+            "",
+            "runtime type identity",
+            "",
+            "base_access_consumers",
+            "",
+            "catch and cross-cast through both bases",
+            "compatible client control",
+        )
+    classes = {"_ZTI": set(), "_ZTV": set()}
+    for row in receipt["withdrawals"]:
+        symbol = row["symbol"]
+        prefix, name = symbol[:4], symbol[4:]
+        if (
+            prefix not in classes
+            or name in classes[prefix]
+            or (row["loader_exit"], row["cli_exit"], row["verdict"])
+            != (127, 4, "BREAKING")
+            or "var_removed_elf_only" not in row["kinds"]
+        ):
+            raise ValueError(f"unexpected exception export withdrawal: {symbol}")
+        classes[prefix].add(name)
+        yield (
+            filename,
+            symbol,
+            "typeinfo" if prefix == "_ZTI" else "vtable",
+            "",
+            symbol,
+            "symbol binding",
+            "withdraw imported object",
+            "ELF data export",
+            "object_removed",
+            "eager loader exit 127",
+            "paired package observation",
+        )
+    if classes["_ZTI"] != classes["_ZTV"] or not classes["_ZTI"]:
+        raise ValueError(
+            "exception typeinfo and vtable withdrawals cover different classes"
+        )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -642,6 +693,7 @@ def main():
         *visitor_receipts(),
         *enum_receipts(),
         *provider_receipts(),
+        *exception_receipts(),
     ]
     for file in (
         "ledger.csv.gz",
