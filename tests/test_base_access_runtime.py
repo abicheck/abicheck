@@ -10,6 +10,8 @@ import pytest
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="compiles shared ELF libraries")
 def test_public_base_path_controls_crosscast_and_catch(tmp_path):
+    from abiforge.run.itanium_base_edges import direct_base_flags
+
     header = """struct Anchor { virtual ~Anchor(); };
 struct Category { virtual ~Category(); };
 struct Item : public Anchor, ACCESS Category {};
@@ -54,6 +56,12 @@ int main() {
             ["g++", "-std=c++17", "-shared", "-s", "-fPIC", source, "-o", library],
             check=True,
         )
+        if os.uname().machine == "x86_64":
+            edges = direct_base_flags(library, "_ZTI4Item")
+            assert edges is not None
+            assert edges["_ZTI6Anchor"] == 2
+            assert edges["_ZTI8Category"] == (8 << 8) | (2 if access == "public" else 0)
+            assert direct_base_flags(library, "_ZTI6Anchor") is None
         exports = subprocess.check_output(
             ["nm", "-D", "--defined-only", "-P", library], text=True
         )

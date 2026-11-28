@@ -983,6 +983,8 @@ def test_core_tree_rtti_elf_layout(release, major):
 
 @pytest.mark.integration
 def test_ref_counter_header_matches_core_rtti(tmp_path):
+    from abiforge.run.itanium_base_edges import direct_base_flags
+
     packages = []
     for release, major in (("OLD", 3), ("NEW", 3), ("MAJOR", 4)):
         prefix = os.getenv(f"ABIFORGE_ONEDAL_{release}")
@@ -995,6 +997,11 @@ def test_ref_counter_header_matches_core_rtti(tmp_path):
         / "abiforge/fixtures/onedal/ref_counter_layout.cpp"
     )
     for sdk, major in packages:
+        flags = direct_base_flags(
+            sdk / f"lib/libonedal_core.so.{major}",
+            "_ZTIN4daal8services10interface110RefCounterE",
+        )
+        assert flags == {"_ZTIN4daal8services10interface16AtomicIiEE": (8 << 8) | 2}
         reader = tmp_path / "ref_counter_layout"
         subprocess.run(
             [
