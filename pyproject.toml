@@ -271,6 +271,7 @@ markers = [
     "msvc: requires MSVC cl.exe (Windows) — MSVC+PDB end-to-end lane",
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
+    "platform_independent_matrix: exhaustive host-independent matrix omitted only from the secondary OS unit lanes",
     "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the repo-scan-tests CI job",
     "model_warning_hygiene: fails the test on an unexpected WARNING log record from abicheck.model.* (tests/_model_warning_hygiene.py allowlist)",
     "known_gap_canary: asserts the current gapped answer of an open docs/contribute/known-gaps.md entry; fails when the gap closes or widens (scripts/known_gap_canaries.py)",

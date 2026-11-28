@@ -39,6 +39,8 @@ from abiforge.operators import OP_BY_NAME, OPERATORS
 from abiforge.run.cells import seed_conflict
 from abiforge.run.tiers import _PR, evidence_fields
 
+pytestmark = pytest.mark.platform_independent_matrix
+
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 CLANG = Toolchain("clang", 18, "clang", "clang++")
 # The PR tier runs, and its verified floor was raised, on Linux ELF only. A
