@@ -118,6 +118,14 @@ def _parse_pe_exports(pe: Any, meta: PeMetadata) -> None:
         if exp.forwarder:
             forwarder = exp.forwarder.decode("utf-8", errors="replace")
             sym_type = PeSymbolType.FORWARDED
+        elif isinstance(getattr(exp, "address", None), int):
+            section = pe.get_section_by_rva(exp.address)
+            if section is not None:
+                flags = section.Characteristics
+                # IMAGE_SCN_CNT_{INITIALIZED,UNINITIALIZED}_DATA without
+                # IMAGE_SCN_CNT_CODE or IMAGE_SCN_MEM_EXECUTE.
+                if flags & 0xC0 and not flags & 0x20000020:
+                    sym_type = PeSymbolType.DATA
 
         meta.exports.append(
             PeExport(

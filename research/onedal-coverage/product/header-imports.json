@@ -1,0 +1,214 @@
+{
+  "dal-2025.9.0": {
+    "empty": {
+      "frontend_references": [],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "covariance": {
+      "frontend_references": [
+        "_ZN6oneapi3dal10covariance6detail12get_means_idEv",
+        "_ZN6oneapi3dal10covariance6detail17get_cor_matrix_idEv",
+        "_ZN6oneapi3dal10covariance6detail17get_cov_matrix_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "decision_forest": {
+      "frontend_references": [],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "linear_regression": {
+      "frontend_references": [
+        "_ZN6oneapi3dal17linear_regression6detail16get_intercept_idEv",
+        "_ZN6oneapi3dal17linear_regression6detail19get_coefficients_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "logistic_regression": {
+      "frontend_references": [
+        "_ZN6oneapi3dal19logistic_regression6detail16get_intercept_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail19get_coefficients_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail23get_iterations_count_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail29get_inner_iterations_count_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "pca": {
+      "frontend_references": [
+        "_ZN6oneapi3dal3pca6detail12get_means_idEv",
+        "_ZN6oneapi3dal3pca6detail16get_variances_idEv",
+        "_ZN6oneapi3dal3pca6detail18get_eigenvalues_idEv",
+        "_ZN6oneapi3dal3pca6detail19get_eigenvectors_idEv",
+        "_ZN6oneapi3dal3pca6detail22get_singular_values_idEv",
+        "_ZN6oneapi3dal3pca6detail32get_explained_variances_ratio_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    }
+  },
+  "dal-2025.11.0": {
+    "empty": {
+      "frontend_references": [],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "covariance": {
+      "frontend_references": [
+        "_ZN6oneapi3dal10covariance6detail12get_means_idEv",
+        "_ZN6oneapi3dal10covariance6detail17get_cor_matrix_idEv",
+        "_ZN6oneapi3dal10covariance6detail17get_cov_matrix_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "decision_forest": {
+      "frontend_references": [],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "linear_regression": {
+      "frontend_references": [
+        "_ZN6oneapi3dal17linear_regression6detail16get_intercept_idEv",
+        "_ZN6oneapi3dal17linear_regression6detail19get_coefficients_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "logistic_regression": {
+      "frontend_references": [
+        "_ZN6oneapi3dal19logistic_regression6detail16get_intercept_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail19get_coefficients_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail23get_iterations_count_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail29get_inner_iterations_count_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "pca": {
+      "frontend_references": [
+        "_ZN6oneapi3dal3pca6detail12get_means_idEv",
+        "_ZN6oneapi3dal3pca6detail16get_variances_idEv",
+        "_ZN6oneapi3dal3pca6detail18get_eigenvalues_idEv",
+        "_ZN6oneapi3dal3pca6detail19get_eigenvectors_idEv",
+        "_ZN6oneapi3dal3pca6detail22get_singular_values_idEv",
+        "_ZN6oneapi3dal3pca6detail32get_explained_variances_ratio_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    }
+  },
+  "dal-2026.2.0": {
+    "empty": {
+      "frontend_references": [],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "covariance": {
+      "frontend_references": [
+        "_ZN6oneapi3dal10covariance6detail12get_means_idEv",
+        "_ZN6oneapi3dal10covariance6detail17get_cor_matrix_idEv",
+        "_ZN6oneapi3dal10covariance6detail17get_cov_matrix_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "decision_forest": {
+      "frontend_references": [],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "linear_regression": {
+      "frontend_references": [
+        "_ZN6oneapi3dal17linear_regression6detail16get_intercept_idEv",
+        "_ZN6oneapi3dal17linear_regression6detail19get_coefficients_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "logistic_regression": {
+      "frontend_references": [
+        "_ZN6oneapi3dal19logistic_regression6detail16get_intercept_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail19get_coefficients_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail23get_iterations_count_idEv",
+        "_ZN6oneapi3dal19logistic_regression6detail29get_inner_iterations_count_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [],
+        "dal-2025.11.0": [],
+        "dal-2026.2.0": []
+      }
+    },
+    "pca": {
+      "frontend_references": [
+        "_ZN6oneapi3dal3pca6detail12get_means_idEv",
+        "_ZN6oneapi3dal3pca6detail16get_variances_idEv",
+        "_ZN6oneapi3dal3pca6detail18get_eigenvalues_idEv",
+        "_ZN6oneapi3dal3pca6detail19get_eigenvectors_idEv",
+        "_ZN6oneapi3dal3pca6detail21get_noise_variance_idEv",
+        "_ZN6oneapi3dal3pca6detail22get_singular_values_idEv",
+        "_ZN6oneapi3dal3pca6detail32get_explained_variances_ratio_idEv"
+      ],
+      "missing_by_release": {
+        "dal-2025.9.0": [
+          "_ZN6oneapi3dal3pca6detail21get_noise_variance_idEv"
+        ],
+        "dal-2025.11.0": [
+          "_ZN6oneapi3dal3pca6detail21get_noise_variance_idEv"
+        ],
+        "dal-2026.2.0": []
+      }
+    }
+  }
+}

@@ -28,10 +28,11 @@ from typing import TYPE_CHECKING, Any
 
 from ...dwarf_advanced import AdvancedDwarfMetadata
 from ...errors import SnapshotError, ValidationError
-from ...extract.export_symbol_identity import msvc_export_function
+from ...extract.export_symbol_identity import msvc_export_function, msvc_export_variable
 from ...extract.surface_fact_producers import export_table_surface_facts
 from ...model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from ...model.dwarf_facts import AdvancedExtractionStatus
+from ...model.pe_facts import PeSymbolType
 from ..snapshot_factory import new_snapshot
 from .scoped import try_header_scoped_dump
 
@@ -194,8 +195,16 @@ def extract_pe(
     # taken from it; this route keeps its own return type and visibility.
     is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
     funcs = []
+    variables = []
     for exp in pe_meta.exports:
         sym = exp.name or f"ordinal:{exp.ordinal}"
+        if exp.sym_type == PeSymbolType.DATA:
+            variables.append(
+                msvc_export_variable(
+                    sym, is_x86_32=is_x86_32, visibility=Visibility.PUBLIC
+                )
+            )
+            continue
         identity = msvc_export_function(sym, is_x86_32=is_x86_32)
         funcs.append(
             Function(
@@ -230,6 +239,7 @@ def extract_pe(
         library=path.name,
         version=version,
         functions=funcs,
+        variables=variables,
         types=pdb_types,
         enums=pdb_enums,
         pe=pe_meta,

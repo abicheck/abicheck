@@ -19,10 +19,12 @@ def test_tree_domain(task, count):
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    "ABIFORGE_ONEDAL_SOURCE" not in os.environ, reason="requires oneDAL checkout"
+    not (os.getenv("ABIFORGE_ONEDAL_SOURCE") or os.getenv("ABIFORGE_ONEDAL_OLD")),
+    reason="requires oneDAL source or CPU development headers",
 )
 def test_real_product_visitors(tmp_path, monkeypatch):
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
-    results = run(tmp_path, Path(os.environ["ABIFORGE_ONEDAL_SOURCE"]))
+    prefix = os.getenv("ABIFORGE_ONEDAL_SOURCE") or os.environ["ABIFORGE_ONEDAL_OLD"]
+    results = run(tmp_path, Path(prefix))
     assert len(results) == 36
     assert [r for r in results if not r["matches"]] == []

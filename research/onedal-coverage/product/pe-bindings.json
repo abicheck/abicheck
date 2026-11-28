@@ -1,0 +1,150 @@
+[
+  {
+    "consumer": "2025.11.0/onedal.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.11.0",
+    "imports": 715,
+    "provider_present": true,
+    "missing_symbols": []
+  },
+  {
+    "consumer": "2025.11.0/onedal.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.9.0",
+    "imports": 715,
+    "provider_present": true,
+    "missing_symbols": [
+      "?getStatus@Environment@interface1@services@daal@@SAHXZ"
+    ]
+  },
+  {
+    "consumer": "2025.11.0/onedal.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2026.2.0",
+    "imports": 715,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2025.11.0/onedal_dpc.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.11.0",
+    "imports": 724,
+    "provider_present": true,
+    "missing_symbols": []
+  },
+  {
+    "consumer": "2025.11.0/onedal_dpc.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.9.0",
+    "imports": 724,
+    "provider_present": true,
+    "missing_symbols": [
+      "?getStatus@Environment@interface1@services@daal@@SAHXZ"
+    ]
+  },
+  {
+    "consumer": "2025.11.0/onedal_dpc.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2026.2.0",
+    "imports": 724,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2025.9.0/onedal.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.11.0",
+    "imports": 714,
+    "provider_present": true,
+    "missing_symbols": []
+  },
+  {
+    "consumer": "2025.9.0/onedal.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.9.0",
+    "imports": 714,
+    "provider_present": true,
+    "missing_symbols": []
+  },
+  {
+    "consumer": "2025.9.0/onedal.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2026.2.0",
+    "imports": 714,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2025.9.0/onedal_dpc.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.11.0",
+    "imports": 723,
+    "provider_present": true,
+    "missing_symbols": []
+  },
+  {
+    "consumer": "2025.9.0/onedal_dpc.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2025.9.0",
+    "imports": 723,
+    "provider_present": true,
+    "missing_symbols": []
+  },
+  {
+    "consumer": "2025.9.0/onedal_dpc.3.dll",
+    "provider": "onedal_core.3.dll",
+    "provider_release": "2026.2.0",
+    "imports": 723,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2026.2.0/onedal.4.dll",
+    "provider": "onedal_core.4.dll",
+    "provider_release": "2025.11.0",
+    "imports": 624,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2026.2.0/onedal.4.dll",
+    "provider": "onedal_core.4.dll",
+    "provider_release": "2025.9.0",
+    "imports": 624,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2026.2.0/onedal.4.dll",
+    "provider": "onedal_core.4.dll",
+    "provider_release": "2026.2.0",
+    "imports": 624,
+    "provider_present": true,
+    "missing_symbols": []
+  },
+  {
+    "consumer": "2026.2.0/onedal_dpc.4.dll",
+    "provider": "onedal_core.4.dll",
+    "provider_release": "2025.11.0",
+    "imports": 633,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2026.2.0/onedal_dpc.4.dll",
+    "provider": "onedal_core.4.dll",
+    "provider_release": "2025.9.0",
+    "imports": 633,
+    "provider_present": false,
+    "missing_symbols": null
+  },
+  {
+    "consumer": "2026.2.0/onedal_dpc.4.dll",
+    "provider": "onedal_core.4.dll",
+    "provider_release": "2026.2.0",
+    "imports": 633,
+    "provider_present": true,
+    "missing_symbols": []
+  }
+]

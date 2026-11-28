@@ -1,0 +1,110 @@
+{
+  "2025.11.0/onedal.3.dll": {
+    "archive_sha256": "952e8615486509f333a67e1776ac925c6463a7703f05a8f4b23cbc8200bc1402",
+    "dll_sha256": "0fd863b0e194c2d59f61e0795990aea0e492cd871e9dd2050d124dacb51a4461",
+    "imports": 4916,
+    "code_imports": 4705,
+    "imports_without_code_thunks": 211,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 4916,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2025.11.0/onedal_core.3.dll": {
+    "archive_sha256": "2e2c0e7b9a483805be9dc4d9f9011e38e15f729c6b1e32b183862d49b1eef2fd",
+    "dll_sha256": "381898636f66e34444b292ff43922c67670935987bd54fabe866ad7eb98e1ebc",
+    "imports": 20261,
+    "code_imports": 18176,
+    "imports_without_code_thunks": 2085,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 20261,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2025.11.0/onedal_dpc.3.dll": {
+    "archive_sha256": "ebcc361c821e19b6eee9fad8b083fa9a6ea707a7cf6e1cb3bc2d50912e069afa",
+    "dll_sha256": "ed059118194d3ddb8f4c3860b2c686f0211b81f307e6fe97d8f8efe93c07ad71",
+    "imports": 8122,
+    "code_imports": 7826,
+    "imports_without_code_thunks": 296,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 8122,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2025.9.0/onedal.3.dll": {
+    "archive_sha256": "952e8615486509f333a67e1776ac925c6463a7703f05a8f4b23cbc8200bc1402",
+    "dll_sha256": "6970b1fa6a5ee1dd07f46f44580e74a25ea2f0b25d1480e76dc73415ce6da89e",
+    "imports": 4916,
+    "code_imports": 4705,
+    "imports_without_code_thunks": 211,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 4916,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2025.9.0/onedal_core.3.dll": {
+    "archive_sha256": "ac60cf86c4dc79c38deecc667df80d3b3ee42f205a8d925ade3f9316d423cd5a",
+    "dll_sha256": "c207ebe4b55d412dde5302583b8b288b587dc5f47988b897e7208dc8a6012366",
+    "imports": 20260,
+    "code_imports": 18175,
+    "imports_without_code_thunks": 2085,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 20260,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2025.9.0/onedal_dpc.3.dll": {
+    "archive_sha256": "7a6dd9d4c6a2659c2ca23b66ce62a265ce5e98e2dac1e25078000fc77387b79d",
+    "dll_sha256": "f631ab22542c155abc1fba46e3a9b531c2692b0fb96e4668679903e61b0a24b2",
+    "imports": 8122,
+    "code_imports": 7826,
+    "imports_without_code_thunks": 296,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 8122,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2026.2.0/onedal.4.dll": {
+    "archive_sha256": "29bcfa567ae4b29e1f652e6380954127f0e741b42f9fe9fded1542a7285762ed",
+    "dll_sha256": "2f3af4217c1453f56f4af30bfab4f2274f98b69d5716a6052a24ba12a94fff1c",
+    "imports": 5010,
+    "code_imports": 4796,
+    "imports_without_code_thunks": 214,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 5010,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2026.2.0/onedal_core.4.dll": {
+    "archive_sha256": "5f0e163db4bc5d95108d4d78c60ada3d87274fd1df02d23dca7897327b311242",
+    "dll_sha256": "440cd8812bd9b6205a958a8c2544c6d0e32179739d5231815c94965ee10e9ed4",
+    "imports": 14211,
+    "code_imports": 12783,
+    "imports_without_code_thunks": 1428,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 14211,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  },
+  "2026.2.0/onedal_dpc.4.dll": {
+    "archive_sha256": "570bc1032bebbb2e9766a1929e45a46391673d3ffc86e357f25750a0a5d1c52b",
+    "dll_sha256": "0a7e839df66f007966c40cdf8dd97568330b92503b0b2051cac6ad9b622689c3",
+    "imports": 6454,
+    "code_imports": 6146,
+    "imports_without_code_thunks": 308,
+    "missing_function_declarations": [],
+    "missing_variable_declarations": [],
+    "linked_imports": 6454,
+    "missing_from_dll": [],
+    "missing_from_archive": []
+  }
+}

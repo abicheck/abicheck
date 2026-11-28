@@ -240,15 +240,17 @@ def _inheritance_shape(size_bytes: int, pointer_size: int) -> str:
     """Describe the inheritance shape implied by a typeinfo object's size."""
     if pointer_size <= 0:
         pointer_size = 8
-    words = size_bytes // pointer_size
-    if words <= 2:
+    if size_bytes == 2 * pointer_size:
         return "no base class (__class_type_info)"
-    if words == 3:
+    if size_bytes == 3 * pointer_size:
         return "single base class (__si_class_type_info)"
-    # __vmi_class_type_info: header is vptr + name + (flags,count) word, then
-    # 2 words per base on LP64. base_count is best-effort (LP64 layout).
-    base_count = max(2, (words - 3) // 2)
-    return f"{base_count} base classes (__vmi_class_type_info)"
+    # VMI adds two 32-bit fields, followed by a pointer and ptrdiff_t per base.
+    payload = size_bytes - (2 * pointer_size + 8)
+    if payload <= 0 or payload % (2 * pointer_size):
+        return f"unknown inheritance shape ({size_bytes} bytes)"
+    count = payload // (2 * pointer_size)
+    noun = "base class" if count == 1 else "base classes"
+    return f"{count} {noun} (__vmi_class_type_info)"
 
 
 # ── G23 Phase B1 — Itanium thunk / VTT surface (L0) ──────────────────────────

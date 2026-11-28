@@ -797,4 +797,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "Large PE export tables and full decorated names. Truncated names and missing "
         "ordinals cannot be reconstructed from old snapshots; re-dump the DLL."
     ),
+    99: GenerationSpellingChange(
+        "PE data-section exports now produce variables. Symbol spellings are unchanged; "
+        "re-dump older DLLs to recover the entity kind."
+    ),
 }

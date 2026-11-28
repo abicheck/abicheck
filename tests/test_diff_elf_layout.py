@@ -77,12 +77,16 @@ class TestHelpers:
     def test_inheritance_shape_categories(self) -> None:
         assert "no base" in _inheritance_shape(16, 8)
         assert "single base" in _inheritance_shape(24, 8)
+        assert _inheritance_shape(40, 8) == "1 base class (__vmi_class_type_info)"
+        assert "unknown" in _inheritance_shape(39, 8)
         assert "2 base" in _inheritance_shape(56, 8)
 
     def test_inheritance_shape_32bit(self) -> None:
         # 2 words on ILP32 = 8 bytes → still "no base"
         assert "no base" in _inheritance_shape(8, 4)
         assert "single base" in _inheritance_shape(12, 4)
+        assert _inheritance_shape(24, 4) == "1 base class (__vmi_class_type_info)"
+        assert "2 base" in _inheritance_shape(32, 4)
 
     def test_slot_and_shape_fall_back_on_bad_pointer_size(self) -> None:
         # A zero/negative pointer width must not divide-by-zero; fall back to 8.

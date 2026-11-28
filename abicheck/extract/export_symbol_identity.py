@@ -66,6 +66,7 @@ __all__ = [
     "itanium_export_variable",
     "msvc_export_function",
     "msvc_export_mangled_name",
+    "msvc_export_variable",
 ]
 
 # PE/COFF C-calling-convention export decoration is decoded by the one
@@ -205,5 +206,24 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
             leaf_name,
             mangled_name=msvc_export_mangled_name(normalized),
             is_extern_c=is_extern_c,
+        ),
+    )
+
+
+def msvc_export_variable(
+    sym: str, *, is_x86_32: bool, visibility: Visibility
+) -> Variable:
+    """Build an export-only variable from a PE data address."""
+    normalized = sym[1:] if is_x86_32 and sym.startswith("__Z") else sym
+    mangled = msvc_export_mangled_name(normalized)
+    leaf = sym.removeprefix("_") if is_x86_32 and mangled is None else normalized
+    return Variable(
+        name=sym,
+        mangled=sym,
+        type=EXPORT_STUB_TYPE,
+        visibility=visibility,
+        **export_table_surface_facts(),
+        entity_id=entity_id_for_variable(
+            (), leaf, mangled_name=mangled, is_extern_c=mangled is None
         ),
     )

@@ -557,9 +557,8 @@ def _finalize_compare_result(
     if result.scope_to_public_surface and not result.scope_resolved:
         click.echo(
             "Warning: public-header scoping could not resolve the public "
-            "surface (no header-derived public symbols); fell back to the full "
-            "export table. Compatibility is UNCONFIRMED — treat this result as "
-            "manual-review-required, not a clean public surface.",
+            "surface (no header-derived public symbols). The comparison used the full "
+            "export table. Manual review of the public surface is required.",
             err=True,
         )
 

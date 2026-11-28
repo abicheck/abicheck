@@ -87,6 +87,11 @@ def encode_platform_enums(d: dict[str, Any]) -> None:
                 if isinstance(exp["sym_type"], str)
                 else exp["sym_type"].value
             )
+            # Older readers use a closed enum for sym_type. Keep a data
+            # export readable as a direct export, with its role on the record.
+            if exp["sym_type"] == "data":
+                exp["sym_type"] = "exported"
+                exp["is_data"] = True
             # Written only when the export is decorated, so an undecorated
             # table encodes exactly as before the field existed.
             if not exp.get("decoded_name"):

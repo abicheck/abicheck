@@ -1,6 +1,7 @@
 """Exercise every single-record field permutation and slot order of the oneDAL tree visitors.
 
 python -m abiforge.run.onedal_tree OUT --source PATH_TO_ONEDAL
+Accepts a source checkout or a CPU SDK prefix containing include/dal.
 The library is a bridge compiled against the product declarations. Each old
 client checks callback identity, order, and every field it receives. The L2
 checker gets the stripped bridge and its corresponding headers.
@@ -173,6 +174,8 @@ def exact_changes(report, group, members, order):
 
 def run(out: Path, source: Path) -> list[dict]:
     src = source / "cpp/daal/include" / _HEADER_DIR
+    if not src.is_dir():
+        src = source / "include/dal" / _HEADER_DIR
     rows = []
     for task in _LEAVES:
         header, provider, client = _sources(task)
