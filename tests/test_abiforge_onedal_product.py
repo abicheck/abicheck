@@ -209,7 +209,7 @@ def test_hdbscan_cpu_clusters(tmp_path, client):
                 "7hdbscan" in name and kind in name and "EEC2E" in name
                 for name in imports
             )
-        for prefix in ("_ZTI", "_ZTV"):
+        for prefix in ("_ZTI", "_ZTV", "_ZTS"):
             assert (
                 len([s for s in imports if s.startswith(prefix) and "7hdbscan" in s])
                 == 2

@@ -452,6 +452,13 @@ the distributed-algorithm diagnostic. Direct import coverage reaches 90/93
 (96.8%); these six calls verify the exception path. Distributed clustering
 results remain unverified.
 
+The RTTI client also compares the addresses and bytes of both exported Itanium
+type-name strings with the names from live objects. The descriptor client
+calls the CPU library's GPU k-d tree diagnostic accessor and checks its text.
+With these three imports, the eight passing clients reference all 93 distinct
+dynamic export names containing `hdbscan` in Linux 2026.2 `libonedal.so.4`.
+GPU execution and successful distributed clustering remain unverified.
+
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
 Both 2025 frontends retain 13 and lack all 29 HDBSCAN-specific imports.

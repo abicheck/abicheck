@@ -32,6 +32,9 @@ int main() {
     descriptor.set_result_options(options);
 
     using messages = oneapi::dal::detail::error_messages;
+    const char* gpu_diagnostic = messages::hdbscan_kd_tree_method_is_not_implemented_for_gpu();
+    if (!gpu_diagnostic || std::string_view(gpu_diagnostic) !=
+        "HDBSCAN k-d tree method is not implemented for GPU") return 19;
     if (!rejects_value(messages::hdbscan_min_cluster_size_lt_two(),
                        [&] { descriptor.set_min_cluster_size(1); })) return 11;
     if (!rejects_value(messages::hdbscan_min_samples_lt_one(),
