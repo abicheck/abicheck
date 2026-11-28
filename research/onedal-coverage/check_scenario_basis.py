@@ -1062,6 +1062,54 @@ def device_loader_receipts():
             )
 
 
+def cpu_example_receipts():
+    filename = "cpu-examples.csv"
+    with (PRODUCT / filename).open() as stream:
+        for row in csv.DictReader(stream):
+            old, minor = (
+                row[f"{version}_stdout_sha256"] for version in ("2025.9", "2025.11")
+            )
+            if (
+                not old
+                or not minor
+                or (row["2025.9_exit"], row["2025.11_exit"]) != ("0", "0")
+            ):
+                raise ValueError(f"invalid CPU release control: {row['source']}")
+            witness = "frozen client, identical stdout"
+            status = "release workload control"
+            if old != minor:
+                repeats = [
+                    int(row[f"{version}_distinct_outputs_in_three_runs"])
+                    for version in ("2025.9", "2025.11")
+                ]
+                rebuilt = row["2025.11_native_rebuild_stdout_sha256"]
+                if any(n not in (1, 2, 3) for n in repeats):
+                    raise ValueError(f"invalid repeat counts: {row['source']}")
+                if repeats == [1, 1]:
+                    witness = "three stable runs per release, native rebuild"
+                    status = (
+                        "changed output reproduced by rebuild"
+                        if rebuilt == minor
+                        else "unresolved output difference"
+                    )
+                else:
+                    witness = f"distinct outputs in three runs: {repeats}"
+                    status = "variable workload output"
+            yield (
+                filename,
+                row["source"],
+                "CPU example",
+                "2025.9 to 2025.11",
+                "",
+                "release behavior",
+                "",
+                "",
+                "",
+                witness,
+                status,
+            )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -1110,6 +1158,7 @@ def main():
         *lifetime_state_receipts(),
         *pe_inventory_receipts(),
         *device_loader_receipts(),
+        *cpu_example_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

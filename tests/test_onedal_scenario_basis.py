@@ -155,3 +155,13 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
     assert len(inventories) == 36 and all(
         not r["generic_mutations"] for r in inventories
     )
+
+    examples = [r for r in rows if r["ledger"] == "cpu-examples.csv"]
+    assert len({r["key"] for r in examples}) == len(examples) == 230
+    assert sum(r["status"] == "release workload control" for r in examples) == 206
+    assert (
+        sum(r["status"] == "changed output reproduced by rebuild" for r in examples)
+        == 18
+    )
+    assert sum(r["status"] == "variable workload output" for r in examples) == 6
+    assert all(not r["generic_mutations"] for r in examples)

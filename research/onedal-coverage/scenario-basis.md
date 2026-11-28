@@ -172,3 +172,9 @@ dependency withdrawals. Removing queue overloads additionally distinguishes
 two consumers: the CPU client still runs and rebuilds, while the queue
 client fails both operations. The matrix records this selective withdrawal
 separately from backend workload controls.
+
+All 230 CPU examples completed on the baseline and minor release. Of 24
+stdout differences, 18 were stable across three runs on each release and
+reproduced by a client rebuilt against the minor SDK. The other six varied
+on repeated runs of the same binary and release. These examples provide
+workload controls. None isolates a new ABI mutation.
