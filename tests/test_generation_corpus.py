@@ -179,6 +179,8 @@ def _undeclared_respellings(
     new: dict[str, Any],
     generation: int,
     new_generation: int = EXTRACTOR_GENERATION,
+    *,
+    reclassified_data: tuple[str, ...] = (),
 ) -> list[str]:
     old_s, new_s = _spellings(old), _spellings(new)
     # A generation in between that declares it retired an extractor-artifact
@@ -189,20 +191,10 @@ def _undeclared_respellings(
         for key, spelling in old_s.items()
         if not _retired_between(key[1], generation, new_generation)
     }
-    if generation < 99 <= new_generation and ("return", "pe_corpus_version") in old_s:
-        # The PE corpus DLL exports this global from a data section. Generation
-        # 99 moved its export-only stub to the variable table, preserving its type.
-        from abicheck.model.pe_facts import PeSymbolType
-
-        pe = snapshot_from_dict(new).pe
-        if pe and any(
-            e.name == "pe_corpus_version" and e.sym_type == PeSymbolType.DATA
-            for e in pe.exports
-        ):
-            assert ("variable", "pe_corpus_version") not in old_s
-            old_s[("variable", "pe_corpus_version")] = old_s.pop(
-                ("return", "pe_corpus_version")
-            )
+    for name in reclassified_data:
+        assert generation < 99 <= new_generation
+        assert ("variable", name) not in old_s
+        old_s[("variable", name)] = old_s.pop(("return", name))
     assert set(old_s) == set(new_s), "the entity sets must match first"
     return [
         f"{key}: {old_s[key]!r} -> {new_s[key]!r}"

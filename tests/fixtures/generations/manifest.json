@@ -517,9 +517,9 @@
       "snapshot": "gen97/corpus.json.gz"
     },
     "98": {
-      "castxml": "castxml version 0.8.0",
+      "castxml": "castxml version 0.7.0",
       "commit": "99b13fc8072f",
-      "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen98/corpus.json.gz"
     }
   },

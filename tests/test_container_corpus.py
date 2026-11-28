@@ -40,6 +40,7 @@ from typing import Any
 
 import pytest
 
+from abicheck.model.pe_facts import PeSymbolType
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.bundle_facts_codec import load_bundle_facts, save_bundle_facts
 from abicheck.storage.dto import migration_source_versions
@@ -431,9 +432,22 @@ def _assert_clean_against_fresh(key: str, fresh: Path, work: Path) -> None:
     assert sorted(old) == sorted(new)
     generation = _entry(key)["generations"]["extractor"]
     for library, (_snap, document) in old.items():
-        assert _undeclared_respellings(document, new[library][1], generation) == [], (
-            library
-        )
+        current, current_document = new[library]
+        reclassified = ()
+        if sample == "pe_snapshot" and generation < 99:
+            # The committed DLL has exactly one data export. Keep its spelling
+            # in the comparison across the generation that changed its entity kind.
+            assert current.pe is not None
+            reclassified = tuple(
+                e.name for e in current.pe.exports if e.sym_type == PeSymbolType.DATA
+            )
+            assert reclassified == ("pe_corpus_version",)
+        assert (
+            _undeclared_respellings(
+                document, current_document, generation, reclassified_data=reclassified
+            )
+            == []
+        ), library
 
 
 @pytest.mark.parametrize(

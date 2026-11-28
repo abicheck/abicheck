@@ -63,7 +63,7 @@ from abicheck.model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, Struc
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model.fact import Fact, FactStatus
 from abicheck.model.macho_facts import MachoExport, MachoMetadata
-from abicheck.model.pe_facts import PeExport, PeMetadata
+from abicheck.model.pe_facts import PeExport, PeMetadata, PeSymbolType
 from abicheck.policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
@@ -318,7 +318,7 @@ class TestUndeclaredExportsReachTheProjection:
         assert [f.mangled for f in functions] == ["helper"]
         assert [v.mangled for v in variables] == ["_ZTV6Widget"]
 
-    def test_pe_exports_are_functions_with_ordinal_placeholders(self) -> None:
+    def test_pe_exports_split_by_section_with_ordinal_placeholders(self) -> None:
         snap = AbiSnapshot(
             library="w.dll",
             version="1",
@@ -326,12 +326,16 @@ class TestUndeclaredExportsReachTheProjection:
             platform="pe",
             pe=PeMetadata(
                 machine="IMAGE_FILE_MACHINE_AMD64",
-                exports=[PeExport(name="api"), PeExport(name="", ordinal=7)],
+                exports=[
+                    PeExport(name="api"),
+                    PeExport(name="", ordinal=7),
+                    PeExport(name="", ordinal=8, sym_type=PeSymbolType.DATA),
+                ],
             ),
         )
         functions, variables = export_only_declarations(snap, set())
         assert [f.mangled for f in functions] == ["api", "ordinal:7"]
-        assert variables == []
+        assert [v.mangled for v in variables] == ["ordinal:8"]
 
     @pytest.mark.parametrize(
         ("lost", "sym_type", "kinds"),
