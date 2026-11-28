@@ -92,3 +92,7 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         == {"l2_representatives/member_return/register"}
         <= available
     )
+
+    slots = [r for r in rows if r["ledger"] == "serialization-slots.json"]
+    assert {r["package_edits"] for r in slots} == {"insert", "remove", "swap"}
+    assert all(r["generic_mutations"] in available | OP_BY_NAME.keys() for r in slots)

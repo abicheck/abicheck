@@ -339,6 +339,49 @@ def root_gap_receipts():
         print(f"{filename}: {len(rejected)} rejected of {len(roots)} selected roots")
 
 
+def serialization_slot_receipts():
+    filename = "serialization-slots.json"
+    variants = json.loads((PRODUCT / filename).read_text())
+    expected = {
+        "old": [21, 22],
+        "control": [21, 22],
+        "swap": [22, 21],
+        "remove": [22],
+        "insert": [23, 21],
+    }
+    if {k: v["method_exits"] for k, v in variants.items()} != expected:
+        raise ValueError(
+            "serialization-slot dispatch observations disagree with controls or mutations"
+        )
+    if variants["control"]["verdict"] != "NO_CHANGE":
+        raise ValueError("serialization-slot control changed")
+    for edit, mutation in {
+        "swap": "l2_representatives/virtual/swap",
+        "insert": "l2_representatives/virtual/insert",
+        "remove": "virtual_remove",
+    }.items():
+        result = variants[edit]
+        if (
+            result["verdict"] != "BREAKING"
+            or "type_vtable_changed" not in result["kinds"]
+        ):
+            raise ValueError(f"unexpected virtual dispatch verdict for {edit}")
+        exits = ", ".join(map(str, result["method_exits"]))
+        yield (
+            filename,
+            edit,
+            "virtual slot",
+            "control exits 21, 22",
+            "",
+            "virtual dispatch",
+            edit,
+            "virtual slot order and presence",
+            mutation,
+            f"frozen client exits {exits}",
+            "paired package observation",
+        )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -377,6 +420,7 @@ def main():
         *return_lowering_receipts(),
         *member_return_receipts(),
         *root_gap_receipts(),
+        *serialization_slot_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

@@ -100,3 +100,9 @@ for the older SDK and zero among 432 selected for 2026.2. For each older gap
 the package-only compile lacks the dispatcher header, adding the source tree
 exposes a missing generated header, and IDE mode compiles. The crosswalk
 retains each as an installed-package evidence gap.
+
+The serialization interface exercises three edits of the virtual dispatch
+table. The frozen client observes distinct method results after slot
+insertion, removal and swapping. The crosswalk uses the existing virtual
+insertion and swap experiments and the generic `virtual_remove` operator.
+The product's serialization data format plays no role in this witness.
