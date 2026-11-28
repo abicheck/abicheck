@@ -26,8 +26,15 @@ void raise_item() { throw Item{}; }
     client_source.write_text(
         """#include "api.hpp"
 #include <cstdio>
+#include <cxxabi.h>
 int main() {
-    std::puts(dynamic_cast<Category*>(make_item()) ? "category" : "no category");
+    Anchor* object = make_item();
+    const auto* info = dynamic_cast<const __cxxabiv1::__vmi_class_type_info*>(&typeid(*object));
+    if (!info || info->__base_count != 2) return 2;
+    const auto& edge = info->__base_info[1];
+    if (*edge.__base_type != typeid(Category) || edge.__is_virtual_p()) return 3;
+    std::puts(edge.__is_public_p() ? "public edge" : "nonpublic edge");
+    std::puts(dynamic_cast<Category*>(object) ? "category" : "no category");
     try { raise_item(); }
     catch (const Category&) { std::puts("base handler"); }
     catch (...) { std::puts("fallback handler"); }
@@ -44,7 +51,8 @@ int main() {
         source.write_text(provider)
         library = root / "libitem.so"
         subprocess.run(
-            ["g++", "-std=c++17", "-shared", "-fPIC", source, "-o", library], check=True
+            ["g++", "-std=c++17", "-shared", "-s", "-fPIC", source, "-o", library],
+            check=True,
         )
         exports = subprocess.check_output(
             ["nm", "-D", "--defined-only", "-P", library], text=True
@@ -70,9 +78,9 @@ int main() {
             [exe], env={**os.environ, "LD_LIBRARY_PATH": str(root)}, text=True
         )
         expected = (
-            ["category", "base handler"]
+            ["public edge", "category", "base handler"]
             if access == "public"
-            else ["no category", "fallback handler"]
+            else ["nonpublic edge", "no category", "fallback handler"]
         )
         assert output.splitlines() == expected
     assert export_sets[0] == export_sets[1] == export_sets[2]

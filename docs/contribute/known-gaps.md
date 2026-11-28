@@ -312,6 +312,19 @@ current emitter, which is unchanged.
 `false-clean` — a gcc-backend dump reports a gained export or a lost `inline` as a plain addition.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_keeps_an_unexported_declaration_public -->
 
+#### Stripped ELF misses loss of a public C++ base path
+
+**OPEN.** A frozen consumer can lose both a cross-cast and a matching exception
+handler when one base of a multiply inherited class becomes nonpublic.
+`tests/test_base_access_runtime.py` builds three stripped libraries with the
+same dynamic export names and reads the Itanium RTTI public flag for the
+specific base directly from each loaded library. A public-to-protected or
+public-to-private comparison currently returns `UNCONFIRMED` with no changes
+in the headerless CLI. The public-to-public control returns `NO_CHANGE`.
+The header comparison already reports `base_class_access_narrowed`. The binary
+RTTI distinguishes public from nonpublic but cannot distinguish private from
+protected. A binary finding needs to preserve that distinction in its evidence.
+
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
 **Status (2026-11-10): OPEN, narrow.** A debug-backed binary-only dump adds an export-table record only for exports no debug declaration names (`extract/dwarf_export_gaps.py`, #1980): it folds a ctor/dtor export into the variant its debug entry names and skips C++ ABI metadata (`_ZT*`, guard variables). The symbols-only lane records all of them. Two shapes follow: (1) a `C1` that aliases `C2` on one side (no virtual base) and has its own entry on the other reads `func_added` (catalog case167, excused in `tests/test_depth_projection_matches_shallow_dump.py`); (2) a stripped copy compared with its own `-g` build reads `func_removed_elf_only`/`var_removed_elf_only` for the `D1` variant and `_ZTI`/`_ZTS`/`_ZTV`, `BREAKING`. Closing it means recording the folded variants and the ABI metadata as export-table records in the DWARF lane (and checking the undeclared-exports detector still credits them to their class).
