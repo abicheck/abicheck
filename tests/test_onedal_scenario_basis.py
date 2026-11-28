@@ -141,3 +141,17 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         == {"func_remove", "object_removed"}
         <= OP_BY_NAME.keys()
     )
+
+    variants = [r for r in rows if r["ledger"] == "variant-loss.json"]
+    assert len(variants) == 6
+    assert (
+        {r["generic_mutations"] for r in variants}
+        == {"func_remove", "object_removed"}
+        <= OP_BY_NAME.keys()
+    )
+    inventories = [
+        r for r in rows if r["ledger"] in {"export-imports.json", "export-lookup.json"}
+    ]
+    assert len(inventories) == 36 and all(
+        not r["generic_mutations"] for r in inventories
+    )

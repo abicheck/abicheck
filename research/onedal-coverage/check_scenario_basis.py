@@ -747,6 +747,89 @@ def import_withdrawal_receipts():
         )
 
 
+def variant_and_lookup_receipts():
+    filename = "variant-loss.json"
+    matrix = json.loads((PRODUCT / filename).read_text())
+    variants = {"C1", "C2", "D0", "D1", "D2", "data"}
+    if matrix.keys() != variants | {"control"}:
+        raise ValueError("incomplete isolated variant withdrawal matrix")
+    lost = set()
+    for absent, row in matrix.items():
+        expected = {tag: 127 if tag == absent else 0 for tag in variants}
+        exports = row["lost_exports"]
+        control = absent == "control"
+        if (
+            row["exits"] != expected
+            or row["checker"] != ("NO_CHANGE" if control else "BREAKING")
+            or len(exports) != int(not control)
+        ):
+            raise ValueError(f"withdrawal did not isolate {absent}")
+        if control:
+            continue
+        symbol = exports[0]
+        if symbol in lost or (absent != "data" and not symbol.endswith(absent + "Ev")):
+            raise ValueError(f"wrong export for {absent}")
+        lost.add(symbol)
+        yield (
+            filename,
+            absent,
+            "ELF address relocation",
+            "five unaffected sibling clients",
+            symbol,
+            "exact symbol binding",
+            "withdraw export",
+            "ELF export",
+            "object_removed" if absent == "data" else "func_remove",
+            "target client exit 127, sibling clients exit 0",
+            "loader failure",
+        )
+
+    lookups = json.loads((PRODUCT / "export-lookup.json").read_text())
+    imports = json.loads((PRODUCT / "export-imports.json").read_text())
+    if lookups.keys() != imports.keys():
+        raise ValueError("lookup and import releases disagree")
+    for release, providers in lookups.items():
+        if providers.keys() != imports[release].keys():
+            raise ValueError(f"lookup and import providers disagree: {release}")
+        for library, count in providers.items():
+            observed = imports[release][library]
+            missing = (
+                ["__bss_start", "_edata", "_end"]
+                if library.startswith("libonedal_thread.")
+                else []
+            )
+            if observed != {
+                "exports": count,
+                "matched_imports": count - len(missing),
+                "unexpected_imports": [],
+                "without_import": missing,
+            }:
+                raise ValueError(
+                    f"incomplete export lookup/import control: {release}/{library}"
+                )
+            for source, witness in (
+                ("export-lookup.json", "dynamic lookup"),
+                (
+                    "export-imports.json",
+                    "generated import"
+                    + (", missing " + ", ".join(missing) if missing else ""),
+                ),
+            ):
+                yield (
+                    source,
+                    release,
+                    "baseline export inventory",
+                    library,
+                    "",
+                    "symbol binding",
+                    "",
+                    "",
+                    "",
+                    witness,
+                    "symbol availability only",
+                )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -791,6 +874,7 @@ def main():
         *provider_receipts(),
         *exception_receipts(),
         *import_withdrawal_receipts(),
+        *variant_and_lookup_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

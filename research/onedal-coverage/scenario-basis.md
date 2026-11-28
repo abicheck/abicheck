@@ -142,3 +142,11 @@ belong to the PLT jump-slot group. The crosswalk preserves both outcomes and
 checks the five recorded relocation-group representatives against individual
 clients. Four actual minor-release removals have a separate address-relocation
 witness, which tests availability without calling the removed implementation.
+
+For isolated C1/C2/D0/D1/D2 and data withdrawals the witness is an exact
+address relocation. Each removed export breaks just its own frozen client.
+The other five clients still load. Function and object removal are sufficient
+for this contract. The experiment never invokes a constructor or destructor.
+Across three releases, the thread library has three linker-defined exports
+without generated imports: `__bss_start`, `_edata` and `_end`. All other lookup
+entries have matching imports. These are availability controls and contribute no mutation.
