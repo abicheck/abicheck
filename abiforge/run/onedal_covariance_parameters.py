@@ -29,7 +29,15 @@ CAMPAIGNS = {
 
 
 def build_client(
-    old, work, algorithm, abi_major, *, link_inputs=(), fixture=None, as_needed=False
+    old,
+    work,
+    algorithm,
+    abi_major,
+    *,
+    link_inputs=(),
+    fixture=None,
+    as_needed=False,
+    compiler="g++",
 ):
     is_pca = algorithm.startswith("pca_")
     fixture_name = "pca" if is_pca else algorithm
@@ -47,7 +55,7 @@ def build_client(
     libraries = [*frontends, "onedal_core", "onedal_thread"]
     subprocess.run(
         [
-            "g++",
+            compiler,
             "-std=c++17",
             f"-I{old}/include",
             f"-I{old}/include/dal",

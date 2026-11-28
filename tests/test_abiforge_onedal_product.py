@@ -232,6 +232,41 @@ def test_hdbscan_cpu_clusters(tmp_path, client):
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not os.getenv("ABIFORGE_ONEDAL_MPI"), reason="requires Open MPI development tools"
+)
+def test_hdbscan_distributed_dispatch(tmp_path):
+    from abiforge.run.onedal_covariance_parameters import build_client
+    from abiforge.run.onedal_export_surface import symbol_names
+
+    if not os.getenv("ABIFORGE_ONEDAL_MAJOR"):
+        pytest.skip("requires the 2026.2 CPU SDK")
+    sdk = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]).resolve()
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "abiforge/fixtures/onedal/hdbscan_spmd.cpp"
+    )
+    exe = build_client(
+        sdk, tmp_path, "hdbscan_spmd", 4, fixture=fixture, compiler="mpicxx"
+    )
+    dispatchers = {
+        n
+        for n in symbol_names(exe, imports=True)
+        if "7hdbscan" in n and "spmd_policy" in n
+    }
+    assert len(dispatchers) == 6
+    env = dict(os.environ, LD_LIBRARY_PATH=str(sdk / "lib"), LD_BIND_NOW="1")
+    run = subprocess.run(
+        ["mpirun", "--allow-run-as-root", "-np", "2", exe],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert run.returncode == 0, run.stderr
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("source", "target"),
     tuple(permutations(("OLD", "NEW", "MAJOR"), 2)),

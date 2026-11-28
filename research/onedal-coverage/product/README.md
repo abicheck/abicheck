@@ -444,6 +444,14 @@ the common base and round-trips a cluster count through the derived result.
 This raises direct imports to 84/93 (90.3%). The nine remaining names are six
 distributed host dispatchers, two RTTI name strings and a GPU diagnostic.
 
+With Open MPI development tools installed, set `ABIFORGE_ONEDAL_MPI=1` and
+`ABIFORGE_ONEDAL_MAJOR` and run `test_hdbscan_distributed_dispatch`. Two ranks
+call all six host dispatchers (three methods in float and double) via
+`preview::compute`. Each invocation throws `oneapi::dal::unimplemented` with
+the distributed-algorithm diagnostic. Direct import coverage reaches 90/93
+(96.8%); these six calls verify the exception path. Distributed clustering
+results remain unverified.
+
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
 Both 2025 frontends retain 13 and lack all 29 HDBSCAN-specific imports.
