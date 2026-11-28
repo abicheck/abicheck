@@ -17,6 +17,7 @@ def test_retained_value_campaign(tmp_path, monkeypatch):
     expected = {
         "old": (17, 1),
         "compatible": (17, 1),
+        "extra_owner": (17, 0),
         "early_release": (-1, 1),
         "self_assignment_release": (17, 2),
         "missing_release": (17, 0),

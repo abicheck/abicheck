@@ -63,6 +63,7 @@ RELEASE_FIRST = "if (--refs == 0) ++releases; ++refs;"
 CASES = {
     "old": ("++refs;", "++releases;", RETAIN_FIRST, (17, 1)),
     "compatible": ("refs += 1;", "releases += 1;", RETAIN_FIRST, (17, 1)),
+    "extra_owner": ("refs += 2;", "++releases;", RETAIN_FIRST, (17, 0)),
     "early_release": ("", "++releases;", RETAIN_FIRST, (-1, 1)),
     "missing_release": ("++refs;", "", RETAIN_FIRST, (17, 0)),
     "double_release": ("++refs;", "releases += 2;", RETAIN_FIRST, (17, 2)),

@@ -1,0 +1,39 @@
+"""Trace the recorded product edits to executable, product-independent mutations."""
+
+import csv
+import subprocess
+import sys
+from pathlib import Path
+
+from abiforge.run import l2_representatives, lifetime_campaign, value_state
+
+
+def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    audit = root / "research/onedal-coverage/check_scenario_basis.py"
+    matrix = tmp_path / "rows.csv"
+    subprocess.run([sys.executable, audit, "--rows", matrix], check=True)
+    available = (
+        {f"value_state/{name}" for name in value_state.EDITS}
+        | {f"lifetime_campaign/{name}" for name in lifetime_campaign.CASES}
+        | {
+            f"l2_representatives/{family}/{variant}"
+            for family, variants in l2_representatives.FAMILIES.items()
+            for variant in variants
+        }
+    )
+    with matrix.open() as stream:
+        rows = list(csv.DictReader(stream))
+    linked = [row for row in rows if row["status"] == "linked edit"]
+    assert linked
+    for row in linked:
+        assert row["witness"]
+        assert set(row["generic_mutations"].split("|")) <= available
+        assert len(row["generic_mutations"].split("|")) == len(
+            row["package_edits"].split("|")
+        )
+    assert all(
+        not row["generic_mutations"]
+        for row in rows
+        if row["status"] == "candidate only"
+    )

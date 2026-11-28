@@ -42,113 +42,25 @@ REFUSED = "REFUSED"
 PUBLIC_DUMP_ENV = "ABICHECK_EDIT_CORPUS_PUBLIC_DUMP"
 
 
-def _consumer_baseline_facts(consumer: Path, baseline: Path):
-    from abicheck.extract.consumer_imports import read_consumer_imports
-    from abicheck.extract.library_export_facts import read_library_export_facts
-    from abicheck.model.availability import FactStatus
-
-    old = read_library_export_facts(baseline)
-    imports = read_consumer_imports(consumer, old.soname)
-    if old.status != FactStatus.PRESENT or imports.status != FactStatus.PRESENT:
-        raise ValueError(f"could not read baseline or consumer: {baseline}, {consumer}")
-
-    return imports, old
-
-
-def consumer_required_names(consumer: Path, baseline: Path) -> set[str]:
-    """Return the requirements scoped to the actual baseline provider."""
-    from abicheck.policy.consumer_requirement_evaluation import (
-        scope_requirements_to_library,
-    )
-
-    imports, old = _consumer_baseline_facts(consumer, baseline)
-    return scope_requirements_to_library(imports, old).undefined_symbols
-
-
-def consumer_missing_symbol_probe(consumer: Path, baseline: Path):
-    """Read the baseline once for a series of candidate symbol-removal checks."""
-    from abicheck.extract.library_export_facts import read_library_export_facts
-    from abicheck.model.availability import FactStatus
-    from abicheck.policy.consumer_requirement_evaluation import (
-        evaluate_consumer_requirements,
-    )
-
-    imports, old = _consumer_baseline_facts(consumer, baseline)
-
-    def probe(candidate: Path) -> list[str]:
-        new = read_library_export_facts(candidate)
-        if new.status != FactStatus.PRESENT:
-            raise ValueError(f"could not read candidate exports: {candidate}")
-        return evaluate_consumer_requirements(imports, old, new, ()).missing_symbols
-
-    return probe
-
-
-@dataclass
-class ElfReleaseSurface:
-    soname: str
-    exports: list[tuple[str, str, str, str, int]]
-    versions_required: dict[str, list[str]]
-    imports: list[tuple[str, str, str, str]]
-    needed: list[str]
-    rpath: str
-    runpath: str
-
-
-def elf_release_surface(path: Path) -> ElfReleaseSurface:
-    """Read dynamic symbols, version requirements and loader metadata once."""
+def elf_export_names(path: Path) -> tuple[str, set[str]]:
+    """The reader's SONAME and versioned dynamic exports."""
     from abicheck.elf_metadata import parse_elf_metadata
 
     metadata = parse_elf_metadata(path)
-    exports = []
+    names = set()
     for symbol in metadata.symbols:
         name = symbol.name
         if symbol.version:
             name += ("@@" if symbol.is_default else "@") + symbol.version
-        exports.append(
-            (
-                name,
-                symbol.sym_type.value,
-                symbol.binding.value,
-                symbol.visibility,
-                symbol.size,
-            )
-        )
-    imports = [
-        (symbol.name, symbol.binding.value, symbol.version, symbol.version_soname)
-        for symbol in metadata.imports
-    ]
-    return ElfReleaseSurface(
-        metadata.soname,
-        exports,
-        metadata.versions_required,
-        imports,
-        metadata.needed,
-        metadata.rpath,
-        metadata.runpath,
-    )
+        names.add(name)
+    return metadata.soname, names
 
 
-def pe_declaration_names(path: Path) -> tuple[list[str], list[str]]:
-    """Return the header-free PE dump's function and variable link names."""
-    from abicheck.workflows.dump.pe import extract_pe
-
-    declarations = extract_pe(path, "audit").declarations
-    return (
-        [function.mangled for function in declarations.functions],
-        [variable.mangled for variable in declarations.variables],
-    )
-
-
-def pe_loader_surface(
-    path: Path,
-) -> tuple[list[tuple[str, int, str]], dict[str, list[str]]]:
-    """Return export identities, forwarding destinations and ordinary imports."""
+def pe_export_names(path: Path) -> list[tuple[str, int]]:
+    """Return name and ordinal together, retaining aliases and nameless exports."""
     from abicheck.pe_metadata import parse_pe_metadata
 
-    meta = parse_pe_metadata(path)
-    exports = [(entry.name, entry.ordinal, entry.forwarder) for entry in meta.exports]
-    return exports, meta.imports
+    return [(entry.name, entry.ordinal) for entry in parse_pe_metadata(path).exports]
 
 
 def snapshot(

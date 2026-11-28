@@ -9,8 +9,6 @@ Measurements use oneDAL example sources at cb26da82f4672a7aad7e8d27be7d6b82fa1f3
 | Packaged CPU runtimes 2025.9 to 2025.11 | 23 precompiled clients | All return zero and match their printed baseline. The tree visitor emits the same 67 nodes. |
 | Packaged core 2025.9 to 2026.2 | 53 old core export names imported by the tree client | 7 absent, all reported. SONAME changes from .3 to .4. Loader rejects the old client before main. The new headers also omit the legacy decision-tree API. |
 | Three header changes against the unchanged 2025.9 runtime | Slot swap, field swap, type alias | Wrong first callback (exit 7), corrupt feature values (exit 0), unchanged output respectively. Header scan reports BREAKING, BREAKING, COMPATIBLE_WITH_RISK. |
-| CPU parameter selectors in 2025.9, 2025.11 and 2026.2 | 40 distinct exported call operators per release | Individual probes observed 18 calls on each release. These match all 18 named selector relocations in each CPU frontend. The remaining 22 have no observed call. The 2026.2 clients were rebuilt. |
-| GPU parameter selectors in the three Linux releases | 42 exported call operators per release | The DPC frontend imports 30 and the CPU frontend imports zero. The other 12 are PCA incremental overloads. Counts come from ELF inspection. |
 
 At the root split the valid feature index and threshold are 4 and 0.2405. Swapping their fields produces 4597832946085265408 and 1.97626e-323. Compare values and callback identity in runtime oracles. Ordinary GCC DWARF omitted visitor method records and yielded NO_CHANGE with complete assurance. Adding -femit-class-debug-always detected the class change. Header evidence named both slots.
 
@@ -25,15 +23,6 @@ These are name intersections. They cannot measure virtual dispatch, inline code,
 ## Reproduction
 
 Create each prefix with micromamba create -p /tmp/dal-VERSION -f conda/env-VERSION.txt. Clone uxlfoundation/oneDAL at the revision above. In conda/, run python make_probe.py PATH_TO_ONEDAL to generate probe.cpp. Run bash replay.sh PATH_TO_ONEDAL to compile the clients using the old include tree and run them against the two runtime versions. inventory.py accepts the unpacked environment prefixes. mutate.py creates three header overlays under the current directory. For the packaged mutation experiment compile probe.cpp with -I<overlay> before the package include paths, then compare its output on 2025.9 with the saved baseline.
-
-The 36-case tree visitor replay can also use the installed 2025.9 CPU SDK.
-With GCC and Clang on PATH, run the following from the repository root.
-The test compiles a baseline client for each task and checks its behavior
-against the original and edited visitor declarations.
-
-```sh
-ABIFORGE_ONEDAL_OLD=/tmp/dal-2025.9.0 python -m pytest -q tests/test_abiforge_onedal_tree.py
-```
 
 ## Coverage expansion and acceptance criteria
 
