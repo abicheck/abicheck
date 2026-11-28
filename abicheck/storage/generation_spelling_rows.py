@@ -797,6 +797,6 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "re-dump older DLLs to recover the entity kind."
     ),
     100: GenerationSpellingChange(
-        "Named x86-64 ELF VMI base access. Older snapshots lack this optional fact. No spelling rewrite."
+        "Named and locally bound x86-64 ELF VMI base access. Older snapshots lack this optional fact. No spelling rewrite."
     ),
 }

@@ -39,14 +39,30 @@ def _edges(elf: Any) -> dict[str, dict[str, bool]] | None:
     # Restrict the initial table scan to files that actually reference VMI RTTI.
     if not syms.get_symbol_by_name(_VMI):
         return {}
+    # A locally bound R_X86_64_RELATIVE addend is the link-time address.
+    # Require an exact, unambiguous dynamic RTTI symbol at that address.
+    by_address = {}
+    for index, sym in enumerate(syms.iter_symbols()):
+        if (
+            sym.name.startswith("_ZTI")
+            and isinstance(sym["st_shndx"], int)
+            and sym["st_info"]["type"] == "STT_OBJECT"
+            and sym["st_size"] > 0
+        ):
+            address = sym["st_value"]
+            by_address[address] = index if address not in by_address else None
     refs = {}
     for rel in rels.iter_relocations():
         addr = rel["r_offset"]
-        refs[addr] = (
-            (rel["r_info_sym"], rel["r_addend"])
-            if rel["r_info_type"] == 1 and addr not in refs
-            else None
-        )
+        target = None
+        if addr not in refs:
+            if rel["r_info_type"] == 1:
+                target = (rel["r_info_sym"], rel["r_addend"])
+            elif rel["r_info_type"] == 8 and rel["r_info_sym"] == 0:
+                index = by_address.get(rel["r_addend"])
+                if index is not None:
+                    target = (index, 0)
+        refs[addr] = target
     result = {}
     seen = set()
     for sym in syms.iter_symbols():

@@ -10,7 +10,10 @@ import pytest
 
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="compiles shared ELF libraries")
-def test_public_base_path_controls_crosscast_and_catch(tmp_path):
+@pytest.mark.parametrize(
+    "link_flags", [(), ("-Wl,-Bsymbolic",)], ids=["preemptible", "local"]
+)
+def test_public_base_path_controls_crosscast_and_catch(tmp_path, link_flags):
     from abiforge.run.itanium_base_edges import direct_base_flags
 
     header = """struct Anchor { virtual ~Anchor(); };
@@ -54,10 +57,20 @@ int main() {
         source.write_text(provider)
         library = root / "libitem.so"
         subprocess.run(
-            ["g++", "-std=c++17", "-shared", "-s", "-fPIC", source, "-o", library],
+            [
+                "g++",
+                "-std=c++17",
+                "-shared",
+                "-s",
+                "-fPIC",
+                *link_flags,
+                source,
+                "-o",
+                library,
+            ],
             check=True,
         )
-        if os.uname().machine == "x86_64":
+        if os.uname().machine == "x86_64" and not link_flags:
             edges = direct_base_flags(library, "_ZTI4Item")
             assert edges is not None
             assert edges["_ZTI6Anchor"] == 2

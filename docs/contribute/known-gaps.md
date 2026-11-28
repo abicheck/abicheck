@@ -316,7 +316,7 @@ current emitter, which is unchanged.
 
 **PARTIAL.** On little-endian x86-64 ELF, the binary comparison detects loss
 of a public direct base in VMI RTTI when both objects identify the base through
-named absolute relocations. Relative relocations, hidden base identities and
+named absolute relocations or relative relocations to a unique exported RTTI object. Packed relative relocations, hidden base identities and
 other architectures remain outside this detector. RTTI distinguishes public
 from nonpublic; the header comparison can distinguish private from protected.
 The frozen client in `tests/test_base_access_runtime.py` verifies cross-cast
