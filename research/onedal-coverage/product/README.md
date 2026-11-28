@@ -488,7 +488,11 @@ this case. A reader compiled against each SDK constructs a concrete
 `RefCounter` subclass and measures the pointer adjustment from
 `RefCounter*` to `Atomic<int>*`. All five same-SONAME header/runtime
 combinations produce an 8-byte adjustment, matching the public, nonvirtual
-base entry in the explicitly loaded core library's RTTI.
+base entry in the explicitly loaded core library's RTTI. Using both
+descriptors from that library, libstdc++'s exception matcher adjusts the
+object pointer to the same atomic subobject. The SDK downcast recovers the
+original counter pointer, and increments and decrements through the two
+views observe the same reference count.
 The four cross-major runs
 exit 127 at startup because the required core SONAME is absent. These
 address relocations exercise loader resolution without calling the tree
