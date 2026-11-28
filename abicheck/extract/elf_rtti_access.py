@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Public direct-base paths in exported x86-64 Itanium VMI type descriptors."""
 
 from __future__ import annotations

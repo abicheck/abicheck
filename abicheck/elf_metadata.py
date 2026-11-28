@@ -165,11 +165,6 @@ def _parse_and_pickle(f: IO[bytes], so_path: Path) -> bytes:
     return pickle.dumps((meta, failures), protocol=pickle.HIGHEST_PROTOCOL)
 
 
-# ---------------------------------------------------------------------------
-# Internal parsing
-# ---------------------------------------------------------------------------
-
-
 def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     meta = ElfMetadata()
     elf = ELFFile(f)
