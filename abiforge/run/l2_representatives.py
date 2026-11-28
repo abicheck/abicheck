@@ -19,6 +19,8 @@ FAMILIES = {
     "callback_large_return": ("change",),
     "callback_pointer_return": ("change",),
     "callback_table": ("control", "swap", "passing"),
+    "callback_interface": ("control", "passing"),
+    "nested_callback": ("control", "passing"),
     "callback_value": ("change",),
     "callback_reference": ("change",),
     "layout": ("control", "swap", "alignment"),
@@ -64,6 +66,31 @@ def callback_return_sources(family, variant):
 
 
 def sources(family, variant):
+    if family == "nested_callback":
+        attr = "" if variant == "passing" else "[[clang::trivial_abi]]"
+        header = f"""
+struct {attr} Value {{ long word; ~Value(); }};
+using Visit = int (*)(Value);
+struct Ops {{ int (*run)(Visit); }};
+using OpsPtr = const Ops*;
+struct Interface {{ OpsPtr ops; }};
+extern "C" const Interface* interface() noexcept;
+"""
+        word = "40 + 2" if variant == "control" else "42"
+        body = f"""
+Value::~Value() {{}}
+static int run(Visit visit) {{ return visit(Value{{{word}}}); }}
+const Interface* interface() noexcept {{
+    static const Ops ops{{run}};
+    static const Interface api{{&ops}};
+    return &api;
+}}
+"""
+        return (
+            header,
+            body,
+            "return interface()->ops->run(+[](Value v) { return v.word != 42 ? 1 : 0; });",
+        )
     if family == "member_return":
         attr = "[[clang::trivial_abi]]" if variant == "register" else ""
         header = f"struct {attr} Value {{ long word; ~Value(); }}; struct Reader {{ Value read(); }}; void expect(Reader*);"
@@ -91,7 +118,7 @@ def sources(family, variant):
         "callback_large_return",
     }:
         return callback_return_sources(family, variant)
-    if family == "callback_table":
+    if family in {"callback_table", "callback_interface"}:
         attr = "[[clang::trivial_abi]]" if variant == "passing" else ""
         fields = (
             "Slot second; First first;"
@@ -107,6 +134,12 @@ const Table* slots() {{ static const Table table = {{ {values} }}; return &table
 static_assert(sizeof(Table) == 2 * sizeof(Slot), "two slots");"""
         if variant == "control":
             body = body.replace("return 19;", "return 18 + 1;")
+        if family == "callback_interface":
+            header += ' struct Interface { const Table* ops; }; extern "C" const Interface* interface() noexcept;'
+            header = header.replace('extern "C" const Table* slots();', "")
+            body = body.replace("const Table* slots()", "static const Table* slots()")
+            body += " const Interface* interface() noexcept { static const Interface i{slots()}; return &i; }"
+            return header, body, "return interface()->ops->second(V{42});"
         return header, body, "return slots()->second(V{42});"
     if family in {"callback_value", "callback_reference"}:
         attr = "[[clang::trivial_abi]]" if variant == "old" else ""
@@ -294,6 +327,22 @@ def check_report(family, variant, data, code, verdict_only=False):
                 "p0.callback.return:nontrivial",
             )
         },
+        ("nested_callback", "passing"): {
+            (
+                "value_abi_trait_changed",
+                "interface",
+                "return.ops.run.callback.p0.callback.p0:trivial",
+                "return.ops.run.callback.p0.callback.p0:nontrivial",
+            )
+        },
+        ("callback_interface", "passing"): {
+            (
+                "value_abi_trait_changed",
+                "interface",
+                "return.ops.second.callback.p0:nontrivial",
+                "return.ops.second.callback.p0:trivial",
+            )
+        },
         ("callback_table", "passing"): {
             (
                 "value_abi_trait_changed",
@@ -412,6 +461,8 @@ def run(out, compiler, frontend, families=FAMILIES, verdict_only=False):
                 "callback_return": [int(variant == "change")],
                 "callback_pointer_return": [0],
                 "callback_large_return": [0],
+                "nested_callback": [int(variant == "passing")],
+                "callback_interface": [23 if variant == "passing" else 17],
                 "callback_table": [{"passing": 23, "swap": 19}.get(variant, 17)],
                 "layout": {"swap": [29, 4], "alignment": [8]}.get(variant, [17, 4]),
                 "calls": [34],

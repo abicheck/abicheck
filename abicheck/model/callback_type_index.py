@@ -5,14 +5,17 @@ from __future__ import annotations
 
 import re
 
+from .availability import FactStatus
 from .declarations import Function
+from .entities import RecordType
+from .fact import Fact
 from .signature_token_scan import _split_top_level_commas
 from .snapshot import AbiSnapshot
 from .type_label import qualified_spelling
 from .type_spelling_resolve import scope_of, split_components
 from .vocabulary import AccessLevel
 
-# Ordinary function pointers. A member pointer, a nested callback declarator
+# Ordinary function pointers. A member pointer
 # or a template containing a callback needs its own type evidence.
 _CALLBACK = re.compile(r"([^()<>&]+?)\s*\(\s*\*\s*\)\s*\((.*)\)\s*(?:noexcept)?")
 _CV = re.compile(
@@ -25,8 +28,11 @@ class CallbackTypeIndex:
         declarations = snap.declarations
         self.aliases = declarations.typedefs_qualified
         self.traits: dict[str, bool | None] = {}
+        self.ambiguous: set[str] = set()
         for record in declarations.types:
             name = record.qualified_name or record.name
+            if name in self.traits:
+                self.ambiguous.add(name)
             self.traits[name] = (
                 record.trivial_for_calls if name not in self.traits else None
             )
@@ -55,28 +61,58 @@ class CallbackTypeIndex:
             seen.add(name)
             spelling, scope = self.aliases[name], scope_of(name)
 
-    def arguments(self, spelling: str, scope: str) -> dict[int, str]:
+    def _callback_parts(self, spelling: str, scope: str) -> tuple[dict[int, str], str]:
         signature, alias_scope = self.resolve(spelling, scope)
         match = _CALLBACK.fullmatch(signature)
         if not match:
-            return {}
-        slots = {
-            i: self.resolve(arg, alias_scope)[0]
-            for i, arg in enumerate(_split_top_level_commas(match[2]))
-        }
-        result = self.resolve(match[1], alias_scope)[0]
-        if result in self.records:
-            slots[-1] = result
-        return slots
+            return {}, alias_scope
+        parts = dict(enumerate(_split_top_level_commas(match[2])))
+        if self.resolve(match[1], alias_scope)[0] in self.records:
+            parts[-1] = match[1]
+        return parts, alias_scope
+
+    def arguments(self, spelling: str, scope: str) -> dict[int, str]:
+        parts, owner = self._callback_parts(spelling, scope)
+        return {i: self.resolve(part, owner)[0] for i, part in parts.items()}
+
+    def _direct_record(
+        self,
+        spelling: str,
+        identities: Fact[tuple[str, ...]] | None,
+        scope: str,
+        *,
+        allow_spelling: bool = False,
+    ) -> RecordType | None:
+        spelling, scope = self.resolve(spelling, scope)
+        direct = re.fullmatch(r"([^*&#()\[\]<>]+?)\s*(?:[*&]\s*(?:const)?)?", spelling)
+        if not direct:
+            return None
+        name = spelling if direct[1] == spelling else self.resolve(direct[1], scope)[0]
+        if identities is not None and identities.is_present:
+            if identities.value != (name,):
+                return None
+        elif not allow_spelling or (
+            identities is not None and identities.status != FactStatus.NOT_COLLECTED
+        ):
+            return None
+        return None if name in self.ambiguous else self.records.get(name)
 
     def slots(self, function: Function) -> dict[tuple[str, bool], str]:
         scope = scope_of(qualified_spelling(function.entity_id) or function.name)
         slots = {}
 
         def add(path: str, spelling: str, owner: str) -> None:
-            for index, name in self.arguments(spelling, owner).items():
+            parts, outer_scope = self._callback_parts(spelling, owner)
+            for index, part in parts.items():
                 suffix = "return" if index == -1 else f"p{index}"
-                slots[f"{path}.callback.{suffix}", index == -1] = name
+                endpoint = f"{path}.callback.{suffix}"
+                name, _ = self.resolve(part, outer_scope)
+                slots[endpoint, index == -1] = name
+                # A registration callback may itself receive a typed callback.
+                if index >= 0 and "(" in name:
+                    for inner, value in self.arguments(part, outer_scope).items():
+                        leaf = "return" if inner == -1 else f"p{inner}"
+                        slots[f"{endpoint}.callback.{leaf}", inner == -1] = value
 
         endpoints = [
             ("return", function.return_type, function.return_type_identities_fact)
@@ -87,22 +123,26 @@ class CallbackTypeIndex:
         )
         for path, spelling, identities in endpoints:
             add(path, spelling, scope)
-            if (
-                identities is None
-                or not identities.is_present
-                or len(identities.value or ()) != 1
-            ):
+            record = self._direct_record(spelling, identities, scope)
+            if record is None:
                 continue
-            owner = (identities.value or ())[0]
-            # Only direct record values, pointers and references expose this table.
-            direct = re.fullmatch(
-                r"([^*&#()\[\]<>]+?)\s*(?:[*&]\s*(?:const)?)?", spelling
-            )
-            if not direct or self.resolve(direct[1], scope)[0] != owner:
-                continue
-            record = self.records.get(owner)
-            if record:
-                for field in record.fields:
-                    if field.access != AccessLevel.PRIVATE:
-                        add(f"{path}.{field.name}", field.type, owner)
+            owner = record.qualified_name or record.name
+            for field in record.fields:
+                if field.access == AccessLevel.PRIVATE:
+                    continue
+                field_path = f"{path}.{field.name}"
+                add(field_path, field.type, owner)
+                # An interface may publish its operations through a separate table.
+                table = self._direct_record(
+                    field.type, field.type_identities_fact, owner, allow_spelling=True
+                )
+                if table is None or table is record:
+                    continue
+                for slot in table.fields:
+                    if slot.access != AccessLevel.PRIVATE:
+                        add(
+                            f"{field_path}.{slot.name}",
+                            slot.type,
+                            table.qualified_name or table.name,
+                        )
         return slots
