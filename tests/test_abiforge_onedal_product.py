@@ -179,14 +179,15 @@ def test_parameter_provider_consumer_scope(tmp_path):
 @pytest.mark.skipif(
     not os.getenv("ABIFORGE_ONEDAL_MAJOR"), reason="requires the 2026.2 CPU SDK"
 )
-def test_hdbscan_cpu_clusters(tmp_path):
+@pytest.mark.parametrize("client", ["hdbscan", "hdbscan_result"])
+def test_hdbscan_cpu_clusters(tmp_path, client):
     from abiforge.run.onedal_covariance_parameters import build_client
 
     sdk = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]).resolve()
     fixture = (
-        Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/hdbscan.cpp"
+        Path(__file__).resolve().parents[1] / f"abiforge/fixtures/onedal/{client}.cpp"
     )
-    exe = build_client(sdk, tmp_path, "hdbscan", 4, fixture=fixture)
+    exe = build_client(sdk, tmp_path, client, 4, fixture=fixture)
     run = subprocess.run(
         [exe],
         env={"LD_LIBRARY_PATH": str(sdk / "lib"), "LD_BIND_NOW": "1"},
@@ -220,7 +221,8 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
     }
     if source == "MAJOR":
         fixture = (
-            Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/hdbscan.cpp"
+            Path(__file__).resolve().parents[1]
+            / f"abiforge/fixtures/onedal/{client}.cpp"
         )
         clients["hdbscan"] = build_client(
             baseline, tmp_path, "hdbscan", source_major, fixture=fixture

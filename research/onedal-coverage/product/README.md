@@ -401,7 +401,13 @@ throws `oneapi::dal::domain_error` when the client calls any of the five
 disabled getters. This exercises typed exception handling across the CPU
 shared-library boundary for all six method and precision combinations.
 
-The two downgrade comparisons include this 2026.2 executable alongside the
+A separate 2026.2 CPU client exercises ownership of all six HDBSCAN result
+tables. It gives each setter a temporary table with a distinct value, copies
+the result, destroys the source, and reads each value through the corresponding
+getter. It also checks that the copied result preserves its cluster count and
+option mask.
+
+The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
 Both 2025 frontends retain 13 and lack all 29 HDBSCAN-specific imports.
 The regression compares the complete missing-name list from `abicheck`
