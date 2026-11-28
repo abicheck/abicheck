@@ -45,7 +45,11 @@ int run() {
   if (p[0] != 4 - rank)
     return 8;
   comm.bcast(q, bytes, 1, dtype, {}, 0).wait();
-  return p[0] != 4;
+  if (p[0] != 4)
+    return 9;
+  bytes[0] = static_cast<d::byte_t>(rank + 3);
+  comm.allreduce(q, bytes, out, 1, d::data_type::uint8, s::reduce_op::sum, {}).wait();
+  return out[0] != static_cast<d::byte_t>(7);
 }
 int main(int argc, char **argv) {
   MPI_Init(&argc, &argv);

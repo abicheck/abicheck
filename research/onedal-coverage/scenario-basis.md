@@ -210,3 +210,25 @@ baseline the derived destructor and deallocator each run once. With the
 mutated provider the old deleting slot reaches an identifiable guard.
 The oneDAL delete_base receipt supplies a release control only. The
 distinguishing mutation runs in the SDK-independent fixture.
+
+### Linux SYCL CPU replay
+
+The CPU replay used oneDAL 2025.9 headers, Clang 19 host compilation,
+Intel SYCL and OpenCL CPU runtimes 2025.2.1, and the OpenCL CPU selector.
+All submitted work in the new lifetime fixture is a SYCL host task.
+The following observations concern shared USM and two local MPI ranks.
+
+| Contract | Compatible control | Distinguishing observation |
+| --- | --- | --- |
+| Queue overload and prerequisite | The existing event mutation replay read 42 with the baseline, copied dependencies and the explicit event after removing its default argument. | Removing the argument or deleting the overload rejected the explicit-event build. Dropping the dependency compiled and read 0. |
+| Frozen binary binding | The same MPI client ran with the 2025.9 and 2025.11 shared libraries. | With the 2026.2 library directory the loader reported missing libonedal_dpc.so.3. The generic PLT fixture separately checks eager failure before main and lazy failure at first use. |
+| Pending-operation ownership | A gated operation retained its USM owner after the client dropped its reference, read 42, and released it once. | With the provider's strong capture removed the deleter ran before the gate opened. The task observed an expired weak pointer and skipped the read. The same frozen client distinguished both providers with either a generic owner or a oneDAL array owner. The mutation is in the submitting provider. |
+| Collective results and count units | The frozen two-rank oneDAL client checked gather ordering, peer exchange, broadcast and sum. Both uint8 and int32 byte-buffer sums produced 7. | The independent erased-buffer fixture isolates the count-as-bytes mutation. The MPI release runs exercise the compatible path. |
+
+Run `abiforge/fixtures/sycl_cpu/run.sh` with a configured SYCL compiler and
+OpenCL CPU runtime. Set `DAL_ROOT` to a 2025 SDK prefix and include its
+libraries on the runtime search path to replay the second ownership client.
+The runner compiles each client once, exchanges the provider library, and
+checks both the exit code and the observed release counts and value.
+The [event and MPI probes](../onedal-sycl-usm/all-signatures.md) exercise the
+package API. Device kernels and GPU memory lifetimes require separate evidence.
