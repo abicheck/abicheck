@@ -12,6 +12,9 @@ using descriptor_base = hdb::detail::descriptor_base<task>;
 extern template class hdb::v1::compute_input<task>;
 extern template class hdb::detail::v1::descriptor_base<task>;
 
+struct derived_input : input {};
+struct derived_result : hdb::compute_result<task> {};
+
 bool recognizes(const dal::base& object, const input* expected_input,
                 const descriptor_base* expected_descriptor) {
     return dynamic_cast<const input*>(&object) == expected_input &&
@@ -26,5 +29,10 @@ int main() {
     if (typeid(data_base) != typeid(input) || typeid(descriptor_ref) != typeid(descriptor_base)) return 1;
     if (!recognizes(data, &data, nullptr)) return 2;
     if (!recognizes(descriptor, nullptr, &descriptor)) return 3;
+    derived_input child;
+    if (!recognizes(child, &child, nullptr) || child.get_data().get_row_count() != 0) return 4;
+    derived_result result;
+    result.set_cluster_count(7);
+    if (result.get_cluster_count() != 7) return 5;
     return 0;
 }

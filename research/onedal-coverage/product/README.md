@@ -438,6 +438,11 @@ for the compute input and descriptor base directly from the CPU library.
 Through a common base reference it checks dynamic type identity, successful
 downcasts and rejection of the other type. Its four RTTI/vtable imports and
 one additional constructor bring the seven-client total to 82/93 (88.2%).
+Client-defined subclasses also exercise both base-object constructor variants
+for compute input and result. The client downcasts the derived input through
+the common base and round-trips a cluster count through the derived result.
+This raises direct imports to 84/93 (90.3%). The nine remaining names are six
+distributed host dispatchers, two RTTI name strings and a GPU diagnostic.
 
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.

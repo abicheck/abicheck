@@ -204,6 +204,11 @@ def test_hdbscan_cpu_clusters(tmp_path, client):
     exe = build_client(sdk, tmp_path, client, 4, fixture=fixture, link_inputs=flags)
     if client == "hdbscan_rtti":
         imports = symbol_names(exe, imports=True)
+        for kind in ("compute_input", "compute_result"):
+            assert any(
+                "7hdbscan" in name and kind in name and "EEC2E" in name
+                for name in imports
+            )
         for prefix in ("_ZTI", "_ZTV"):
             assert (
                 len([s for s in imports if s.startswith(prefix) and "7hdbscan" in s])
