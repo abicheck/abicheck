@@ -191,3 +191,9 @@ instantiation availability and symbol version binding. The crosswalk retains
 both checker lanes and verifies that the two generic L2 frontend receipts
 agree on frozen-client results. Repeated frontend observations add no new
 mechanism.
+
+The source index now assigns an evidence role to every structured product
+file. Files with no direct rows supply scope, attribution or corroborating
+metadata. New files require review. The release-client matrix reuses ownership
+and missing-dependency scenarios. Every return scan is joined to a recorded
+client outcome before its checker verdict is included.

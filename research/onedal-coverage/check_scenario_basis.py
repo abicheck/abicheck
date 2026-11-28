@@ -1243,6 +1243,85 @@ def contract_pilot_receipts():
         raise ValueError("generic frontend receipts disagree on frozen-client outcomes")
 
 
+def release_client_receipts():
+    filename = "release-clients.json"
+    for release, report in json.loads((PRODUCT / filename).read_text()).items():
+        missing = release == "dal-2026.2.0"
+        for case, result in report["cases"].items():
+            contract, edit, mutation = "release workload", "", ""
+            expected = 0
+            if missing:
+                contract, edit, mutation, expected = (
+                    "provider resolution",
+                    "missing dependency",
+                    "provider_campaign/missing",
+                    127,
+                )
+            elif case.endswith(("_borrow", "_extra_owner")):
+                edit = "borrow" if case.endswith("_borrow") else "extra_owner"
+                contract, mutation = "ownership", REPRESENTATIVES[edit]
+                expected = (1 if edit == "borrow" else 2) + (
+                    3 if case.startswith("key_value") else 0
+                )
+            if result["exit"] != expected:
+                raise ValueError(
+                    f"unexpected release client observation: {release}/{case}"
+                )
+            yield (
+                filename,
+                release,
+                case,
+                "",
+                "",
+                contract,
+                edit,
+                contract,
+                mutation,
+                f"client exit {expected}",
+                "release client observation",
+            )
+
+    with (PRODUCT / "return-witnesses.csv").open() as stream:
+        observed = {
+            (r["family"], r["variant"], r["client_exit"])
+            for r in csv.DictReader(stream)
+        }
+    filename = "return-scans.csv"
+    with (PRODUCT / filename).open() as stream:
+        for r in csv.DictReader(stream):
+            if (r["family"], r["variant"], r["client_exit"]) not in observed:
+                raise ValueError(
+                    f"return scan lacks corresponding client observation: {r}"
+                )
+            yield (
+                filename,
+                r["family"],
+                r["variant"],
+                r["lane"],
+                "",
+                "return scan",
+                "",
+                "",
+                "",
+                f"client exit {r['client_exit']}, checker {r['checker']}",
+                "corroborates return-witnesses.csv",
+            )
+
+
+# Files that support an existing observation or describe the scope of the input.
+SUPPORTING_SOURCES = {
+    "installed-header selection": "roots.txt 2026.2/roots.txt",
+    "installed-header diagnostics": "root-context.csv 2026.2/unparsed.csv",
+    "derived inventory statistics": "coverage.json scores.json extended-inventory.json",
+    "dependency names": "dependencies.txt",
+    "ELF reader and export inventory": "elf-extraction.json export-surface.json release-matrix.csv.gz",
+    "virtual slot location inventory": "header-slots.csv virtual-slots.csv.gz",
+    "import to declaration attribution": "import-declarations.json ownership-imports.csv",
+    "accessor selection for return witnesses": "return-getters.csv table-accessors.csv",
+    "checker attribution for return convention": "status-exports.json status-impact.csv.gz status-original-headers.json",
+}
+
+
 def main():
     check_mapping(
         "package runners",
@@ -1294,6 +1373,7 @@ def main():
         *cpu_example_receipts(),
         *cpu_campaign_receipts(),
         *contract_pilot_receipts(),
+        *release_client_receipts(),
     ]
     for file in (
         "ledger.csv.gz",
@@ -1426,17 +1506,28 @@ def main():
                 "candidate only",
             )
         )
-    if args.sources:
-        from collections import Counter
+    from collections import Counter
 
-        counts = Counter(row[0] for row in dispositions)
+    counts = Counter(row[0] for row in dispositions)
+    support = {
+        name: reason
+        for reason, names in SUPPORTING_SOURCES.items()
+        for name in names.split()
+    }
+    inventory = []
+    for path in sorted(PRODUCT.rglob("*")):
+        if path.name.endswith((".csv", ".csv.gz", ".json", ".tsv", ".txt")):
+            name = path.relative_to(PRODUCT).as_posix()
+            if not counts[name] and name not in support:
+                raise ValueError(f"unreviewed product evidence source: {name}")
+            inventory.append(
+                (name, counts[name], support.get(name, "direct crosswalk"))
+            )
+    if args.sources:
         with args.sources.open("w", newline="") as stream:
             writer = csv.writer(stream)
-            writer.writerow(("product_file", "direct_crosswalk_rows"))
-            for path in sorted(PRODUCT.rglob("*")):
-                if path.name.endswith((".csv", ".csv.gz", ".json", ".tsv", ".txt")):
-                    name = path.relative_to(PRODUCT).as_posix()
-                    writer.writerow((name, counts[name]))
+            writer.writerow(("product_file", "direct_crosswalk_rows", "evidence_role"))
+            writer.writerows(inventory)
     if output is not None:
         with output.open("w", newline="") as stream:
             writer = csv.writer(stream)
