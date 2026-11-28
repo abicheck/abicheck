@@ -197,3 +197,6 @@ file. Files with no direct rows supply scope, attribution or corroborating
 metadata. New files require review. The release-client matrix reuses ownership
 and missing-dependency scenarios. Every return scan is joined to a recorded
 client outcome before its checker verdict is included.
+
+See [the Forge-wide comparison](forge-comparison.md) for main/PR differences,
+operator ablation and a finite minimum for the bit-field projection.
