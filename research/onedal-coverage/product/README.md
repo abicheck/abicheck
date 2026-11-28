@@ -433,6 +433,12 @@ the input and result ownership checks and verify imports of one input setter
 and eight result setters. Across the six builds, direct imports now cover
 77/93 HDBSCAN names (82.8%) on Linux 2026.2.
 
+A position-independent RTTI client imports the type information and vtables
+for the compute input and descriptor base directly from the CPU library.
+Through a common base reference it checks dynamic type identity, successful
+downcasts and rejection of the other type. Its four RTTI/vtable imports and
+one additional constructor bring the seven-client total to 82/93 (88.2%).
+
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
 Both 2025 frontends retain 13 and lack all 29 HDBSCAN-specific imports.
