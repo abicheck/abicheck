@@ -187,9 +187,13 @@ def test_hdbscan_cpu_clusters(tmp_path):
         Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/hdbscan.cpp"
     )
     exe = build_client(sdk, tmp_path, "hdbscan", 4, fixture=fixture)
-    subprocess.run(
-        [exe], env={"LD_LIBRARY_PATH": str(sdk / "lib"), "LD_BIND_NOW": "1"}, check=True
+    run = subprocess.run(
+        [exe],
+        env={"LD_LIBRARY_PATH": str(sdk / "lib"), "LD_BIND_NOW": "1"},
+        capture_output=True,
+        text=True,
     )
+    assert run.returncode == 0, run.stderr
 
 
 @pytest.mark.integration
@@ -828,12 +832,14 @@ def test_ref_counter_header_matches_core_rtti(tmp_path):
         for runtime, runtime_major in packages:
             if runtime_major == major:
                 lib = runtime / "lib"
-                subprocess.run(
+                run = subprocess.run(
                     [reader, lib / f"libonedal_core.so.{major}"],
                     env={
                         "LD_LIBRARY_PATH": str(lib),
                         "LD_BIND_NOW": "1",
                         "LD_PRELOAD": str(lib / f"libonedal_thread.so.{major}"),
                     },
-                    check=True,
+                    capture_output=True,
+                    text=True,
                 )
+                assert run.returncode == 0, run.stderr

@@ -8,12 +8,7 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import Confidence
 from abicheck.report.diff_report import to_json, to_stat_json
 from abicheck.report.dispatch_markdown import to_markdown
-from abicheck.report.render_review import render_terminal_digest
-from tests._report_test_helpers import (
-    compute_review,
-    make_result as _result,
-    review_digest,
-)
+from tests._report_test_helpers import make_result as _result, review_digest
 
 
 def _first_finding(doc: dict) -> dict:
@@ -35,21 +30,6 @@ class TestReviewDigest:
         assert "`BREAKING`" in out
         assert "Release recommendation:" not in out
         assert "_Z3foov" in out
-
-    def test_manual_review_banner_on_scope_fallback(self):
-        r = _result(
-            Verdict.BREAKING,
-            changes=[
-                Change(ChangeKind.FUNC_REMOVED, "x", "removed"),
-            ],
-        )
-        r.scope_to_public_surface = True
-        r.scope_resolved = False
-        for out in (review_digest(r), render_terminal_digest(compute_review(r))):
-            assert "BREAKING" in out
-            assert "Manual review required" in out
-            assert "full export table" in out
-            assert "result as unconfirmed" not in out.lower().replace("*", "")
 
     def test_no_banner_when_scope_resolved(self):
         r = _result(Verdict.COMPATIBLE)

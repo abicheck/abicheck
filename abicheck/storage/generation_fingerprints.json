@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "0a30ed68df82af475f7d27dfbab3a9a3c183208d97b22eeff9c8aff633566330",
+      "abicheck/dumper.py": "fc9877301e6e5661234543355ac4a16b911eb8b05891e2e0ce2dea1f9cb88c01",
       "abicheck/dumper_clang.py": "433b6d8fa9a5b2654bbffb7a9087838b6c04f9534d923332dcb799ba16f57939",
       "abicheck/dwarf_advanced.py": "1e903a0d8693daa7f5c264f013f4a29795ba5509b0ee6dd6ee373d0ff6bd5984",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
@@ -77,7 +77,7 @@
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/elf_vtt_entries.py": "9983a5e2e7937fa3b6d9953463133e686b19957a6ac73beb3b239942be8eadb2",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
-      "abicheck/extract/export_symbol_identity.py": "25dc298a3a4533c87063d4f93d1a45593a699b0cb92686404ccecab1f440d6e2",
+      "abicheck/extract/export_symbol_identity.py": "03676a2c2f9363999b4c2bcb97977e10de1099b90c43a020d766cd9280d3c978",
       "abicheck/extract/export_table_read.py": "60fbf398e40df9cd48a9146ae1b79910cb7da865015a171405a727284848f7bd",
       "abicheck/extract/extraction_limitations.py": "b37f010164cf4e3e10e39a3cbb009e23b521244608da9269771e6c70806b4340",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
@@ -249,9 +249,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "07cebaa353760a43aab0c8b39635bc1d2bf02e836b7dc4d402bf80e93bbdc0d8"
     },
-    "fingerprint": "2d793000a2b567cec25262d3bb0b67d8e65da5a83b347fc2344a45434561d217",
+    "fingerprint": "df00c7e1056ae547cc982c268c4897dc1e2eaea0692d57e0b5311af5ab15a268",
     "generation": 99,
-    "reason": "Classify direct PE exports in non-executable data sections as variables."
+    "reason": "Move the generation 99 PE export partition into the existing export identity module without changing snapshot output."
   },
   "resolver": {
     "files": {

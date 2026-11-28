@@ -78,8 +78,8 @@ from .extract.elf_symbol_classify import (
 from .extract.export_symbol_identity import (
     itanium_export_function as _itanium_export_function,
     itanium_export_variable as _itanium_export_variable,
-    msvc_export_function as _msvc_export_function,
-    msvc_export_variable,
+    msvc_export_function as _msvc_export_function,  # noqa: F401 - historical dumper import
+    pe_export_declarations,
 )
 from .extract.export_table_read import finish_binary_snapshot, read_exports_or_fail
 from .extract.header_ast_backend import (
@@ -142,8 +142,7 @@ from .extract.headers.toolchain import (
 from .extract.macho_debug import MACHO_MAGICS, macho_dwarf_kwargs, warn_dwarf_only
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
-from .model import AbiSnapshot, RecordType, Visibility
-from .model.pe_facts import PeSymbolType
+from .model import AbiSnapshot, RecordType
 from .storage.ast_cache_location import reference_scratch_scoped
 from .storage.header_ast_cache import _cache_path as _cache_path
 from .workflows import memory_trace
@@ -880,16 +879,7 @@ def _dump_pe(
             "type information will be missing."
         )
         _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
-        # 32-bit x86 is the only PE machine type with __stdcall/__fastcall/
-        # __cdecl export decoration -- see export_symbol_identity.py's own
-        # comment for why every other machine type must NOT strip a
-        # leading underscore.
-        data_symbols = {
-            exp.name or f"ordinal:{exp.ordinal}"
-            for exp in pe_meta.exports
-            if exp.sym_type == PeSymbolType.DATA
-        }
-        _is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
+        functions, variables = pe_export_declarations(pe_meta)
         return new_snapshot(
             library=dll_path.name,
             **pe_pdb_debug_kwargs(dll_path),
@@ -898,17 +888,8 @@ def _dump_pe(
             source_mtime=_dll_mtime,
             source_mtime_epoch=_dll_mtime_epoch,
             source_size=_safe_size(dll_path),
-            # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
-            functions=[
-                _msvc_export_function(sym, is_x86_32=_is_x86_32)
-                for sym in sorted(exported_dynamic - data_symbols)
-            ],
-            variables=[
-                msvc_export_variable(
-                    sym, is_x86_32=_is_x86_32, visibility=Visibility.ELF_ONLY
-                )
-                for sym in sorted(data_symbols)
-            ],
+            functions=functions,
+            variables=variables,
             pe=pe_meta,
             elf_only_mode=True,
             platform="pe",
