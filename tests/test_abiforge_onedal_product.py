@@ -220,13 +220,11 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
         for algorithm in CAMPAIGNS
     }
     if source == "MAJOR":
-        fixture = (
-            Path(__file__).resolve().parents[1]
-            / f"abiforge/fixtures/onedal/{client}.cpp"
-        )
-        clients["hdbscan"] = build_client(
-            baseline, tmp_path, "hdbscan", source_major, fixture=fixture
-        )
+        fixtures = Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal"
+        for name in ("hdbscan", "hdbscan_result"):
+            clients[name] = build_client(
+                baseline, tmp_path, name, source_major, fixture=fixtures / f"{name}.cpp"
+            )
         header = tmp_path / "hdbscan_header.cpp"
         header.write_text("#include <oneapi/dal/algo/hdbscan.hpp>\nint main() {}\n")
         clients["hdbscan_header"] = build_client(
@@ -282,6 +280,11 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
         assert len(required) == 42
         assert len(missing) == 29
         assert missing == {name for name in required if "hdbscan" in name}
+        result_required, result_missing = expected["hdbscan_result"]
+        assert len(result_required) == 37
+        assert result_missing == {name for name in result_required if "hdbscan" in name}
+        assert len(result_missing) == 23
+        assert len(result_missing - missing) == 9
         header_required, header_missing = expected["hdbscan_header"]
         option_getters = {
             name

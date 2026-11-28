@@ -405,7 +405,12 @@ A separate 2026.2 CPU client exercises ownership of all six HDBSCAN result
 tables. It gives each setter a temporary table with a distinct value, copies
 the result, destroys the source, and reads each value through the corresponding
 getter. It also checks that the copied result preserves its cluster count and
-option mask.
+option mask. The ownership client imports 23 HDBSCAN names from the CPU
+frontend. Nine are additional to the clustering client's 29, bringing their
+combined coverage to 38 of the 93 exported names containing `hdbscan` in
+Linux 2026.2 `libonedal.so.4` (40.9%, up from 31.2%). This counts distinct
+dynamic symbol names, including C++ ABI aliases. The downgrade tests compare
+the ownership client's exact missing-name set against both 2025 frontends.
 
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
