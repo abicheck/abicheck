@@ -427,6 +427,12 @@ deleter counts. The library releases the original buffer once at replacement
 and the replacement buffer once at input destruction. This adds the
 `set_data_impl` import, bringing the four-client total to 68/93 (73.1%).
 
+Two additional builds use explicit instantiation declarations so the linker
+resolves the public template setters in the shipped CPU library. They repeat
+the input and result ownership checks and verify imports of one input setter
+and eight result setters. Across the six builds, direct imports now cover
+77/93 HDBSCAN names (82.8%) on Linux 2026.2.
+
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
 Both 2025 frontends retain 13 and lack all 29 HDBSCAN-specific imports.

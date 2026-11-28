@@ -180,16 +180,33 @@ def test_parameter_provider_consumer_scope(tmp_path):
     not os.getenv("ABIFORGE_ONEDAL_MAJOR"), reason="requires the 2026.2 CPU SDK"
 )
 @pytest.mark.parametrize(
-    "client", ["hdbscan", "hdbscan_result", "hdbscan_descriptor", "hdbscan_input"]
+    "client",
+    [
+        "hdbscan",
+        "hdbscan_result",
+        "hdbscan_descriptor",
+        "hdbscan_input",
+        "hdbscan_input_exported",
+        "hdbscan_result_exported",
+    ],
 )
 def test_hdbscan_cpu_clusters(tmp_path, client):
     from abiforge.run.onedal_covariance_parameters import build_client
+    from abiforge.run.onedal_export_surface import symbol_names
 
     sdk = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]).resolve()
     fixture = (
         Path(__file__).resolve().parents[1] / f"abiforge/fixtures/onedal/{client}.cpp"
     )
     exe = build_client(sdk, tmp_path, client, 4, fixture=fixture)
+    if client.endswith("_exported"):
+        setters = {
+            name
+            for name in symbol_names(exe, imports=True)
+            if "7hdbscan" in name and "set_" in name
+        }
+        assert len(setters) == (1 if client == "hdbscan_input_exported" else 8)
+        assert all("_impl" not in name for name in setters)
     run = subprocess.run(
         [exe],
         env={"LD_LIBRARY_PATH": str(sdk / "lib"), "LD_BIND_NOW": "1"},
