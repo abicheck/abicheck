@@ -54,7 +54,12 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         for row in withdrawals
     )
 
-    observed = [r for r in rows if r["status"] == "paired package observation"]
+    observed = [
+        r
+        for r in rows
+        if r["ledger"] in {"table-ownership.csv", "return-witnesses.csv"}
+        and r["status"] == "paired package observation"
+    ]
     assert {r["package_edits"] for r in observed} == {
         "borrow",
         "extra_owner",
@@ -65,3 +70,10 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
     content = [r for r in rows if r["package_edits"] == "drop_sum"]
     assert {r["key"] for r in content} == {"dal-2025.9.0", "dal-2025.11.0"}
     assert all(r["status"] == "implementation-only result content" for r in content)
+    arguments = [r for r in rows if r["ledger"] == "argument-abi.json"]
+    assert len(arguments) == 6
+    assert (
+        {r["generic_mutations"] for r in arguments}
+        == {"l2_representatives/large_argument/stack_value"}
+        <= available
+    )

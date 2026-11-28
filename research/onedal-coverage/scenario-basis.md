@@ -69,3 +69,10 @@ across both receipts. The status checks reuse the returned-state scenario.
 The statistics client's `drop_sum` check observes a missing or malformed
 result after a successful call, an implementation-level payload obligation.
 Repeated executions across accessors and releases do not add distinct contracts.
+
+Six first-argument witnesses in `argument-abi.json` share one SysV AMD64
+transition from an indirect object to a stack copy. The generic
+`large_argument/stack_value` variant keeps the aggregate at three machine
+words. Its frozen client detects the displaced scalar argument, and LLVM IR
+independently identifies the stack copy. This exercises a different machine
+calling sequence from the small-aggregate register case.

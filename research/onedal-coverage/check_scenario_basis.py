@@ -3,6 +3,7 @@
 import argparse
 import csv
 import gzip
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -129,6 +130,46 @@ def return_receipts():
             )
 
 
+def argument_receipts():
+    filename = "argument-abi.json"
+    receipt = json.loads((PRODUCT / filename).read_text())
+    calls = receipt["calls"]
+    clients = receipt["client_exits"]
+    checker = receipt["checker"]
+    if (
+        not calls
+        or calls.keys() != clients.keys()
+        or calls.keys() != checker["mutant"]["arguments"].keys()
+    ):
+        raise ValueError("argument witnesses disagree on the exercised calls")
+    if checker["control"] != {"verdict": "NO_CHANGE", "exit": 0, "arguments": {}} or (
+        checker["mutant"]["verdict"],
+        checker["mutant"]["exit"],
+    ) != ("BREAKING", 4):
+        raise ValueError("unexpected argument checker result")
+    for symbol, lowering in calls.items():
+        if (
+            lowering
+            != {"old": "indirect", "control": "indirect", "mutant": "stack-by-value"}
+            or clients[symbol] != {"old": 0, "control": 0, "mutant": 41}
+            or checker["mutant"]["arguments"][symbol] != ["p0:nontrivial", "p0:trivial"]
+        ):
+            raise ValueError(f"unexpected argument witness for {symbol}")
+        yield (
+            filename,
+            symbol,
+            "by-value argument",
+            "p0",
+            symbol,
+            "calling convention",
+            "indirect to stack-by-value",
+            "large aggregate argument",
+            "l2_representatives/large_argument/stack_value",
+            "LLVM lowering, frozen client and checker",
+            "paired package observation",
+        )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -155,7 +196,7 @@ def main():
     edit_map = {
         name: family for family, names in EDITS.items() for name in names.split()
     }
-    dispositions = list(return_receipts())
+    dispositions = [*return_receipts(), *argument_receipts()]
     for file in (
         "ledger.csv.gz",
         "extended-obligations.csv.gz",
