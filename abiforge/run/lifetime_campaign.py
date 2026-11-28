@@ -15,6 +15,7 @@ struct Value {
     int slot;
     Value();
     Value(const Value&);
+    Value& operator=(const Value&);
     ~Value();
     int read() const;
 };
@@ -26,6 +27,11 @@ PROVIDER = """
 static int refs, releases;
 Value::Value() : slot(17) { ++refs; }
 Value::Value(const Value& v) : slot(v.slot) { COPY }
+Value& Value::operator=(const Value& other) {
+    ASSIGN
+    slot = other.slot;
+    return *this;
+}
 Value::~Value() { if (--refs == 0) { RELEASE } }
 int Value::read() const { return refs > 0 ? slot : -1; }
 Value make() { return Value(); }
@@ -35,24 +41,32 @@ CLIENT = """
 #include "value.hpp"
 #include <cstdio>
 int main() {
-    int observed;
+    int observed, after_assignment;
     {
         Value original = make();
+        const Value& alias = original;
+        original = alias;
+        after_assignment = deletions();
         {
             Value copy(original);
             if (copy.read() != 17) return 2;
         }
         observed = original.read();
     }
-    std::printf("%d %d\\n", observed, deletions());
+    std::printf("%d %d %d\\n", observed, deletions(), after_assignment);
 }
 """
+# All handles share one tracked resource. Releasing its last reference runs
+# the deleter, even when an assignment immediately restores the count.
+RETAIN_FIRST = "++refs; if (--refs == 0) ++releases;"
+RELEASE_FIRST = "if (--refs == 0) ++releases; ++refs;"
 CASES = {
-    "old": ("++refs;", "++releases;", (17, 1)),
-    "compatible": ("refs += 1;", "releases += 1;", (17, 1)),
-    "early_release": ("", "++releases;", (-1, 1)),
-    "missing_release": ("++refs;", "", (17, 0)),
-    "double_release": ("++refs;", "releases += 2;", (17, 2)),
+    "old": ("++refs;", "++releases;", RETAIN_FIRST, (17, 1)),
+    "compatible": ("refs += 1;", "releases += 1;", RETAIN_FIRST, (17, 1)),
+    "early_release": ("", "++releases;", RETAIN_FIRST, (-1, 1)),
+    "missing_release": ("++refs;", "", RETAIN_FIRST, (17, 0)),
+    "double_release": ("++refs;", "releases += 2;", RETAIN_FIRST, (17, 2)),
+    "self_assignment_release": ("++refs;", "++releases;", RELEASE_FIRST, (17, 2)),
 }
 
 
@@ -63,11 +77,15 @@ def run(root: Path) -> None:
     header.write_text(HEADER)
     (root / "client.cpp").write_text(CLIENT)
     rows = []
-    for name, (copy, release, expected) in CASES.items():
+    for name, (copy, release, assign, expected) in CASES.items():
         case = root / name
         case.mkdir(exist_ok=True)
         source = case / "value.cpp"
-        source.write_text(PROVIDER.replace("COPY", copy).replace("RELEASE", release))
+        source.write_text(
+            PROVIDER.replace("COPY", copy)
+            .replace("RELEASE", release)
+            .replace("ASSIGN", assign)
+        )
         lib = case / "libvalue.so"
         subprocess.run(
             [
@@ -104,7 +122,7 @@ def run(root: Path) -> None:
             text=True,
         )
         observed = tuple(map(int, output.split()))
-        if observed != expected:
+        if observed != (*expected, int(name == "self_assignment_release")):
             raise AssertionError((name, observed, expected))
         for lane, options in [
             ("elf", []),
@@ -135,10 +153,19 @@ def run(root: Path) -> None:
                     f"{name}/{lane}: checker exited {comparison.returncode} without a report: {comparison.stderr}"
                 )
             data = json.loads(report.read_text())
-            rows.append((name, *observed, lane, data["verdict"]))
+            rows.append((name, *observed[:2], lane, data["verdict"], observed[2]))
     with (root / "results.csv").open("w") as stream:
         writer = csv.writer(stream)
-        writer.writerow(("case", "surviving_value", "deleter_calls", "lane", "verdict"))
+        writer.writerow(
+            (
+                "case",
+                "surviving_value",
+                "deleter_calls",
+                "lane",
+                "verdict",
+                "releases_after_assignment",
+            )
+        )
         writer.writerows(rows)
 
 
