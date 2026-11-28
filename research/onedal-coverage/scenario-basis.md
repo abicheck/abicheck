@@ -106,3 +106,11 @@ table. The frozen client observes distinct method results after slot
 insertion, removal and swapping. The crosswalk uses the existing virtual
 insertion and swap experiments and the generic `virtual_remove` operator.
 The product's serialization data format plays no role in this witness.
+
+The visitor and range pilots exercise two existing mutations. Seven visitor
+field-pair swaps and the range field swap reuse the record layout experiment.
+Reordering visitor callbacks reuses the virtual slot swap. The crosswalk
+preserves the individual checker lanes. With DWARF alone the visitor slot
+swap produced NO_CHANGE even though the frozen client failed. Identity,
+type-alias and added nonvirtual method cases retain their successful client
+outcomes as controls.

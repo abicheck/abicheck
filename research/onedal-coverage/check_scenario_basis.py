@@ -382,6 +382,84 @@ def serialization_slot_receipts():
         )
 
 
+def visitor_receipts():
+    field_swaps = {
+        "base_level_impurity",
+        "base_level_nNodeSampleCount",
+        "base_impurity_nNodeSampleCount",
+        "split_featureIndex_featureValue",
+        "split_featureIndex_coverValue",
+        "split_featureValue_coverValue",
+        "leaf_response_coverValue",
+    }
+    visitor_cases = {
+        "base_level_impurity",
+        "slots",
+        "field_alias",
+        "nonvirtual",
+        "identity",
+    }
+    for path, cases, lanes in (
+        (PRODUCT / "visitor.csv", visitor_cases, {"stripped+headers"}),
+        (
+            PRODUCT.parent / "pilot/results.csv",
+            visitor_cases | field_swaps,
+            {"symbols", "dwarf", "headers"},
+        ),
+        (
+            PRODUCT.parent / "pilot/range_results.csv",
+            {"old", "alias", "swap"},
+            {"symbols", "dwarf", "headers"},
+        ),
+    ):
+        seen = set()
+        with path.open() as stream:
+            for row in csv.DictReader(stream):
+                case = row["case"]
+                lane = row.get("lane", "stripped+headers")
+                mutation = ""
+                if case in field_swaps or case == "swap":
+                    mutation = "l2_representatives/layout/swap"
+                elif case == "slots":
+                    mutation = "l2_representatives/virtual/swap"
+                verdict = row.get("checker") or row["verdict"]
+                if (
+                    (case, lane) in seen
+                    or row["client_exit"] != str(int(bool(mutation)))
+                    or (
+                        mutation
+                        and lane in {"headers", "stripped+headers"}
+                        and verdict != "BREAKING"
+                    )
+                ):
+                    raise ValueError(
+                        f"unexpected pilot observation: {path.name} {case} {lane}"
+                    )
+                seen.add((case, lane))
+                filename = path.name if path.parent == PRODUCT else f"pilot/{path.name}"
+                yield (
+                    filename,
+                    case,
+                    "frozen client",
+                    lane,
+                    "",
+                    "object representation"
+                    if case in field_swaps or case == "swap"
+                    else "virtual dispatch"
+                    if case == "slots"
+                    else "compatibility control",
+                    case,
+                    mutation.rpartition("/")[0],
+                    mutation,
+                    f"client exit {row['client_exit']}, checker {verdict}",
+                    "paired pilot observation"
+                    if mutation
+                    else "compatible client control",
+                )
+        if seen != {(case, lane) for case in cases for lane in lanes}:
+            raise ValueError(f"incomplete pilot observations: {path}")
+
+
 def main():
     check_mapping(
         "package runners",
@@ -421,6 +499,7 @@ def main():
         *member_return_receipts(),
         *root_gap_receipts(),
         *serialization_slot_receipts(),
+        *visitor_receipts(),
     ]
     for file in (
         "ledger.csv.gz",
