@@ -27,14 +27,28 @@ so the sentinel safely exposes both incorrect access directions.
   representation already have enum, symbol binding and layout mechanisms
   in Forge. Product-specific old-client mutations for these contracts remain
   unverified in this sweep.
-- For callback tables the C adapter also checks a minimum table size.
-  A future representative should pass a shorter operations prefix and observe
-  rejection before callback dispatch. The sized data-record scenario checks
-  optional field access and does not exercise this rejection policy.
-- Caller-owned versus library-owned result buffers merit an allocator/deleter
-  witness tied to the public C cleanup function. Existing ownership mutations
-  are a starting point. A matching typedef or an unchanged export cannot
-  verify correct release behavior.
+- The callback table and cleanup experiments below now exercise the two
+  behavioral contracts in Forge. The product evidence for these two cases is
+  source inspection of StreamBuf::validate and svs_search_results_free.
+
+## Follow-up experiments
+
+A frozen caller passed a table with a shortened logical extent. The baseline
+rejected it before invoking its callback. Removing the minimum check invoked
+the callback once. A full table dispatched successfully on both libraries.
+A separate cleanup mutation invoked a release callback on borrowed storage.
+An owned result was released exactly once across two cleanup calls. These
+probes observe execution with identical public declarations.
+
+The C++ callback_interface family exposes a callback through an interface's
+public operations pointer. Changing the calling convention of its by-value
+record argument kept both table layouts fixed. The frozen caller returned
+17 with the original and equivalent providers and 23 with the mutation.
+On identical CastXML snapshots the old checker returned NO_CHANGE. The
+updated checker attributed value_abi_trait_changed to the exported interface
+and the nested callback parameter. Clang snapshots produced the same finding.
+This comparison needs call-triviality evidence on both sides. A CastXML scan
+that omits the optional Clang semantics pass can lack that evidence.
 
 Run the following with the project environment active and CastXML, clang++ and
 a C compiler on PATH. The product replay builds the upstream Status translation
@@ -44,7 +58,7 @@ in scripts/l2_real_profiles.py remains the separate release-to-release test.
 ```sh
 python -m abiforge.run.l2_representatives /tmp/svs-l2 --frontend castxml \
   --family layout --family callback_table --family virtual \
-  --family member_return --family callback_return
+  --family member_return --family callback_return --family callback_interface
 pytest -q tests/test_abiforge_sized_record.py
 research/svs-coverage/replay.sh /path/to/ScalableVectorSearch
 ```

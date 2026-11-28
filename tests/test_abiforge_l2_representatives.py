@@ -116,3 +116,26 @@ def test_duplicate_export_is_checked_per_loaded_provider(tmp_path):
     receipt = json.loads((dest / "receipt.json").read_text())
     assert receipt["cases"]["withdrawal"]["libcpu.so"]["exit"] == 127
     assert receipt["cases"]["withdrawal"]["libdpc.so"]["exit"] == 0
+
+
+def test_nested_callback_record_needs_an_unambiguous_direct_field():
+    from types import SimpleNamespace
+
+    from abicheck.model.callback_type_index import CallbackTypeIndex
+    from abicheck.model.fact import Fact
+
+    record = SimpleNamespace(
+        name="Ops", qualified_name="api::Ops", trivial_for_calls=True
+    )
+    declarations = SimpleNamespace(types=[record], typedefs_qualified={})
+    index = CallbackTypeIndex(SimpleNamespace(declarations=declarations))
+
+    def identify(spelling, fact):
+        return index._direct_record(
+            spelling, fact, "api::Interface", allow_spelling=True
+        )
+
+    assert identify("const Ops *", Fact.not_collected()) is record
+    assert identify("Ops **", Fact.not_collected()) is None
+    assert identify("Ops *", Fact.present(("other::Ops",))) is None
+    assert identify("Ops *", Fact.present(())) is None

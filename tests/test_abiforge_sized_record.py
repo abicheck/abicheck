@@ -78,3 +78,38 @@ def test_sized_input_and_output(tmp_path):
             )
         else:
             assert check.returncode == 0 and data["verdict"] == "NO_CHANGE"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="uses the ELF dynamic loader")
+def test_dispatch_minimum_and_cleanup_owner(tmp_path):
+    source = SOURCE.with_name("callback_cleanup")
+    client = tmp_path / "client"
+    for name, flags, expected in (
+        ("control", [], "-1 0 0 1 / 0 1"),
+        ("short_table", ["-DIGNORE_MINIMUM"], "0 1 0 2 / 0 1"),
+        ("ownership", ["-DRELEASE_BORROWED"], "-1 0 0 1 / 1 1"),
+    ):
+        directory = tmp_path / name
+        directory.mkdir()
+        library = directory / "libops.so"
+        subprocess.run(
+            ["cc", "-shared", "-fPIC", *flags, source / "provider.c", "-o", library],
+            check=True,
+        )
+        if name == "control":
+            subprocess.run(
+                ["cc", source / "client.c", "-L", directory, "-lops", "-o", client],
+                check=True,
+            )
+        result = subprocess.run(
+            [client],
+            env={**os.environ, "LD_LIBRARY_PATH": str(directory)},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert (result.returncode, result.stdout.strip()) == (
+            int(name != "control"),
+            expected,
+        )

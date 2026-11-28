@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import re
 
+from .availability import FactStatus
 from .declarations import Function
+from .entities import RecordType
+from .fact import Fact
 from .signature_token_scan import _split_top_level_commas
 from .snapshot import AbiSnapshot
 from .type_label import qualified_spelling
@@ -25,8 +28,11 @@ class CallbackTypeIndex:
         declarations = snap.declarations
         self.aliases = declarations.typedefs_qualified
         self.traits: dict[str, bool | None] = {}
+        self.ambiguous: set[str] = set()
         for record in declarations.types:
             name = record.qualified_name or record.name
+            if name in self.traits:
+                self.ambiguous.add(name)
             self.traits[name] = (
                 record.trivial_for_calls if name not in self.traits else None
             )
@@ -69,6 +75,27 @@ class CallbackTypeIndex:
             slots[-1] = result
         return slots
 
+    def _direct_record(
+        self,
+        spelling: str,
+        identities: Fact[tuple[str, ...]] | None,
+        scope: str,
+        *,
+        allow_spelling: bool = False,
+    ) -> RecordType | None:
+        direct = re.fullmatch(r"([^*&#()\[\]<>]+?)\s*(?:[*&]\s*(?:const)?)?", spelling)
+        if not direct:
+            return None
+        name = self.resolve(direct[1], scope)[0]
+        if identities is not None and identities.is_present:
+            if identities.value != (name,):
+                return None
+        elif not allow_spelling or (
+            identities is not None and identities.status != FactStatus.NOT_COLLECTED
+        ):
+            return None
+        return None if name in self.ambiguous else self.records.get(name)
+
     def slots(self, function: Function) -> dict[tuple[str, bool], str]:
         scope = scope_of(qualified_spelling(function.entity_id) or function.name)
         slots = {}
@@ -87,22 +114,26 @@ class CallbackTypeIndex:
         )
         for path, spelling, identities in endpoints:
             add(path, spelling, scope)
-            if (
-                identities is None
-                or not identities.is_present
-                or len(identities.value or ()) != 1
-            ):
+            record = self._direct_record(spelling, identities, scope)
+            if record is None:
                 continue
-            owner = (identities.value or ())[0]
-            # Only direct record values, pointers and references expose this table.
-            direct = re.fullmatch(
-                r"([^*&#()\[\]<>]+?)\s*(?:[*&]\s*(?:const)?)?", spelling
-            )
-            if not direct or self.resolve(direct[1], scope)[0] != owner:
-                continue
-            record = self.records.get(owner)
-            if record:
-                for field in record.fields:
-                    if field.access != AccessLevel.PRIVATE:
-                        add(f"{path}.{field.name}", field.type, owner)
+            owner = record.qualified_name or record.name
+            for field in record.fields:
+                if field.access == AccessLevel.PRIVATE:
+                    continue
+                field_path = f"{path}.{field.name}"
+                add(field_path, field.type, owner)
+                # An interface may publish its operations through a separate table.
+                table = self._direct_record(
+                    field.type, field.type_identities_fact, owner, allow_spelling=True
+                )
+                if table is None or table is record:
+                    continue
+                for slot in table.fields:
+                    if slot.access != AccessLevel.PRIVATE:
+                        add(
+                            f"{field_path}.{slot.name}",
+                            slot.type,
+                            table.qualified_name or table.name,
+                        )
         return slots
