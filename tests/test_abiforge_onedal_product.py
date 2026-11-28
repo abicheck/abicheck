@@ -298,6 +298,52 @@ def test_hdbscan_export_coverage(hdbscan_binary):
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not os.getenv("ABIFORGE_ONEDAL_MPI"), reason="requires Open MPI development tools"
+)
+@pytest.mark.parametrize("target", ["OLD", "NEW"])
+def test_hdbscan_downgrade_report(tmp_path, hdbscan_binary, target):
+    from abiforge.run.onedal_export_surface import symbol_names
+
+    prefix = os.getenv(f"ABIFORGE_ONEDAL_{target}")
+    if not prefix:
+        pytest.skip("requires the target oneDAL CPU package")
+    baseline = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]) / "lib/libonedal.so.4"
+    candidate = Path(prefix) / "lib/libonedal.so.3"
+    clients = [hdbscan_binary(name) for name in (*HDBSCAN_CPU_CLIENTS, "hdbscan_spmd")]
+    report = tmp_path / "report.json"
+    compared = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "abicheck",
+            "compare",
+            baseline,
+            candidate,
+            *(arg for client in clients for arg in ("--used-by", client)),
+            "-o",
+            f"json={report}",
+        ]
+    )
+    assert compared.returncode == 4
+    data = json.loads(report.read_text())
+    consumers = {row["app"]: row for row in data["used_by"]}
+    assert consumers.keys() == {str(client) for client in clients}
+    original_exports = symbol_names(baseline)
+    replacement_exports = symbol_names(candidate)
+    reported = set()
+    for client in clients:
+        consumer = consumers[str(client)]
+        required = symbol_names(client, imports=True) & original_exports
+        assert consumer["verdict"] == "BREAKING"
+        assert consumer["required_symbol_count"] == len(required)
+        missing = set(consumer["missing_symbols"])
+        assert missing == required - replacement_exports
+        reported.update(name for name in missing if "hdbscan" in name)
+    assert len(reported) == 93
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("source", "target"),
     tuple(permutations(("OLD", "NEW", "MAJOR"), 2)),

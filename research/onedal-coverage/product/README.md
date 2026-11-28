@@ -462,6 +462,12 @@ with the union of undefined HDBSCAN symbols in those same eight binaries.
 With the CPU SDK and Open MPI environment variables set as above, replay the
 runtime and coverage checks together with
 `python -m pytest -q tests/test_abiforge_onedal_product.py -k hdbscan`.
+Set `ABIFORGE_ONEDAL_OLD` and `ABIFORGE_ONEDAL_NEW` to the 2025.9 and
+2025.11 package roots to include both downgrade reports in the same run.
+For each target, `abicheck compare --used-by` reports all eight consumers as
+breaking. Each consumer's missing-name list matches its imported baseline
+exports absent from the target, independently computed with GNU nm. Together
+the lists identify all 93 missing HDBSCAN names on each downgrade.
 GPU execution and successful distributed clustering remain unverified.
 
 The two downgrade comparisons include the clustering executable alongside the
