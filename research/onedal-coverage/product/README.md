@@ -388,7 +388,10 @@ python -m abiforge.run.onedal_header_imports "$OLD" "$MINOR" "$MAJOR" --all-head
 The DBSCAN CPU fixture is built once per 2025 minor release and each binary
 runs against both 2025.9 and 2025.11. In float and double, with memory-saving
 mode on and off, it verifies two clusters, one noise point and all six core
-observations against their input indices. Each binary imports 18 of the 56
+observations against their input indices. Assigning the isolated point weight
+three makes it a third cluster and a seventh core observation. The weighted
+and unweighted cases pass across all four build/runtime pairings.
+Each binary imports 20 of the 56
 frontend exports containing the Itanium namespace component `6dbscan` in
 each release. Replay with `test_dbscan_minor_release_results` and the
 `ABIFORGE_ONEDAL_OLD` and `ABIFORGE_ONEDAL_NEW` SDK roots.
