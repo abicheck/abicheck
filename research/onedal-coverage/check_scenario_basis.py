@@ -926,6 +926,37 @@ def lifetime_state_receipts():
                 )
 
 
+def pe_inventory_receipts():
+    filename = "pe-exports.json"
+    images = json.loads((PRODUCT / filename).read_text())
+    releases = {"2025.9.0": 3, "2025.11.0": 3, "2026.2.0": 4}
+    expected = {
+        f"{release}/{library}.{major}.dll"
+        for release, major in releases.items()
+        for library in ("onedal", "onedal_core", "onedal_dpc", "onedal_thread")
+    }
+    if images.keys() != expected:
+        raise ValueError("incomplete Windows DLL inventory")
+    for image, result in images.items():
+        if result["missing"] or result["unexpected"] or result["exports"] <= 0:
+            raise ValueError(
+                f"PE export readers disagree or observed no exports: {image}"
+            )
+        yield (
+            filename,
+            image,
+            "PE image",
+            result["sha256"],
+            "",
+            "PE export identity",
+            "",
+            "",
+            "",
+            "objdump and PE reader agree on name and ordinal",
+            "binary inventory only",
+        )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -972,6 +1003,7 @@ def main():
         *import_withdrawal_receipts(),
         *variant_and_lookup_receipts(),
         *lifetime_state_receipts(),
+        *pe_inventory_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

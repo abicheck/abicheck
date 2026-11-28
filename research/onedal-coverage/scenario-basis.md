@@ -157,3 +157,10 @@ reuse the state-propagation scenario alongside the no-op clear. The lifetime
 campaign instead observes the surviving handle and deleter count. Shared
 return-type probes supply per-type ownership evidence. Their return-symbol
 counts do not establish per-accessor execution.
+
+For each of 12 Windows DLL images, the PE inventory compares the multiset
+of export names and ordinals against objdump. The crosswalk retains the
+image digest for replay. A separate portable fixture keeps the export name
+and ordinal constant while switching the export between code, data and a
+forwarder. Its witness reads PE metadata. Windows loader execution remains
+an open evidence gap.
