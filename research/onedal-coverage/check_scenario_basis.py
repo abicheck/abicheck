@@ -1176,6 +1176,73 @@ def cpu_campaign_receipts():
             )
 
 
+def contract_pilot_receipts():
+    mutations = {
+        "range_argument": "l2_representatives/layout/swap",
+        "range_return": "l2_representatives/layout/swap",
+        "range_register_argument": "l2_representatives/calls/register_class",
+        "range_register_return": "l2_representatives/calls/register_class",
+        "template_provider": "explicit_instantiation_dropped",
+        "symbol_version": "provider_campaign/wrong_version",
+    }
+    filename = "contracts.csv"
+    with (PRODUCT / filename).open() as stream:
+        rows = list(csv.DictReader(stream))
+    expected = {
+        (family, variant, lane)
+        for family in mutations
+        for variant in ("break", "control")
+        for lane in ("elf", "headers")
+    }
+    if (
+        len(rows) != len(expected)
+        or {(r["family"], r["case"], r["lane"]) for r in rows} != expected
+    ):
+        raise ValueError("incomplete contract pilot matrix")
+    for row in rows:
+        family = row["family"]
+        broken = row["case"] == "break"
+        code = (127 if family == "template_provider" else 1) if broken else 0
+        if int(row["client_exit"]) != code:
+            raise ValueError(f"unexpected contract pilot outcome: {row}")
+        yield (
+            filename,
+            family,
+            row["case"],
+            row["lane"],
+            "",
+            family,
+            row["case"],
+            "generic contract pilot",
+            mutations[family] if broken else "",
+            f"client exit {code}, checker {row['checker']}",
+            "paired pilot observation" if broken else "compatible client control",
+        )
+
+    by_frontend = {}
+    for frontend in ("clang", "castxml"):
+        filename = f"l2-representatives-{frontend}.json"
+        results = json.loads((PRODUCT / filename).read_text())
+        by_frontend[frontend] = {case: row["exits"] for case, row in results.items()}
+        for case, row in results.items():
+            family, variant = case.split("/")
+            yield (
+                filename,
+                case,
+                family,
+                frontend,
+                "",
+                family,
+                variant,
+                "generic L2 replay",
+                f"l2_representatives/{case}",
+                f"client exits {row['exits']}",
+                "generic observation",
+            )
+    if by_frontend["clang"] != by_frontend["castxml"]:
+        raise ValueError("generic frontend receipts disagree on frozen-client outcomes")
+
+
 def main():
     check_mapping(
         "package runners",
@@ -1226,6 +1293,7 @@ def main():
         *device_loader_receipts(),
         *cpu_example_receipts(),
         *cpu_campaign_receipts(),
+        *contract_pilot_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

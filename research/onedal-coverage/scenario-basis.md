@@ -184,3 +184,10 @@ split and leaf records. An old client indexing the second array element
 detects the changed stride. These six observations reuse
 `struct_append_field`. The other mutations reuse field or virtual-slot
 reordering. The test checks the complete case set generated for both tasks.
+
+The six contract pilots preserve input versus return direction for record
+field order and register-class changes. The other two pilots isolate template
+instantiation availability and symbol version binding. The crosswalk retains
+both checker lanes and verifies that the two generic L2 frontend receipts
+agree on frozen-client results. Repeated frontend observations add no new
+mechanism.

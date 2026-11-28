@@ -97,7 +97,11 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
     assert {r["package_edits"] for r in slots} == {"insert", "remove", "swap"}
     assert all(r["generic_mutations"] in available | OP_BY_NAME.keys() for r in slots)
 
-    pilots = [r for r in rows if r["status"] == "paired pilot observation"]
+    pilots = [
+        r
+        for r in rows
+        if r["status"] == "paired pilot observation" and r["ledger"] != "contracts.csv"
+    ]
     assert {r["generic_mutations"] for r in pilots} == {
         "l2_representatives/layout/swap",
         "l2_representatives/virtual/swap",
