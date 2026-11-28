@@ -77,3 +77,9 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         == {"l2_representatives/large_argument/stack_value"}
         <= available
     )
+
+    lowering = [r for r in rows if r["ledger"] == "return-lowering.csv"]
+    options = [r for r in rows if r["ledger"] == "option-returns.csv"]
+    assert len(lowering) == 225
+    assert len(options) == 38
+    assert all(not r["generic_mutations"] for r in lowering + options)

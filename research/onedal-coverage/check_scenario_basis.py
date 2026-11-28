@@ -170,6 +170,61 @@ def argument_receipts():
         )
 
 
+def return_lowering_receipts():
+    """Distinguish observed calling sequences from mutation evidence."""
+    direct = set()
+    seen = set()
+    with (PRODUCT / "return-lowering.csv").open() as stream:
+        for row in csv.DictReader(stream):
+            symbol = row["symbol"]
+            shape = row["llvm_return"], row["hidden_result_pointer"]
+            if symbol in seen or shape not in {("void", "1"), ("i64", "0")}:
+                raise ValueError(f"unexpected or repeated return lowering: {symbol}")
+            seen.add(symbol)
+            if shape == ("i64", "0"):
+                direct.add(symbol)
+            yield (
+                "return-lowering.csv",
+                symbol,
+                "by-value return",
+                row["sdk_type"],
+                symbol,
+                "calling convention",
+                "",
+                "integer register" if symbol in direct else "hidden result pointer",
+                "",
+                "LLVM IR of SDK type probe",
+                "baseline lowering only",
+            )
+    observed = set()
+    with (PRODUCT / "option-returns.csv").open() as stream:
+        for row in csv.DictReader(stream):
+            symbol = row["symbol"]
+            old, minor = (
+                int(row[release]) for release in ("dal-2025.9.0", "dal-2025.11.0")
+            )
+            if symbol in observed or old != minor or old <= 0 or old & (old - 1):
+                raise ValueError(f"unexpected or repeated option mask: {symbol}")
+            observed.add(symbol)
+            yield (
+                "option-returns.csv",
+                symbol,
+                "option getter",
+                str(old),
+                symbol,
+                "returned bit mask",
+                "",
+                "",
+                "",
+                "frozen client on two releases",
+                "implementation-level value control",
+            )
+    if observed != direct:
+        raise ValueError(
+            "direct-return type probes and frozen option getter observations disagree"
+        )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -196,7 +251,11 @@ def main():
     edit_map = {
         name: family for family, names in EDITS.items() for name in names.split()
     }
-    dispositions = [*return_receipts(), *argument_receipts()]
+    dispositions = [
+        *return_receipts(),
+        *argument_receipts(),
+        *return_lowering_receipts(),
+    ]
     for file in (
         "ledger.csv.gz",
         "extended-obligations.csv.gz",

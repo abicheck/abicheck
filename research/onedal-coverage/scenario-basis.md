@@ -76,3 +76,10 @@ transition from an indirect object to a stack copy. The generic
 words. Its frozen client detects the displaced scalar argument, and LLVM IR
 independently identifies the stack copy. This exercises a different machine
 calling sequence from the small-aggregate register case.
+
+The SDK return-type probes record 187 hidden result pointers and 38 direct
+integer returns. These are baseline calling sequences. The 38 direct-return
+entries also have a frozen-client observation of the same single-bit option
+value on two releases. The crosswalk checks that both symbol sets agree.
+A stable option value is a behavioral control. Neither receipt introduces
+an independent ABI mutation or increases the number of covered mechanisms.
