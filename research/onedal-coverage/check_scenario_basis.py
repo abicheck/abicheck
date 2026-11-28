@@ -145,6 +145,43 @@ def main():
     print(
         f"SYCL: {len(older)} older signatures, {len(newer)} newer signatures, {len(newer - older)} newer-only"
     )
+    # This receipt records a header-projection edit independently of runtime success.
+    # It identifies a declaration by qualified name and full written signature.
+    with (device / "checker-withdrawals.tsv").open() as stream:
+        withdrawals = list(csv.DictReader(stream, delimiter="\t"))
+    expected_keys = {(name, signature) for _, name, signature in older}
+    actual_keys = {(r["qualified_name"], r["signature"]) for r in withdrawals}
+    if (
+        actual_keys != expected_keys
+        or len(withdrawals) != len(older)
+        or len(actual_keys) != len(withdrawals)
+    ):
+        raise ValueError(
+            "SYCL withdrawal receipts must match each signature exactly once"
+        )
+    for row in withdrawals:
+        if tuple(
+            row[key]
+            for key in ("isolated_removal", "bulk_removal", "unchanged_removal")
+        ) != ("True", "True", "False"):
+            raise ValueError(
+                f"withdrawal or unchanged control failed for {row['qualified_name']} {row['signature']}"
+            )
+        dispositions.append(
+            (
+                "checker-withdrawals.tsv",
+                row["qualified_name"],
+                "SYCL signature",
+                row["signature"],
+                "",
+                "declaration availability",
+                "withdraw declaration",
+                "source surface",
+                "header_inline_removed|src_public_function_removed",
+                "checker-withdrawals.tsv",
+                "projected withdrawal; inline/exported kind unresolved",
+            )
+        )
     for row in signatures:
         witness = row["witness"]
         scenario = {

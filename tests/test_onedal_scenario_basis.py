@@ -44,3 +44,12 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
             assert row["scenario_contracts"] == "l2_representatives/virtual/swap"
         elif row["key"].endswith(("::get_queue", "::make_communicator")):
             assert row["scenario_contracts"] == ""
+
+    from abiforge.operators import OP_BY_NAME
+
+    withdrawals = [row for row in rows if row["ledger"] == "checker-withdrawals.tsv"]
+    assert len(withdrawals) == 59
+    assert all(
+        set(row["generic_mutations"].split("|")) <= OP_BY_NAME.keys()
+        for row in withdrawals
+    )

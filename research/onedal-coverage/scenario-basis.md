@@ -40,8 +40,14 @@ The newer package experiments reduce in the same way. CPU/GPU selectors, eager l
 The two-rank package replay exercises four collective operations through typed
 and byte-buffer calls. Their count/type boundary uses the erased-buffer
 scenario. The five interface calls, including the queue getter, exercise virtual
-dispatch. The communicator factory and the concrete queue getter have runtime
-receipts but no matched generic mutation in this inventory.
+dispatch. For the communicator factory and concrete queue getter, the evidence covers
+returning a value and withdrawing the declaration. No compiler-lowering
+mutation was recorded for these two returns. All 59 older SYCL signatures
+have a separate exact declaration-withdrawal receipt with isolated, bulk and
+unchanged controls. The generic operators are `header_inline_removed` and
+`src_public_function_removed`. The receipt aggregates both finding kinds,
+so it cannot establish which operator applies to each signature or whether
+an already-built binary loses an export.
 
 Peer routing is a separate behavioral observation. In a two-rank control, a
 frozen client passed the destination and an integer to a shared library.
