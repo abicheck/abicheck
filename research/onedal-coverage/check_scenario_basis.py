@@ -526,6 +526,80 @@ def enum_receipts():
             )
 
 
+def provider_receipts():
+    for filename in (
+        "provider-binding.csv",
+        "provider-move.csv",
+        "provider-move-bundle.csv",
+    ):
+        with (PRODUCT / filename).open() as stream:
+            rows = list(csv.DictReader(stream))
+        binding = filename == "provider-binding.csv"
+        expected = (
+            {"reachable", "missing", "wrong_version", "unreachable"}
+            if binding
+            else {"moved", "missing"}
+        )
+        if {r["case"] for r in rows} != expected or len(rows) != len(expected):
+            raise ValueError(f"incomplete provider observations: {filename}")
+        for row in rows:
+            case = row["case"]
+            target = "reachable" if case == "moved" else case
+            loads = target == "reachable"
+            if row["client_exit"] != ("0" if loads else "127"):
+                raise ValueError(f"unexpected loader exit: {filename}/{case}")
+            if binding:
+                if row["loadability"] != ("pass" if loads else "fail"):
+                    raise ValueError(f"unexpected loadability result: {case}")
+                detail = row["loadability"]
+            else:
+                detail = row.get("single_provider_verdict") or row["release_verdict"]
+                if "bundle_verdict" in row:
+                    detail += f", bundle {row['bundle_verdict']} ({row['bundle_findings']} findings)"
+            yield (
+                filename,
+                case,
+                "ELF dependency",
+                detail,
+                "",
+                "provider resolution",
+                case,
+                "versioned dependency lookup",
+                f"provider_campaign/{target}",
+                f"frozen client exit {row['client_exit']}",
+                "loader observation",
+            )
+
+    filename = "duplicate-provider.json"
+    receipt = json.loads((PRODUCT / filename).read_text())
+    cases = receipt["cases"]
+    for variant in ("control", "withdrawal"):
+        case = cases[variant]
+        for library in ("libonedal_dpc.so.3", "libonedal.so.3"):
+            missing = variant == "withdrawal" and library == "libonedal_dpc.so.3"
+            result = case[library]
+            if result != {
+                "exit": 127 if missing else 0,
+                "binding": None if missing else library,
+            }:
+                raise ValueError(
+                    f"unexpected duplicate-provider binding: {variant}/{library}"
+                )
+            yield (
+                filename,
+                library,
+                "ELF dependency",
+                case["package_verdict"],
+                receipt["symbol"],
+                "provider resolution",
+                variant,
+                "duplicate provider",
+                f"duplicate_provider/{variant}",
+                f"client exit {result['exit']}, binding {result['binding']}",
+                "loader observation",
+            )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -567,6 +641,7 @@ def main():
         *serialization_slot_receipts(),
         *visitor_receipts(),
         *enum_receipts(),
+        *provider_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

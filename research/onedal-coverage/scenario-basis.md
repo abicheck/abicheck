@@ -121,3 +121,10 @@ underlying type change that shifts a field in the enclosing record. All
 three edits reuse existing enum operators. The crosswalk checks host and
 OpenCL CPU observations on both releases. The two sparse-indexing checker
 frontends describe the same client workloads.
+
+Provider relocation and versioned dependency lookup share the frozen-client
+loader experiment. The crosswalk preserves a discrepancy in the archived
+bundle comparison: both the reachable move and the missing provider received
+a NO_CHANGE bundle verdict, although only the reachable move loaded. A
+separate duplicate-provider experiment withdraws one export and checks which
+library each of two clients actually binds. The sibling client still runs.
