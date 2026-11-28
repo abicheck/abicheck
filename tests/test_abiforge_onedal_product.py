@@ -6,12 +6,12 @@ from __future__ import annotations
 import csv
 import gzip
 import json
-from itertools import permutations
 import os
 import re
 import shutil
 import subprocess
 import sys
+from itertools import permutations
 from pathlib import Path
 
 import pytest
@@ -476,7 +476,10 @@ def test_thread_provider_consumer_requirements(tmp_path):
 
 @pytest.mark.integration
 def test_core_provider_consumer_requirements(tmp_path):
-    from abiforge.checkers.abicheck import consumer_missing_symbol_probe, consumer_required_names
+    from abiforge.checkers.abicheck import (
+        consumer_missing_symbol_probe,
+        consumer_required_names,
+    )
     from abiforge.run.onedal_export_surface import symbol_names
 
     providers = {}

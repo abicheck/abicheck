@@ -9,8 +9,11 @@ from abicheck.checker_policy import Confidence
 from abicheck.report.diff_report import to_json, to_stat_json
 from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.report.render_review import render_terminal_digest
-from tests._report_test_helpers import compute_review
-from tests._report_test_helpers import make_result as _result, review_digest
+from tests._report_test_helpers import (
+    compute_review,
+    make_result as _result,
+    review_digest,
+)
 
 
 def _first_finding(doc: dict) -> dict:
