@@ -830,6 +830,102 @@ def variant_and_lookup_receipts():
                 )
 
 
+def lifetime_state_receipts():
+    filename = "lifetime.csv"
+    outcomes = {
+        "old": (17, 1),
+        "compatible": (17, 1),
+        "early_release": (-1, 1),
+        "missing_release": (17, 0),
+        "double_release": (17, 2),
+    }
+    with (PRODUCT / filename).open() as stream:
+        rows = list(csv.DictReader(stream))
+    expected = {(case, lane) for case in outcomes for lane in ("elf", "headers")}
+    if len(rows) != len(expected) or {(r["case"], r["lane"]) for r in rows} != expected:
+        raise ValueError("incomplete generic lifetime controls or mutations")
+    for row in rows:
+        case = row["case"]
+        outcome = int(row["surviving_value"]), int(row["deleter_calls"])
+        if outcome != outcomes[case]:
+            raise ValueError(f"unexpected lifetime outcome: {case}")
+        yield (
+            filename,
+            case,
+            "generic replay",
+            row["lane"],
+            "",
+            "ownership",
+            case,
+            "lifetime_campaign",
+            f"lifetime_campaign/{case}",
+            f"surviving value {outcome[0]}, deleter calls {outcome[1]}, checker {row['verdict']}",
+            "generic observation",
+        )
+
+    for filename in ("ownership-campaign.csv", "status-clear.csv"):
+        expected = (
+            {"COPY": ("discard_copy", 11), "ASSIGN": ("discard_assignment", 12)}
+            if filename.startswith("ownership")
+            else {"CLEAR": ("no_op_clear", 3)}
+        )
+        with (PRODUCT / filename).open() as stream:
+            groups = {}
+            for row in csv.DictReader(stream):
+                key = row["environment"], row.get("operation", "CLEAR")
+                group = groups.setdefault(key, {})
+                variant = row["implementation"].lower()
+                if variant in group:
+                    raise ValueError(f"repeated status observation: {key}/{variant}")
+                group[variant] = int(row["exit"])
+        if groups.keys() != {
+            (release, op)
+            for release in ("dal-2025.9.0", "dal-2025.11.0")
+            for op in expected
+        }:
+            raise ValueError(f"incomplete status observations: {filename}")
+        for (release, operation), exits in groups.items():
+            edit, code = expected[operation]
+            mutant = "no_op" if operation == "CLEAR" else "mutant"
+            if exits != {"baseline": 0, "forward": 0, mutant: code}:
+                raise ValueError(
+                    f"unexpected status propagation: {release}/{operation}"
+                )
+            yield (
+                filename,
+                release,
+                operation,
+                "",
+                "",
+                "returned state",
+                edit,
+                "value_state",
+                REPRESENTATIVES[edit],
+                f"frozen client exit {code}",
+                "paired package observation",
+            )
+
+    filename = "shared-return-types.csv"
+    with (PRODUCT / filename).open() as stream:
+        for row in csv.DictReader(stream):
+            if (row["control"], row["borrow"], row["extra_owner"]) != ("0", "11", "12"):
+                raise ValueError(f"unexpected shared return observation: {row}")
+            for edit in ("borrow", "extra_owner"):
+                yield (
+                    filename,
+                    row["release"],
+                    "return type",
+                    row["sdk_type"],
+                    "",
+                    "ownership",
+                    edit,
+                    "lifetime_campaign",
+                    REPRESENTATIVES[edit],
+                    f"type probe exit {row[edit]}",
+                    "per-type observation",
+                )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -875,6 +971,7 @@ def main():
         *exception_receipts(),
         *import_withdrawal_receipts(),
         *variant_and_lookup_receipts(),
+        *lifetime_state_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

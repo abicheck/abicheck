@@ -150,3 +150,10 @@ for this contract. The experiment never invokes a constructor or destructor.
 Across three releases, the thread library has three linker-defined exports
 without generated imports: `__bss_start`, `_edata` and `_end`. All other lookup
 entries have matching imports. These are availability controls and contribute no mutation.
+
+The ownership campaign's COPY and ASSIGN shims discard status contents.
+Their independent witness reads the resulting status, so these operations
+reuse the state-propagation scenario alongside the no-op clear. The lifetime
+campaign instead observes the surviving handle and deleter count. Shared
+return-type probes supply per-type ownership evidence. Their return-symbol
+counts do not establish per-accessor execution.
