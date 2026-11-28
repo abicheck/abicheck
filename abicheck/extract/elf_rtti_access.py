@@ -42,7 +42,7 @@ def _edges(elf: Any) -> dict[str, dict[str, bool]] | None:
     # A locally bound R_X86_64_RELATIVE addend is the link-time address.
     # Require an exact, unambiguous dynamic RTTI symbol at that address.
     by_address = {}
-    for index, sym in enumerate(syms.iter_symbols()):
+    for symbol_index, sym in enumerate(syms.iter_symbols()):
         if (
             sym.name.startswith("_ZTI")
             and isinstance(sym["st_shndx"], int)
@@ -50,7 +50,7 @@ def _edges(elf: Any) -> dict[str, dict[str, bool]] | None:
             and sym["st_size"] > 0
         ):
             address = sym["st_value"]
-            by_address[address] = index if address not in by_address else None
+            by_address[address] = symbol_index if address not in by_address else None
     refs = {}
     for rel in rels.iter_relocations():
         addr = rel["r_offset"]
@@ -71,7 +71,7 @@ def _edges(elf: Any) -> dict[str, dict[str, bool]] | None:
             if address in refs or address in packed_slots:
                 return None
             packed_slots.add(address)
-    result = {}
+    result: dict[str, dict[str, bool]] = {}
     seen = set()
     for sym in syms.iter_symbols():
         name = sym.name

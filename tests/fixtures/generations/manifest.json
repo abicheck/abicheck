@@ -534,7 +534,8 @@
     "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
     "70": "generation 70 changed only castxml's guess for a global-namespace variable's mangling (the Itanium ABI does not mangle global variables); retired by generation 71 without a separate frozen snapshot, as generation 69 was",
     "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
-    "88": "Never shipped on main: an intermediate generation of the typed header-graph branch (PR #2141), superseded by 89 before merge; the CLI dump it froze is identical to generation 87's."
+    "88": "Never shipped on main: an intermediate generation of the typed header-graph branch (PR #2141), superseded by 89 before merge; the CLI dump it froze is identical to generation 87's.",
+    "99": "Intermediate extractor generation on the oneDAL coverage branch, superseded before merge."
   },
   "sources_sha256": "e11d1372d25b44c7369c13f322830386c43e524c696f089c932f146f082d6514"
 }

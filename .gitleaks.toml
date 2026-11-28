@@ -30,3 +30,10 @@ regexes = ['''"revision": "[0-9a-f]{40}"''']
 description = "LLVM apt repository signing-key fingerprint (public, pinned in clang-plugin.yml)"
 regexTarget = "line"
 regexes = ['''LLVM_KEY_FPR: "[0-9A-F]{40}"''']
+
+[[allowlists]]
+description = "Generated SHA-256 fingerprint of the ELF RTTI access extractor"
+condition = "AND"
+paths = ['''^(b/)?abicheck/storage/generation_fingerprints\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"abicheck/extract/elf_rtti_access\.py": "[0-9a-f]{64}",?\s*$''']

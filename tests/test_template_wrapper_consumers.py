@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="uses the ELF dynamic loader")
@@ -17,17 +19,14 @@ def test_template_wrapper_and_implementation_have_distinct_consumers(tmp_path):
     for case, library in providers.items():
         report = tmp_path / f"{case}.json"
         compared = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
+            abicheck_command(
                 "compare",
                 providers["both"],
                 library,
                 *(arg for client in clients for arg in ("--used-by", client)),
                 "-o",
                 f"json={report}",
-            ]
+            )
         )
         data = json.loads(report.read_text())
         assert compared.returncode == (0 if case == "both" else 4)

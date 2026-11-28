@@ -22,7 +22,6 @@ from .generation_spelling_types import GenerationSpellingChange
 
 __all__ = ["SPELLING_MIGRATIONS"]
 
-
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
         "85d745b9a (#1538): first stamped generation; the baseline every "
@@ -792,11 +791,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "Large PE export tables and full decorated names. Truncated names and missing "
         "ordinals cannot be reconstructed from old snapshots; re-dump the DLL."
     ),
-    99: GenerationSpellingChange(
-        "PE data-section exports now produce variables. Symbol spellings are unchanged; "
-        "re-dump older DLLs to recover the entity kind."
-    ),
+    99: GenerationSpellingChange("PE data exports become variables; re-dump for kind."),
     100: GenerationSpellingChange(
-        "Named and locally bound x86-64 ELF VMI base access. Older snapshots lack this optional fact. No spelling rewrite."
+        "ELF VMI base access is optional. No spelling rewrite."
     ),
 }

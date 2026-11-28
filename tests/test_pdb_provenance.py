@@ -541,10 +541,12 @@ class TestDumpPeFallbackBuildsPdbTypes:
         hdr = tmp_path / "api.h"
         hdr.write_text("struct Widget { int x; };\n")
 
+        from abicheck.model.pe_facts import PeExport
+
         # Fake PE metadata: one named export, valid machine.
         fake_pe = _t.SimpleNamespace(
             machine="AMD64",
-            exports=[_t.SimpleNamespace(name="Api", ordinal=1)],
+            exports=[PeExport(name="Api", ordinal=1)],
         )
         monkeypatch.setattr("abicheck.pe_metadata.parse_pe_metadata", lambda p: fake_pe)
         # PDB debug info with a public-header type.

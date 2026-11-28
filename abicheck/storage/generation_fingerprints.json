@@ -68,7 +68,7 @@
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_pure_virtual_slots.py": "c583305033c551840e206f28600400e6e01929e7a383284fb8261a644c76c191",
-      "abicheck/extract/elf_rtti_access.py": "85fa708afcb742200f4ae87f7b4cf51f6bbef8d57779269a4b00dabe16a70797",
+      "abicheck/extract/elf_rtti_access.py": "407799d119e21c7b3178cfff542b26a3015a920a3922c84ce4aff773a42910ab",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
       "abicheck/extract/elf_string_table.py": "8348fa460902944419d2f9fe0918d05d232dc0a6ebce3d606e1b1fcb68c69337",
       "abicheck/extract/elf_symbol_classify.py": "e7e4d0eb3bd5fab47da591e7c6180edee612adde5ab5eda2522f8d782cd368e9",
@@ -250,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "07cebaa353760a43aab0c8b39635bc1d2bf02e836b7dc4d402bf80e93bbdc0d8"
     },
-    "fingerprint": "9d0727dbdea429cdba52c78badbb8c6765add4f4f034aadc647c6699397cf161",
+    "fingerprint": "7347d4041a848d5286a5ebd12ec020473958f7732c3270c16f2721148f115c2f",
     "generation": 100,
-    "reason": "Read the in-place addend for packed RELR direct-base pointers in VMI RTTI"
+    "reason": "Preserve PE export data classification in the raw index"
   },
   "resolver": {
     "files": {

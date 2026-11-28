@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command
+
 
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="compiles shared ELF libraries")
@@ -51,30 +53,24 @@ def test_public_base_path_controls_crosscast_and_catch(tmp_path, link_flags):
         for access in ("public", "protected", "private"):
             root = tmp_path / access
             subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "abicheck",
+                abicheck_command(
                     "dump",
                     root / "libitem.so",
                     "-o",
                     root / "snap.json",
-                ],
+                ),
                 check=True,
             )
         for access in ("protected", "private"):
             report = tmp_path / f"{access}.json"
             compared = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "abicheck",
+                abicheck_command(
                     "compare",
                     tmp_path / "public/snap.json",
                     tmp_path / access / "snap.json",
                     "-o",
                     f"json={report}",
-                ]
+                )
             )
             assert compared.returncode == 4
             rows = json.loads(report.read_text())["changes"]
