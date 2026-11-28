@@ -51,6 +51,7 @@ from .extract.elf_notes import (
     decode_gnu_property_desc,
     iter_gnu_property_descs,
 )
+from .extract.elf_rtti_access import read_rtti_access
 from .extract.elf_static_tls import has_static_tls_relocation
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -164,12 +165,10 @@ def _parse_and_pickle(f: IO[bytes], so_path: Path) -> bytes:
     return pickle.dumps((meta, failures), protocol=pickle.HIGHEST_PROTOCOL)
 
 
-# ---------------------------------------------------------------------------
-# Internal parsing
-# ---------------------------------------------------------------------------
-
-
 def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
+    """Read the export table before interpreting relocations that reference it.
+
+    Hardening facts depend on both the segments and the decoded symbols."""
     meta = ElfMetadata()
     elf = ELFFile(f)
 
@@ -191,6 +190,7 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     _postprocess_metadata(meta)
     # DF_STATIC_TLS: AArch64 ld omits it; the relocation is the requirement.
     meta.has_static_tls = meta.has_static_tls or has_static_tls_relocation(elf)
+    meta.rtti_access = read_rtti_access(elf)
     meta.vtt_entries = read_vtt_entries(elf, meta)
 
     # Finalize hardening now that segments, dynamic flags and symbols are read.

@@ -33,6 +33,7 @@ from ..policy.generation_drift_demotion import (
     demote_generation_spelling_drift,
     demote_restrict_depth_drift,
 )
+from ..policy.pe_export_generation_drift import qualify_pe_export_reclassification
 from ..policy.retired_function_drift import demote_retired_function_drift
 from ..storage.generation_migrations import (
     erased_extents_restored_between,
@@ -78,6 +79,9 @@ def demote_cross_generation_drift(
     if old.fact_generations == new.fact_generations:
         return changes
     old_generation, new_generation = operand_extractor_generations(old, new)
+    qualify_pe_export_reclassification(
+        changes, old, new, old_generation, new_generation
+    )
     changes = demote_generation_spelling_drift(
         changes,
         old,

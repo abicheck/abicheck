@@ -31,19 +31,6 @@ class TestReviewDigest:
         assert "Release recommendation:" not in out
         assert "_Z3foov" in out
 
-    def test_manual_review_banner_on_scope_fallback(self):
-        r = _result(
-            Verdict.BREAKING,
-            changes=[
-                Change(ChangeKind.FUNC_REMOVED, "x", "removed"),
-            ],
-        )
-        r.scope_to_public_surface = True
-        r.scope_resolved = False
-        out = review_digest(r)
-        assert "Manual review required" in out
-        assert "unconfirmed" in out.lower()
-
     def test_no_banner_when_scope_resolved(self):
         r = _result(Verdict.COMPATIBLE)
         r.scope_to_public_surface = True

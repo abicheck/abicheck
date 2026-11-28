@@ -47,6 +47,7 @@ from .extension_fact_catalog import (
     CXX_CONCEPT_CONSTRAINTS,
     CXX_CONCEPT_HEADER_SCAN,
     CXX_TEMPLATE_DEFAULTS,
+    ELF_RTTI_ACCESS,
     ELF_VTT_ENTRIES,
     EXPORT_READ,
     EXTENSION_FACTS,
@@ -343,6 +344,12 @@ def sync_model_extension_facts(snap: Any) -> None:
     path and the evidence digest call this first; it is idempotent."""
     sync_export_read_fact(snap)
     sync_macho_sizes_fact(snap)
+    elf = _platform_blocks(snap).get("elf")
+    if elf is not None and _blocked_reason(snap, ELF_RTTI_ACCESS.section) is None:
+        if elf.rtti_access is None:
+            _drop_extension_fact(snap, ELF_RTTI_ACCESS)
+        else:
+            write_extension_fact(snap, ELF_RTTI_ACCESS, elf.rtti_access)
     sync_vtt_entries_fact(snap)
     _sync_binary_sha256(snap)
     # Before the early return below: its section is not this fact's, and a
@@ -634,6 +641,15 @@ def apply_model_extension_facts(snap: Any) -> None:
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
     apply_macho_sizes_fact(snap)
+    elf = _platform_blocks(snap).get("elf")
+    if elf is not None and _blocked_reason(snap, ELF_RTTI_ACCESS.section) is None:
+        access = read_extension_fact(snap, ELF_RTTI_ACCESS)
+        if access.status is FactStatus.PRESENT:
+            elf.rtti_access = access.value
+        elif access.status is not FactStatus.NOT_COLLECTED:
+            raise SnapshotError(
+                "snapshot's elf_rtti_access extension fact is unreadable"
+            )
     apply_vtt_entries_fact(snap)
     _apply_binary_sha256(snap)
     _apply_concept_constraints(snap)

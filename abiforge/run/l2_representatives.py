@@ -22,6 +22,8 @@ FAMILIES = {
     "callback_value": ("change",),
     "callback_reference": ("change",),
     "layout": ("control", "swap", "alignment"),
+    "member_return": ("control", "register"),
+    "large_argument": ("control", "stack_value"),
     "calls": ("control", "assignment", "nontrivial", "register_class"),
     "virtual": (
         "control",
@@ -62,6 +64,27 @@ def callback_return_sources(family, variant):
 
 
 def sources(family, variant):
+    if family == "member_return":
+        attr = "[[clang::trivial_abi]]" if variant == "register" else ""
+        header = f"struct {attr} Value {{ long word; ~Value(); }}; struct Reader {{ Value read(); }}; void expect(Reader*);"
+        predicate = (
+            "this != receiver" if variant != "control" else "!(receiver == this)"
+        )
+        body = f"""#include <cstdlib>
+        static Reader* receiver;
+        void expect(Reader* object) {{ receiver = object; }}
+        Value::~Value() {{}}
+        Value Reader::read() {{ std::_Exit({predicate}); }}
+        """
+        return header, body, "Reader reader; expect(&reader); reader.read(); return 2;"
+    if family == "large_argument":
+        attr = "[[clang::trivial_abi]]" if variant == "stack_value" else ""
+        header = f'struct {attr} Packet {{ long words[3]; ~Packet(); }}; extern "C" int inspect(Packet, unsigned long);'
+        # The old calling sequence passes a non-null object address in RDI.
+        # With a stack copy the callee reads its scalar marker from RDI instead.
+        predicate = "marker != 0" if variant != "control" else "!(marker == 0)"
+        body = f"Packet::~Packet() {{}} int inspect(Packet, unsigned long marker) {{ return {predicate}; }}"
+        return header, body, "return inspect(Packet{}, 0);"
     if family in {
         "callback_return",
         "callback_pointer_return",
@@ -392,6 +415,8 @@ def run(out, compiler, frontend, families=FAMILIES, verdict_only=False):
                 "callback_table": [{"passing": 23, "swap": 19}.get(variant, 17)],
                 "layout": {"swap": [29, 4], "alignment": [8]}.get(variant, [17, 4]),
                 "calls": [34],
+                "member_return": [int(variant == "register")],
+                "large_argument": [int(variant == "stack_value")],
                 "virtual": {
                     "move_base": [41],
                     "insert": [19, 17, 41],
@@ -405,6 +430,37 @@ def run(out, compiler, frontend, families=FAMILIES, verdict_only=False):
                     f"{family}/{variant}: frozen client {exits}, expected {expected}"
                 )
             row = {"exits": exits}
+            if family == "member_return":
+                ir = subprocess.check_output(
+                    [*build, "-S", "-emit-llvm", src, "-o", "-"], text=True
+                )
+                signature = next(
+                    line
+                    for line in ir.splitlines()
+                    if line.startswith("define ") and "@_ZN6Reader4readEv(" in line
+                )
+                expected_return = "i64" if variant == "register" else "void"
+                if f"{expected_return} @_ZN6Reader4readEv(" not in signature or (
+                    "sret(" in signature
+                ) != (variant != "register"):
+                    raise ValueError(f"unexpected member return: {signature}")
+                row["return"] = "register" if variant == "register" else "sret"
+            if family == "large_argument":
+                ir = subprocess.check_output(
+                    [*build, "-S", "-emit-llvm", src, "-o", "-"], text=True
+                )
+                signature = next(
+                    line
+                    for line in ir.splitlines()
+                    if line.startswith("define ") and "@inspect(" in line
+                )
+                if ("byval(" in signature) != (
+                    variant == "stack_value"
+                ) or "@inspect(ptr" not in signature:
+                    raise ValueError(f"unexpected aggregate argument: {signature}")
+                row["argument"] = (
+                    "stack-by-value" if variant == "stack_value" else "indirect"
+                )
             if family == "calls":
                 ir = subprocess.check_output(
                     [*build, "-S", "-emit-llvm", src, "-o", "-"], text=True

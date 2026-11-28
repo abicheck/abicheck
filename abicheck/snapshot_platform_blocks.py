@@ -179,7 +179,12 @@ def pe_from_dict(pe: dict[str, Any], schema_version: int) -> Any:
         PeExport(
             name=x["name"],
             ordinal=x.get("ordinal", 0),
-            sym_type=PeSymbolType(x.get("sym_type", "exported")),
+            sym_type=(
+                PeSymbolType.DATA
+                if x.get("is_data") is True
+                and x.get("sym_type", "exported") == "exported"
+                else PeSymbolType(x.get("sym_type", "exported"))
+            ),
             forwarder=x.get("forwarder", ""),
             # Stored by the extractor when non-empty; absent means "" on a
             # current snapshot and "not stored" on an older one -- either way

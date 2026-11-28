@@ -240,7 +240,7 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "base_class_access_narrowed",
         _A,
-        impact="A base-class specifier became more restrictive (public -> protected/private or protected -> private). Code that converts a derived pointer or reference to the base, or uses the base's members through the derived type, no longer compiles. Layout and mangled names are unchanged; detected from header (castxml/clang) evidence only.",
+        impact="A base-class specifier became more restrictive (public -> protected/private or protected -> private). Code that converts a derived pointer or reference to the base, or uses the base's members through the derived type, no longer compiles. When a public base becomes nonpublic, an existing binary can also lose a successful dynamic cross-cast or stop matching a base-class exception handler, even with identical exported names. The access finding uses header evidence.",
         description_template="Base class access narrowed: {name}: base {detail} {old} → {new}",
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,

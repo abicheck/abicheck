@@ -323,3 +323,49 @@ def test_macho_header_scoping_fallback_keeps_exports(monkeypatch, tmp_path):
     )
     assert [f.name for f in snap.declarations.functions] == ["_f"]
     assert snap.scope_fallback == "why"
+
+
+def test_pe_exported_data_is_a_variable():
+    dll = Path(__file__).parent / "fixtures/containers/sources/corpus_pe.dll"
+    snapshot = pe_mod.extract_pe(dll, "1")
+    assert {var.name for var in snapshot.declarations.variables} == {
+        "pe_corpus_version"
+    }
+    assert {func.name for func in snapshot.declarations.functions} == {
+        "pe_corpus_open",
+        "pe_corpus_close",
+    }
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("same_binary", [False, True])
+def test_pe_data_reclassification_requires_identical_binary(reverse, same_binary):
+    from abicheck.extract.export_symbol_identity import msvc_export_function
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.model.change_catalog.registry import Verdict
+    from abicheck.model.snapshot import AbiSnapshot
+    from abicheck.workflows.generation_drift import demote_cross_generation_drift
+
+    dll = Path(__file__).parent / "fixtures/containers/sources/corpus_pe.dll"
+    fresh = pe_mod.extract_pe(dll, "1")
+    fresh.binary_sha256 = "a" * 64
+    fresh.fact_generations = (99, 4, 1)
+    name = "pe_corpus_version"
+    stale = AbiSnapshot(
+        library=dll.name,
+        version="1",
+        pe=PeMetadata(exports=[PeExport(name=name)]),
+        functions=[msvc_export_function(name)],
+        fact_generations=(98, 4, 1),
+        binary_sha256=fresh.binary_sha256 if same_binary else "b" * 64,
+    )
+    old, new = (fresh, stale) if reverse else (stale, fresh)
+    kind = ChangeKind.VAR_REMOVED if reverse else ChangeKind.FUNC_REMOVED
+    change = Change(kind, name, "export reclassification")
+    unrelated = Change(kind, "other_export", "unrelated removal")
+    demote_cross_generation_drift([change, unrelated], old, new)
+    assert change.effective_verdict == (
+        Verdict.COMPATIBLE_WITH_RISK if same_binary else None
+    )
+    assert unrelated.effective_verdict is None

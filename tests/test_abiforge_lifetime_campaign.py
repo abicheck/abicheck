@@ -17,7 +17,9 @@ def test_retained_value_campaign(tmp_path, monkeypatch):
     expected = {
         "old": (17, 1),
         "compatible": (17, 1),
+        "extra_owner": (17, 0),
         "early_release": (-1, 1),
+        "self_assignment_release": (17, 2),
         "missing_release": (17, 0),
         "double_release": (17, 2),
     }
@@ -27,6 +29,9 @@ def test_retained_value_campaign(tmp_path, monkeypatch):
         (case, lane) for case in expected for lane in ("elf", "headers")
     }
     for row in rows:
+        assert int(row["releases_after_assignment"]) == int(
+            row["case"] == "self_assignment_release"
+        )
         assert (int(row["surviving_value"]), int(row["deleter_calls"])) == expected[
             row["case"]
         ]

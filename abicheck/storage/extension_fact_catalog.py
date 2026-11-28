@@ -67,6 +67,7 @@ __all__ = [
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
     "MACHO_OBJECT_SIZES",
+    "ELF_RTTI_ACCESS",
     "ELF_VTT_ENTRIES",
     "FINAL_MEMBER_FUNCTIONS",
     "RECORD_CALL_TRAITS",
@@ -369,6 +370,32 @@ ELF_VTT_ENTRIES: ExtensionFact[dict[str, Any]] = ExtensionFact(
     owner="ADR-062",
     encode=_vtt_entries_codec,
     decode=_vtt_entries_codec,
+)
+
+
+def _rtti_access_codec(value: Any) -> Any:
+    if not isinstance(value, dict) or not all(
+        isinstance(name, str)
+        and name.startswith("_ZTI")
+        and isinstance(edges, dict)
+        and all(
+            isinstance(base, str) and base.startswith("_ZTI") and isinstance(flag, bool)
+            for base, flag in edges.items()
+        )
+        for name, edges in value.items()
+    ):
+        raise ValueError("expected RTTI name to direct base public flags")
+    return value
+
+
+ELF_RTTI_ACCESS: ExtensionFact[dict[str, Any]] = ExtensionFact(
+    name="abicheck.elf_rtti_access",
+    section="binary",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="direct-base public access is unknown",
+    owner="ADR-062",
+    encode=_rtti_access_codec,
+    decode=_rtti_access_codec,
 )
 
 
@@ -756,6 +783,7 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         CXX_CONCEPT_HEADER_SCAN,
         CXX_CONCEPT_CONSTRAINTS,
         CXX_TEMPLATE_DEFAULTS,
+        ELF_RTTI_ACCESS,
         ELF_VTT_ENTRIES,
         EXPORT_READ,
         FINAL_MEMBER_FUNCTIONS,

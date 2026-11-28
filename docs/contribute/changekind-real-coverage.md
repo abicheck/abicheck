@@ -141,7 +141,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `python_stable_abi_violation` | RISK | 0 | 0 | 0 |
 | `relro_weakened` | RISK | 1 | 0 | 0 |
 | `rpath_type_changed` | RISK | 0 | 0 | 0 |
-| `rtti_inheritance_changed` | BREAKING | 0 | 0 | 1 |
+| `rtti_inheritance_changed` | BREAKING | 0 | 0 | 2 |
 | `runpath_changed` | COMPATIBLE | 2 | 0 | 0 |
 | `runtime_floor_raised` | RISK | 1 | 0 | 0 |
 | `runtime_symbol_provider_changed` | RISK | 0 | 0 | 0 |

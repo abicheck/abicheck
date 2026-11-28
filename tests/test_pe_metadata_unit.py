@@ -133,6 +133,7 @@ class TestPeSerialization:
                     sym_type=PeSymbolType.FORWARDED,
                     forwarder="OTHER.init",
                 ),
+                PeExport(name="version", ordinal=3, sym_type=PeSymbolType.DATA),
             ],
             imports={"KERNEL32.dll": ["LoadLibraryA", "GetProcAddress"]},
             file_version="1.0.0.0",
@@ -141,13 +142,17 @@ class TestPeSerialization:
         snap = AbiSnapshot(library="test.dll", version="1.0", pe=pe)
         d = snapshot_to_dict(snap)
         assert d["pe"]["machine"] == "IMAGE_FILE_MACHINE_AMD64"
-        assert len(d["pe"]["exports"]) == 2
+        assert len(d["pe"]["exports"]) == 3
         assert d["pe"]["exports"][1]["sym_type"] == "forwarded"
+        assert d["pe"]["exports"][2]["sym_type"] == "exported"
+        assert d["pe"]["exports"][2]["is_data"] is True
+        assert "is_data" not in d["pe"]["exports"][0]
 
         snap2 = snapshot_from_dict(d)
         assert snap2.pe is not None
         assert snap2.pe.machine == "IMAGE_FILE_MACHINE_AMD64"
-        assert len(snap2.pe.exports) == 2
+        assert len(snap2.pe.exports) == 3
+        assert snap2.pe.exports[2].sym_type == PeSymbolType.DATA
         assert snap2.pe.exports[1].sym_type == PeSymbolType.FORWARDED
         assert snap2.pe.exports[1].forwarder == "OTHER.init"
         assert snap2.pe.imports == {"KERNEL32.dll": ["LoadLibraryA", "GetProcAddress"]}

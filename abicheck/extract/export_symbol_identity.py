@@ -57,6 +57,7 @@ from __future__ import annotations
 from ..model import Function, Variable, Visibility
 from ..model.identity import entity_id_for_function, entity_id_for_variable
 from ..model.name_decoration import pe_x86
+from ..model.pe_facts import PeMetadata, PeSymbolType
 from ..model.surface_facts import EXPORT_STUB_TYPE
 from .surface_fact_producers import export_table_surface_facts
 
@@ -66,6 +67,7 @@ __all__ = [
     "itanium_export_variable",
     "msvc_export_function",
     "msvc_export_mangled_name",
+    "msvc_export_variable",
 ]
 
 # PE/COFF C-calling-convention export decoration is decoded by the one
@@ -207,3 +209,44 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
             is_extern_c=is_extern_c,
         ),
     )
+
+
+def msvc_export_variable(
+    sym: str, *, is_x86_32: bool, visibility: Visibility
+) -> Variable:
+    """Build an export-only variable from a PE data address."""
+    normalized = sym[1:] if is_x86_32 and sym.startswith("__Z") else sym
+    mangled = msvc_export_mangled_name(normalized)
+    leaf = sym.removeprefix("_") if is_x86_32 and mangled is None else normalized
+    return Variable(
+        name=sym,
+        mangled=sym,
+        type=EXPORT_STUB_TYPE,
+        visibility=visibility,
+        **export_table_surface_facts(),
+        entity_id=entity_id_for_variable(
+            (), leaf, mangled_name=mangled, is_extern_c=mangled is None
+        ),
+    )
+
+
+def pe_export_declarations(
+    metadata: PeMetadata,
+) -> tuple[list[Function], list[Variable]]:
+    """Classify headerless PE exports, preserving the dumper's sorted, unique names."""
+    is_x86_32 = metadata.machine == "IMAGE_FILE_MACHINE_I386"
+    names = {entry.name or f"ordinal:{entry.ordinal}" for entry in metadata.exports}
+    data_names = {
+        entry.name or f"ordinal:{entry.ordinal}"
+        for entry in metadata.exports
+        if entry.sym_type == PeSymbolType.DATA
+    }
+    functions = [
+        msvc_export_function(name, is_x86_32=is_x86_32)
+        for name in sorted(names - data_names)
+    ]
+    variables = [
+        msvc_export_variable(name, is_x86_32=is_x86_32, visibility=Visibility.ELF_ONLY)
+        for name in sorted(data_names)
+    ]
+    return functions, variables

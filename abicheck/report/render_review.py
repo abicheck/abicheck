@@ -86,6 +86,12 @@ MAX_REVIEW_IMPACTED_SYMBOLS = 10
 MAX_REVIEW_DISPOSITION_RULES = 4
 
 
+_SCOPE_REVIEW_MESSAGE = (
+    "The comparison used the full export table because public-header scoping "
+    "could not resolve the public surface."
+)
+
+
 def render_review_digest(digest: ReviewDigest) -> str:
     def compact(value: object, limit: int = 180) -> str:
         text = str(value).replace("\n", " ")
@@ -110,9 +116,7 @@ def render_review_digest(digest: ReviewDigest) -> str:
 
     if digest.manual_review_banner:
         lines += [
-            "> ⚠️ **Manual review required.** Public-header scoping could not "
-            "resolve the public surface, so analysis fell back to the full export "
-            "table. Treat this result as *unconfirmed*, not a clean public surface.",
+            f"> ⚠️ **Manual review required.** {_SCOPE_REVIEW_MESSAGE}",
             "",
         ]
     if digest.coverage_warnings:
@@ -304,17 +308,8 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
     ]
     if digest.evidence_summary:
         lines.append(f"Evidence: {digest.evidence_summary}.")
-    # The same unconfirmed-result warning the Markdown projection carries
-    # (CodeRabbit review). This projection is what an ordinary `compare`
-    # prints, so omitting it is the one direction that matters: a
-    # public-surface fallback presented without it reads as a clean public
-    # surface, which is precisely what the banner exists to deny.
     if digest.manual_review_banner:
-        lines.append(
-            "WARNING: Manual review required -- the public surface could not be "
-            "resolved, so analysis fell back to the full export table. Treat "
-            "this result as unconfirmed, not a clean public surface."
-        )
+        lines.append(f"WARNING: Manual review required -- {_SCOPE_REVIEW_MESSAGE}")
     lines.extend(
         f"WARNING: {compact(warning, 300)}" for warning in digest.coverage_warnings
     )

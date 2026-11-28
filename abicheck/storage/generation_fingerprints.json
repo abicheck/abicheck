@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
-      "abicheck/dumper.py": "6d6df4f72968133150ac026bf88846cabd8e44ed8185a88a9fb71451c8fb0864",
+      "abicheck/dumper.py": "fc9877301e6e5661234543355ac4a16b911eb8b05891e2e0ce2dea1f9cb88c01",
       "abicheck/dumper_clang.py": "433b6d8fa9a5b2654bbffb7a9087838b6c04f9534d923332dcb799ba16f57939",
       "abicheck/dwarf_advanced.py": "1e903a0d8693daa7f5c264f013f4a29795ba5509b0ee6dd6ee373d0ff6bd5984",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
@@ -12,7 +12,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "4cef17c9d4ed06c753e792e3b9d448b2412dd76d505bf3607902f0f5ee869fc8",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
-      "abicheck/elf_metadata.py": "7ccb5cf7e6d457bd4d7aaecfef5f51f4f924c8a52e1fd55bc447283bf02392b9",
+      "abicheck/elf_metadata.py": "94778a5cdf1f6dd0ecca4a0bd230d38c1cc3a4d79d88c0c7c91b9fac01bd4512",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
@@ -68,6 +68,7 @@
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
       "abicheck/extract/elf_pure_virtual_slots.py": "c583305033c551840e206f28600400e6e01929e7a383284fb8261a644c76c191",
+      "abicheck/extract/elf_rtti_access.py": "ad85737e78c5affa1c8efa7c251c26389c9a5ef4232452d22d1f05faed7592f7",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
       "abicheck/extract/elf_string_table.py": "8348fa460902944419d2f9fe0918d05d232dc0a6ebce3d606e1b1fcb68c69337",
       "abicheck/extract/elf_symbol_classify.py": "e7e4d0eb3bd5fab47da591e7c6180edee612adde5ab5eda2522f8d782cd368e9",
@@ -77,7 +78,7 @@
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/elf_vtt_entries.py": "9983a5e2e7937fa3b6d9953463133e686b19957a6ac73beb3b239942be8eadb2",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
-      "abicheck/extract/export_symbol_identity.py": "fc6262e7eeaf5834cfd354cef88cff7610dcfd30961f42118623635b9c57736d",
+      "abicheck/extract/export_symbol_identity.py": "03676a2c2f9363999b4c2bcb97977e10de1099b90c43a020d766cd9280d3c978",
       "abicheck/extract/export_table_read.py": "60fbf398e40df9cd48a9146ae1b79910cb7da865015a171405a727284848f7bd",
       "abicheck/extract/extraction_limitations.py": "b37f010164cf4e3e10e39a3cbb009e23b521244608da9269771e6c70806b4340",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
@@ -239,7 +240,7 @@
       "abicheck/pdb_model.py": "c42cf25e4e3bd4d098575989cec9de94ab9795e171dde08e7b9a93d155a7ebe8",
       "abicheck/pdb_parser.py": "cfcb071ded9843b10834a236b6d61ca2db9522fb6d18d535a0f3861cb8a6caf6",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
-      "abicheck/pe_metadata.py": "5fb51af4f41051da083ce3c79101b338c0e110f262cc559492603b6317a86fbe",
+      "abicheck/pe_metadata.py": "51282f8d0e8809e10883b0121368e40c5da1246c1060654cc4f7d6e7becd4722",
       "abicheck/sycl_metadata.py": "6a718f9630264440046c91c782d1e0b8f353ffb4680cd45155e7d87213d09965",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf",
@@ -247,11 +248,11 @@
       "abicheck/workflows/dump/formats.py": "634c897b872e20c7c1579a9f569700a32c1b99b204569e8bb198a4174587b6d2",
       "abicheck/workflows/dump/macho.py": "ee301926fd430c4eed3128e75b07fc494805ff76d0b2acbcd83fa7a8fc9f424e",
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
-      "abicheck/workflows/dump/pe.py": "2fdbceed74e2fe3b9bc264543ab135311834e891fcbc4e694ee89b5b14d4db5c"
+      "abicheck/workflows/dump/pe.py": "07cebaa353760a43aab0c8b39635bc1d2bf02e836b7dc4d402bf80e93bbdc0d8"
     },
-    "fingerprint": "fde8497899cee39e279b11b86c2b798834c9ded184492c73e14a5a1102f677a7",
-    "generation": 98,
-    "reason": "bumped to 98 for a semantic change"
+    "fingerprint": "2f2494cd8e0a2b88858dc1070efa788faf0b2b7fcbf1479e727cc078b55d43b8",
+    "generation": 100,
+    "reason": "Document ELF metadata read order"
   },
   "resolver": {
     "files": {

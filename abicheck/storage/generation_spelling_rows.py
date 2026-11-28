@@ -22,7 +22,6 @@ from .generation_spelling_types import GenerationSpellingChange
 
 __all__ = ["SPELLING_MIGRATIONS"]
 
-
 SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     1: GenerationSpellingChange(
         "85d745b9a (#1538): first stamped generation; the baseline every "
@@ -395,14 +394,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         migrates_facts=True,
     ),
     47: GenerationSpellingChange(
-        "no type or name spelling changes. castxml and clang runs set "
-        "cxx_template_defaults (the public headers' template-parameter "
-        "defaults of every class, function, alias and variable template, read "
-        "from the clang AST: extract/headers/clang/template_default_entries.py; "
-        "castxml through castxml/clang_semantics_join.py) where it was unset; "
-        "no rewrite is needed -- an older snapshot reads as not modelled, so a "
-        "castxml side keeps its header-scan gap note and a clang side its "
-        "alias/variable-template gap note"
+        "Clang and CastXML record cxx_template_defaults from the clang AST for public "
+        "class, function, alias and variable templates. No type or name respelling. "
+        "Older snapshots retain the CastXML header-scan or Clang alias/variable gap note."
     ),
     48: GenerationSpellingChange(
         "advanced DWARF records a by-value aggregate's triviality as 'unknown' "
@@ -796,5 +790,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     98: GenerationSpellingChange(
         "Large PE export tables and full decorated names. Truncated names and missing "
         "ordinals cannot be reconstructed from old snapshots; re-dump the DLL."
+    ),
+    99: GenerationSpellingChange("PE data exports become variables; re-dump for kind."),
+    100: GenerationSpellingChange(
+        "ELF VMI base access is optional. No spelling rewrite."
     ),
 }

@@ -246,6 +246,9 @@ def _rich_overrides(cls: type, depth: int) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for f in dataclasses.fields(cls):
         if f.init and not f.name.startswith("_") and f.name not in _STR_DOMAINS:
+            if f.name == "rtti_access":
+                out[f.name] = _nondefault_value(cls, f.name)
+                continue
             out[f.name] = _synth(hints[f.name], _NO_AVOID, depth)
     return out
 
@@ -278,6 +281,8 @@ def _default_of(f: dataclasses.Field[Any]) -> Any:
 def _nondefault_value(cls: type, fname: str) -> Any:
     f = next(x for x in dataclasses.fields(cls) if x.name == fname)
     avoid = _default_of(f)
+    if fname == "rtti_access":
+        return {"_ZTI7Derived": {"_ZTI4Base": True}}
     if fname == "fact_generations":
         return this_build_generations()
     if fname == "stale_fact_families":

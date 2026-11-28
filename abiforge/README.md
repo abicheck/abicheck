@@ -20,6 +20,8 @@ The goal is evidence, not anecdotes: to show, for an explicitly stated space,
 that a checker detects every class of change in it, and to say exactly which
 part of the language is inside that space and which is not.
 
+The [oneDAL scenario crosswalk](../research/onedal-coverage/scenario-basis.md) traces package observations to reusable edits and identifies obligations that still lack a witness.
+
 ## What it is made of
 
 ```text

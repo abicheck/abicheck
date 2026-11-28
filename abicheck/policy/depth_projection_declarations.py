@@ -137,13 +137,7 @@ def binary_level_declarations(
 ) -> tuple[list[Function], list[Variable]]:
     """*functions*/*variables* each reduced to its binary-level view.
 
-    On PE a declared variable becomes an export-only *function*: a PE export
-    directory does not say whether an export is code or data, so a
-    binary-only PE dump lists every export as a function, and the header's
-    variable/function split is evidence the binary view never had (a const
-    change read ``var_added`` projected and ``func_added`` from the
-    binary-only dump). ELF and Mach-O record the split (symbol type,
-    section), so a variable stays a variable there.
+    On PE the target section determines whether an exported variable remains data.
     """
     projected = [binary_level_function(f) for f in functions]
     if not snap.from_headers:
@@ -156,9 +150,12 @@ def binary_level_declarations(
     projected_functions = binary_purity_functions(snap, projected)
     index = build_raw_export_index(snap)
     if index is not None and index.platform == "pe":
+        data = {e.name or f"ordinal:{e.ordinal}" for e in index.entries if e.is_data}
         return projected_functions + [
-            binary_level_function(_as_function(v)) for v in variables
-        ], []
+            binary_level_function(_as_function(v))
+            for v in variables
+            if v.mangled not in data
+        ], [binary_level_variable(v) for v in variables if v.mangled in data]
     return projected_functions, [binary_level_variable(v) for v in variables]
 
 
@@ -300,7 +297,7 @@ def export_only_declarations(
       runtime); a ``notype`` export is listed as a function only.
     * Mach-O -- the ABI-relevant exports, split into functions and variables
       by section (``MachoExport.is_data``), as ``dumper``'s export-only path.
-    * PE -- every export as a function, an ordinal-only one under its
+    * PE -- exports split by target section, an ordinal-only one under its
       ``ordinal:N`` placeholder, as ``dumper``'s export-only path.
 
     Empty when the export table was never read: an unread table is not an
@@ -334,7 +331,10 @@ def export_only_declarations(
         var_names = {e.name for e in relevant if e.is_data}
     else:
         func_names = {e.name or f"ordinal:{e.ordinal}" for e in index.entries}
-        var_names = set()
+        var_names = {
+            e.name or f"ordinal:{e.ordinal}" for e in index.entries if e.is_data
+        }
+        func_names -= var_names
     functions: list[Function] = []
     for sym in sorted(func_names - declared):
         elf_sym = _elf_symbol(snap, sym)

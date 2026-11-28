@@ -31,6 +31,7 @@ from .name_decoration import pe_x86
 
 class PeSymbolType(StrEnum):
     EXPORTED = "exported"  # ordinal / name in export table
+    DATA = "data"  # direct export in a non-executable data section
     FORWARDED = "forwarded"  # forwarded to another DLL
     OTHER = "other"
 

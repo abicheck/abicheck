@@ -66,6 +66,7 @@ from typing import TYPE_CHECKING, Literal
 from .execution_cache import request_key
 from .execution_cache_scoped import InstanceMemo
 from .export_read import ExportReadState
+from .pe_facts import PeSymbolType
 
 if TYPE_CHECKING:
     from .elf_facts import ElfMetadata, ElfSymbol
@@ -138,8 +139,7 @@ class RawExportEntry:
     ``post_manifest``'s callable-type filter already compared against) —
     ``None`` for PE/Mach-O, which carry no equivalent function-vs-data
     distinction in their export directories. ``is_data`` is populated for
-    Mach-O only (``True`` for a ``__DATA``-segment/global-variable export) —
-    ``None`` for ELF/PE, which use ``sym_type``/no such facet at all instead.
+    Mach-O and PE from the target section. ELF uses ``sym_type`` instead.
     ``visibility`` carries the ELF ``ST_VISIBILITY`` spelling
     (``"default"``/``"hidden"``/``"protected"``/``"internal"``, matching
     ``ElfSymbol.visibility``) — ``None`` for PE/Mach-O, which expose no
@@ -219,7 +219,10 @@ def build_raw_export_index_from_pe(pe_meta: PeMetadata) -> RawExportIndex:
     return RawExportIndex(
         platform="pe",
         entries=tuple(
-            RawExportEntry(name=e.name, ordinal=e.ordinal) for e in pe_meta.exports
+            RawExportEntry(
+                name=e.name, ordinal=e.ordinal, is_data=e.sym_type == PeSymbolType.DATA
+            )
+            for e in pe_meta.exports
         ),
     )
 

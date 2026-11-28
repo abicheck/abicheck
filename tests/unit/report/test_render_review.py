@@ -402,3 +402,22 @@ def test_review_group_note_is_still_silent_when_nothing_was_retained() -> None:
     assert review_group_note(model) == []
     model.result_counts = {"review_groups": 0, "gating_review_groups": 0}
     assert review_group_note(model) == []
+
+
+def test_manual_review_banner_on_scope_fallback() -> None:
+    from abicheck.checker import Change, ChangeKind, Verdict
+    from tests._report_test_helpers import compute_review, make_result
+
+    r = make_result(
+        Verdict.BREAKING,
+        changes=[
+            Change(ChangeKind.FUNC_REMOVED, "x", "removed"),
+        ],
+    )
+    r.scope_to_public_surface = True
+    r.scope_resolved = False
+    for out in (review_digest(r), render_terminal_digest(compute_review(r))):
+        assert "BREAKING" in out
+        assert "Manual review required" in out
+        assert "full export table" in out
+        assert "result as unconfirmed" not in out.lower().replace("*", "")
