@@ -63,6 +63,14 @@ def _edges(elf: Any) -> dict[str, dict[str, bool]] | None:
                 if index is not None:
                     target = (index, 0)
         refs[addr] = target
+    # RELR stores the addend in the relocated word itself.
+    packed_slots: set[int] = set()
+    for section in elf.iter_sections(type="SHT_RELR"):
+        for rel in section.iter_relocations():
+            address = rel["r_offset"]
+            if address in refs or address in packed_slots:
+                return None
+            packed_slots.add(address)
     result = {}
     seen = set()
     for sym in syms.iter_symbols():
@@ -91,7 +99,9 @@ def _edges(elf: Any) -> dict[str, dict[str, bool]] | None:
             or offset + size > section["sh_size"]
         ):
             continue
-        if start + 16 in refs or start + 20 in refs:
+        if any(
+            addr in refs or addr in packed_slots for addr in (start + 16, start + 20)
+        ):
             continue
         elf.stream.seek(section["sh_offset"] + offset)
         raw = elf.stream.read(size)
@@ -102,7 +112,16 @@ def _edges(elf: Any) -> dict[str, dict[str, bool]] | None:
         for i in range(count):
             slot = 24 + 16 * i
             target = refs.get(start + slot)
-            if not target or target[1] or start + slot + 8 in refs:
+            if start + slot in packed_slots:
+                index = by_address.get(struct.unpack_from("<Q", raw, slot)[0])
+                target = (index, 0) if index is not None else None
+            flag_address = start + slot + 8
+            if (
+                not target
+                or target[1]
+                or flag_address in refs
+                or flag_address in packed_slots
+            ):
                 break
             base = syms.get_symbol(target[0]).name
             if not base.startswith("_ZTI") or base in edges:

@@ -11,7 +11,9 @@ import pytest
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="compiles shared ELF libraries")
 @pytest.mark.parametrize(
-    "link_flags", [(), ("-Wl,-Bsymbolic",)], ids=["preemptible", "local"]
+    "link_flags",
+    [(), ("-Wl,-Bsymbolic",), ("-Wl,-Bsymbolic", "-Wl,-z,pack-relative-relocs")],
+    ids=["preemptible", "local", "packed"],
 )
 def test_public_base_path_controls_crosscast_and_catch(tmp_path, link_flags):
     from abiforge.run.itanium_base_edges import direct_base_flags
@@ -70,6 +72,10 @@ int main() {
             ],
             check=True,
         )
+        if "-Wl,-z,pack-relative-relocs" in link_flags:
+            dynamic = subprocess.check_output(["readelf", "-dW", library], text=True)
+            if "(RELR)" not in dynamic:
+                pytest.skip("linker did not emit packed relative relocations")
         if os.uname().machine == "x86_64" and not link_flags:
             edges = direct_base_flags(library, "_ZTI4Item")
             assert edges is not None
