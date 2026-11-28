@@ -12,7 +12,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "4cef17c9d4ed06c753e792e3b9d448b2412dd76d505bf3607902f0f5ee869fc8",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
-      "abicheck/elf_metadata.py": "fefbfbd7513a2e8a8ceb217da1feadd702b9d06178e972b7dd86caf0bac1568a",
+      "abicheck/elf_metadata.py": "94778a5cdf1f6dd0ecca4a0bd230d38c1cc3a4d79d88c0c7c91b9fac01bd4512",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
@@ -250,9 +250,9 @@
       "abicheck/workflows/dump/native.py": "8e1c0005a54d645541297dbdae76a7fa9641abaa1ffc54c565b5a917a41f6bb2",
       "abicheck/workflows/dump/pe.py": "07cebaa353760a43aab0c8b39635bc1d2bf02e836b7dc4d402bf80e93bbdc0d8"
     },
-    "fingerprint": "6336bd4560c8da23678bcf65f13ff49c90058f3748a05830dd2862b72e543ba3",
+    "fingerprint": "2f2494cd8e0a2b88858dc1070efa788faf0b2b7fcbf1479e727cc078b55d43b8",
     "generation": 100,
-    "reason": "Add the license header and remove a section divider"
+    "reason": "Document ELF metadata read order"
   },
   "resolver": {
     "files": {

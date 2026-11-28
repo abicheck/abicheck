@@ -166,6 +166,9 @@ def _parse_and_pickle(f: IO[bytes], so_path: Path) -> bytes:
 
 
 def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
+    """Read the export table before interpreting relocations that reference it.
+
+    Hardening facts depend on both the segments and the decoded symbols."""
     meta = ElfMetadata()
     elf = ELFFile(f)
 
