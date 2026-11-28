@@ -957,6 +957,111 @@ def pe_inventory_receipts():
         )
 
 
+def device_loader_receipts():
+    filename = "cpu-loadability.json"
+    for row in json.loads((PRODUCT / filename).read_text()):
+        absent = row["absent"]
+        expected = (127, "fail") if absent else (0, "pass")
+        if (row["loader_exit"], row["loadability"]) != expected or not row["matches"]:
+            raise ValueError(f"unexpected CPU dependency outcome: {absent}")
+        yield (
+            filename,
+            absent or "control",
+            "CPU client",
+            "",
+            "",
+            "provider resolution",
+            "missing dependency" if absent else "",
+            "required library",
+            "provider_campaign/missing" if absent else "",
+            f"loader exit {expected[0]}",
+            "loader observation",
+        )
+
+    filename = "device-release-matrix.json"
+    observed = {}
+    for row in json.loads((PRODUCT / filename).read_text()):
+        release, client = row["package"], row["client"]
+        key = release, client
+        missing = release == "dal-2026.2.0"
+        if (
+            key in observed
+            or row["device_selector"] != "opencl:cpu"
+            or not row["matches"]
+            or row["exit"] != (127 if missing else 0)
+            or (missing and row.get("missing_soname") != "libonedal_dpc.so.3")
+            or (not missing and not row.get("providers"))
+        ):
+            raise ValueError(f"unexpected OpenCL release outcome: {key}")
+        observed[key] = row
+        yield (
+            filename,
+            release,
+            client,
+            "opencl:cpu",
+            "",
+            "provider resolution" if missing else "backend boundary",
+            "missing dependency" if missing else "",
+            "required library" if missing else "",
+            "provider_campaign/missing" if missing else "",
+            f"client exit {row['exit']}",
+            "loader failure" if missing else "device workload control",
+        )
+    expected = {
+        (release, client)
+        for release in ("dal-2025.9.0", "dal-2025.11.0", "dal-2026.2.0")
+        for client in ("event", "buffer", "csr", "dependency", "ownership", "spmd")
+    }
+    if observed.keys() != expected:
+        raise ValueError("incomplete OpenCL CPU release matrix")
+
+    filename = "opencl-cpu-release.json"
+    for row in json.loads((PRODUCT / filename).read_text()):
+        key = row["package"], row["client"]
+        if not row["matches"] or any(
+            row[k] != observed[key][k] for k in ("exit", "stdout", "stderr")
+        ):
+            raise ValueError(f"OpenCL CPU release controls disagree: {key}")
+        yield (
+            filename,
+            *key,
+            "opencl:cpu",
+            "",
+            "backend boundary",
+            "",
+            "",
+            "",
+            "release client output",
+            "device workload control",
+        )
+
+    filename = "opencl-cpu-queue.json"
+    cases = json.loads((PRODUCT / filename).read_text())
+    for client in ("cpu", "queue"):
+        for variant in ("old", "withdrawn"):
+            row = cases[f"{client}/{variant}"]
+            broken = (client, variant) == ("queue", "withdrawn")
+            if not row["matches"] or (row["run"], row["rebuild"]) != (
+                (127, 1) if broken else (0, 0)
+            ):
+                raise ValueError(
+                    f"unexpected queue overload outcome: {client}/{variant}"
+                )
+            yield (
+                filename,
+                client,
+                variant,
+                "opencl:cpu",
+                "",
+                "symbol binding",
+                "withdraw overload" if variant == "withdrawn" else "",
+                "selective function withdrawal",
+                "func_remove" if variant == "withdrawn" else "",
+                f"client exit {row['run']}, rebuild exit {row['rebuild']}",
+                "loader failure" if broken else "compatible client control",
+            )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -1004,6 +1109,7 @@ def main():
         *variant_and_lookup_receipts(),
         *lifetime_state_receipts(),
         *pe_inventory_receipts(),
+        *device_loader_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

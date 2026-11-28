@@ -164,3 +164,11 @@ image digest for replay. A separate portable fixture keeps the export name
 and ordinal constant while switching the export between code, data and a
 forwarder. Its witness reads PE metadata. Windows loader execution remains
 an open evidence gap.
+
+Six frozen OpenCL CPU workloads ran with both 2025 releases. With 2026.2
+all six stopped at the same missing DPC SONAME, before device execution.
+This reuses the missing-provider scenario, as do the four isolated CPU
+dependency withdrawals. Removing queue overloads additionally distinguishes
+two consumers: the CPU client still runs and rebuilds, while the queue
+client fails both operations. The matrix records this selective withdrawal
+separately from backend workload controls.
