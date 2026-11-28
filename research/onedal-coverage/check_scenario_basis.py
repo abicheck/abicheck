@@ -715,7 +715,9 @@ def import_withdrawal_receipts():
             row["symbol"],
             "symbol binding",
             "withdraw export",
-            "ELF export",
+            "linux_client_witnesses/plt_binding"
+            if "R_X86_64_JUMP_SLOT" in row["relocations"]
+            else "ELF export",
             "func_remove" if row["entity"] == "function" else "object_removed",
             row["client"],
             f"representative, client exit {row['withdrawn']}",
@@ -1257,6 +1259,8 @@ def release_client_receipts():
                     "provider_campaign/missing",
                     127,
                 )
+            elif case == "delete_base":
+                contract = "virtual deletion"
             elif case.endswith(("_borrow", "_extra_owner")):
                 edit = "borrow" if case.endswith("_borrow") else "extra_owner"
                 contract, mutation = "ownership", REPRESENTATIVES[edit]
@@ -1275,7 +1279,9 @@ def release_client_receipts():
                 "",
                 contract,
                 edit,
-                contract,
+                "linux_client_witnesses/virtual_deletion"
+                if contract == "virtual deletion"
+                else contract,
                 mutation,
                 f"client exit {expected}",
                 "release client observation",

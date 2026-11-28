@@ -200,3 +200,13 @@ client outcome before its checker verdict is included.
 
 See [the Forge-wide comparison](forge-comparison.md) for main/PR differences,
 operator ablation and a finite minimum for the bit-field projection.
+
+On Linux x86-64, `linux_client_witnesses.plt_binding` applies `func_remove`
+and runs the same client on both branches with lazy and eager binding. A
+marker distinguishes failure before main from failure on first use.
+`linux_client_witnesses.virtual_deletion` applies
+`destructor_became_nonvirtual` to the existing VDr declaration. On the
+baseline the derived destructor and deallocator each run once. With the
+mutated provider the old deleting slot reaches an identifiable guard.
+The oneDAL delete_base receipt supplies a release control only. The
+distinguishing mutation runs in the SDK-independent fixture.
