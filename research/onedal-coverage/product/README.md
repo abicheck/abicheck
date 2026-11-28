@@ -412,6 +412,12 @@ Linux 2026.2 `libonedal.so.4` (40.9%, up from 31.2%). This counts distinct
 dynamic symbol names, including C++ ABI aliases. The downgrade tests compare
 the ownership client's exact missing-name set against both 2025 frontends.
 
+The descriptor client sets and reads back all 13 public HDBSCAN descriptor
+properties, including the two constructor parameters. It checks distinct values
+across the shared-library boundary for integer, double, Boolean, enum and
+result-option types. Of its 33 HDBSCAN imports, 21 are unique to this client.
+The three passing CPU clients together import 59/93 HDBSCAN names (63.4%).
+
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
 Both 2025 frontends retain 13 and lack all 29 HDBSCAN-specific imports.
