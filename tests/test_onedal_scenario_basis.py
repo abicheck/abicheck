@@ -83,3 +83,12 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
     assert len(lowering) == 225
     assert len(options) == 38
     assert all(not r["generic_mutations"] for r in lowering + options)
+
+    members = [r for r in rows if r["scenario_contracts"] == "member return"]
+    assert sum(r["status"] == "paired package observation" for r in members) == 3
+    assert sum(r["status"] == "compiler observation only" for r in members) == 38
+    assert (
+        {r["generic_mutations"] for r in members}
+        == {"l2_representatives/member_return/register"}
+        <= available
+    )

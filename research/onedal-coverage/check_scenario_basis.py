@@ -225,6 +225,61 @@ def return_lowering_receipts():
         )
 
 
+def member_return_receipts():
+    mutation = "l2_representatives/member_return/register"
+    filename = "status-return-abi.json"
+    receipt = json.loads((PRODUCT / filename).read_text())
+    clients = receipt["client_exits"]
+    if set(clients) != {"compute", "table", "virtual"} or receipt["checker"] != {
+        "control": {"exit": 0, "verdict": "NO_CHANGE", "status_return": []},
+        "mutant": {
+            "exit": 4,
+            "verdict": "BREAKING",
+            "status_return": [["memory (sret)", "regs(INTEGER)"]],
+        },
+    }:
+        raise ValueError("unexpected status return checker or client set")
+    for name, exits in clients.items():
+        if exits != {"release": 0, "old": 0, "control": 0, "mutant": 42}:
+            raise ValueError(f"unexpected status receiver observation: {name}")
+        yield (
+            filename,
+            name,
+            "member return",
+            "",
+            "",
+            "calling convention",
+            "sret to register",
+            "member return",
+            mutation,
+            "receiver address in frozen client",
+            "paired package observation",
+        )
+    filename = "status-member-templates.json"
+    receipt = json.loads((PRODUCT / filename).read_text())
+    symbols = receipt["symbols"]
+    if (
+        (receipt["old"], receipt["mutant"]) != ("sret", "register")
+        or set(receipt["providers"]) != {"dal-2025.9.0", "dal-2025.11.0"}
+        or len(symbols) != len(set(symbols))
+    ):
+        raise ValueError("unexpected specialized member return evidence")
+    for symbol in symbols:
+        yield (
+            filename,
+            symbol,
+            "member specialization",
+            "",
+            symbol,
+            "calling convention",
+            "sret to register",
+            "member return",
+            mutation,
+            "call-site LLVM IR and provider export",
+            "compiler observation only",
+        )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -255,6 +310,7 @@ def main():
         *return_receipts(),
         *argument_receipts(),
         *return_lowering_receipts(),
+        *member_return_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

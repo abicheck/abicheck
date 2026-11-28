@@ -83,3 +83,10 @@ entries also have a frozen-client observation of the same single-bit option
 value on two releases. The crosswalk checks that both symbol sets agree.
 A stable option value is a behavioral control. Neither receipt introduces
 an independent ABI mutation or increases the number of covered mechanisms.
+
+The member-return experiment covers the loss of hidden result storage on
+SysV AMD64. Removing the hidden pointer shifts the receiver. One frozen
+client compares the received object address against the one registered
+before the call. The three product client paths share this witness.
+Another 38 member specializations have compiler and export evidence for the
+same transition. Their receipt contains no per-specialization runtime result.
