@@ -457,6 +457,11 @@ type-name strings with the names from live objects. The descriptor client
 calls the CPU library's GPU k-d tree diagnostic accessor and checks its text.
 With these three imports, the eight passing clients reference all 93 distinct
 dynamic export names containing `hdbscan` in Linux 2026.2 `libonedal.so.4`.
+The regression `test_hdbscan_export_coverage` compares the exact export set
+with the union of undefined HDBSCAN symbols in those same eight binaries.
+With the CPU SDK and Open MPI environment variables set as above, replay the
+runtime and coverage checks together with
+`python -m pytest -q tests/test_abiforge_onedal_product.py -k hdbscan`.
 GPU execution and successful distributed clustering remain unverified.
 
 The two downgrade comparisons include the clustering executable alongside the

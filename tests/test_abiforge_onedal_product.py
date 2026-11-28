@@ -175,33 +175,51 @@ def test_parameter_provider_consumer_scope(tmp_path):
         )
 
 
-@pytest.mark.integration
-@pytest.mark.skipif(
-    not os.getenv("ABIFORGE_ONEDAL_MAJOR"), reason="requires the 2026.2 CPU SDK"
+HDBSCAN_CPU_CLIENTS = (
+    "hdbscan",
+    "hdbscan_result",
+    "hdbscan_descriptor",
+    "hdbscan_input",
+    "hdbscan_input_exported",
+    "hdbscan_result_exported",
+    "hdbscan_rtti",
 )
-@pytest.mark.parametrize(
-    "client",
-    [
-        "hdbscan",
-        "hdbscan_result",
-        "hdbscan_descriptor",
-        "hdbscan_input",
-        "hdbscan_input_exported",
-        "hdbscan_result_exported",
-        "hdbscan_rtti",
-    ],
-)
-def test_hdbscan_cpu_clusters(tmp_path, client):
+
+
+@pytest.fixture(scope="module")
+def hdbscan_binary(tmp_path_factory):
+    from functools import cache
+
     from abiforge.run.onedal_covariance_parameters import build_client
+
+    if not os.getenv("ABIFORGE_ONEDAL_MAJOR"):
+        pytest.skip("requires the 2026.2 CPU SDK")
+    sdk = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]).resolve()
+    work = tmp_path_factory.mktemp("hdbscan")
+
+    @cache
+    def build(client):
+        fixture = (
+            Path(__file__).resolve().parents[1]
+            / f"abiforge/fixtures/onedal/{client}.cpp"
+        )
+        # PIC keeps the RTTI and vtables in the provider instead of ELF copy relocations.
+        flags = ("-fPIC",) if client == "hdbscan_rtti" else ()
+        compiler = "mpicxx" if client == "hdbscan_spmd" else "g++"
+        return build_client(
+            sdk, work, client, 4, fixture=fixture, link_inputs=flags, compiler=compiler
+        )
+
+    return build
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("client", HDBSCAN_CPU_CLIENTS)
+def test_hdbscan_cpu_clusters(hdbscan_binary, client):
     from abiforge.run.onedal_export_surface import symbol_names
 
     sdk = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]).resolve()
-    fixture = (
-        Path(__file__).resolve().parents[1] / f"abiforge/fixtures/onedal/{client}.cpp"
-    )
-    # PIC keeps the RTTI and vtables in the provider instead of ELF copy relocations.
-    flags = ("-fPIC",) if client == "hdbscan_rtti" else ()
-    exe = build_client(sdk, tmp_path, client, 4, fixture=fixture, link_inputs=flags)
+    exe = hdbscan_binary(client)
     if client == "hdbscan_rtti":
         imports = symbol_names(exe, imports=True)
         for kind in ("compute_input", "compute_result"):
@@ -235,20 +253,11 @@ def test_hdbscan_cpu_clusters(tmp_path, client):
 @pytest.mark.skipif(
     not os.getenv("ABIFORGE_ONEDAL_MPI"), reason="requires Open MPI development tools"
 )
-def test_hdbscan_distributed_dispatch(tmp_path):
-    from abiforge.run.onedal_covariance_parameters import build_client
+def test_hdbscan_distributed_dispatch(hdbscan_binary):
     from abiforge.run.onedal_export_surface import symbol_names
 
-    if not os.getenv("ABIFORGE_ONEDAL_MAJOR"):
-        pytest.skip("requires the 2026.2 CPU SDK")
     sdk = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"]).resolve()
-    fixture = (
-        Path(__file__).resolve().parents[1]
-        / "abiforge/fixtures/onedal/hdbscan_spmd.cpp"
-    )
-    exe = build_client(
-        sdk, tmp_path, "hdbscan_spmd", 4, fixture=fixture, compiler="mpicxx"
-    )
+    exe = hdbscan_binary("hdbscan_spmd")
     dispatchers = {
         n
         for n in symbol_names(exe, imports=True)
@@ -264,6 +273,28 @@ def test_hdbscan_distributed_dispatch(tmp_path):
         timeout=60,
     )
     assert run.returncode == 0, run.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not os.getenv("ABIFORGE_ONEDAL_MPI"), reason="requires Open MPI development tools"
+)
+def test_hdbscan_export_coverage(hdbscan_binary):
+    from abiforge.run.onedal_export_surface import symbol_names
+
+    sdk = Path(os.environ["ABIFORGE_ONEDAL_MAJOR"])
+    exports = {
+        name for name in symbol_names(sdk / "lib/libonedal.so.4") if "hdbscan" in name
+    }
+    imports = set()
+    for client in (*HDBSCAN_CPU_CLIENTS, "hdbscan_spmd"):
+        imports.update(
+            name
+            for name in symbol_names(hdbscan_binary(client), imports=True)
+            if "hdbscan" in name
+        )
+    assert len(exports) == 93
+    assert imports == exports
 
 
 @pytest.mark.integration
