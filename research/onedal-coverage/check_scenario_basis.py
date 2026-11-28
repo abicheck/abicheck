@@ -651,6 +651,102 @@ def exception_receipts():
         )
 
 
+def import_withdrawal_receipts():
+    filename = "import-withdrawals.json"
+    rows = json.loads((PRODUCT / filename).read_text())
+    witnesses = {}
+    totals = {}
+    for row in rows:
+        symbol = row["symbol"]
+        entity = (
+            "typeinfo"
+            if symbol.startswith("_ZTI")
+            else "vtable"
+            if symbol.startswith("_ZTV")
+            else "function"
+        )
+        key = row["provider"], symbol, row["client"]
+        code = row["withdrawn"]
+        if (
+            key in witnesses
+            or (row["baseline_exit"], row["minor_exit"], row["unresolved_relocation"])
+            != (0, 0, True)
+            or code not in (0, 127)
+        ):
+            raise ValueError(f"unexpected withdrawal observation: {key}")
+        group = entity, code
+        witnesses[key] = group
+        totals[group] = totals.get(group, 0) + 1
+        mutation = "func_remove" if entity == "function" else "object_removed"
+        yield (
+            filename,
+            row["provider"],
+            entity,
+            row["client"],
+            symbol,
+            "symbol binding",
+            "withdraw export",
+            "ELF export",
+            mutation,
+            f"unresolved relocation, client exit {code}",
+            "loader failure" if code else "unresolved import with successful workload",
+        )
+    filename = "withdrawal-scenarios.json"
+    counts = {}
+    seen = set()
+    for row in json.loads((PRODUCT / filename).read_text()):
+        key = row["provider"], row["symbol"], row["client"]
+        group = row["entity"], row["withdrawn"]
+        signature = group, tuple(row["relocations"])
+        if (
+            witnesses.get(key) != group
+            or signature in seen
+            or not signature[1]
+            or row["count"] < 1
+        ):
+            raise ValueError(f"invalid withdrawal representative: {key}")
+        seen.add(signature)
+        counts[group] = counts.get(group, 0) + row["count"]
+        yield (
+            filename,
+            row["provider"],
+            row["entity"],
+            "|".join(row["relocations"]),
+            row["symbol"],
+            "symbol binding",
+            "withdraw export",
+            "ELF export",
+            "func_remove" if row["entity"] == "function" else "object_removed",
+            row["client"],
+            f"representative, client exit {row['withdrawn']}",
+        )
+    if totals != counts:
+        raise ValueError(
+            "withdrawal group counts disagree with individual observations"
+        )
+
+    filename = "minor-dpc-withdrawals.json"
+    for row in json.loads((PRODUCT / filename).read_text()):
+        if (
+            row["exits"] != {"dal-2025.9.0": 0, "dal-2025.11.0": 127}
+            or row["detected_removal"] is not True
+        ):
+            raise ValueError(f"unexpected minor-release withdrawal: {row['symbol']}")
+        yield (
+            filename,
+            "libonedal_dpc.so.3",
+            "function",
+            "minor upgrade",
+            row["symbol"],
+            "symbol binding",
+            "withdraw export",
+            "ELF export",
+            "func_remove",
+            "address relocation, client exit 127",
+            "loader failure",
+        )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -694,6 +790,7 @@ def main():
         *enum_receipts(),
         *provider_receipts(),
         *exception_receipts(),
+        *import_withdrawal_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

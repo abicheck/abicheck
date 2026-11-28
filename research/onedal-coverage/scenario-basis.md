@@ -134,3 +134,11 @@ both directions. Withdrawing an imported typeinfo object or vtable instead
 stops the loader before the handler runs. The 22 isolated withdrawals reuse
 the ELF data-object removal operator. The two successful release runs are
 controls for runtime type identity.
+
+The 63 isolated import withdrawals reuse function and data-object removal.
+Every withdrawn import was independently unresolved. The ordinary frozen
+workload failed in 44 cases and succeeded in 19. All 19 successful cases
+belong to the PLT jump-slot group. The crosswalk preserves both outcomes and
+checks the five recorded relocation-group representatives against individual
+clients. Four actual minor-release removals have a separate address-relocation
+witness, which tests availability without calling the removed implementation.

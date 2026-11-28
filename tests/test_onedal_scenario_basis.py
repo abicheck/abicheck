@@ -127,3 +127,17 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         == {"object_removed"}
         <= OP_BY_NAME.keys()
     )
+
+    imports = [r for r in rows if r["ledger"] == "import-withdrawals.json"]
+    assert sum(r["status"] == "loader failure" for r in imports) == 44
+    assert (
+        sum(
+            r["status"] == "unresolved import with successful workload" for r in imports
+        )
+        == 19
+    )
+    assert (
+        {r["generic_mutations"] for r in imports}
+        == {"func_remove", "object_removed"}
+        <= OP_BY_NAME.keys()
+    )
