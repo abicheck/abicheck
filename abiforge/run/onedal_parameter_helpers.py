@@ -24,7 +24,9 @@ def run(prefix, work, candidates=()):
         shared = symbol_names(provider) & symbol_names(frontend, imports=True)
         required = consumer_required_names(frontend, provider)
         if required != shared:
-            raise ValueError(f"abicheck and nm disagree for {frontend}: {required ^ shared}")
+            raise ValueError(
+                f"abicheck and nm disagree for {frontend}: {required ^ shared}"
+            )
         selectors = {s for s in shared if "_parameters_" in s and "EEclE" in s}
         helpers = shared - selectors
         if not helpers:

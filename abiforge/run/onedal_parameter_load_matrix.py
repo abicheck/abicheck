@@ -108,14 +108,18 @@ def run(prefixes, work, *, import_profiles=None):
                     f"oneDAL import bindings changed across same-major runs for {exe}"
                 )
             frontend = image(sdk, "libonedal")
-            frontend_names = {name for provider, name in bindings if provider == frontend.name}
+            frontend_names = {
+                name for provider, name in bindings if provider == frontend.name
+            }
             predict_missing = consumer_missing_symbol_probe(exe, frontend)
             missing_by_candidate = {}
             for runtime in prefixes:
                 candidate = image(runtime, "libonedal")
                 missing_names = predict_missing(candidate)
                 if set(missing_names) != frontend_names - candidate_exports(candidate):
-                    raise ValueError(f"missing frontend imports differ: {exe}, {candidate}")
+                    raise ValueError(
+                        f"missing frontend imports differ: {exe}, {candidate}"
+                    )
                 missing_by_candidate[runtime.name] = missing_names
             packaged = [name for name in direct if (sdk / "lib" / name).is_file()]
             dependency_tags = set().union(

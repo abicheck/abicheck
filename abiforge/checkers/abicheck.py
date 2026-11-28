@@ -46,6 +46,7 @@ def _consumer_baseline_facts(consumer: Path, baseline: Path):
     from abicheck.extract.consumer_imports import read_consumer_imports
     from abicheck.extract.library_export_facts import read_library_export_facts
     from abicheck.model.availability import FactStatus
+
     old = read_library_export_facts(baseline)
     imports = read_consumer_imports(consumer, old.soname)
     if old.status != FactStatus.PRESENT or imports.status != FactStatus.PRESENT:
@@ -104,14 +105,27 @@ def elf_release_surface(path: Path) -> ElfReleaseSurface:
         name = symbol.name
         if symbol.version:
             name += ("@@" if symbol.is_default else "@") + symbol.version
-        exports.append((name, symbol.sym_type.value, symbol.binding.value, symbol.visibility, symbol.size))
+        exports.append(
+            (
+                name,
+                symbol.sym_type.value,
+                symbol.binding.value,
+                symbol.visibility,
+                symbol.size,
+            )
+        )
     imports = [
         (symbol.name, symbol.binding.value, symbol.version, symbol.version_soname)
         for symbol in metadata.imports
     ]
     return ElfReleaseSurface(
-        metadata.soname, exports, metadata.versions_required, imports,
-        metadata.needed, metadata.rpath, metadata.runpath,
+        metadata.soname,
+        exports,
+        metadata.versions_required,
+        imports,
+        metadata.needed,
+        metadata.rpath,
+        metadata.runpath,
     )
 
 
@@ -126,7 +140,9 @@ def pe_declaration_names(path: Path) -> tuple[list[str], list[str]]:
     )
 
 
-def pe_loader_surface(path: Path) -> tuple[list[tuple[str, int, str]], dict[str, list[str]]]:
+def pe_loader_surface(
+    path: Path,
+) -> tuple[list[tuple[str, int, str]], dict[str, list[str]]]:
     """Return export identities, forwarding destinations and ordinary imports."""
     from abicheck.pe_metadata import parse_pe_metadata
 

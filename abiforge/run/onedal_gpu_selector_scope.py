@@ -145,7 +145,9 @@ def compare(frontend, work, evidence, *, control=None):
             prediction = predict_missing(single)
             expected = [name] if individual[name] == 127 else []
             if prediction != expected:
-                raise ValueError(f"consumer prediction differs for {name}: {prediction}")
+                raise ValueError(
+                    f"consumer prediction differs for {name}: {prediction}"
+                )
             predicted_missing.extend(prediction)
         rows[case]["single_removal_predicted_missing"] = predicted_missing
         rows[case]["single_removal_loader_exits"] = individual

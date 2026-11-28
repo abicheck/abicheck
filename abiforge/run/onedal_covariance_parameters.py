@@ -13,8 +13,14 @@ from .onedal_export_surface import symbol_names, validate_release_labels
 
 CAMPAIGNS = {
     "logistic_regression": ("logistic_regression10parameters20train_parameters_cpu", 4),
-    "decision_forest": (r"decision_forest10parameters20(?:infer|train)_parameters_cpu", 10),
-    "pca_precomputed": (r"3pca10parameters20train_parameters_cpuI[fd]NS1_6method2v111precomputedE", 6),
+    "decision_forest": (
+        r"decision_forest10parameters20(?:infer|train)_parameters_cpu",
+        10,
+    ),
+    "pca_precomputed": (
+        r"3pca10parameters20train_parameters_cpuI[fd]NS1_6method2v111precomputedE",
+        6,
+    ),
     "pca_svd": (r"3pca10parameters20train_parameters_cpuI[fd]NS1_6method2v13svdE", 6),
     "pca_cov": (r"3pca10parameters20train_parameters_cpuI[fd]NS1_6method2v13covE", 6),
     "covariance": ("covariance10parameters22compute_parameters_cpu", 2),
@@ -22,7 +28,9 @@ CAMPAIGNS = {
 }
 
 
-def build_client(old, work, algorithm, abi_major, *, link_inputs=(), fixture=None, as_needed=False):
+def build_client(
+    old, work, algorithm, abi_major, *, link_inputs=(), fixture=None, as_needed=False
+):
     is_pca = algorithm.startswith("pca_")
     fixture_name = "pca" if is_pca else algorithm
     fixture = fixture or (
@@ -31,7 +39,11 @@ def build_client(old, work, algorithm, abi_major, *, link_inputs=(), fixture=Non
     )
     exe = work / algorithm
     # With --as-needed the frontend must precede the provider of its parameter symbols.
-    frontends = ["onedal", "onedal_parameters"] if as_needed else ["onedal_parameters", "onedal"]
+    frontends = (
+        ["onedal", "onedal_parameters"]
+        if as_needed
+        else ["onedal_parameters", "onedal"]
+    )
     libraries = [*frontends, "onedal_core", "onedal_thread"]
     subprocess.run(
         [
@@ -68,7 +80,9 @@ def audit(old, minor, work, algorithm="covariance", *, abi_major=3):
         if re.search(selector_name, name) and "EEclE" in name
     )
     if len(selectors) != expected_count:
-        raise ValueError(f"expected {expected_count} exported {algorithm} CPU call operators")
+        raise ValueError(
+            f"expected {expected_count} exported {algorithm} CPU call operators"
+        )
     expected_calls = selectors
     if is_pca:
         expected_calls = [name for name in selectors if "11train_input" in name]
@@ -126,7 +140,9 @@ def audit(old, minor, work, algorithm="covariance", *, abi_major=3):
         bound = [name for name in bound if name not in helpers]
         reached = [name for name in reached if name not in helpers]
         if bound != expected_calls or reached != expected_calls:
-            raise ValueError(f"{algorithm} selector coverage changed in {release}: {bound=}, {reached=}")
+            raise ValueError(
+                f"{algorithm} selector coverage changed in {release}: {bound=}, {reached=}"
+            )
         control_key = (
             "unimplemented_exception_control_exit"
             if algorithm == "logistic_regression"
@@ -138,22 +154,34 @@ def audit(old, minor, work, algorithm="covariance", *, abi_major=3):
         }
         if helpers:
             if helper_bindings != helpers or helper_calls != helpers:
-                raise ValueError(f"decision forest helper coverage changed in {release}")
+                raise ValueError(
+                    f"decision forest helper coverage changed in {release}"
+                )
             results[release.name]["bound_helpers"] = helper_bindings
             results[release.name]["called_helpers"] = helper_calls
         if expected_calls != selectors:
             results[release.name]["bound_selectors"] = bound
-            results[release.name]["unobserved_selectors"] = sorted(set(selectors) - set(reached))
+            results[release.name]["unobserved_selectors"] = sorted(
+                set(selectors) - set(reached)
+            )
     return results
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("old", type=Path, help="compile the frozen client against this .so.3 SDK")
-    parser.add_argument("minor", type=Path, help="run the same binary against this second .so.3 package")
-    parser.add_argument("--major", type=Path, help="also rebuild against a oneDAL .so.4 SDK")
+    parser.add_argument(
+        "old", type=Path, help="compile the frozen client against this .so.3 SDK"
+    )
+    parser.add_argument(
+        "minor", type=Path, help="run the same binary against this second .so.3 package"
+    )
+    parser.add_argument(
+        "--major", type=Path, help="also rebuild against a oneDAL .so.4 SDK"
+    )
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--algorithm", choices=[*CAMPAIGNS, "all"], default="covariance")
+    parser.add_argument(
+        "--algorithm", choices=[*CAMPAIGNS, "all"], default="covariance"
+    )
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         if args.major:
@@ -163,7 +191,9 @@ if __name__ == "__main__":
         for algorithm in algorithms:
             result = audit(args.old, args.minor, Path(tmp), algorithm)
             if args.major:
-                result.update(audit(args.major, None, Path(tmp), algorithm, abi_major=4))
+                result.update(
+                    audit(args.major, None, Path(tmp), algorithm, abi_major=4)
+                )
             reports[algorithm] = result
         if args.algorithm == "all":
             report = {"frozen_client_sdk": args.old.name, "campaigns": reports}

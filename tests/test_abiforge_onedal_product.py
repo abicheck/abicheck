@@ -215,20 +215,36 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
         for algorithm in CAMPAIGNS
     }
     if source == "MAJOR":
-        fixture = Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/hdbscan.cpp"
-        clients["hdbscan"] = build_client(baseline, tmp_path, "hdbscan", source_major, fixture=fixture)
+        fixture = (
+            Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/hdbscan.cpp"
+        )
+        clients["hdbscan"] = build_client(
+            baseline, tmp_path, "hdbscan", source_major, fixture=fixture
+        )
         header = tmp_path / "hdbscan_header.cpp"
         header.write_text("#include <oneapi/dal/algo/hdbscan.hpp>\nint main() {}\n")
         clients["hdbscan_header"] = build_client(
             baseline, tmp_path, "hdbscan_header", source_major, fixture=header
         )
         clients["hdbscan_header_as_needed"] = build_client(
-            baseline, tmp_path, "hdbscan_header_as_needed", source_major, fixture=header, as_needed=True
+            baseline,
+            tmp_path,
+            "hdbscan_header_as_needed",
+            source_major,
+            fixture=header,
+            as_needed=True,
         )
-        tags = subprocess.check_output(["readelf", "-d", clients["hdbscan_header_as_needed"]], text=True)
+        tags = subprocess.check_output(
+            ["readelf", "-d", clients["hdbscan_header_as_needed"]], text=True
+        )
         needed = re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", tags)
-        assert [name for name in needed if name.startswith(("libonedal", "libtbb"))] == [
-            "libonedal.so.4", "libonedal_parameters.so.4", "libonedal_core.so.4", "libonedal_thread.so.4"
+        assert [
+            name for name in needed if name.startswith(("libonedal", "libtbb"))
+        ] == [
+            "libonedal.so.4",
+            "libonedal_parameters.so.4",
+            "libonedal_core.so.4",
+            "libonedal_thread.so.4",
         ]
     expected = {}
     original_exports = symbol_names(original)
@@ -236,12 +252,18 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
     for algorithm, client in clients.items():
         for runtime in (baseline, candidate):
             loaded = subprocess.run(
-                [client], env={"LD_LIBRARY_PATH": str(runtime / "lib"), "LD_BIND_NOW": "1"},
-                capture_output=True, text=True,
+                [client],
+                env={"LD_LIBRARY_PATH": str(runtime / "lib"), "LD_BIND_NOW": "1"},
+                capture_output=True,
+                text=True,
             )
             if runtime == candidate and crosses_major:
                 assert loaded.returncode == 127
-                library = "libonedal" if algorithm == "hdbscan_header_as_needed" else "libonedal_parameters"
+                library = (
+                    "libonedal"
+                    if algorithm == "hdbscan_header_as_needed"
+                    else "libonedal_parameters"
+                )
                 assert f"{library}.so.{source_major}: cannot open" in loaded.stderr
             else:
                 assert loaded.returncode == 0, loaded.stderr
@@ -256,7 +278,9 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
         assert missing == {name for name in required if "hdbscan" in name}
         header_required, header_missing = expected["hdbscan_header"]
         option_getters = {
-            name for name in missing if "7hdbscan6detail" in name and name.endswith("_idEv")
+            name
+            for name in missing
+            if "7hdbscan6detail" in name and name.endswith("_idEv")
         }
         assert len(option_getters) == 6
         assert header_required == header_missing == option_getters
@@ -265,9 +289,12 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
     required, missing = expected["covariance"]
     prefix = "_ZNK6oneapi3dal10covariance2v114compute_resultINS1_4task2v17computeEE"
     assert {
-        prefix + suffix for suffix in ("14get_cov_matrixEv", "14get_cor_matrixEv", "9get_meansEv")
+        prefix + suffix
+        for suffix in ("14get_cov_matrixEv", "14get_cor_matrixEv", "9get_meansEv")
     } <= required
-    covariance_destructor = "_ZN6oneapi3dal10covariance2v113compute_inputINS1_4task2v17computeEED1Ev"
+    covariance_destructor = (
+        "_ZN6oneapi3dal10covariance2v113compute_inputINS1_4task2v17computeEED1Ev"
+    )
     assert missing == ({covariance_destructor} if source == "MAJOR" else set())
     required, missing = expected["linear_regression"]
     assert len(required) == (51 if source == "MAJOR" else 49)
@@ -281,7 +308,9 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
         "_ZN6oneapi3dal3pca6detail21get_noise_variance_idEv",
         "_ZN6oneapi3dal3pca2v111train_inputINS1_4task2v113dim_reductionEED1Ev",
     }
-    partial_destructor = "_ZN6oneapi3dal3pca2v119partial_train_inputINS1_4task2v113dim_reductionEED1Ev"
+    partial_destructor = (
+        "_ZN6oneapi3dal3pca2v119partial_train_inputINS1_4task2v113dim_reductionEED1Ev"
+    )
     for method, minor_count, additions in (
         ("pca_cov", 44, batch_additions | {partial_destructor}),
         ("pca_svd", 35, batch_additions),
@@ -298,11 +327,19 @@ def test_frozen_cpu_client_provider_scope(tmp_path, source, target):
         assert not missing
 
     report = tmp_path / "consumers.json"
-    compared = subprocess.run([
-        sys.executable, "-m", "abicheck", "compare", original, replacement,
-        *(arg for client in clients.values() for arg in ("--used-by", client)),
-        "-o", f"json={report}",
-    ])
+    compared = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "abicheck",
+            "compare",
+            original,
+            replacement,
+            *(arg for client in clients.values() for arg in ("--used-by", client)),
+            "-o",
+            f"json={report}",
+        ]
+    )
     assert compared.returncode == (4 if crosses_major else 1)
     data = json.loads(report.read_text())
     assert data["verdict"] == ("BREAKING" if crosses_major else "UNCONFIRMED")
@@ -329,7 +366,9 @@ def test_pca_header_noise_variance_import(tmp_path, release, major):
         pytest.skip("requires the pinned oneDAL CPU development package")
     source = tmp_path / "pca_header.cpp"
     source.write_text("#include <oneapi/dal/algo/pca.hpp>\nint main() {}\n")
-    exe = build_client(Path(prefix).resolve(), tmp_path, "header", major, fixture=source)
+    exe = build_client(
+        Path(prefix).resolve(), tmp_path, "header", major, fixture=source
+    )
     getter = "_ZN6oneapi3dal3pca6detail21get_noise_variance_idEv"
     assert (getter in symbol_names(exe, imports=True)) == (major == 4)
 
@@ -349,9 +388,21 @@ def test_as_needed_parameter_link_order(tmp_path, release, major, linker):
         pytest.skip(f"requires ld.{linker}")
     obj = tmp_path / "pca.o"
     subprocess.run(
-        ["g++", "-std=c++17", f"-I{sdk}/include", f"-I{sdk}/include/dal",
-         "-x", "c++", "-c", "-", "-o", obj],
-        input="#include <oneapi/dal/algo/pca.hpp>\nint main() {}\n", text=True, check=True,
+        [
+            "g++",
+            "-std=c++17",
+            f"-I{sdk}/include",
+            f"-I{sdk}/include/dal",
+            "-x",
+            "c++",
+            "-c",
+            "-",
+            "-o",
+            obj,
+        ],
+        input="#include <oneapi/dal/algo/pca.hpp>\nint main() {}\n",
+        text=True,
+        check=True,
     )
     frontend = lib / f"libonedal.so.{major}"
     parameters = lib / f"libonedal_parameters.so.{major}"
@@ -365,10 +416,22 @@ def test_as_needed_parameter_link_order(tmp_path, release, major, linker):
         (["-Wl,--no-as-needed", parameters, frontend], True),
     ):
         linked = subprocess.run(
-            ["g++", f"-fuse-ld={linker}", obj, "-Wl,--as-needed,--no-demangle", f"-Wl,-rpath-link,{lib}",
-             *libraries, lib / f"libonedal_core.so.{major}",
-             lib / f"libonedal_thread.so.{major}", lib / "libtbb.so.12", "-o", exe],
-            env={**os.environ, "LC_ALL": "C"}, capture_output=True, text=True,
+            [
+                "g++",
+                f"-fuse-ld={linker}",
+                obj,
+                "-Wl,--as-needed,--no-demangle",
+                f"-Wl,-rpath-link,{lib}",
+                *libraries,
+                lib / f"libonedal_core.so.{major}",
+                lib / f"libonedal_thread.so.{major}",
+                lib / "libtbb.so.12",
+                "-o",
+                exe,
+            ],
+            env={**os.environ, "LC_ALL": "C"},
+            capture_output=True,
+            text=True,
         )
         if not should_link:
             assert linked.returncode != 0
@@ -377,13 +440,17 @@ def test_as_needed_parameter_link_order(tmp_path, release, major, linker):
         else:
             assert linked.returncode == 0, linked.stderr
             loaded = subprocess.run(
-                [exe], env={"LD_LIBRARY_PATH": str(lib), "LD_BIND_NOW": "1"},
-                capture_output=True, text=True,
+                [exe],
+                env={"LD_LIBRARY_PATH": str(lib), "LD_BIND_NOW": "1"},
+                capture_output=True,
+                text=True,
             )
             if linker == "lld" and "-Wl,--no-as-needed" not in libraries:
                 tags = subprocess.check_output(["readelf", "-d", exe], text=True)
                 needed = re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", tags)
-                assert [name for name in needed if name.startswith("libonedal")] == [frontend.name]
+                assert [name for name in needed if name.startswith("libonedal")] == [
+                    frontend.name
+                ]
                 assert loaded.returncode == 127
                 symbol = "_ZNK4daal15data_management10interface115CSRNumericTable19getSerializationTagEv"
                 assert f"{frontend}: undefined symbol: {symbol}" in loaded.stderr
@@ -411,13 +478,20 @@ def test_as_needed_parameter_link_order(tmp_path, release, major, linker):
                     ):
                         replay = subprocess.run(
                             [exe],
-                            env={"LD_LIBRARY_PATH": str(lib), "LD_BIND_NOW": "1",
-                                 "LD_PRELOAD": ":".join(map(str, providers))},
-                            capture_output=True, text=True,
+                            env={
+                                "LD_LIBRARY_PATH": str(lib),
+                                "LD_BIND_NOW": "1",
+                                "LD_PRELOAD": ":".join(map(str, providers)),
+                            },
+                            capture_output=True,
+                            text=True,
                         )
                         if unresolved:
                             assert replay.returncode == 127
-                            assert f"{frontend}: undefined symbol: {unresolved}" in replay.stderr
+                            assert (
+                                f"{frontend}: undefined symbol: {unresolved}"
+                                in replay.stderr
+                            )
                         else:
                             assert replay.returncode == 0, replay.stderr
             else:
@@ -444,7 +518,9 @@ def test_thread_provider_consumer_requirements(tmp_path):
             consumers[client] = symbol_names(client, imports=True) & exports
         requirements[release] = consumers
 
-    old, minor, major = (list(requirements[key].values()) for key in ("OLD", "NEW", "MAJOR"))
+    old, minor, major = (
+        list(requirements[key].values()) for key in ("OLD", "NEW", "MAJOR")
+    )
     assert old == minor
     assert old[0] == old[1] == major[0] == major[1]
     assert len(old[0]) == 23 and "_daal_unlock_mutex" in old[0]
@@ -456,11 +532,19 @@ def test_thread_provider_consumer_requirements(tmp_path):
         replacement, exports = releases[target]
         clients = requirements[source]
         report = tmp_path / f"{source}-{target}.json"
-        compared = subprocess.run([
-            sys.executable, "-m", "abicheck", "compare", original, replacement,
-            *(arg for client in clients for arg in ("--used-by", client)),
-            "-o", f"json={report}",
-        ])
+        compared = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "abicheck",
+                "compare",
+                original,
+                replacement,
+                *(arg for client in clients for arg in ("--used-by", client)),
+                "-o",
+                f"json={report}",
+            ]
+        )
         crosses_major = "MAJOR" in (source, target)
         data = json.loads(report.read_text())
         assert compared.returncode == (4 if crosses_major else 0)
@@ -471,7 +555,11 @@ def test_thread_provider_consumer_requirements(tmp_path):
             assert rows[client]["verdict"] == "COMPATIBLE"
             assert required <= exports
             assert rows[client]["required_symbol_count"] == len(required)
-            assert rows[client]["missing_symbols"] == rows[client]["missing_versions"] == []
+            assert (
+                rows[client]["missing_symbols"]
+                == rows[client]["missing_versions"]
+                == []
+            )
 
 
 @pytest.mark.integration
@@ -491,16 +579,23 @@ def test_core_provider_consumer_requirements(tmp_path):
         providers[release] = provider, symbol_names(provider)
 
     missing_counts = {
-        ("OLD", "NEW"): 0, ("NEW", "OLD"): 1,
-        ("OLD", "MAJOR"): 499, ("NEW", "MAJOR"): 499,
-        ("MAJOR", "OLD"): 406, ("MAJOR", "NEW"): 405,
+        ("OLD", "NEW"): 0,
+        ("NEW", "OLD"): 1,
+        ("OLD", "MAJOR"): 499,
+        ("NEW", "MAJOR"): 499,
+        ("MAJOR", "OLD"): 406,
+        ("MAJOR", "NEW"): 405,
     }
     dpc_only = {}
     for source, (baseline, exports) in providers.items():
         cpu_count = {"OLD": 688, "NEW": 689, "MAJOR": 595}[source]
         cpu = baseline.with_name(baseline.name.replace("onedal_core", "onedal"))
         cpu_imports = symbol_names(cpu, imports=True) & exports
-        for library, count in (("onedal", cpu_count), ("onedal_dpc", cpu_count + 10), ("onedal_thread", 0)):
+        for library, count in (
+            ("onedal", cpu_count),
+            ("onedal_dpc", cpu_count + 10),
+            ("onedal_thread", 0),
+        ):
             client = baseline.with_name(baseline.name.replace("onedal_core", library))
             required = symbol_names(client, imports=True) & exports
             assert len(required) == count
@@ -516,7 +611,9 @@ def test_core_provider_consumer_requirements(tmp_path):
                 assert len(missing) == (missing_counts[source, target] if count else 0)
                 assert set(probe(candidate)) == missing
                 if missing and (source, target) == ("NEW", "OLD"):
-                    assert missing == {"_ZN4daal8services10interface111Environment9getStatusEv"}
+                    assert missing == {
+                        "_ZN4daal8services10interface111Environment9getStatusEv"
+                    }
 
     names = dpc_only["OLD"]
     assert names == dpc_only["NEW"] == dpc_only["MAJOR"]
@@ -525,18 +622,26 @@ def test_core_provider_consumer_requirements(tmp_path):
     # Link strong address references to both function and RTTI symbols.
     obj = tmp_path / "tree-references.o"
     assembly = ".data\n" + "".join(f".quad {name}\n" for name in sorted(names))
-    subprocess.run(["as", "--64", "-o", obj, "-"], input=assembly, text=True, check=True)
+    subprocess.run(
+        ["as", "--64", "-o", obj, "-"], input=assembly, text=True, check=True
+    )
     imports = subprocess.check_output(["nm", "-u", "-P", obj], text=True)
     assert {line.split()[0] for line in imports.splitlines()} == names
     image = tmp_path / "tree.so"
     reader = tmp_path / "tree-rtti"
-    fixture = Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/tree_rtti.cpp"
+    fixture = (
+        Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/tree_rtti.cpp"
+    )
     subprocess.run(["g++", "-std=c++17", fixture, "-ldl", "-o", reader], check=True)
     assert subprocess.run([reader], env={}).returncode == 1
     for provider, _ in providers.values():
-        subprocess.run(["ld", "-shared", "-z", "defs", "-o", image, obj, provider], check=True)
+        subprocess.run(
+            ["ld", "-shared", "-z", "defs", "-o", image, obj, provider], check=True
+        )
         for runtime, _ in providers.values():
-            thread = runtime.with_name(runtime.name.replace("onedal_core", "onedal_thread"))
+            thread = runtime.with_name(
+                runtime.name.replace("onedal_core", "onedal_thread")
+            )
             loaded = subprocess.run(
                 [reader],
                 env={
@@ -546,11 +651,14 @@ def test_core_provider_consumer_requirements(tmp_path):
                     "LD_DEBUG": "bindings",
                     "LC_ALL": "C",
                 },
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if provider.name != runtime.name:
                 assert loaded.returncode == 127
-                assert f"{provider.name}: cannot open shared object file" in loaded.stderr
+                assert (
+                    f"{provider.name}: cannot open shared object file" in loaded.stderr
+                )
                 continue
             assert loaded.returncode == 0, loaded.stderr
             bindings = re.findall(
@@ -562,7 +670,9 @@ def test_core_provider_consumer_requirements(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("source", "target"), tuple(permutations(("OLD", "NEW", "MAJOR"), 2)))
+@pytest.mark.parametrize(
+    ("source", "target"), tuple(permutations(("OLD", "NEW", "MAJOR"), 2))
+)
 def test_core_provider_cli(tmp_path, source, target):
     from abiforge.run.onedal_export_surface import symbol_names
 
@@ -580,15 +690,27 @@ def test_core_provider_cli(tmp_path, source, target):
         client = baseline.with_name(baseline.name.replace("onedal_core", stem))
         required = symbol_names(client, imports=True) & old_exports
         missing = required - new_exports
-        verdict = "NO_CHANGE" if not required else ("BREAKING" if missing else "COMPATIBLE")
+        verdict = (
+            "NO_CHANGE" if not required else ("BREAKING" if missing else "COMPATIBLE")
+        )
         expected[client] = (len(required), missing, verdict)
 
     report = tmp_path / "core.json"
-    compared = subprocess.run([
-        sys.executable, "-m", "abicheck", "compare", baseline, candidate,
-        *(arg for client in expected for arg in ("--used-by", client)),
-        "-o", f"json={report}",
-    ], capture_output=True, text=True)
+    compared = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "abicheck",
+            "compare",
+            baseline,
+            candidate,
+            *(arg for client in expected for arg in ("--used-by", client)),
+            "-o",
+            f"json={report}",
+        ],
+        capture_output=True,
+        text=True,
+    )
     upgrade = (source, target) == ("OLD", "NEW")
     assert compared.returncode == (1 if upgrade else 4), compared.stderr
     assert "public-header scoping" in compared.stderr
@@ -597,13 +719,22 @@ def test_core_provider_cli(tmp_path, source, target):
     assert data["verdict"] == ("UNCONFIRMED" if upgrade else "BREAKING")
     if "MAJOR" not in (source, target):
         status_symbol = "_ZN4daal8services10interface111Environment9getStatusEv"
-        finding, = [row for row in data["changes"] if row["symbol"] == status_symbol]
+        (finding,) = [row for row in data["changes"] if row["symbol"] == status_symbol]
         assert finding["kind"] == ("func_added" if upgrade else "func_removed_elf_only")
-        assert finding["compatibility_decision"] == ("COMPATIBLE" if upgrade else "BREAKING")
+        assert finding["compatibility_decision"] == (
+            "COMPATIBLE" if upgrade else "BREAKING"
+        )
         if not upgrade:
-            assert finding["contract_reason_code"] == "explicit_consumer_or_required_symbol_evidence"
+            assert (
+                finding["contract_reason_code"]
+                == "explicit_consumer_or_required_symbol_evidence"
+            )
     assert {
-        Path(row["app"]): (row["required_symbol_count"], set(row["missing_symbols"]), row["verdict"])
+        Path(row["app"]): (
+            row["required_symbol_count"],
+            set(row["missing_symbols"]),
+            row["verdict"],
+        )
         for row in data["used_by"]
     } == expected
 
@@ -621,20 +752,33 @@ def test_core_tree_rtti_elf_layout(release, major):
     tree = "_ZTIN4daal10algorithms6dtrees8internal4TreeE"
     base = "_ZTIN4daal4BaseE"
     ref_counter = "_ZTIN4daal8services10interface110RefCounterE"
-    sizes = {s.name: s.size for s in parse_elf_metadata(core).symbols if s.name in (tree, base, ref_counter)}
+    sizes = {
+        s.name: s.size
+        for s in parse_elf_metadata(core).symbols
+        if s.name in (tree, base, ref_counter)
+    }
     assert sizes == {tree: 24, base: 16, ref_counter: 40}
-    assert _inheritance_shape(sizes[ref_counter], 8) == "1 base class (__vmi_class_type_info)"
-    assert _inheritance_shape(sizes[tree], 8) == "single base class (__si_class_type_info)"
+    assert (
+        _inheritance_shape(sizes[ref_counter], 8)
+        == "1 base class (__vmi_class_type_info)"
+    )
+    assert (
+        _inheritance_shape(sizes[tree], 8) == "single base class (__si_class_type_info)"
+    )
     assert _inheritance_shape(sizes[base], 8) == "no base class (__class_type_info)"
 
     symbols = subprocess.check_output(["nm", "-D", "--defined-only", core], text=True)
     addresses = {
-        name: int(address, 16) for address, _, name in map(str.split, symbols.splitlines())
+        name: int(address, 16)
+        for address, _, name in map(str.split, symbols.splitlines())
         if name in (tree, base, ref_counter)
     }
     targets = {
         addresses[ref_counter]: ("_ZTVN10__cxxabiv121__vmi_class_type_infoE", "10"),
-        addresses[ref_counter] + 24: ("_ZTIN4daal8services10interface16AtomicIiEE", "0"),
+        addresses[ref_counter] + 24: (
+            "_ZTIN4daal8services10interface16AtomicIiEE",
+            "0",
+        ),
         addresses[tree]: ("_ZTVN10__cxxabiv120__si_class_type_infoE", "10"),
         addresses[tree] + 8: (tree.replace("_ZTI", "_ZTS"), "0"),
         addresses[tree] + 16: (base, "0"),
@@ -646,7 +790,8 @@ def test_core_tree_rtti_elf_layout(release, major):
         int(address, 16): (name, addend)
         for address, name, addend in re.findall(
             r"^([0-9a-f]+)\s+\S+\s+R_X86_64_64\s+\S+\s+(\S+) \+ ([0-9a-f]+)$",
-            relocations, re.MULTILINE,
+            relocations,
+            re.MULTILINE,
         )
         if int(address, 16) in targets
     }
@@ -662,18 +807,33 @@ def test_ref_counter_header_matches_core_rtti(tmp_path):
             pytest.skip("requires the three pinned Linux oneDAL SDKs")
         packages.append((Path(prefix).resolve(), major))
 
-    source = Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/ref_counter_layout.cpp"
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "abiforge/fixtures/onedal/ref_counter_layout.cpp"
+    )
     for sdk, major in packages:
         reader = tmp_path / "ref_counter_layout"
-        subprocess.run([
-            "g++", "-std=c++17", f"-I{sdk}/include/dal", source, "-ldl", "-o", reader,
-        ], check=True)
+        subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                f"-I{sdk}/include/dal",
+                source,
+                "-ldl",
+                "-o",
+                reader,
+            ],
+            check=True,
+        )
         for runtime, runtime_major in packages:
             if runtime_major == major:
                 lib = runtime / "lib"
                 subprocess.run(
                     [reader, lib / f"libonedal_core.so.{major}"],
-                    env={"LD_LIBRARY_PATH": str(lib), "LD_BIND_NOW": "1",
-                         "LD_PRELOAD": str(lib / f"libonedal_thread.so.{major}")},
+                    env={
+                        "LD_LIBRARY_PATH": str(lib),
+                        "LD_BIND_NOW": "1",
+                        "LD_PRELOAD": str(lib / f"libonedal_thread.so.{major}"),
+                    },
                     check=True,
                 )
