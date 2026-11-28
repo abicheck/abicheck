@@ -72,7 +72,8 @@ def sources(family, variant):
 struct {attr} Value {{ long word; ~Value(); }};
 using Visit = int (*)(Value);
 struct Ops {{ int (*run)(Visit); }};
-struct Interface {{ const Ops* ops; }};
+using OpsPtr = const Ops*;
+struct Interface {{ OpsPtr ops; }};
 extern "C" const Interface* interface() noexcept;
 """
         word = "40 + 2" if variant == "control" else "42"

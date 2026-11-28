@@ -127,7 +127,9 @@ def test_nested_callback_record_needs_an_unambiguous_direct_field():
     record = SimpleNamespace(
         name="Ops", qualified_name="api::Ops", trivial_for_calls=True
     )
-    declarations = SimpleNamespace(types=[record], typedefs_qualified={})
+    declarations = SimpleNamespace(
+        types=[record], typedefs_qualified={"api::OpsPtr": "const Ops*"}
+    )
     index = CallbackTypeIndex(SimpleNamespace(declarations=declarations))
 
     def identify(spelling, fact):
@@ -136,6 +138,8 @@ def test_nested_callback_record_needs_an_unambiguous_direct_field():
         )
 
     assert identify("const Ops *", Fact.not_collected()) is record
+    assert identify("OpsPtr", Fact.present(("api::Ops",))) is record
+    assert identify("OpsPtr *", Fact.not_collected()) is None
     assert identify("Ops **", Fact.not_collected()) is None
     assert identify("Ops *", Fact.present(("other::Ops",))) is None
     assert identify("Ops *", Fact.present(())) is None

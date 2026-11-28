@@ -3,11 +3,14 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.skipif(shutil.which("cc") is None, reason="requires cc")
 
 SOURCE = Path(__file__).resolve().parents[1] / "abiforge/fixtures/sized_record"
 

@@ -83,10 +83,11 @@ class CallbackTypeIndex:
         *,
         allow_spelling: bool = False,
     ) -> RecordType | None:
+        spelling, scope = self.resolve(spelling, scope)
         direct = re.fullmatch(r"([^*&#()\[\]<>]+?)\s*(?:[*&]\s*(?:const)?)?", spelling)
         if not direct:
             return None
-        name = self.resolve(direct[1], scope)[0]
+        name = spelling if direct[1] == spelling else self.resolve(direct[1], scope)[0]
         if identities is not None and identities.is_present:
             if identities.value != (name,):
                 return None

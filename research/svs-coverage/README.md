@@ -74,8 +74,8 @@ inline namespace v1 withdraws its v0 helper symbols. The frozen client fails
 at symbol resolution (127); the checker reports func_removed on store_message
 and inline_namespace_moved. Both comparisons return BREAKING (4).
 
-Run the following with the project environment active and CastXML, clang++ and
-a C compiler on PATH. The product replay builds the upstream Status translation
+Run the following with the project environment active and CastXML, clang++, cc, gcc
+and a C++20-capable g++ on PATH. The product replay builds the upstream Status translation
 unit and isolates export withdrawal. The existing released-runtime profile
 in scripts/l2_real_profiles.py remains the separate release-to-release test.
 
