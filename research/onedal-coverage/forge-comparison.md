@@ -56,3 +56,62 @@ not itself add a consumer contract. A global minimum for standalone runners
 and integration tests remains unknown: the registered operator model does
 not encode their full consumer observations. Product algorithm names are
 not inputs to either ablation.
+
+## Frozen clients across the registered seeds
+
+The executable audit builds each seed's baseline once, compiles its clients
+against that baseline, and runs them against the edited libraries with eager
+binding. It compares exit status, stdout and stderr. It repeats each baseline
+and each edited run. For each seed it enumerates all client subsets and
+reports the smallest ones that detect every edit detected by the full set.
+
+On Linux x86-64 with GCC 14.2, C17/C++17 and default flags, 403 of 446
+applicable seed/operator pairs ran across 13 seeds. These exercised 369
+distinct operators. The clients detected a change in 102 pairs (87 distinct
+operators). The other 301 ran without a client-visible difference in these
+workloads. The 43 excluded pairs retain a configuration or build reason in
+the matrix. A compatible control and an undetected break can both have an
+empty detection set.
+
+| Seed | Executed edits | Client-visible edits | Shapes | Minimum shapes for these detections |
+| --- | ---: | ---: | ---: | ---: |
+| c_core | 28 | 12 | 4 | 4 |
+| cxx_classes | 42 | 19 | 6 | 6 |
+| c_elf | 102 | 20 | 3 | 3 |
+| c_elf_alt | 18 | 4 | 2 | 1 |
+| cxx_more | 154 | 13 | 3 | 2 |
+| cxx_alt | 7 | 4 | 1 | 1 |
+| c_byval | 1 | 1 | 2 | 1 |
+| c_opaque | 2 | 1 | 2 | 1 |
+| c_layout | 41 | 23 | 1 | 1 |
+| cxx_stdlib | 7 | 4 | 1 | 1 |
+| cxx_dialect | 1 | 1 | 3 | 1 |
+| cxx_src, cxx_tree | 0 | 0 | 2 | No eligible edit in this configuration |
+
+For example, in c_core the enum client alone detects a changed enumerator
+value, the field client alone detects a variable type change, the call
+client alone detects an appended parameter, and the allocation client alone
+detects an appended record field. Each contributes a distinct witness.
+In c_opaque the handle client survives private-record growth. Its successful
+run provides a compatibility control even though removing it loses no
+positive detection.
+
+The per-seed minima sum to 22 of 30 shapes for this detection objective.
+Six shapes add no positive detection in seeds with executed edits. Two
+belong to seeds without eligible edits. Stronger objectives such as retaining
+negative controls, identifying which consumers are affected, testing source
+compatibility or distinguishing different failure outputs can require more
+clients. This experiment changes no suites or default test selections.
+
+Run from the repository root:
+
+```sh
+PYTHONPATH=. python research/onedal-coverage/forge_client_ablation.py clients.json
+```
+
+The [recorded matrix](forge-client-matrix.json) includes all detected edits,
+successful controls and exclusions. The operator names and build configuration
+define the scope; this matrix does not measure product coverage.
+
+Independent builds with the Forge implementation from main at `e2fc8dc2a`
+and the PR at `164c1630d` produced byte-identical client matrices.

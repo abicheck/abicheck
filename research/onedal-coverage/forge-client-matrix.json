@@ -1,0 +1,873 @@
+{
+  "c_byval": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "value"
+      ]
+    ],
+    "shapes": [
+      "call",
+      "value"
+    ],
+    "tested": {
+      "public_record_grew": [
+        "value"
+      ]
+    },
+    "unavailable": {}
+  },
+  "c_core": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "alloc",
+        "call",
+        "enum",
+        "field"
+      ]
+    ],
+    "shapes": [
+      "alloc",
+      "call",
+      "enum",
+      "field"
+    ],
+    "tested": {
+      "comment_only": [],
+      "enum_append_member": [],
+      "enum_append_wide_value": [],
+      "enum_change_value": [
+        "enum"
+      ],
+      "enum_remove_member": [],
+      "func_add": [],
+      "func_lose_default_visibility": [],
+      "func_param_append": [
+        "call"
+      ],
+      "func_param_remove": [
+        "call"
+      ],
+      "func_param_type_change": [],
+      "func_remove": [
+        "call",
+        "field"
+      ],
+      "func_return_type_change": [],
+      "param_rename_header_only": [],
+      "params_reordered": [
+        "alloc"
+      ],
+      "rebuild_hidden_visibility": [],
+      "rebuild_optimized": [],
+      "rebuild_pack_struct": [
+        "alloc"
+      ],
+      "rebuild_short_enums": [],
+      "reorder_declarations": [],
+      "static_inline_helper_added": [],
+      "struct_append_field": [
+        "alloc"
+      ],
+      "struct_array_grow": [
+        "alloc"
+      ],
+      "struct_array_shrink_in_padding": [],
+      "struct_field_widen": [
+        "call"
+      ],
+      "struct_remove_trailing_field": [
+        "alloc"
+      ],
+      "struct_swap_fields": [
+        "call"
+      ],
+      "typedef_retarget": [],
+      "var_type_change": [
+        "field"
+      ]
+    },
+    "unavailable": {
+      "enum_underlying_narrow": "c17 is outside the standards this edit is defined in: c c23-on (cited: ISO/IEC 9899:2024 6.7.2.2 (fixed underlying type of an enumeration)); c++ c++11-on (cited: ISO/IEC 14882:2011 [dcl.enum] (underlying type))"
+    }
+  },
+  "c_elf": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "call",
+        "data",
+        "symbols"
+      ]
+    ],
+    "shapes": [
+      "call",
+      "data",
+      "symbols"
+    ],
+    "tested": {
+      "api_deprecated": [],
+      "api_undeprecated": [],
+      "bind_now_dropped": [],
+      "cet_disabled": [],
+      "cet_enabled": [],
+      "char_made_unsigned": [],
+      "const_object_value_changed": [],
+      "const_string_object_grew": [
+        "data"
+      ],
+      "debug_info_dropped": [],
+      "declared_but_not_exported": [],
+      "declared_exports_defined": [],
+      "enum_member_renamed": [],
+      "enum_sentinel_moved": [],
+      "executable_stack": [],
+      "export_localized_header_kept": [
+        "call"
+      ],
+      "export_surface_exploded": [],
+      "exported_but_undeclared": [],
+      "field_became_atomic": [],
+      "field_became_bitfield": [],
+      "field_became_const": [],
+      "field_became_volatile": [],
+      "field_renamed": [],
+      "flexible_array_member": [],
+      "func_became_ifunc": [],
+      "func_became_ms_abi": [
+        "symbols"
+      ],
+      "func_became_protected": [],
+      "func_became_variadic": [],
+      "func_became_weak": [],
+      "func_contract_attribute_added": [],
+      "func_contract_attribute_removed": [],
+      "func_lost_variadic": [],
+      "glibc_floor_raised": [],
+      "glibc_older_version_required": [],
+      "glibc_version_required_added": [],
+      "gnu_hash_dropped": [],
+      "header_constant_added": [],
+      "header_constant_changed": [],
+      "header_constant_removed": [],
+      "imported_symbol_added": [],
+      "init_fini_dropped": [],
+      "internal_table_grown": [
+        "symbols"
+      ],
+      "needed_added": [],
+      "needed_removed": [],
+      "needed_reordered": [],
+      "no_common_spelled": [],
+      "nodelete_flag": [],
+      "object_added": [],
+      "object_alignment_reduced": [],
+      "object_array_grew": [
+        "data"
+      ],
+      "object_became_const": [],
+      "object_became_protected": [
+        "data"
+      ],
+      "object_became_tls": [
+        "data"
+      ],
+      "object_hidden": [
+        "data"
+      ],
+      "object_lost_const": [],
+      "object_moved_version_node": [
+        "data"
+      ],
+      "object_removed": [
+        "data"
+      ],
+      "param_became_va_list": [
+        "symbols"
+      ],
+      "param_lost_va_list": [
+        "symbols"
+      ],
+      "param_pointee_const_added": [],
+      "param_pointee_const_to_volatile": [],
+      "param_pointer_level_changed": [
+        "call"
+      ],
+      "param_restrict_added": [],
+      "record_added": [],
+      "record_became_opaque": [],
+      "record_became_packed": [],
+      "record_removed": [
+        "call"
+      ],
+      "relr_packed_relocs": [],
+      "relro_disabled": [],
+      "return_deep_pointee_const_removed": [],
+      "return_pointee_const_added": [],
+      "return_pointee_const_removed": [],
+      "return_pointer_level_changed": [
+        "call"
+      ],
+      "rpath_added": [],
+      "runpath_added": [],
+      "serialization_tag_swapped": [
+        "symbols"
+      ],
+      "short_wchar": [],
+      "soname_changed": [],
+      "soname_dropped": [],
+      "source_only_var_export_added": [],
+      "stack_protector_dropped": [],
+      "struct_became_union": [],
+      "symbol_moved_version_node": [
+        "call"
+      ],
+      "symbol_moved_version_node_keeping_alias": [],
+      "symbolic_binding": [],
+      "symbols_prefixed_batch": [
+        "symbols"
+      ],
+      "target_isa_raised": [],
+      "text_relocation_introduced": [],
+      "tls_initial_exec": [],
+      "tls_object_grew": [],
+      "typedef_removed": [],
+      "union_member_added": [],
+      "union_member_removed": [],
+      "union_member_retyped": [],
+      "unversioned_export_added": [],
+      "var_alignment_raised": [],
+      "vector_math_abi_changed": [],
+      "version_node_added_for_new_symbol": [],
+      "version_node_renamed": [
+        "call",
+        "data",
+        "symbols"
+      ],
+      "version_script_dropped": [
+        "call",
+        "data",
+        "symbols"
+      ],
+      "weak_became_global": [],
+      "writable_executable_segment": [],
+      "x86_isa_level_raised": []
+    },
+    "unavailable": {
+      "field_became_bit_int": "c17 is outside the standards this edit is defined in: c c23-on (cited: ISO/IEC 9899:2024 6.2.5 (bit-precise integer types))",
+      "import_left_unprovided": "whether an import has a provider is a fact about the DT_NEEDED closure; needs a follow_deps config",
+      "l3_asan_enabled": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_exceptions_enabled": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_language_standard_raised": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_lto_enabled": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_sanitizer_enabled": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_struct_packing_8": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_tls_model_local_dynamic": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "rebuild_m32": ") s += i * n + (s ^ i); return s; }\nint _lib_table[4] = {1, 2, 3, 4};\n\n--- stderr ---\nIn file included from WORK/rebuild_m32/edit_seed.c:1:\nWORK/rebuild_m32/edit_seed.h:15:48: warning: \u2018legacy\u2019 is deprecated [-Wdeprecated-declarations]\n   15 | __attribute__((deprecated)) int old_api(struct legacy *l, int x);\n      |                                                ^~~~~~\nWORK/rebuild_m32/edit_seed.h:12:36: note: declared here\n   12 | struct __attribute__((deprecated)) legacy { int x; };\n      |                                    ^~~~~~\nIn file included from WORK/rebuild_m32/edit_seed.c:2:\n/usr/include/string.h:26:10: fatal error: bits/libc-header-start.h: No such file or directory\n   26 | #include <bits/libc-header-start.h>\n      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~\ncompilation terminated.\n",
+      "rebuild_x32": ") s += i * n + (s ^ i); return s; }\nint _lib_table[4] = {1, 2, 3, 4};\n\n--- stderr ---\nIn file included from WORK/rebuild_x32/edit_seed.c:1:\nWORK/rebuild_x32/edit_seed.h:15:48: warning: \u2018legacy\u2019 is deprecated [-Wdeprecated-declarations]\n   15 | __attribute__((deprecated)) int old_api(struct legacy *l, int x);\n      |                                                ^~~~~~\nWORK/rebuild_x32/edit_seed.h:12:36: note: declared here\n   12 | struct __attribute__((deprecated)) legacy { int x; };\n      |                                    ^~~~~~\nIn file included from WORK/rebuild_x32/edit_seed.c:2:\n/usr/include/string.h:26:10: fatal error: bits/libc-header-start.h: No such file or directory\n   26 | #include <bits/libc-header-start.h>\n      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~\ncompilation terminated.\n"
+    }
+  },
+  "c_elf_alt": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "call"
+      ]
+    ],
+    "shapes": [
+      "call",
+      "data"
+    ],
+    "tested": {
+      "api_version_suffix_bumped": [
+        "call"
+      ],
+      "bind_now_dropped_without_relro": [],
+      "empty_version_node_dropped": [],
+      "executable_stack_removed": [],
+      "fortified_call_dropped": [],
+      "glibc_version_requirement_dropped": [],
+      "header_only_function_params_changed": [],
+      "ifunc_removed": [],
+      "imported_symbol_removed": [],
+      "integer_typedef_widened": [],
+      "internal_helper_hidden": [
+        "call"
+      ],
+      "long_double_made_64bit": [
+        "call"
+      ],
+      "relr_relocs_unpacked": [],
+      "returned_struct_grew_past_registers": [
+        "call"
+      ],
+      "rpath_became_runpath": [],
+      "soname_added": [],
+      "static_tls_removed": [],
+      "text_relocation_removed": []
+    },
+    "unavailable": {
+      "time_bits_64": "time_t is already 64-bit"
+    }
+  },
+  "c_layout": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "layout"
+      ]
+    ],
+    "shapes": [
+      "layout"
+    ],
+    "tested": {
+      "bitfield_barrier_inserted_after_17": [
+        "layout"
+      ],
+      "bitfield_barrier_inserted_before_17": [],
+      "bitfield_barrier_inserted_before_7": [
+        "layout"
+      ],
+      "bitfield_barrier_removed_after_14": [],
+      "bitfield_barrier_removed_after_16": [],
+      "bitfield_barrier_removed_after_17": [
+        "layout"
+      ],
+      "bitfield_barrier_removed_after_6": [
+        "layout"
+      ],
+      "bitfield_barrier_removed_before_1": [
+        "layout"
+      ],
+      "bitfield_barrier_removed_before_30": [],
+      "bitfield_barrier_removed_before_7": [
+        "layout"
+      ],
+      "bitfield_rebuild_optimized": [],
+      "bitfield_rebuild_packed_alignment_only": [
+        "layout"
+      ],
+      "bitfield_width_15_to_16": [
+        "layout"
+      ],
+      "bitfield_width_16_to_17": [
+        "layout"
+      ],
+      "bitfield_width_16_to_17_behind_barrier": [],
+      "bitfield_width_17_to_16_shrink": [
+        "layout"
+      ],
+      "bitfield_width_17_to_31": [],
+      "bitfield_width_1_to_2_after_barrier": [
+        "layout"
+      ],
+      "bitfield_width_1_to_2_before_barrier": [],
+      "bitfield_width_1_to_7": [
+        "layout"
+      ],
+      "bitfield_width_31_to_32": [],
+      "bitfield_width_7_to_8": [
+        "layout"
+      ],
+      "bitfield_width_8_to_9": [
+        "layout"
+      ],
+      "bitfield_width_9_to_15": [
+        "layout"
+      ],
+      "union_array_stride_grows": [
+        "layout"
+      ],
+      "union_array_stride_shrinks": [
+        "layout"
+      ],
+      "union_array_stride_unchanged": [],
+      "union_char_extent_15_to_16": [],
+      "union_char_extent_16_to_17": [
+        "layout"
+      ],
+      "union_char_extent_7_to_8": [],
+      "union_char_extent_8_to_9": [
+        "layout"
+      ],
+      "union_char_only_extent_8_to_9": [],
+      "union_member_added_same_layout": [],
+      "union_member_lowers_alignment": [
+        "layout"
+      ],
+      "union_member_raises_alignment": [
+        "layout"
+      ],
+      "union_member_removed_same_layout": [],
+      "union_member_retyped_same_size": [],
+      "union_member_retyped_same_size_back": [],
+      "union_rebuild_optimized": [],
+      "union_rebuild_packed": [
+        "layout"
+      ],
+      "union_rebuild_packed_alignment_only": [
+        "layout"
+      ]
+    },
+    "unavailable": {}
+  },
+  "c_opaque": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "call"
+      ]
+    ],
+    "shapes": [
+      "call",
+      "handle"
+    ],
+    "tested": {
+      "func_removed_and_private_record_grew": [
+        "call"
+      ],
+      "private_record_grew": []
+    },
+    "unavailable": {}
+  },
+  "cxx_alt": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "call"
+      ]
+    ],
+    "shapes": [
+      "call"
+    ],
+    "tested": {
+      "allocator_replacement_removed": [],
+      "by_value_struct_became_nontrivial": [
+        "call"
+      ],
+      "gnu_unique_disabled": [],
+      "header_inline_removed": [],
+      "internal_template_instance_dropped": [
+        "call"
+      ],
+      "internal_type_grew": [
+        "call"
+      ],
+      "std_string_abi_flipped": [
+        "call"
+      ]
+    },
+    "unavailable": {
+      "char_param_became_char8": "c++17 is outside the standards this edit is defined in: c++ c++20-on (cited: P0482R6 (char8_t), [lex.ccon])",
+      "l3_rtti_disabled": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_stdlib_assertions": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_threadsafe_statics_disabled": "the flag is recorded only in the build's compile commands (L3); needs a build_data config",
+      "l3_whole_program_vtables": "-fwhole-program-vtables is a clang option"
+    }
+  },
+  "cxx_classes": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "alloc",
+        "call",
+        "derive",
+        "enum",
+        "field",
+        "modern"
+      ]
+    ],
+    "shapes": [
+      "alloc",
+      "call",
+      "derive",
+      "enum",
+      "field",
+      "modern"
+    ],
+    "tested": {
+      "base_class_add": [
+        "derive"
+      ],
+      "comment_only": [],
+      "enum_append_member": [],
+      "enum_append_wide_value": [],
+      "enum_change_value": [
+        "enum"
+      ],
+      "enum_class_append": [],
+      "enum_class_change_value": [],
+      "enum_class_remove": [],
+      "enum_class_underlying_narrow": [],
+      "enum_remove_member": [],
+      "enum_underlying_narrow": [],
+      "func_add": [],
+      "func_lose_default_visibility": [],
+      "func_out_of_line_to_inline": [
+        "modern"
+      ],
+      "func_param_append": [
+        "call"
+      ],
+      "func_param_remove": [
+        "call"
+      ],
+      "func_param_type_change": [
+        "call"
+      ],
+      "func_remove": [
+        "call",
+        "field"
+      ],
+      "func_return_type_change": [],
+      "method_const_drop": [],
+      "method_noexcept_add": [],
+      "param_rename_header_only": [],
+      "params_reordered": [
+        "alloc"
+      ],
+      "rebuild_hidden_visibility": [],
+      "rebuild_optimized": [],
+      "rebuild_pack_struct": [
+        "alloc",
+        "modern"
+      ],
+      "rebuild_short_enums": [],
+      "reorder_declarations": [],
+      "static_inline_helper_added": [],
+      "struct_append_field": [
+        "alloc"
+      ],
+      "struct_array_grow": [
+        "alloc"
+      ],
+      "struct_array_shrink_in_padding": [],
+      "struct_field_widen": [
+        "call"
+      ],
+      "struct_remove_trailing_field": [
+        "alloc"
+      ],
+      "struct_swap_fields": [
+        "call"
+      ],
+      "template_default_arg_change": [],
+      "typedef_retarget": [],
+      "var_type_change": [
+        "field"
+      ],
+      "virtual_become_pure": [
+        "derive"
+      ],
+      "virtual_method_add": [
+        "derive"
+      ],
+      "virtual_remove": [
+        "derive"
+      ],
+      "virtual_reorder": [
+        "derive"
+      ]
+    },
+    "unavailable": {
+      "concept_constraint_added": "c++17 is outside the standards this edit is defined in: c++ c++20-on (cited: P0734R0 (concepts), [temp.concept])",
+      "concept_constraint_relaxed": "c++17 is outside the standards this edit is defined in: c++ c++20-on (cited: P0734R0 (concepts), [temp.concept])",
+      "no_unique_address_added": "c++17 is outside the standards this edit is defined in: c++ c++20-on (cited: P0840R2 ([[no_unique_address]]), [dcl.attr.nouniqueaddr])"
+    }
+  },
+  "cxx_dialect": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "char"
+      ]
+    ],
+    "shapes": [
+      "callback",
+      "char",
+      "keep"
+    ],
+    "tested": {
+      "dialect_cxx20_char8_t_parameter": [
+        "char"
+      ]
+    },
+    "unavailable": {
+      "dialect_cxx17_noexcept_in_function_type": "c++17 is outside the standards this edit is defined in: c++ c++11-on (cited: ISO/IEC 14882:2011 [except.spec] (noexcept, not part of the type)); last in c++14 (cited: P0012R1 (part of the function type from C++17))",
+      "dialect_rebuild_cxx23_control": "c++17 is outside the standards this edit is defined in: c++ c++20-on (cited: P0482R6 (char8_t from C++20; nothing these declarations use changes type after it))"
+    }
+  },
+  "cxx_more": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "classes",
+        "hier"
+      ]
+    ],
+    "shapes": [
+      "classes",
+      "hier",
+      "symbols"
+    ],
+    "tested": {
+      "abi_tag_added": [
+        "classes"
+      ],
+      "allocator_replacement_added": [],
+      "array_grown_into_padding": [],
+      "array_shrunk_shifting": [],
+      "base_access_narrowed": [],
+      "base_added_nonvirtual": [],
+      "base_became_nonvirtual": [],
+      "base_became_virtual": [
+        "hier"
+      ],
+      "base_removed": [],
+      "bases_reordered": [
+        "hier"
+      ],
+      "bitfield_became_field": [],
+      "bitfield_width_crosses_unit": [],
+      "bitfield_width_within_unit": [],
+      "class_became_final": [],
+      "class_lost_final": [],
+      "class_rtti_became_protected": [
+        "hier"
+      ],
+      "class_visibility_hidden": [],
+      "const_overload_removed": [
+        "classes"
+      ],
+      "converting_ctor_overload_added": [],
+      "cpu_dispatch_variants_dropped": [],
+      "ctor_explicit_added": [],
+      "ctor_explicit_removed": [],
+      "cxx_record_added": [],
+      "declared_function_export_became_c_namesake": [],
+      "declared_function_lost_definition": [],
+      "deduced_lambda_return_named": [],
+      "default_argument_added": [],
+      "destructor_became_nonvirtual": [],
+      "destructor_became_virtual": [],
+      "enum_added": [],
+      "enum_became_scoped": [],
+      "enum_class_added": [],
+      "enum_class_became_opaque": [],
+      "enum_class_enumerator_alias_added": [],
+      "enum_class_enumerator_inserted": [],
+      "enum_class_enumerator_renamed": [],
+      "enum_class_enumerator_values_swapped": [],
+      "enum_class_removed": [],
+      "enum_enumerator_alias_added": [],
+      "enum_lost_scoped": [],
+      "enum_removed": [],
+      "experimental_api_graduated": [],
+      "experimental_api_removed": [],
+      "explicit_instantiation_dropped": [],
+      "exported_instantiation_default_changed": [],
+      "extern_c_linkage_removed": [],
+      "field_access_narrowed": [],
+      "field_added_in_tail_padding": [],
+      "field_became_mutable": [],
+      "field_default_initializer_changed": [],
+      "field_default_initializer_removed": [],
+      "field_deprecated_removed": [],
+      "field_inserted_at_head": [],
+      "field_inserted_in_middle": [],
+      "field_inserted_in_padding": [],
+      "field_lost_const": [],
+      "field_lost_mutable": [],
+      "field_lost_volatile": [],
+      "field_removed_at_head": [],
+      "field_removed_in_middle": [],
+      "field_removed_into_tail_padding": [],
+      "field_removed_without_shrink": [],
+      "field_retyped_abi_equivalent": [],
+      "field_retyped_alignment_only": [],
+      "field_retyped_same_layout": [],
+      "field_retyped_smaller": [],
+      "fixed_enum_added": [],
+      "fixed_enum_became_opaque": [],
+      "fixed_enum_became_scoped": [],
+      "fixed_enum_enumerator_alias_added": [],
+      "fixed_enum_enumerator_appended": [],
+      "fixed_enum_enumerator_inserted": [],
+      "fixed_enum_enumerator_removed": [],
+      "fixed_enum_enumerator_renamed": [],
+      "fixed_enum_enumerator_value_changed": [],
+      "fixed_enum_enumerator_values_swapped": [],
+      "fixed_enum_removed": [],
+      "func_became_extern_c": [],
+      "function_became_customization_object": [],
+      "gnu_unique_static_added": [],
+      "handle_typedef_retargeted": [],
+      "hidden_friend_added": [],
+      "hidden_friend_removed": [],
+      "inline_function_outlined": [],
+      "inline_namespace_bumped": [
+        "classes"
+      ],
+      "inline_namespace_version_bumped": [],
+      "key_function_inlined": [],
+      "last_virtual_removed": [],
+      "mandatory_template_param_added": [],
+      "member_noexcept_removed": [],
+      "method_access_narrowed": [],
+      "method_became_nonvirtual": [],
+      "method_became_pure_virtual": [
+        "hier"
+      ],
+      "method_became_static": [
+        "classes"
+      ],
+      "method_became_virtual": [],
+      "method_deleted": [
+        "classes"
+      ],
+      "method_ref_qualified": [
+        "classes"
+      ],
+      "new_side_dumped_without_headers": [],
+      "nonpod_field_added_in_tail_padding": [],
+      "object_became_inline_variable": [],
+      "object_became_weak": [],
+      "object_renamed": [],
+      "object_retyped_same_size": [],
+      "object_shrank": [],
+      "opaque_record_defined": [],
+      "overload_added": [],
+      "overload_retyped": [],
+      "override_added": [],
+      "override_removed": [],
+      "override_return_became_covariant": [],
+      "override_specifier_added": [],
+      "override_specifier_removed": [],
+      "param_default_value_changed": [],
+      "param_default_value_removed": [],
+      "param_restrict_removed": [],
+      "pimpl_member_renamed_under_inline_body": [],
+      "polymorphic_type_added_without_virtual_dtor": [],
+      "primary_base_grew": [],
+      "pure_virtual_added": [
+        "hier"
+      ],
+      "record_alignment_raised": [],
+      "record_lost_standard_layout": [],
+      "record_lost_trivially_copyable": [
+        "classes"
+      ],
+      "reserved_field_used": [],
+      "secondary_base_became_polymorphic": [],
+      "source_only_export_added": [],
+      "static_member_access_narrowed": [],
+      "static_member_access_widened": [],
+      "std_reexport_dropped": [],
+      "std_template_instance_exported": [],
+      "stl_by_value_api_added": [],
+      "struct_became_class": [],
+      "tag_type_renamed": [],
+      "template_added": [],
+      "template_instantiation_added": [],
+      "template_nontype_param_retyped": [],
+      "template_param_added_defaulted": [],
+      "template_param_argument_changed": [],
+      "template_param_removed": [],
+      "template_return_argument_changed": [],
+      "template_specialization_added": [],
+      "template_specialization_removed": [],
+      "type_lost_abstract": [],
+      "typedef_added": [],
+      "typedef_respelled_as_alias": [],
+      "typedef_retargeted_same_size": [],
+      "unnamed_type_api_added": [],
+      "version_sentinel_typedef_bumped": [],
+      "virtual_appended_after_last_slot": [],
+      "virtual_bases_reordered": [],
+      "virtual_became_final": [],
+      "virtual_lost_final": [],
+      "virtual_noexcept_added": [],
+      "vptr_introduced": [
+        "hier"
+      ],
+      "vtt_grew": []
+    },
+    "unavailable": {
+      "func_exception_spec_widened": "c++17 is outside the standards this edit is defined in: c++ c++11-on (cited: ISO/IEC 14882:1998 [except.spec] (dynamic exception specifications)); last in c++14 (cited: P0003R5 (removed from C++17))"
+    }
+  },
+  "cxx_src": {
+    "inconclusive": {},
+    "minimum_covers": [
+      []
+    ],
+    "shapes": [
+      "call"
+    ],
+    "tested": {},
+    "unavailable": {
+      "src_default_argument_changed": "only source replay or the source graph sees it; needs a sources config",
+      "src_inline_body_changed": "only source replay or the source graph sees it; needs a sources config",
+      "src_macro_removed": "only source replay or the source graph sees it; needs a sources config",
+      "src_macro_value_changed": "only source replay or the source graph sees it; needs a sources config",
+      "src_public_entry_calls_internal": "only source replay or the source graph sees it; needs a sources config",
+      "src_public_entry_depends_on_hidden": "only source replay or the source graph sees it; needs a sources config",
+      "src_public_function_added": "only source replay or the source graph sees it; needs a sources config",
+      "src_public_function_removed": "only source replay or the source graph sees it; needs a sources config",
+      "src_template_body_changed": "only source replay or the source graph sees it; needs a sources config",
+      "src_undocumented_export_added": "only source replay or the source graph sees it; needs a sources config",
+      "src_uninstantiated_template_removed": "only source replay or the source graph sees it; needs a sources config",
+      "src_virtual_dispatch_target_added": "only source replay or the source graph sees it; needs a sources config"
+    }
+  },
+  "cxx_stdlib": {
+    "inconclusive": {},
+    "minimum_covers": [
+      [
+        "stdlib"
+      ]
+    ],
+    "shapes": [
+      "stdlib"
+    ],
+    "tested": {
+      "func_param_append": [
+        "stdlib"
+      ],
+      "func_param_remove": [
+        "stdlib"
+      ],
+      "func_param_type_change": [
+        "stdlib"
+      ],
+      "param_rename_header_only": [],
+      "rebuild_cxx11_abi_off": [
+        "stdlib"
+      ],
+      "rebuild_hidden_visibility": [],
+      "rebuild_optimized": []
+    },
+    "unavailable": {
+      "rebuild_against_libcxx": "-stdlib=libc++ is a clang switch; the corpus pairs it with ELF"
+    }
+  },
+  "cxx_tree": {
+    "inconclusive": {},
+    "minimum_covers": [
+      []
+    ],
+    "shapes": [
+      "call"
+    ],
+    "tested": {},
+    "unavailable": {
+      "tree_anonymous_type_coordinates_shifted": "only source replay or the source graph sees it; needs a sources config",
+      "tree_internal_rtti_exported": "only source replay or the source graph sees it; needs a sources config",
+      "tree_pointee_type_renamed": "only source replay or the source graph sees it; needs a sources config",
+      "tree_private_declaration_exported": "only source replay or the source graph sees it; needs a sources config",
+      "tree_private_pointee_type_renamed": "only source replay or the source graph sees it; needs a sources config",
+      "tree_type_definition_diverges_per_tu": "only source replay or the source graph sees it; needs a sources config"
+    }
+  }
+}
