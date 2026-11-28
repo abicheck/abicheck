@@ -179,7 +179,9 @@ def test_parameter_provider_consumer_scope(tmp_path):
 @pytest.mark.skipif(
     not os.getenv("ABIFORGE_ONEDAL_MAJOR"), reason="requires the 2026.2 CPU SDK"
 )
-@pytest.mark.parametrize("client", ["hdbscan", "hdbscan_result", "hdbscan_descriptor"])
+@pytest.mark.parametrize(
+    "client", ["hdbscan", "hdbscan_result", "hdbscan_descriptor", "hdbscan_input"]
+)
 def test_hdbscan_cpu_clusters(tmp_path, client):
     from abiforge.run.onedal_covariance_parameters import build_client
 

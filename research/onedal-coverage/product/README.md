@@ -421,6 +421,12 @@ exported SDK diagnostic and verifies that the descriptor retains its prior setti
 Of its 41 HDBSCAN imports, 29 are unique to this client, including the eight
 diagnostic helpers. The three CPU clients import 67/93 names in total (72.0%).
 
+A fourth client replaces the table held by an HDBSCAN compute input. It reads
+each value after the temporary table is destroyed and checks independent
+deleter counts. The library releases the original buffer once at replacement
+and the replacement buffer once at input destruction. This adds the
+`set_data_impl` import, bringing the four-client total to 68/93 (73.1%).
+
 The two downgrade comparisons include the clustering executable alongside the
 seven CPU parameter clients. It requires 42 symbols from the CPU frontend.
 Both 2025 frontends retain 13 and lack all 29 HDBSCAN-specific imports.
