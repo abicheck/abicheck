@@ -37,3 +37,10 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         for row in rows
         if row["status"] == "candidate only"
     )
+    spmd = [r for r in rows if r["witness"] == "spmd_consumer.cpp"]
+    assert sum(r["scenario_contracts"].startswith("erased_buffer") for r in spmd) == 8
+    for row in spmd:
+        if row["status"] == "package: virtual-dispatch-pass":
+            assert row["scenario_contracts"] == "l2_representatives/virtual/swap"
+        elif row["key"].endswith(("::get_queue", "::make_communicator")):
+            assert row["scenario_contracts"] == ""

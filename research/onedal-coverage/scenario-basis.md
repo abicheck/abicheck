@@ -15,7 +15,7 @@ A scenario specifies an old client, a change to its provider, and an observation
 | Runtime type identity | Change a public base to nonpublic while keeping export names fixed. Check a cross-cast and a catch through that base. | `run/base_access_consumers.py`, `run/itanium_base_edges.py` | Named ELF, local and packed relocation forms are evidence variants. Unknown type identities and other C++ runtimes need separate validation. |
 | Resource ownership | Copy, retain and destroy handles across a library boundary. Observe the surviving value and count releases, including assignment through an alias. | `run/lifetime_campaign.py` | A runtime observation. Equal symbol names and layouts cannot prove correct reference counting. Device events and queue-dependent destruction require additional evidence. |
 | Returned state | Preserve independent success and failure values through return, copy, assignment and reset. Mutate one operation at a time. | `run/value_state.py` | Behavioral contract. The portable scenario checks loss of state, not the numerical result of a clustering algorithm. |
-| Type-erased buffer | Pass an element count and type tag through a shared library. A provider interpreting the count as bytes passes the one-byte control and fails for four-byte items. | `run/erased_buffer.py` | Covers typed and byte forms of a buffer transfer. Rank, peer selection and collective semantics require a distributed witness. |
+| Type-erased buffer | Pass an element count and type tag through a shared library. A provider interpreting the count as bytes passes the one-byte control and fails for four-byte items. | `run/erased_buffer.py` | Covers typed and byte forms of a buffer transfer. The peer chosen and the reduction result are runtime semantics. A virtual communicator call additionally depends on slot identity. |
 | Backend boundary | Withdraw a runtime/plugin entry point while keeping the consumer fixed. | `run/sycl_plugins.py` | Covers host binding. The portable `run/dependency_forwarding.py` distinguishes forwarding, dropping and reversing a prerequisite by its observed result. Real device scheduling and collective execution need their own runtime evidence. |
 
 ## Mapping the source corpus
@@ -34,6 +34,23 @@ in the ledger. The remaining rows and the separate package receipts do not
 inherit a pass from another declaration of the same kind.
 
 The newer package experiments reduce in the same way. CPU/GPU selectors, eager loading, transitive header imports and helper exports exercise binding and provider resolution. Tree visitors exercise representation, dispatch and type identity. Returning tables exercises calling convention and ownership. Windows import libraries and export classifications exercise PE identity. Clustering labels, method choices and float/double repeat these mechanisms unless a changed binary contract can be demonstrated.
+
+### Distributed operations
+
+The two-rank package replay exercises four collective operations through typed
+and byte-buffer calls. Their count/type boundary uses the erased-buffer
+scenario. The five interface calls, including the queue getter, exercise virtual
+dispatch. The communicator factory and the concrete queue getter have runtime
+receipts but no matched generic mutation in this inventory.
+
+Peer routing is a separate behavioral observation. In a two-rank control, a
+frozen client passed the destination and an integer to a shared library.
+With inputs 10 and 11, the ranks received 11 and 10. A provider that used
+the caller's rank as the destination returned 10 and 11. Both providers
+exported the same `int exchange(int, int)` function and used the same calling
+convention. An implementation-only routing error therefore contributes no
+additional ABI edit to the basis. The package replay remains evidence for
+actual collective and device behavior.
 
 ## Coverage decision
 

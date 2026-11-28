@@ -149,11 +149,16 @@ def main():
         witness = row["witness"]
         scenario = {
             "dependency_consumer.cpp": "dependency_forwarding",
-            "spmd_consumer.cpp": "erased_buffer (typed and byte forms only)",
             "ownership_consumer.cpp": "lifetime_campaign",
             "dispatch_consumer.cpp": "template_wrapper_consumers",
             "abiforge.run.onedal_sycl": "template_wrapper_consumers",
         }.get(witness, "")
+        if witness == "spmd_consumer.cpp":
+            operation = row["qualified_name"].rsplit("::", 1)[-1]
+            if row["result"] == "virtual-dispatch-pass":
+                scenario = "l2_representatives/virtual/swap"
+            elif operation in {"allgatherv", "allreduce", "bcast", "sendrecv_replace"}:
+                scenario = "erased_buffer (typed and byte forms only)"
         dispositions.append(
             (
                 "signature-witnesses.tsv",
