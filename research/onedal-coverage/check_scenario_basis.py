@@ -69,6 +69,66 @@ def check_mapping(group, actual, mapping):
     print(f"{group}: {len(actual)} mapped")
 
 
+def return_receipts():
+    """Keep controls paired with mutations of the same packaged entry point."""
+    groups = {}
+    for filename in ("return-witnesses.csv", "table-ownership.csv"):
+        with (PRODUCT / filename).open() as stream:
+            for row in csv.DictReader(stream):
+                key = (
+                    filename,
+                    row.get("environment") or row["package"],
+                    row.get("family", "table ownership"),
+                    row["symbol"],
+                )
+                variants = groups.setdefault(key, {})
+                observations = (
+                    {row["variant"]: row["client_exit"]}
+                    if "variant" in row
+                    else {
+                        v: row[v]
+                        for v in ("baseline", "forward", "borrow", "extra_owner")
+                    }
+                )
+                if variants.keys() & observations.keys():
+                    raise ValueError(f"duplicate return receipt: {key}")
+                variants.update(observations)
+    for (filename, release, family, symbol), observations in groups.items():
+        expected = {"baseline": "0", "forward": "0"}
+        mutations = {
+            "status": {"swallow_error": "20", "reject_success": "23"},
+            "statistics": {"reject_success": "30", "drop_sum": "31"},
+        }.get(family, {"borrow": "11", "extra_owner": "12"})
+        if observations != expected | mutations:
+            raise ValueError(
+                f"incomplete or unexpected return receipt: {release} {symbol}"
+            )
+        for edit in mutations:
+            behavior = edit == "drop_sum"
+            scenario = REPRESENTATIVES.get(edit, "")
+            yield (
+                filename,
+                release,
+                family,
+                "baseline=0 forward=0",
+                symbol,
+                "returned payload"
+                if behavior
+                else (
+                    "ownership"
+                    if edit in ("borrow", "extra_owner")
+                    else "returned state"
+                ),
+                edit,
+                scenario.partition("/")[0],
+                scenario,
+                f"{family}: exit {observations[edit]}",
+                "implementation-only result content"
+                if behavior
+                else "paired package observation",
+            )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -95,7 +155,7 @@ def main():
     edit_map = {
         name: family for family, names in EDITS.items() for name in names.split()
     }
-    dispositions = []
+    dispositions = list(return_receipts())
     for file in (
         "ledger.csv.gz",
         "extended-obligations.csv.gz",

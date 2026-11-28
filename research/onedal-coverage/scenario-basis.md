@@ -61,3 +61,11 @@ actual collective and device behavior.
 ## Coverage decision
 
 Every currently inventoried category has a disposition. End-to-end coverage of oneDAL remains **partial**. Three things require more evidence: execution on the Windows and device runtimes listed above, a concrete declaration-to-mutation witness for candidates with no independent edit, and SDK roots the existing inventory could not parse (see `product/unparsed.csv`). Image or export coverage cannot resolve those gaps. This is a reduced working basis; a proof of global minimality or completeness would require a complete inventory of obligations and a distinguishing experiment for each.
+
+The crosswalk pairs the baseline and forwarding controls with each mutation in
+`table-ownership.csv` and `return-witnesses.csv` by release and entry point.
+Early destruction and delayed destruction reuse the same two lifetime mutations
+across both receipts. The status checks reuse the returned-state scenario.
+The statistics client's `drop_sum` check observes a missing or malformed
+result after a successful call, an implementation-level payload obligation.
+Repeated executions across accessors and releases do not add distinct contracts.

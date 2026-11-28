@@ -53,3 +53,15 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
         set(row["generic_mutations"].split("|")) <= OP_BY_NAME.keys()
         for row in withdrawals
     )
+
+    observed = [r for r in rows if r["status"] == "paired package observation"]
+    assert {r["package_edits"] for r in observed} == {
+        "borrow",
+        "extra_owner",
+        "reject_success",
+        "swallow_error",
+    }
+    assert all(r["generic_mutations"] in available for r in observed)
+    content = [r for r in rows if r["package_edits"] == "drop_sum"]
+    assert {r["key"] for r in content} == {"dal-2025.9.0", "dal-2025.11.0"}
+    assert all(r["status"] == "implementation-only result content" for r in content)
