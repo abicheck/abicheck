@@ -175,6 +175,31 @@ def test_parameter_provider_consumer_scope(tmp_path):
         )
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("source", ["OLD", "NEW"])
+def test_dbscan_minor_release_results(tmp_path, source):
+    from abiforge.run.onedal_covariance_parameters import build_client
+
+    if not all(os.getenv(f"ABIFORGE_ONEDAL_{key}") for key in ("OLD", "NEW")):
+        pytest.skip("requires both pinned oneDAL minor-release CPU SDKs")
+    packages = {
+        key: Path(os.environ[f"ABIFORGE_ONEDAL_{key}"]).resolve()
+        for key in ("OLD", "NEW")
+    }
+    fixture = (
+        Path(__file__).resolve().parents[1] / "abiforge/fixtures/onedal/dbscan.cpp"
+    )
+    exe = build_client(packages[source], tmp_path, "dbscan", 3, fixture=fixture)
+    for runtime in packages.values():
+        run = subprocess.run(
+            [exe],
+            env={"LD_LIBRARY_PATH": str(runtime / "lib"), "LD_BIND_NOW": "1"},
+            capture_output=True,
+            text=True,
+        )
+        assert run.returncode == 0, (runtime, run.stderr)
+
+
 HDBSCAN_CPU_CLIENTS = (
     "hdbscan",
     "hdbscan_result",
