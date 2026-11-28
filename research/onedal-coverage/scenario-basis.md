@@ -178,3 +178,9 @@ stdout differences, 18 were stable across three runs on each release and
 reproduced by a client rebuilt against the minor SDK. The other six varied
 on repeated runs of the same binary and release. These examples provide
 workload controls. None isolates a new ABI mutation.
+
+The expanded CPU visitor campaign also appends a trailing field to base,
+split and leaf records. An old client indexing the second array element
+detects the changed stride. These six observations reuse
+`struct_append_field`. The other mutations reuse field or virtual-slot
+reordering. The test checks the complete case set generated for both tasks.

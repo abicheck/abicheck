@@ -1110,6 +1110,72 @@ def cpu_example_receipts():
             )
 
 
+def cpu_campaign_receipts():
+    filename = "abiforge-cpu-receipt.json"
+    campaign = json.loads((PRODUCT / filename).read_text())
+    for row in campaign["visitors"]:
+        case = row["case"]
+        kind, _, fields = case.partition("_")
+        mutation = ""
+        if kind == "slots":
+            mutation = REPRESENTATIVES["virtual_reorder"]
+        elif kind in {"base", "split", "leaf"}:
+            mutation = (
+                "struct_append_field"
+                if fields.endswith("_extra")
+                else REPRESENTATIVES["struct_swap_fields"]
+            )
+        elif case != "identity":
+            raise ValueError(f"unclassified CPU visitor case: {case}")
+        exit_code = row["client_exit"]
+        if (
+            not row["matches"]
+            or (exit_code != 0) != bool(mutation)
+            or row["verdict"] != ("BREAKING" if mutation else "NO_CHANGE")
+            or row["checker_exit"] != (4 if mutation else 0)
+        ):
+            raise ValueError(f"inconsistent CPU visitor result: {case}")
+        witness = {
+            0: "unchanged client",
+            1: "callback result",
+            2: "second array element",
+        }[exit_code]
+        yield (
+            filename,
+            row["task"],
+            case,
+            "",
+            "",
+            "virtual dispatch" if kind == "slots" else "record representation",
+            case,
+            "CPU visitor",
+            mutation,
+            witness,
+            "paired package observation" if mutation else "compatible client control",
+        )
+    for release, libraries in campaign["release_exports"].items():
+        for library, result in libraries.items():
+            if any(
+                result[k] for k in ("missing_baseline", "missed", "false_positives")
+            ):
+                raise ValueError(
+                    f"inconsistent CPU export projection: {release}/{library}"
+                )
+            yield (
+                filename,
+                release,
+                "release export comparison",
+                library,
+                "",
+                "symbol binding",
+                "",
+                "",
+                "",
+                f"{result['absent']} selected identities absent",
+                "binary inventory only",
+            )
+
+
 def main():
     check_mapping(
         "package runners",
@@ -1159,6 +1225,7 @@ def main():
         *pe_inventory_receipts(),
         *device_loader_receipts(),
         *cpu_example_receipts(),
+        *cpu_campaign_receipts(),
     ]
     for file in (
         "ledger.csv.gz",

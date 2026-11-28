@@ -165,3 +165,15 @@ def test_product_edit_links_resolve_to_generic_mutations(tmp_path):
     )
     assert sum(r["status"] == "variable workload output" for r in examples) == 6
     assert all(not r["generic_mutations"] for r in examples)
+
+    from abiforge.run.onedal_tree import cases
+
+    visitors = [r for r in rows if r["scenario_contracts"] == "CPU visitor"]
+    assert {(r["key"], r["kind"]) for r in visitors} == {
+        (task, "_".join((group, *order)))
+        for task in ("regression", "classification")
+        for group, _, order in cases(task)
+    }
+    appended = [r for r in visitors if r["generic_mutations"] == "struct_append_field"]
+    assert len(appended) == 6
+    assert all(r["witness"] == "second array element" for r in appended)
