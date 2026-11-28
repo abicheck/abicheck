@@ -280,6 +280,65 @@ def member_return_receipts():
         )
 
 
+def root_gap_receipts():
+    """Check the installed-header failures against separately recorded compile probes."""
+    with (PRODUCT / "root-context.csv").open() as stream:
+        contexts = {}
+        for row in csv.DictReader(stream):
+            probes = contexts.setdefault(row["root"], {})
+            context = row["context"]
+            if context in probes:
+                raise ValueError(f"duplicate root probe: {row}")
+            probes[context] = (row["exit"], row["first_error"])
+    for prefix in ("", "2026.2/"):
+        filename = prefix + "unparsed.csv"
+        roots = set((PRODUCT / (prefix + "roots.txt")).read_text().splitlines())
+        with (PRODUCT / filename).open() as stream:
+            failures = list(csv.DictReader(stream))
+        rejected = {r["root"] for r in failures}
+        if len(rejected) != len(failures) or rejected - roots:
+            raise ValueError(f"invalid rejected root in {filename}")
+        if not prefix and rejected != contexts.keys():
+            raise ValueError(
+                "installed-header failures disagree with independent probes"
+            )
+        for row in failures:
+            root = row["root"]
+            detail = row["diagnostic"]
+            if not prefix:
+                probes = contexts[root]
+                if (
+                    probes
+                    != {
+                        "package": (
+                            "1",
+                            "oneapi/dal/backend/dispatcher.hpp: No such file or directory",
+                        ),
+                        "source": (
+                            "1",
+                            "oneapi/dal/_dal_cpu_dispatcher_gen.hpp: No such file or directory",
+                        ),
+                        "source-ide": ("0", ""),
+                    }
+                    or "oneapi/dal/backend/dispatcher.hpp" not in detail
+                ):
+                    raise ValueError(f"unexpected parse context for {root}")
+            yield (
+                filename,
+                root,
+                "installed header",
+                detail,
+                "",
+                "unknown",
+                "",
+                "",
+                "",
+                "root-context.csv" if not prefix else filename,
+                "uninventoried root",
+            )
+        print(f"{filename}: {len(rejected)} rejected of {len(roots)} selected roots")
+
+
 def main():
     check_mapping(
         "package runners",
@@ -298,7 +357,13 @@ def main():
     parser.add_argument(
         "--rows", type=Path, help="write one disposition per obligation to CSV"
     )
-    output = parser.parse_args().rows
+    parser.add_argument(
+        "--sources",
+        type=Path,
+        help="index all structured product receipts and their direct crosswalk rows",
+    )
+    args = parser.parse_args()
+    output = args.rows
     kinds, edits = set(), set()
     kind_map = {
         name: family for family, names in KINDS.items() for name in names.split()
@@ -311,6 +376,7 @@ def main():
         *argument_receipts(),
         *return_lowering_receipts(),
         *member_return_receipts(),
+        *root_gap_receipts(),
     ]
     for file in (
         "ledger.csv.gz",
@@ -443,6 +509,17 @@ def main():
                 "candidate only",
             )
         )
+    if args.sources:
+        from collections import Counter
+
+        counts = Counter(row[0] for row in dispositions)
+        with args.sources.open("w", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(("product_file", "direct_crosswalk_rows"))
+            for path in sorted(PRODUCT.rglob("*")):
+                if path.name.endswith((".csv", ".csv.gz", ".json", ".tsv", ".txt")):
+                    name = path.relative_to(PRODUCT).as_posix()
+                    writer.writerow((name, counts[name]))
     if output is not None:
         with output.open("w", newline="") as stream:
             writer = csv.writer(stream)

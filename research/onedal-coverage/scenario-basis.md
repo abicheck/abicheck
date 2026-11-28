@@ -90,3 +90,13 @@ client compares the received object address against the one registered
 before the call. The three product client paths share this witness.
 Another 38 member specializations have compiler and export evidence for the
 same transition. Their receipt contains no per-specialization runtime result.
+
+Use `python research/onedal-coverage/check_scenario_basis.py --sources sources.csv`
+to inventory the structured product evidence files, including files with zero
+direct rows in the crosswalk. This count describes traceability only. A
+supporting receipt can corroborate a row attributed to a different file.
+The installed-header inventory records six rejected roots among 169 selected
+for the older SDK and zero among 432 selected for 2026.2. For each older gap
+the package-only compile lacks the dispatcher header, adding the source tree
+exposes a missing generated header, and IDE mode compiles. The crosswalk
+retains each as an installed-package evidence gap.
